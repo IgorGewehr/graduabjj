@@ -1,0 +1,375 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../models/student.dart';
+import 'firebase_service.dart';
+
+/// Class Schedule Model
+class ClassSchedule {
+  final int dayOfWeek; // 0 = Sunday, 6 = Saturday
+  final String startTime;
+  final String endTime;
+
+  ClassSchedule({
+    required this.dayOfWeek,
+    required this.startTime,
+    required this.endTime,
+  });
+
+  factory ClassSchedule.fromMap(Map<String, dynamic> map) {
+    return ClassSchedule(
+      dayOfWeek: map['dayOfWeek'] ?? 0,
+      startTime: map['startTime'] ?? '00:00',
+      endTime: map['endTime'] ?? '00:00',
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'dayOfWeek': dayOfWeek,
+      'startTime': startTime,
+      'endTime': endTime,
+    };
+  }
+}
+
+/// BJJ Class Model
+class BJJClass {
+  final String id;
+  final String name;
+  final String? description;
+  final String? instructorId;
+  final String? instructorName;
+  final List<String> studentIds;
+  final List<ClassSchedule> schedule;
+  final StudentCategory? category;
+  final String? minBelt;
+  final String? maxBelt;
+  final int? maxStudents;
+  final bool isActive;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  BJJClass({
+    required this.id,
+    required this.name,
+    this.description,
+    this.instructorId,
+    this.instructorName,
+    this.studentIds = const [],
+    this.schedule = const [],
+    this.category,
+    this.minBelt,
+    this.maxBelt,
+    this.maxStudents,
+    this.isActive = true,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory BJJClass.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return BJJClass(
+      id: doc.id,
+      name: data['name'] ?? '',
+      description: data['description'],
+      instructorId: data['instructorId'],
+      instructorName: data['instructorName'],
+      studentIds: data['studentIds'] != null
+          ? List<String>.from(data['studentIds'])
+          : [],
+      schedule: data['schedule'] != null
+          ? (data['schedule'] as List)
+              .map((s) => ClassSchedule.fromMap(s as Map<String, dynamic>))
+              .toList()
+          : [],
+      category: data['category'] != null
+          ? StudentCategoryExtension.fromString(data['category'])
+          : null,
+      minBelt: data['minBelt'],
+      maxBelt: data['maxBelt'],
+      maxStudents: data['maxStudents'],
+      isActive: data['isActive'] ?? true,
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    );
+  }
+
+  // Check if class is happening now
+  bool isHappeningNow() {
+    final now = DateTime.now();
+    final currentDayOfWeek = now.weekday % 7; // Convert to 0-6 format
+    final currentMinutes = now.hour * 60 + now.minute;
+
+    for (final s in schedule) {
+      if (s.dayOfWeek != currentDayOfWeek) continue;
+
+      final startParts = s.startTime.split(':').map(int.parse).toList();
+      final endParts = s.endTime.split(':').map(int.parse).toList();
+      final startMinutes = startParts[0] * 60 + startParts[1];
+      final endMinutes = endParts[0] * 60 + endParts[1];
+
+      if (currentMinutes >= startMinutes && currentMinutes <= endMinutes) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Get schedule for a specific day
+  ClassSchedule? getScheduleForDay(int dayOfWeek) {
+    return schedule.where((s) => s.dayOfWeek == dayOfWeek).firstOrNull;
+  }
+}
+
+/// Class Service - Multi-tenant class management
+class ClassService {
+  final String academyId;
+  late final Collections _collections;
+
+  ClassService(this.academyId) {
+    _collections = Collections(academyId);
+  }
+
+  CollectionReference get _classesRef => _collections.classes;
+
+  // ============================================
+  // List All Active Classes
+  // ============================================
+  Future<List<BJJClass>> list() async {
+    final query = await _classesRef
+        .where('isActive', isEqualTo: true)
+        .get();
+
+    var classes = query.docs.map((doc) => BJJClass.fromFirestore(doc)).toList();
+    classes.sort((a, b) => a.name.compareTo(b.name));
+    return classes;
+  }
+
+  // ============================================
+  // Get Class by ID
+  // ============================================
+  Future<BJJClass?> getById(String id) async {
+    final doc = await _collections.classDoc(id).get();
+    if (!doc.exists) return null;
+    return BJJClass.fromFirestore(doc);
+  }
+
+  // ============================================
+  // Get Classes by Day of Week
+  // ============================================
+  Future<List<BJJClass>> getByDayOfWeek(int dayOfWeek) async {
+    final allClasses = await list();
+    return allClasses.where((cls) =>
+        cls.schedule.any((s) => s.dayOfWeek == dayOfWeek)
+    ).toList();
+  }
+
+  // ============================================
+  // Get Today's Classes
+  // ============================================
+  Future<List<BJJClass>> getTodayClasses() async {
+    final dayOfWeek = DateTime.now().weekday % 7;
+    return getByDayOfWeek(dayOfWeek);
+  }
+
+  // ============================================
+  // Get Current Class (happening now or starting soon)
+  // ============================================
+  Future<BJJClass?> getCurrentClass() async {
+    final now = DateTime.now();
+    final dayOfWeek = now.weekday % 7;
+    final currentMinutes = now.hour * 60 + now.minute;
+
+    final todayClasses = await getByDayOfWeek(dayOfWeek);
+
+    for (final cls in todayClasses) {
+      for (final schedule in cls.schedule) {
+        if (schedule.dayOfWeek != dayOfWeek) continue;
+
+        final startParts = schedule.startTime.split(':').map(int.parse).toList();
+        final endParts = schedule.endTime.split(':').map(int.parse).toList();
+        final startMinutes = startParts[0] * 60 + startParts[1];
+        final endMinutes = endParts[0] * 60 + endParts[1];
+
+        // Check if within 30 min before start or during class
+        if (currentMinutes >= startMinutes - 30 && currentMinutes <= endMinutes) {
+          return cls;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // ============================================
+  // Get Classes by Category
+  // ============================================
+  Future<List<BJJClass>> getByCategory(StudentCategory category) async {
+    final query = await _classesRef
+        .where('category', isEqualTo: category.value)
+        .where('isActive', isEqualTo: true)
+        .get();
+
+    var classes = query.docs.map((doc) => BJJClass.fromFirestore(doc)).toList();
+    classes.sort((a, b) => a.name.compareTo(b.name));
+    return classes;
+  }
+
+  // ============================================
+  // Get Weekly Schedule
+  // ============================================
+  Future<Map<int, List<BJJClass>>> getWeeklySchedule() async {
+    final allClasses = await list();
+    final schedule = <int, List<BJJClass>>{
+      0: [], // Sunday
+      1: [], // Monday
+      2: [], // Tuesday
+      3: [], // Wednesday
+      4: [], // Thursday
+      5: [], // Friday
+      6: [], // Saturday
+    };
+
+    for (final cls in allClasses) {
+      for (final s in cls.schedule) {
+        if (!schedule[s.dayOfWeek]!.any((c) => c.id == cls.id)) {
+          schedule[s.dayOfWeek]!.add(cls);
+        }
+      }
+    }
+
+    // Sort each day by start time
+    for (final day in schedule.keys) {
+      schedule[day]!.sort((a, b) {
+        final aTime = a.schedule.where((s) => s.dayOfWeek == day).firstOrNull?.startTime ?? '00:00';
+        final bTime = b.schedule.where((s) => s.dayOfWeek == day).firstOrNull?.startTime ?? '00:00';
+        return aTime.compareTo(bTime);
+      });
+    }
+
+    return schedule;
+  }
+
+  // ============================================
+  // Get Classes for Date
+  // ============================================
+  Future<List<BJJClass>> getClassesForDate(DateTime date) async {
+    final dayOfWeek = date.weekday % 7;
+    return getByDayOfWeek(dayOfWeek);
+  }
+
+  // ============================================
+  // WRITE OPERATIONS
+  // ============================================
+
+  // ============================================
+  // Create Class
+  // ============================================
+  Future<BJJClass> create({
+    required String name,
+    String? description,
+    String? instructorId,
+    String? instructorName,
+    List<ClassSchedule>? schedule,
+    StudentCategory? category,
+    String? minBelt,
+    String? maxBelt,
+    int? maxStudents,
+  }) async {
+    final docRef = await _classesRef.add({
+      'name': name,
+      'description': description,
+      'instructorId': instructorId,
+      'instructorName': instructorName,
+      'studentIds': [],
+      'schedule': schedule?.map((s) => s.toMap()).toList() ?? [],
+      'category': category?.value,
+      'minBelt': minBelt,
+      'maxBelt': maxBelt,
+      'maxStudents': maxStudents,
+      'isActive': true,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    final doc = await docRef.get();
+    return BJJClass.fromFirestore(doc);
+  }
+
+  // ============================================
+  // Update Class
+  // ============================================
+  Future<BJJClass> update(String id, Map<String, dynamic> data) async {
+    data['updatedAt'] = FieldValue.serverTimestamp();
+    await _collections.classDoc(id).update(data);
+    final updated = await getById(id);
+    return updated!;
+  }
+
+  // ============================================
+  // Delete Class (Soft Delete)
+  // ============================================
+  Future<void> delete(String id) async {
+    await _collections.classDoc(id).update({
+      'isActive': false,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ============================================
+  // Hard Delete Class
+  // ============================================
+  Future<void> hardDelete(String id) async {
+    await _collections.classDoc(id).delete();
+  }
+
+  // ============================================
+  // Add Student to Class
+  // ============================================
+  Future<BJJClass> addStudent(String classId, String studentId) async {
+    await _collections.classDoc(classId).update({
+      'studentIds': FieldValue.arrayUnion([studentId]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    final updated = await getById(classId);
+    return updated!;
+  }
+
+  // ============================================
+  // Remove Student from Class
+  // ============================================
+  Future<BJJClass> removeStudent(String classId, String studentId) async {
+    await _collections.classDoc(classId).update({
+      'studentIds': FieldValue.arrayRemove([studentId]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    final updated = await getById(classId);
+    return updated!;
+  }
+
+  // ============================================
+  // Toggle Student in Class
+  // ============================================
+  Future<BJJClass> toggleStudent(String classId, String studentId) async {
+    final cls = await getById(classId);
+    if (cls == null) throw Exception('Turma não encontrada');
+
+    if (cls.studentIds.contains(studentId)) {
+      return removeStudent(classId, studentId);
+    } else {
+      return addStudent(classId, studentId);
+    }
+  }
+}
+
+// ============================================
+// Factory Function
+// ============================================
+ClassService createClassService(String academyId) {
+  return ClassService(academyId);
+}
+
+// ============================================
+// Default Instance (uses current academy)
+// ============================================
+ClassService get classService => ClassService(FirebaseService.academyId);

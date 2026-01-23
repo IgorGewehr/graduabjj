@@ -1,0 +1,83 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+/// Firebase Service - Base configuration and collection references
+/// Multi-tenant architecture for BJJ academies
+class FirebaseService {
+  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  FirebaseService._();
+
+  static FirebaseFirestore get firestore => _firestore;
+  static FirebaseAuth get auth => _auth;
+
+  // Current user
+  static User? get currentUser => _auth.currentUser;
+  static String? get currentUserId => _auth.currentUser?.uid;
+
+  // Default academy ID (should be set from user profile or environment)
+  static String _academyId = 'default';
+
+  static String get academyId => _academyId;
+
+  static void setAcademyId(String id) {
+    _academyId = id;
+  }
+}
+
+/// Collection References - Multi-tenant structure
+class Collections {
+  final String academyId;
+
+  Collections(this.academyId);
+
+  // Base academy document
+  DocumentReference get academy =>
+      FirebaseService.firestore.collection('academies').doc(academyId);
+
+  // Subcollections under academy
+  CollectionReference get students => academy.collection('students');
+  CollectionReference get attendance => academy.collection('attendance');
+  CollectionReference get achievements => academy.collection('achievements');
+  CollectionReference get classes => academy.collection('classes');
+  CollectionReference get teams => academy.collection('teams');
+  CollectionReference get plans => academy.collection('plans');
+  CollectionReference get payments => academy.collection('payments');
+  CollectionReference get competitions => academy.collection('competitions');
+  CollectionReference get competitionEnrollments => academy.collection('competitionEnrollments');
+  CollectionReference get assessments => academy.collection('assessments');
+  CollectionReference get linkCodes => academy.collection('linkCodes');
+  CollectionReference get settings => academy.collection('settings');
+  CollectionReference get storeProducts => academy.collection('storeProducts');
+  CollectionReference get storeOrders => academy.collection('storeOrders');
+  CollectionReference get beltProgressions => academy.collection('beltProgressions');
+  CollectionReference get notifications => academy.collection('notifications');
+
+  // Individual document references
+  DocumentReference student(String id) => students.doc(id);
+  DocumentReference attendanceDoc(String id) => attendance.doc(id);
+  DocumentReference achievement(String id) => achievements.doc(id);
+  DocumentReference classDoc(String id) => classes.doc(id);
+  DocumentReference team(String id) => teams.doc(id);
+  DocumentReference plan(String id) => plans.doc(id);
+  DocumentReference payment(String id) => payments.doc(id);
+  DocumentReference competition(String id) => competitions.doc(id);
+  DocumentReference competitionEnrollment(String id) => competitionEnrollments.doc(id);
+  DocumentReference assessment(String id) => assessments.doc(id);
+  DocumentReference linkCode(String code) => linkCodes.doc(code);
+
+  // Factory method for convenience
+  static Collections forAcademy(String academyId) => Collections(academyId);
+
+  // Default instance using current academy
+  static Collections get current => Collections(FirebaseService.academyId);
+}
+
+/// Users collection (global, not per-academy)
+class UserCollections {
+  static CollectionReference get users =>
+      FirebaseService.firestore.collection('users');
+
+  static DocumentReference user(String uid) => users.doc(uid);
+}

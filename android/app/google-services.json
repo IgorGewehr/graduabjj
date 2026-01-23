@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "880937749202",
+    "project_id": "arpjj-76350",
+    "storage_bucket": "arpjj-76350.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:880937749202:android:788260c7ed7da052eb3b0b",
+        "android_client_info": {
+          "package_name": "com.tensorroot.graduabjj"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxB_Wdt0SQPnXADfejpNyDeEnYDUr9W2E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

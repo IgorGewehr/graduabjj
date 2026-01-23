@@ -1,0 +1,16 @@
+// Services Barrel File
+export 'firebase_service.dart';
+export 'student_service.dart';
+export 'attendance_service.dart';
+export 'achievement_service.dart';
+export 'assessment_service.dart';
+export 'payment_service.dart';
+export 'class_service.dart';
+export 'competition_service.dart';
+export 'competition_enrollment_service.dart';
+export 'plan_service.dart';
+export 'settings_service.dart';
+export 'link_code_service.dart';
+export 'belt_progression_service.dart';
+export 'notification_service.dart';
+export 'store_service.dart';
