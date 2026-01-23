@@ -56,11 +56,11 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCOvI6fk-3Js0cp0PNpVFRUKzR5Cz9OK58',
-    appId: '1:880937749202:ios:REPLACE_WITH_IOS_APP_ID',
+    apiKey: 'AIzaSyAM4oihQ7eJ6gTuV5jzlXE8opn7d-1qeew',
+    appId: '1:880937749202:ios:649a91755c6f6236eb3b0b',
     messagingSenderId: '880937749202',
     projectId: 'arpjj-76350',
     storageBucket: 'arpjj-76350.firebasestorage.app',
-    iosBundleId: 'com.graduabjj.graduabjj',
+    iosBundleId: 'com.tensorroot.graduabjj',
   );
 }
