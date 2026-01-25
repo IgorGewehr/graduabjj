@@ -54,22 +54,10 @@ class BehaviorScreen extends ConsumerWidget {
 
               return SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header
-                    Text(
-                      'Meu Comportamento',
-                      style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Acompanhe suas avaliacoes de comportamento',
-                      style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-                    ),
-                    const SizedBox(height: 24),
-
                     // Latest Assessment Card
                     if (latest != null)
                       _LatestAssessmentCard(

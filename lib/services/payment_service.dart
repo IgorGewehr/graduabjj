@@ -140,11 +140,15 @@ class Payment {
       id: doc.id,
       studentId: data['studentId'] ?? '',
       studentName: data['studentName'] ?? '',
-      value: (data['value'] ?? 0).toDouble(),
+      // Support both 'amount' (webapp) and 'value' (legacy) field names
+      value: (data['amount'] ?? data['value'] ?? 0).toDouble(),
       dueDate: (data['dueDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      paidAt: data['paidAt'] != null
-          ? (data['paidAt'] as Timestamp).toDate()
-          : null,
+      // Support both 'paymentDate' (webapp) and 'paidAt' (legacy) field names
+      paidAt: data['paymentDate'] != null
+          ? (data['paymentDate'] as Timestamp).toDate()
+          : data['paidAt'] != null
+              ? (data['paidAt'] as Timestamp).toDate()
+              : null,
       status: PaymentStatusExtension.fromString(data['status'] ?? 'pending'),
       method: data['method'] != null
           ? PaymentMethodExtension.fromString(data['method'])
@@ -359,16 +363,19 @@ class PaymentService {
     String? description,
     String? referenceMonth,
     String? createdBy,
+    String type = 'monthly_tuition',
   }) async {
     final docRef = await _paymentsRef.add({
       'studentId': studentId,
       'studentName': studentName,
-      'value': value,
+      'amount': value,
+      'type': type,
       'dueDate': Timestamp.fromDate(dueDate),
       'status': PaymentStatus.pending.value,
       'description': description ?? 'Mensalidade',
       'referenceMonth': referenceMonth,
       'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
       'createdBy': createdBy,
     });
 
@@ -398,7 +405,7 @@ class PaymentService {
     return update(id, {
       'status': PaymentStatus.paid.value,
       'method': method.value,
-      'paidAt': Timestamp.fromDate(paidAt),
+      'paymentDate': Timestamp.fromDate(paidAt),
     });
   }
 

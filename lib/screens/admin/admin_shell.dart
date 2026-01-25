@@ -1,19 +1,127 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/portal_providers.dart';
+import '../../widgets/common/more_menu_sheet.dart';
 
 /// Admin Navigation Shell - Main navigation for admin screens
-class AdminShell extends StatelessWidget {
+class AdminShell extends ConsumerWidget {
   final Widget child;
 
   const AdminShell({super.key, required this.child});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final location = GoRouterState.of(context).uri.path;
+    final currentUser = ref.watch(currentUserProvider);
+    final user = currentUser.valueOrNull;
+    final settingsAsync = ref.watch(academySettingsProvider);
+    final settings = settingsAsync.valueOrNull;
 
     return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: MediaQuery.of(context).size.width < 768
+          ? AppBar(
+              backgroundColor: AppTheme.surface,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              title: Row(
+                children: [
+                  // Logo
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: settings?.logoUrl == null ? AppTheme.textPrimary : null,
+                      borderRadius: BorderRadius.circular(6),
+                      image: settings?.logoUrl != null
+                          ? DecorationImage(
+                              image: NetworkImage(settings!.logoUrl!),
+                              fit: BoxFit.cover,
+                            )
+                          : null,
+                    ),
+                    child: settings?.logoUrl == null
+                        ? Center(
+                            child: Text(
+                              settings?.name.isNotEmpty == true
+                                  ? settings!.name[0].toUpperCase()
+                                  : 'A',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 16,
+                              ),
+                            ),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 10),
+                  // Academy name and slogan
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          settings?.name ?? 'Minha Academia',
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (settings?.portalSlogan != null && settings!.portalSlogan!.isNotEmpty)
+                          Text(
+                            settings.portalSlogan!,
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                IconButton(
+                  icon: const Icon(LucideIcons.bell, size: 20),
+                  onPressed: () {},
+                ),
+                const SizedBox(width: 4),
+                // User avatar
+                Container(
+                  margin: const EdgeInsets.only(right: 12),
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: AppTheme.textPrimary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      user?.displayName.isNotEmpty == true
+                          ? user!.displayName[0].toUpperCase()
+                          : 'U',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(1),
+                child: Container(height: 1, color: AppTheme.divider),
+              ),
+            )
+          : null,
       body: Row(
         children: [
           // Sidebar for larger screens
@@ -23,10 +131,6 @@ class AdminShell extends StatelessWidget {
           Expanded(child: child),
         ],
       ),
-      // Drawer for mobile
-      drawer: MediaQuery.of(context).size.width < 768
-          ? Drawer(child: AdminSidebar(currentPath: location))
-          : null,
       bottomNavigationBar: MediaQuery.of(context).size.width < 768
           ? AdminBottomNav(currentPath: location)
           : null,
@@ -35,13 +139,19 @@ class AdminShell extends StatelessWidget {
 }
 
 /// Admin Sidebar Navigation
-class AdminSidebar extends StatelessWidget {
+class AdminSidebar extends ConsumerWidget {
   final String currentPath;
 
   const AdminSidebar({super.key, required this.currentPath});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settingsAsync = ref.watch(academySettingsProvider);
+    final settings = settingsAsync.valueOrNull;
+    final isStoreEnabled = settings?.storeEnabled ?? false;
+    final currentUser = ref.watch(currentUserProvider);
+    final user = currentUser.valueOrNull;
+
     return Container(
       width: 250,
       color: AppTheme.surface,
@@ -56,18 +166,40 @@ class AdminSidebar extends StatelessWidget {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: AppTheme.primary,
+                    color: settings?.logoUrl == null ? AppTheme.primary : null,
                     borderRadius: BorderRadius.circular(8),
+                    image: settings?.logoUrl != null
+                        ? DecorationImage(
+                            image: NetworkImage(settings!.logoUrl!),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
                   ),
-                  child: const Icon(Icons.sports_martial_arts, color: Colors.white),
+                  child: settings?.logoUrl == null
+                      ? Center(
+                          child: Text(
+                            settings?.name.isNotEmpty == true
+                                ? settings!.name[0].toUpperCase()
+                                : 'A',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 18,
+                            ),
+                          ),
+                        )
+                      : null,
                 ),
                 const SizedBox(width: 12),
-                const Text(
-                  'GraduaBJJ',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.textPrimary,
+                Expanded(
+                  child: Text(
+                    settings?.name ?? 'Minha Academia',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textPrimary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -123,19 +255,20 @@ class AdminSidebar extends StatelessWidget {
                   currentPath: currentPath,
                 ),
                 _NavItem(
-                  icon: Icons.military_tech_outlined,
-                  activeIcon: Icons.military_tech,
-                  label: 'Graduação',
-                  path: '/admin/graduacao',
-                  currentPath: currentPath,
-                ),
-                _NavItem(
                   icon: Icons.bar_chart_outlined,
                   activeIcon: Icons.bar_chart,
                   label: 'Relatórios',
                   path: '/admin/relatorios',
                   currentPath: currentPath,
                 ),
+                if (isStoreEnabled)
+                  _NavItem(
+                    icon: Icons.store_outlined,
+                    activeIcon: Icons.store,
+                    label: 'Loja',
+                    path: '/admin/loja',
+                    currentPath: currentPath,
+                  ),
                 const Divider(),
                 _NavItem(
                   icon: Icons.settings_outlined,
@@ -151,16 +284,32 @@ class AdminSidebar extends StatelessWidget {
           // User section
           const Divider(height: 1),
           ListTile(
-            leading: const CircleAvatar(
+            leading: CircleAvatar(
               backgroundColor: AppTheme.primary,
-              child: Icon(Icons.person, color: Colors.white, size: 20),
+              child: Text(
+                user?.displayName.isNotEmpty == true
+                    ? user!.displayName[0].toUpperCase()
+                    : 'U',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
-            title: const Text('Admin', style: TextStyle(fontWeight: FontWeight.w500)),
-            subtitle: const Text('Administrador', style: TextStyle(fontSize: 12)),
+            title: Text(
+              user?.displayName ?? 'Admin',
+              style: const TextStyle(fontWeight: FontWeight.w500),
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              user?.isAdmin == true ? 'Administrador' : 'Instrutor',
+              style: const TextStyle(fontSize: 12),
+            ),
             trailing: IconButton(
               icon: const Icon(Icons.logout),
-              onPressed: () {
-                // TODO: Implement logout
+              onPressed: () async {
+                final authService = ref.read(authServiceProvider);
+                await authService.signOut();
               },
             ),
           ),
@@ -219,62 +368,252 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-/// Admin Bottom Navigation (for mobile)
-class AdminBottomNav extends StatelessWidget {
+/// Admin Bottom Navigation (for mobile) - Fintech style matching webapp
+class AdminBottomNav extends ConsumerStatefulWidget {
   final String currentPath;
 
   const AdminBottomNav({super.key, required this.currentPath});
 
+  @override
+  ConsumerState<AdminBottomNav> createState() => _AdminBottomNavState();
+}
+
+class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
+  // Navigation items for bottom nav (first 4 + "Mais")
+  static const List<_AdminNavItem> _bottomNavItems = [
+    _AdminNavItem(
+      label: 'Dashboard',
+      icon: LucideIcons.layoutDashboard,
+      path: '/admin',
+    ),
+    _AdminNavItem(
+      label: 'Chamada',
+      icon: LucideIcons.clipboardCheck,
+      path: '/admin/chamada',
+    ),
+    _AdminNavItem(
+      label: 'Alunos',
+      icon: LucideIcons.users,
+      path: '/admin/alunos',
+    ),
+    _AdminNavItem(
+      label: 'Financeiro',
+      icon: LucideIcons.dollarSign,
+      path: '/admin/financeiro',
+    ),
+    _AdminNavItem(
+      label: 'Mais',
+      icon: LucideIcons.moreHorizontal,
+      path: '', // Special case for bottom sheet
+    ),
+  ];
+
+  // Items for "Mais" menu
+  static const List<_AdminNavItem> _moreMenuItems = [
+    _AdminNavItem(
+      label: 'Turmas',
+      icon: LucideIcons.calendar,
+      path: '/admin/turmas',
+    ),
+    _AdminNavItem(
+      label: 'Competicoes',
+      icon: LucideIcons.trophy,
+      path: '/admin/campeonatos',
+    ),
+    _AdminNavItem(
+      label: 'Graduacao',
+      icon: LucideIcons.award,
+      path: '/admin/graduacao',
+    ),
+    _AdminNavItem(
+      label: 'Relatorios',
+      icon: LucideIcons.barChart3,
+      path: '/admin/relatorios',
+    ),
+    _AdminNavItem(
+      label: 'Loja',
+      icon: LucideIcons.store,
+      path: '/admin/loja',
+    ),
+    _AdminNavItem(
+      label: 'Configuracoes',
+      icon: LucideIcons.settings,
+      path: '/admin/configuracoes',
+    ),
+  ];
+
   int _getSelectedIndex() {
-    if (currentPath == '/admin') return 0;
-    if (currentPath.startsWith('/admin/alunos')) return 1;
-    if (currentPath.startsWith('/admin/chamada')) return 2;
-    if (currentPath.startsWith('/admin/financeiro')) return 3;
+    final location = widget.currentPath;
+
+    // Check bottom nav items (except "Mais")
+    for (int i = 0; i < _bottomNavItems.length - 1; i++) {
+      final path = _bottomNavItems[i].path;
+      // Exact match for /admin, prefix match for others
+      if (path == '/admin') {
+        if (location == path) return i;
+      } else if (location == path || location.startsWith('$path/')) {
+        return i;
+      }
+    }
+
+    // Check if any "more" item is active
+    for (final item in _moreMenuItems) {
+      if (location == item.path || location.startsWith('${item.path}/')) {
+        return 4; // "Mais" index
+      }
+    }
+
     return 0;
+  }
+
+  void _onItemTapped(int index) {
+    if (index == 4) {
+      _showMoreMenu();
+    } else {
+      context.go(_bottomNavItems[index].path);
+    }
+  }
+
+  void _showMoreMenu() {
+    final currentLocation = widget.currentPath;
+    final navigator = GoRouter.of(context);
+
+    // Get academy settings to check if store is enabled
+    final settings = ref.read(academySettingsProvider).valueOrNull;
+    final isStoreEnabled = settings?.storeEnabled ?? false;
+
+    // Filter menu items based on conditions
+    final filteredItems = _moreMenuItems.where((item) {
+      // Loja only shows if store is enabled
+      if (item.path == '/admin/loja') {
+        return isStoreEnabled;
+      }
+      return true;
+    }).toList();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => MoreMenuSheet(
+        items: filteredItems
+            .map((item) => MoreMenuItem(
+                  label: item.label,
+                  icon: item.icon,
+                  path: item.path,
+                  isActive: currentLocation == item.path,
+                ))
+            .toList(),
+        onLogout: () async {
+          Navigator.pop(sheetContext);
+          final authService = ref.read(authServiceProvider);
+          await authService.signOut();
+        },
+        onNavigate: (path) {
+          Navigator.pop(sheetContext);
+          navigator.go(path);
+        },
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return NavigationBar(
-      selectedIndex: _getSelectedIndex(),
-      onDestinationSelected: (index) {
-        switch (index) {
-          case 0:
-            context.go('/admin');
-            break;
-          case 1:
-            context.go('/admin/alunos');
-            break;
-          case 2:
-            context.go('/admin/chamada');
-            break;
-          case 3:
-            context.go('/admin/financeiro');
-            break;
-        }
-      },
-      destinations: const [
-        NavigationDestination(
-          icon: Icon(Icons.dashboard_outlined),
-          selectedIcon: Icon(Icons.dashboard),
-          label: 'Dashboard',
+    final selectedIndex = _getSelectedIndex();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface.withValues(alpha: 0.95),
+        border: const Border(
+          top: BorderSide(color: AppTheme.divider, width: 1),
         ),
-        NavigationDestination(
-          icon: Icon(Icons.people_outline),
-          selectedIcon: Icon(Icons.people),
-          label: 'Alunos',
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Row(
+            children: List.generate(
+              _bottomNavItems.length,
+              (index) => _AdminBottomNavItem(
+                item: _bottomNavItems[index],
+                isSelected: selectedIndex == index,
+                onTap: () => _onItemTapped(index),
+              ),
+            ),
+          ),
         ),
-        NavigationDestination(
-          icon: Icon(Icons.check_circle_outline),
-          selectedIcon: Icon(Icons.check_circle),
-          label: 'Chamada',
+      ),
+    );
+  }
+}
+
+/// Navigation item data
+class _AdminNavItem {
+  final String label;
+  final IconData icon;
+  final String path;
+
+  const _AdminNavItem({
+    required this.label,
+    required this.icon,
+    required this.path,
+  });
+}
+
+/// Bottom nav item widget - Fintech style with pill indicator
+class _AdminBottomNavItem extends StatelessWidget {
+  final _AdminNavItem item;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _AdminBottomNavItem({
+    required this.item,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon with pill background when selected
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isSelected ? AppTheme.textPrimary : Colors.transparent,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  item.icon,
+                  size: 20,
+                  color: isSelected ? Colors.white : AppTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 3),
+              // Label
+              Text(
+                item.label,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  color: isSelected ? AppTheme.textPrimary : AppTheme.textSecondary,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
         ),
-        NavigationDestination(
-          icon: Icon(Icons.attach_money_outlined),
-          selectedIcon: Icon(Icons.attach_money),
-          label: 'Financeiro',
-        ),
-      ],
+      ),
     );
   }
 }

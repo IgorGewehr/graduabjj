@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
@@ -116,8 +117,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
         IconButton(
           icon: const Icon(Icons.edit),
           onPressed: () {
-            // Navigate to edit screen
-            // TODO: Implement navigation
+            context.push('/admin/alunos/${widget.studentId}/editar');
           },
         ),
         PopupMenuButton<String>(
@@ -721,18 +721,30 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        child: Row(
           children: [
-            Icon(icon, color: AppTheme.primary, size: 24),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              label,
-              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            Icon(icon, color: AppTheme.primary, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    value,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    label,
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                      fontSize: 10,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -810,12 +822,14 @@ class _PaymentCard extends StatelessWidget {
         ),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
               'R\$ ${payment.value.toStringAsFixed(2)}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
             ),
+            const SizedBox(height: 2),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
@@ -825,7 +839,7 @@ class _PaymentCard extends StatelessWidget {
               child: Text(
                 payment.status.label,
                 style: TextStyle(
-                  fontSize: 10,
+                  fontSize: 9,
                   color: statusColors[payment.status],
                   fontWeight: FontWeight.w500,
                 ),

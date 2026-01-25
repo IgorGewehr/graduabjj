@@ -8,17 +8,52 @@ import '../../core/theme.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 
-/// Financial Screen - Financeiro
-class FinancialScreen extends ConsumerWidget {
+/// Financial Screen - Financeiro (Redesigned)
+class FinancialScreen extends ConsumerStatefulWidget {
   const FinancialScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<FinancialScreen> createState() => _FinancialScreenState();
+}
+
+class _FinancialScreenState extends ConsumerState<FinancialScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  String _formatCurrency(double value) {
+    return NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(value);
+  }
+
+  void _copyPixKey(String pixKey) {
+    if (pixKey.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: pixKey));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Chave PIX copiada!'),
+        backgroundColor: AppTheme.success,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final studentAsync = ref.watch(currentStudentProvider);
     final pixInfoAsync = ref.watch(pixInfoProvider);
-    final planAsync = studentAsync.whenData(
-      (s) => s != null ? ref.watch(studentPlanProvider(s.id)) : const AsyncValue.data(null),
-    );
 
     return studentAsync.when(
       data: (student) {
@@ -30,7 +65,6 @@ class FinancialScreen extends ConsumerWidget {
         final statsAsync = ref.watch(studentPaymentStatsProvider(student.id));
         final pixInfo = pixInfoAsync.valueOrNull ?? {};
         final pixKey = pixInfo['key'] ?? '';
-        final plan = planAsync.valueOrNull?.valueOrNull;
 
         return RefreshIndicator(
           onRefresh: () async {
@@ -42,115 +76,157 @@ class FinancialScreen extends ConsumerWidget {
             data: (payments) {
               final stats = statsAsync.valueOrNull ?? _defaultStats;
               final pendingCount = (stats['pending'] as Map?)?['count'] ?? 0;
-              final pendingAmount = ((stats['pending'] as Map?)?['total'] ?? 0).toDouble();
+              final pendingAmount =
+                  ((stats['pending'] as Map?)?['total'] ?? 0).toDouble();
               final overdueCount = (stats['overdue'] as Map?)?['count'] ?? 0;
-              final overdueAmount = ((stats['overdue'] as Map?)?['total'] ?? 0).toDouble();
-              final paidCount = (stats['paid'] as Map?)?['count'] ?? 0;
-              final totalPaid = ((stats['paid'] as Map?)?['total'] ?? 0).toDouble();
+              final overdueAmount =
+                  ((stats['overdue'] as Map?)?['total'] ?? 0).toDouble();
+
+              // Separate payments by status
+              final pendingPayments = payments
+                  .where((p) => p.status == PaymentStatus.pending)
+                  .toList();
+              final overduePayments = payments
+                  .where((p) => p.status == PaymentStatus.overdue)
+                  .toList();
+              final historyPayments = payments
+                  .where((p) =>
+                      p.status == PaymentStatus.paid ||
+                      p.status == PaymentStatus.cancelled)
+                  .toList();
 
               final hasDebts = pendingCount > 0 || overdueCount > 0;
 
-              return SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header
-                    Text(
-                      'Financeiro',
-                      style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Acompanhe suas mensalidades e pagamentos',
-                      style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-                    ),
-
-                    // Plan info
-                    if (plan != null) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: AppTheme.infoLight,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(LucideIcons.calendar, size: 14, color: AppTheme.info),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Plano: ${plan.name} - Vencimento: Dia ${plan.defaultDueDay}',
-                              style: AppTheme.labelSmall.copyWith(
-                                color: AppTheme.info,
-                                fontWeight: FontWeight.w600,
+              return Column(
+                children: [
+                  // Fixed header section
+                  Container(
+                    color: AppTheme.background,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Summary Cards
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _SummaryCard(
+                                      icon: LucideIcons.clock,
+                                      iconColor: AppTheme.warning,
+                                      label: 'Pendentes',
+                                      count: pendingCount,
+                                      amount: pendingAmount,
+                                      formatCurrency: _formatCurrency,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: _SummaryCard(
+                                      icon: LucideIcons.alertTriangle,
+                                      iconColor: AppTheme.error,
+                                      label: 'Em Atraso',
+                                      count: overdueCount,
+                                      amount: overdueAmount,
+                                      formatCurrency: _formatCurrency,
+                                      isAlert: overdueCount > 0,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 16),
+
+                              // PIX Info (when has debts)
+                              if (hasDebts && pixKey.isNotEmpty)
+                                _PixCard(
+                                  pixKey: pixKey,
+                                  onCopy: () => _copyPixKey(pixKey),
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                    const SizedBox(height: 24),
+                        const SizedBox(height: 16),
 
-                    // Overdue Alert
-                    if (overdueCount > 0) ...[
-                      _OverdueAlert(
-                        count: overdueCount,
-                        amount: overdueAmount,
-                        formatCurrency: _formatCurrency,
-                        onCopyPix: () => _copyPixKey(context, pixKey),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-
-                    // Stats Cards
-                    _StatsRow(
-                      pendingCount: pendingCount,
-                      pendingAmount: pendingAmount,
-                      overdueCount: overdueCount,
-                      overdueAmount: overdueAmount,
-                      paidCount: paidCount,
-                      totalPaid: totalPaid,
-                      formatCurrency: _formatCurrency,
+                        // Tab Bar
+                        Container(
+                          decoration: const BoxDecoration(
+                            border: Border(
+                              bottom:
+                                  BorderSide(color: AppTheme.divider, width: 1),
+                            ),
+                          ),
+                          child: TabBar(
+                            controller: _tabController,
+                            labelColor: AppTheme.textPrimary,
+                            unselectedLabelColor: AppTheme.textSecondary,
+                            labelStyle: AppTheme.labelMedium.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                            unselectedLabelStyle: AppTheme.labelMedium,
+                            indicatorColor: AppTheme.textPrimary,
+                            indicatorWeight: 2,
+                            tabs: [
+                              Tab(
+                                text: pendingCount > 0
+                                    ? 'Pendentes ($pendingCount)'
+                                    : 'Pendentes',
+                              ),
+                              Tab(
+                                text: overdueCount > 0
+                                    ? 'Em Atraso ($overdueCount)'
+                                    : 'Em Atraso',
+                              ),
+                              Tab(
+                                text: historyPayments.isNotEmpty
+                                    ? 'Historico (${historyPayments.length})'
+                                    : 'Historico',
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 24),
+                  ),
 
-                    // Payment Info
-                    if (hasDebts && pixKey.isNotEmpty) ...[
-                      _PaymentInfoCard(
-                        pixKey: pixKey,
-                        onCopyPix: () => _copyPixKey(context, pixKey),
-                      ),
-                      const SizedBox(height: 24),
-                    ],
-
-                    // Payment History
-                    Text(
-                      'HISTORICO DE PAGAMENTOS',
-                      style: AppTheme.labelSmall.copyWith(
-                        color: AppTheme.textSecondary,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    if (payments.isEmpty)
-                      _buildEmptyState()
-                    else
-                      ...payments.map((payment) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: _PaymentCard(
-                          payment: payment,
+                  // Tab Content
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        // Pendentes Tab
+                        _PaymentsList(
+                          payments: pendingPayments,
+                          emptyIcon: LucideIcons.checkCircle,
+                          emptyTitle: 'Nenhum pagamento pendente',
+                          emptySubtitle: 'Voce esta em dia!',
                           formatCurrency: _formatCurrency,
                         ),
-                      )),
 
-                    const SizedBox(height: 80),
-                  ],
-                ),
+                        // Em Atraso Tab
+                        _PaymentsList(
+                          payments: overduePayments,
+                          emptyIcon: LucideIcons.partyPopper,
+                          emptyTitle: 'Nenhum pagamento atrasado',
+                          emptySubtitle: 'Continue assim!',
+                          formatCurrency: _formatCurrency,
+                        ),
+
+                        // Historico Tab
+                        _PaymentsList(
+                          payments: historyPayments,
+                          emptyIcon: LucideIcons.history,
+                          emptyTitle: 'Nenhum historico',
+                          emptySubtitle: 'Seus pagamentos aparecerao aqui',
+                          formatCurrency: _formatCurrency,
+                          showStatus: true,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               );
             },
             loading: () => _buildLoadingState(),
@@ -169,21 +245,6 @@ class FinancialScreen extends ConsumerWidget {
         'paid': {'count': 0, 'total': 0.0},
       };
 
-  String _formatCurrency(double value) {
-    return NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(value);
-  }
-
-  void _copyPixKey(BuildContext context, String pixKey) {
-    if (pixKey.isEmpty) return;
-    Clipboard.setData(ClipboardData(text: pixKey));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Chave PIX copiada!'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
-
   Widget _buildNoStudentState() {
     return Center(
       child: Padding(
@@ -191,11 +252,25 @@ class FinancialScreen extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(LucideIcons.creditCard, size: 64, color: AppTheme.textDisabled),
-            const SizedBox(height: 16),
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(
+                LucideIcons.wallet,
+                size: 40,
+                color: AppTheme.textDisabled,
+              ),
+            ),
+            const SizedBox(height: 24),
             Text(
               'Financeiro',
-              style: AppTheme.titleLarge.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.titleLarge.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -215,26 +290,53 @@ class FinancialScreen extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 120,
-            height: 24,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(4),
-            ),
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceVariant,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 100,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceVariant,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: 160,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceVariant,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
           const SizedBox(height: 24),
           Row(
             children: List.generate(
-              3,
+              2,
               (index) => Expanded(
                 child: Padding(
-                  padding: EdgeInsets.only(right: index < 2 ? 12 : 0),
+                  padding: EdgeInsets.only(right: index < 1 ? 12 : 0),
                   child: Container(
-                    height: 80,
+                    height: 100,
                     decoration: BoxDecoration(
                       color: AppTheme.surfaceVariant,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
                 ),
@@ -245,12 +347,12 @@ class FinancialScreen extends ConsumerWidget {
           ...List.generate(
             3,
             (index) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: 12),
               child: Container(
                 height: 80,
                 decoration: BoxDecoration(
                   color: AppTheme.surfaceVariant,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
             ),
@@ -267,48 +369,56 @@ class FinancialScreen extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(LucideIcons.alertCircle, size: 64, color: AppTheme.error),
-            const SizedBox(height: 16),
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppTheme.errorLight,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(
+                LucideIcons.alertCircle,
+                size: 40,
+                color: AppTheme.error,
+              ),
+            ),
+            const SizedBox(height: 24),
             Text(
               'Erro ao carregar dados',
-              style: AppTheme.titleLarge.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.titleLarge.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Tente novamente mais tarde.',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
             ),
           ],
         ),
       ),
     );
   }
-
-  Widget _buildEmptyState() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Center(
-        child: Text(
-          'Nenhum pagamento registrado',
-          style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-        ),
-      ),
-    );
-  }
 }
 
-/// Overdue Alert
-class _OverdueAlert extends StatelessWidget {
+/// Summary Card
+class _SummaryCard extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String label;
   final int count;
   final double amount;
   final String Function(double) formatCurrency;
-  final VoidCallback onCopyPix;
+  final bool isAlert;
 
-  const _OverdueAlert({
+  const _SummaryCard({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
     required this.count,
     required this.amount,
     required this.formatCurrency,
-    required this.onCopyPix,
+    this.isAlert = false,
   });
 
   @override
@@ -316,230 +426,243 @@ class _OverdueAlert extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.errorLight,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.error.withOpacity(0.3)),
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isAlert ? AppTheme.error : AppTheme.divider,
+          width: isAlert ? 1.5 : 1,
+        ),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(LucideIcons.alertCircle, size: 18, color: AppTheme.error),
-          const SizedBox(width: 12),
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 18, color: iconColor),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isAlert
+                      ? AppTheme.errorLight
+                      : AppTheme.surfaceVariant,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  count.toString(),
+                  style: AppTheme.labelMedium.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: isAlert ? AppTheme.error : AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            label,
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            formatCurrency(amount),
+            style: AppTheme.titleMedium.copyWith(
+              fontWeight: FontWeight.w700,
+              color: isAlert ? AppTheme.error : AppTheme.textPrimary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// PIX Card
+class _PixCard extends StatelessWidget {
+  final String pixKey;
+  final VoidCallback onCopy;
+
+  const _PixCard({
+    required this.pixKey,
+    required this.onCopy,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.primary,
+            AppTheme.primary.withValues(alpha: 0.8),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              LucideIcons.qrCode,
+              size: 22,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Voce tem $count pagamento${count > 1 ? 's' : ''} em atraso totalizando ${formatCurrency(amount)}.',
-                  style: AppTheme.bodySmall.copyWith(color: AppTheme.error),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: onCopyPix,
-                  icon: const Icon(LucideIcons.copy, size: 14),
-                  label: const Text('Copiar PIX'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.error,
-                    side: const BorderSide(color: AppTheme.error),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  'Chave PIX',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: Colors.white.withValues(alpha: 0.8),
                   ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  pixKey,
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Stats Row
-class _StatsRow extends StatelessWidget {
-  final int pendingCount;
-  final double pendingAmount;
-  final int overdueCount;
-  final double overdueAmount;
-  final int paidCount;
-  final double totalPaid;
-  final String Function(double) formatCurrency;
-
-  const _StatsRow({
-    required this.pendingCount,
-    required this.pendingAmount,
-    required this.overdueCount,
-    required this.overdueAmount,
-    required this.paidCount,
-    required this.totalPaid,
-    required this.formatCurrency,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _StatCard(
-            icon: LucideIcons.clock,
-            iconColor: AppTheme.warning,
-            iconBgColor: AppTheme.warningLight,
-            value: formatCurrency(pendingAmount),
-            label: 'Pendente ($pendingCount)',
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            icon: LucideIcons.alertCircle,
-            iconColor: AppTheme.error,
-            iconBgColor: AppTheme.errorLight,
-            value: formatCurrency(overdueAmount),
-            valueColor: overdueCount > 0 ? AppTheme.error : null,
-            label: 'Em Atraso ($overdueCount)',
-            hasBorder: overdueCount > 0,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            icon: LucideIcons.checkCircle,
-            iconColor: AppTheme.success,
-            iconBgColor: AppTheme.successLight,
-            value: formatCurrency(totalPaid),
-            valueColor: AppTheme.success,
-            label: 'Total Pago ($paidCount)',
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Stat Card
-class _StatCard extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final Color iconBgColor;
-  final String value;
-  final Color? valueColor;
-  final String label;
-  final bool hasBorder;
-
-  const _StatCard({
-    required this.icon,
-    required this.iconColor,
-    required this.iconBgColor,
-    required this.value,
-    this.valueColor,
-    required this.label,
-    this.hasBorder = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: hasBorder ? AppTheme.error : AppTheme.divider,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: iconBgColor,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, size: 18, color: iconColor),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            value,
-            style: AppTheme.titleMedium.copyWith(
-              fontWeight: FontWeight.w700,
-              color: valueColor ?? AppTheme.textPrimary,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Payment Info Card
-class _PaymentInfoCard extends StatelessWidget {
-  final String pixKey;
-  final VoidCallback onCopyPix;
-
-  const _PaymentInfoCard({
-    required this.pixKey,
-    required this.onCopyPix,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.infoLight,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.info.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Dados para Pagamento',
-            style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Icon(LucideIcons.creditCard, size: 18, color: AppTheme.info),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(width: 12),
+          Material(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              onTap: onCopy,
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      'Chave PIX',
-                      style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                    Icon(
+                      LucideIcons.copy,
+                      size: 16,
+                      color: AppTheme.primary,
                     ),
+                    const SizedBox(width: 6),
                     Text(
-                      pixKey,
-                      style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+                      'Copiar',
+                      style: AppTheme.labelMedium.copyWith(
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
               ),
-              TextButton.icon(
-                onPressed: onCopyPix,
-                icon: const Icon(LucideIcons.copy, size: 14),
-                label: const Text('Copiar'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Apos o pagamento, envie o comprovante via WhatsApp para confirmar.',
-            style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+            ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Payments List
+class _PaymentsList extends StatelessWidget {
+  final List<Payment> payments;
+  final IconData emptyIcon;
+  final String emptyTitle;
+  final String emptySubtitle;
+  final String Function(double) formatCurrency;
+  final bool showStatus;
+
+  const _PaymentsList({
+    required this.payments,
+    required this.emptyIcon,
+    required this.emptyTitle,
+    required this.emptySubtitle,
+    required this.formatCurrency,
+    this.showStatus = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (payments.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceVariant,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  emptyIcon,
+                  size: 32,
+                  color: AppTheme.textDisabled,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                emptyTitle,
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                emptySubtitle,
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(20),
+      itemCount: payments.length,
+      itemBuilder: (context, index) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _PaymentCard(
+            payment: payments[index],
+            formatCurrency: formatCurrency,
+            showStatus: showStatus,
+          ),
+        );
+      },
     );
   }
 }
@@ -548,58 +671,103 @@ class _PaymentInfoCard extends StatelessWidget {
 class _PaymentCard extends StatelessWidget {
   final Payment payment;
   final String Function(double) formatCurrency;
+  final bool showStatus;
 
   const _PaymentCard({
     required this.payment,
     required this.formatCurrency,
+    this.showStatus = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final isOverdue = payment.status == PaymentStatus.overdue;
+    final isPaid = payment.status == PaymentStatus.paid;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isOverdue ? AppTheme.error : AppTheme.divider,
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          // Icon
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: isOverdue
+                  ? AppTheme.errorLight
+                  : isPaid
+                      ? AppTheme.successLight
+                      : AppTheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              isOverdue
+                  ? LucideIcons.alertTriangle
+                  : isPaid
+                      ? LucideIcons.checkCircle
+                      : LucideIcons.receipt,
+              size: 20,
+              color: isOverdue
+                  ? AppTheme.error
+                  : isPaid
+                      ? AppTheme.success
+                      : AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(width: 16),
+          // Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  payment.description ?? 'Mensalidade',
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Row(
                   children: [
-                    Text(
-                      payment.description ?? 'Mensalidade',
-                      style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+                    Icon(
+                      LucideIcons.calendar,
+                      size: 12,
+                      color: AppTheme.textSecondary,
                     ),
-                    if (payment.referenceMonth != null)
-                      Text(
-                        'Ref: ${payment.referenceMonth}',
-                        style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                    const SizedBox(width: 4),
+                    Text(
+                      DateFormat("dd/MM/yyyy").format(payment.dueDate),
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.textSecondary,
                       ),
+                    ),
+                    if (payment.referenceMonth != null) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        '(${payment.referenceMonth})',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
-              ),
-              _StatusChip(status: payment.status),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // Value & Status
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(
-                DateFormat("dd 'de' MMM 'de' yyyy", 'pt_BR').format(payment.dueDate),
-                style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-              ),
               Text(
                 formatCurrency(payment.value),
                 style: AppTheme.titleMedium.copyWith(
@@ -607,6 +775,10 @@ class _PaymentCard extends StatelessWidget {
                   color: isOverdue ? AppTheme.error : AppTheme.textPrimary,
                 ),
               ),
+              if (showStatus) ...[
+                const SizedBox(height: 4),
+                _StatusChip(status: payment.status),
+              ],
             ],
           ),
         ],
@@ -651,16 +823,17 @@ class _StatusChip extends StatelessWidget {
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
         label,
         style: AppTheme.labelSmall.copyWith(
           color: textColor,
           fontWeight: FontWeight.w600,
+          fontSize: 10,
         ),
       ),
     );

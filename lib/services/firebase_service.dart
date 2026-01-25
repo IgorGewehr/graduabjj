@@ -43,7 +43,7 @@ class Collections {
   CollectionReference get classes => academy.collection('classes');
   CollectionReference get teams => academy.collection('teams');
   CollectionReference get plans => academy.collection('plans');
-  CollectionReference get payments => academy.collection('payments');
+  CollectionReference get payments => academy.collection('financials');
   CollectionReference get competitions => academy.collection('competitions');
   CollectionReference get competitionEnrollments => academy.collection('competitionEnrollments');
   CollectionReference get assessments => academy.collection('assessments');

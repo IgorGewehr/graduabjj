@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
@@ -23,11 +22,13 @@ class MoreMenuItem {
 class MoreMenuSheet extends StatelessWidget {
   final List<MoreMenuItem> items;
   final VoidCallback onLogout;
+  final void Function(String path) onNavigate;
 
   const MoreMenuSheet({
     super.key,
     required this.items,
     required this.onLogout,
+    required this.onNavigate,
   });
 
   @override
@@ -81,10 +82,7 @@ class MoreMenuSheet extends StatelessWidget {
               children: [
                 ...items.map((item) => _MenuItemTile(
                       item: item,
-                      onTap: () {
-                        Navigator.pop(context);
-                        context.go(item.path);
-                      },
+                      onTap: () => onNavigate(item.path),
                     )),
                 const SizedBox(height: 16),
                 const Divider(),

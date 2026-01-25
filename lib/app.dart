@@ -16,9 +16,145 @@ import 'screens/portal/schedule_screen.dart';
 import 'screens/portal/timeline_screen.dart';
 import 'screens/portal/financial_screen.dart';
 import 'screens/portal/behavior_screen.dart';
+import 'screens/portal/store_screen.dart';
+import 'screens/portal/cart_screen.dart';
+import 'screens/portal/store_orders_screen.dart';
 import 'screens/splash_screen.dart';
 // Admin screens
 import 'screens/admin/admin_screens.dart';
+
+/// No transition - for instant tab switching (bottom nav)
+CustomTransitionPage<T> _buildPageInstant<T>({
+  required BuildContext context,
+  required GoRouterState state,
+  required Widget child,
+}) {
+  return CustomTransitionPage<T>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: Duration.zero,
+    reverseTransitionDuration: Duration.zero,
+    transitionsBuilder: (context, animation, secondaryAnimation, child) => child,
+  );
+}
+
+/// Quick crossfade for tab switching - subtle and fast
+CustomTransitionPage<T> _buildPageWithCrossfade<T>({
+  required BuildContext context,
+  required GoRouterState state,
+  required Widget child,
+}) {
+  return CustomTransitionPage<T>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: const Duration(milliseconds: 150),
+    reverseTransitionDuration: const Duration(milliseconds: 100),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      return FadeTransition(
+        opacity: CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOut,
+        ),
+        child: child,
+      );
+    },
+  );
+}
+
+/// iOS-style push transition - slide from right with parallax
+CustomTransitionPage<T> _buildPageWithPushTransition<T>({
+  required BuildContext context,
+  required GoRouterState state,
+  required Widget child,
+}) {
+  return CustomTransitionPage<T>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: const Duration(milliseconds: 300),
+    reverseTransitionDuration: const Duration(milliseconds: 250),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      // Primary animation - incoming page slides from right
+      final primaryCurve = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+
+      // Secondary animation - outgoing page slides left (parallax effect)
+      final secondaryCurve = CurvedAnimation(
+        parent: secondaryAnimation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+
+      return SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(1.0, 0.0),
+          end: Offset.zero,
+        ).animate(primaryCurve),
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: Offset.zero,
+            end: const Offset(-0.3, 0.0),
+          ).animate(secondaryCurve),
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
+/// Fade + slight scale for modal-like pages
+CustomTransitionPage<T> _buildPageWithScaleFade<T>({
+  required BuildContext context,
+  required GoRouterState state,
+  required Widget child,
+}) {
+  return CustomTransitionPage<T>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: const Duration(milliseconds: 250),
+    reverseTransitionDuration: const Duration(milliseconds: 200),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final curvedAnimation = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+
+      return FadeTransition(
+        opacity: curvedAnimation,
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.95, end: 1.0).animate(curvedAnimation),
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
+/// Fade-only transition for auth screens
+CustomTransitionPage<T> _buildPageWithFadeTransition<T>({
+  required BuildContext context,
+  required GoRouterState state,
+  required Widget child,
+}) {
+  return CustomTransitionPage<T>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: const Duration(milliseconds: 300),
+    reverseTransitionDuration: const Duration(milliseconds: 200),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      return FadeTransition(
+        opacity: CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOut,
+        ),
+        child: child,
+      );
+    },
+  );
+}
 
 /// Main App Widget
 class GraduaBJJApp extends ConsumerWidget {
@@ -48,6 +184,7 @@ class GraduaBJJApp extends ConsumerWidget {
 /// Router Provider
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authStateProvider);
+  final currentUser = ref.watch(currentUserProvider);
 
   return GoRouter(
     initialLocation: '/',
@@ -58,9 +195,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isRegistering = state.matchedLocation == '/register';
       final isSplash = state.matchedLocation == '/';
 
+      print('[ROUTER] matchedLocation: ${state.matchedLocation}, isLoggedIn: $isLoggedIn, authLoading: ${authState.isLoading}, userLoading: ${currentUser.isLoading}');
+
       // Show splash while loading auth state
       if (authState.isLoading) {
-        return null;
+        return isSplash ? null : '/';
       }
 
       // If not logged in, redirect to login
@@ -71,8 +210,22 @@ final routerProvider = Provider<GoRouter>((ref) {
         return '/login';
       }
 
-      // If logged in and trying to access auth pages, redirect to portal
-      if (isLoggedIn && (isLoggingIn || isRegistering || isSplash)) {
+      // If logged in, wait for user data to load before redirecting
+      if (currentUser.isLoading) {
+        print('[ROUTER] Waiting for user data to load...');
+        return isSplash ? null : '/';
+      }
+
+      final user = currentUser.valueOrNull;
+      print('[ROUTER] User loaded: ${user?.displayName}, role: ${user?.role}, isAdmin: ${user?.isAdmin}, isInstructor: ${user?.isInstructor}');
+
+      // If logged in and on auth pages, redirect based on role
+      if (isLoggingIn || isRegistering || isSplash) {
+        if (user != null && (user.isAdmin || user.isInstructor)) {
+          print('[ROUTER] Redirecting admin/instructor to /admin');
+          return '/admin';
+        }
+        print('[ROUTER] Redirecting to /portal');
         return '/portal';
       }
 
@@ -88,48 +241,114 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Auth Routes
       GoRoute(
         path: '/login',
-        builder: (context, state) => const LoginScreen(),
+        pageBuilder: (context, state) => _buildPageWithFadeTransition(
+          context: context,
+          state: state,
+          child: const LoginScreen(),
+        ),
       ),
       GoRoute(
         path: '/register',
-        builder: (context, state) => const RegisterScreen(),
+        pageBuilder: (context, state) => _buildPageWithPushTransition(
+          context: context,
+          state: state,
+          child: const RegisterScreen(),
+        ),
       ),
 
       // Portal Routes (Student Portal)
       ShellRoute(
         builder: (context, state, child) => PortalShell(child: child),
         routes: [
+          // Main tab routes - instant/crossfade transitions
           GoRoute(
             path: '/portal',
-            builder: (context, state) => const HomeScreen(),
+            pageBuilder: (context, state) => _buildPageInstant(
+              context: context,
+              state: state,
+              child: const HomeScreen(),
+            ),
           ),
           GoRoute(
             path: '/portal/perfil',
-            builder: (context, state) => const ProfileScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const ProfileScreen(),
+            ),
           ),
           GoRoute(
             path: '/portal/presencas',
-            builder: (context, state) => const AttendanceScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AttendanceScreen(),
+            ),
           ),
           GoRoute(
             path: '/portal/competicoes',
-            builder: (context, state) => const CompetitionsScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const CompetitionsScreen(),
+            ),
           ),
           GoRoute(
             path: '/portal/horarios',
-            builder: (context, state) => const ScheduleScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const ScheduleScreen(),
+            ),
           ),
           GoRoute(
             path: '/portal/linha-do-tempo',
-            builder: (context, state) => const TimelineScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const TimelineScreen(),
+            ),
           ),
           GoRoute(
             path: '/portal/financeiro',
-            builder: (context, state) => const FinancialScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const FinancialScreen(),
+            ),
           ),
           GoRoute(
             path: '/portal/comportamento',
-            builder: (context, state) => const BehaviorScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const BehaviorScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/loja',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const PortalStoreScreen(),
+            ),
+          ),
+          // Sub-pages - iOS-style push transitions
+          GoRoute(
+            path: '/portal/loja/carrinho',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const PortalCartScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/loja/pedidos',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const PortalStoreOrdersScreen(),
+            ),
           ),
         ],
       ),
@@ -138,57 +357,125 @@ final routerProvider = Provider<GoRouter>((ref) {
       ShellRoute(
         builder: (context, state, child) => AdminShell(child: child),
         routes: [
+          // Main tab routes - instant/crossfade transitions
           GoRoute(
             path: '/admin',
-            builder: (context, state) => const AdminDashboardScreen(),
+            pageBuilder: (context, state) => _buildPageInstant(
+              context: context,
+              state: state,
+              child: const AdminDashboardScreen(),
+            ),
           ),
           GoRoute(
             path: '/admin/alunos',
-            builder: (context, state) => const StudentsListScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const StudentsListScreen(),
+            ),
           ),
+          // Sub-pages - iOS-style push transitions
           GoRoute(
             path: '/admin/alunos/novo',
-            builder: (context, state) => const AdminStudentFormScreen(),
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const AdminStudentFormScreen(),
+            ),
           ),
           GoRoute(
             path: '/admin/alunos/:id',
-            builder: (context, state) => AdminStudentDetailScreen(
-              studentId: state.pathParameters['id']!,
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: AdminStudentDetailScreen(
+                studentId: state.pathParameters['id']!,
+              ),
             ),
           ),
           GoRoute(
             path: '/admin/alunos/:id/editar',
-            builder: (context, state) => AdminStudentFormScreen(
-              studentId: state.pathParameters['id'],
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: AdminStudentFormScreen(
+                studentId: state.pathParameters['id'],
+              ),
+            ),
+          ),
+          // Main tab routes
+          GoRoute(
+            path: '/admin/chamada',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminAttendanceScreen(),
             ),
           ),
           GoRoute(
-            path: '/admin/chamada',
-            builder: (context, state) => const AdminAttendanceScreen(),
-          ),
-          GoRoute(
             path: '/admin/turmas',
-            builder: (context, state) => const AdminClassesScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminClassesScreen(),
+            ),
           ),
           GoRoute(
             path: '/admin/campeonatos',
-            builder: (context, state) => const AdminCompetitionsScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminCompetitionsScreen(),
+            ),
           ),
           GoRoute(
             path: '/admin/financeiro',
-            builder: (context, state) => const AdminFinancialScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminFinancialScreen(),
+            ),
           ),
           GoRoute(
             path: '/admin/graduacao',
-            builder: (context, state) => const AdminGraduationScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminGraduationScreen(),
+            ),
           ),
           GoRoute(
             path: '/admin/relatorios',
-            builder: (context, state) => const AdminReportsScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminReportsScreen(),
+            ),
           ),
           GoRoute(
             path: '/admin/configuracoes',
-            builder: (context, state) => const AdminSettingsScreen(),
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminSettingsScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/loja',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminStoreScreen(),
+            ),
+          ),
+          // Sub-pages
+          GoRoute(
+            path: '/admin/loja/pedidos',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const PortalStoreOrdersScreen(),
+            ),
           ),
         ],
       ),

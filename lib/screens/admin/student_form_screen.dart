@@ -373,6 +373,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
       children: [
         DropdownButtonFormField<Plan>(
           value: _selectedPlan,
+          isExpanded: true,
           decoration: const InputDecoration(
             labelText: 'Plano',
             border: OutlineInputBorder(),
@@ -385,7 +386,10 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
             ..._availablePlans.map((plan) {
               return DropdownMenuItem(
                 value: plan,
-                child: Text('${plan.name} - R\$ ${plan.monthlyValue.toStringAsFixed(2)}'),
+                child: Text(
+                  '${plan.name} - R\$ ${plan.monthlyValue.toStringAsFixed(2)}',
+                  overflow: TextOverflow.ellipsis,
+                ),
               );
             }),
           ],

@@ -182,6 +182,15 @@ final studentPlanProvider = FutureProvider.family<Plan?, String>((ref, studentId
   return await service.getPlanForStudent(studentId);
 });
 
+/// Plan by ID provider
+final planByIdProvider = FutureProvider.family<Plan?, String>((ref, planId) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+  if (currentUser?.academyId == null) return null;
+
+  final service = PlanService(currentUser!.academyId!);
+  return await service.getById(planId);
+});
+
 // ============================================
 // Belt Progression Providers
 // ============================================

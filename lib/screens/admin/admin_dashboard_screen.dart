@@ -2,29 +2,41 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 
-/// Admin Dashboard Screen
+/// Admin Dashboard Screen - Matching webapp design
 class AdminDashboardScreen extends ConsumerStatefulWidget {
   const AdminDashboardScreen({super.key});
 
   @override
-  ConsumerState<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
+  ConsumerState<AdminDashboardScreen> createState() =>
+      _AdminDashboardScreenState();
 }
 
 class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   Map<String, dynamic>? _studentStats;
   List<dynamic>? _overduePayments;
-  List<dynamic>? _eligibleStudents;
   Map<String, dynamic>? _monthlySummary;
   bool _isLoading = true;
+
+  // Stats carousel
+  final PageController _statsPageController = PageController(viewportFraction: 0.85);
+  int _currentStatsPage = 0;
 
   @override
   void initState() {
     super.initState();
     _loadDashboardData();
+  }
+
+  @override
+  void dispose() {
+    _statsPageController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadDashboardData() async {
@@ -33,11 +45,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     try {
       final academyId = FirebaseService.academyId;
 
-      // Load data in parallel
       final results = await Future.wait([
         StudentService(academyId).getDashboardStats(),
         PaymentService(academyId).getOverdue(),
-        BeltProgressionService(academyId).getEligibleStudents(),
         PaymentService(academyId).getMonthlySummary(
           DateFormat('yyyy-MM').format(DateTime.now()),
         ),
@@ -46,8 +56,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
       setState(() {
         _studentStats = results[0] as Map<String, dynamic>;
         _overduePayments = results[1] as List<dynamic>;
-        _eligibleStudents = results[2] as List<dynamic>;
-        _monthlySummary = results[3] as Map<String, dynamic>;
+        _monthlySummary = results[2] as Map<String, dynamic>;
         _isLoading = false;
       });
     } catch (e) {
@@ -55,50 +64,79 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     }
   }
 
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Bom dia';
+    if (hour < 18) return 'Boa tarde';
+    return 'Boa noite';
+  }
+
+  String _getFormattedDate() {
+    final now = DateTime.now();
+    final weekdays = [
+      'Segunda-feira',
+      'Terca-feira',
+      'Quarta-feira',
+      'Quinta-feira',
+      'Sexta-feira',
+      'Sabado',
+      'Domingo'
+    ];
+    final months = [
+      'Janeiro', 'Fevereiro', 'Marco', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+    ];
+
+    final weekday = weekdays[now.weekday - 1];
+    final day = now.day;
+    final month = months[now.month - 1];
+
+    return '$weekday, $day De $month';
+  }
+
+  String _formatCurrency(double value) {
+    return NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(value);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final currentUser = ref.watch(currentUserProvider);
+    final userName =
+        currentUser.valueOrNull?.displayName.split(' ').first ?? 'Admin';
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Dashboard'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadDashboardData,
-          ),
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {
-              // TODO: Show notifications
-            },
-          ),
-        ],
-      ),
+      backgroundColor: AppTheme.background,
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _loadDashboardData,
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
+                physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Stats Cards
-                    _buildStatsSection(),
-                    const SizedBox(height: 24),
+                    // Welcome Header
+                    _buildWelcomeHeader(userName),
 
                     // Quick Actions
-                    _buildQuickActionsSection(),
+                    _buildQuickActions(),
+
+                    const SizedBox(height: 24),
+
+                    // Stats Carousel
+                    _buildStatsCarousel(),
+
+                    const SizedBox(height: 24),
+
+                    // Monthly Financial Card
+                    _buildMonthlyFinancialCard(),
+
                     const SizedBox(height: 24),
 
                     // Alerts Section
-                    if (_overduePayments != null && _overduePayments!.isNotEmpty)
-                      _buildAlertsSection(),
+                    _buildAlertsSection(),
 
-                    // Eligible for Promotion
-                    if (_eligibleStudents != null && _eligibleStudents!.isNotEmpty) ...[
-                      const SizedBox(height: 24),
-                      _buildEligibleStudentsSection(),
-                    ],
+                    const SizedBox(height: 100),
                   ],
                 ),
               ),
@@ -106,214 +144,291 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildStatsSection() {
+  Widget _buildWelcomeHeader(String userName) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${_getGreeting()}, $userName!',
+            style: AppTheme.headlineMedium.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _getFormattedDate(),
+            style: AppTheme.bodyMedium.copyWith(
+              color: AppTheme.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickActions() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+          // Chamada - Primary (black)
+          Expanded(
+            child: _QuickActionCard(
+              icon: LucideIcons.clipboardCheck,
+              label: 'Chamada',
+              isPrimary: true,
+              onTap: () => context.go('/admin/chamada'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Novo Aluno
+          Expanded(
+            child: _QuickActionCard(
+              icon: LucideIcons.userPlus,
+              label: 'Novo Aluno',
+              isPrimary: false,
+              onTap: () => context.go('/admin/alunos/novo'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Financeiro
+          Expanded(
+            child: _QuickActionCard(
+              icon: LucideIcons.dollarSign,
+              label: 'Financeiro',
+              isPrimary: false,
+              onTap: () => context.go('/admin/financeiro'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsCarousel() {
     final stats = _studentStats ?? {};
     final byStatus = stats['byStatus'] as Map<String, dynamic>? ?? {};
     final summary = _monthlySummary ?? {};
 
+    final totalActive = byStatus['active'] ?? 0;
+    final totalStudents = stats['total'] ?? 0;
+    final monthlyRevenue = (summary['paid']?['value'] ?? 0).toDouble();
+    final paidCount = summary['paid']?['count'] ?? 0;
+
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Visão Geral',
-          style: AppTheme.headlineSmall.copyWith(fontWeight: FontWeight.bold),
+        SizedBox(
+          height: 100,
+          child: PageView.builder(
+            controller: _statsPageController,
+            onPageChanged: (page) {
+              setState(() => _currentStatsPage = page);
+            },
+            itemCount: 2,
+            itemBuilder: (context, index) {
+              final cards = [
+                // Alunos Ativos
+                _StatsCarouselCard(
+                  icon: LucideIcons.users,
+                  label: 'Alunos Ativos',
+                  value: totalActive.toString(),
+                  subtitle: 'de $totalStudents total',
+                  onTap: () => context.go('/admin/alunos'),
+                ),
+                // Receita do Mes
+                _StatsCarouselCard(
+                  icon: LucideIcons.dollarSign,
+                  iconBgColor: AppTheme.successLight,
+                  iconColor: AppTheme.success,
+                  label: 'Receita do Mes',
+                  value: _formatCurrency(monthlyRevenue),
+                  subtitle: '$paidCount pagamentos',
+                  onTap: () => context.go('/admin/financeiro'),
+                ),
+              ];
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: cards[index],
+              );
+            },
+          ),
         ),
-        const SizedBox(height: 16),
-        GridView.count(
-          crossAxisCount: MediaQuery.of(context).size.width > 600 ? 4 : 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [
-            _StatCard(
-              title: 'Alunos Ativos',
-              value: '${byStatus['active'] ?? 0}',
-              icon: Icons.people,
-              color: Colors.green,
-              onTap: () => context.go('/admin/alunos'),
-            ),
-            _StatCard(
-              title: 'Total de Alunos',
-              value: '${stats['total'] ?? 0}',
-              icon: Icons.groups,
-              color: AppTheme.primary,
-              onTap: () => context.go('/admin/alunos'),
-            ),
-            _StatCard(
-              title: 'Receita do Mês',
-              value: 'R\$ ${(summary['totalPaid'] ?? 0).toStringAsFixed(0)}',
-              icon: Icons.attach_money,
-              color: Colors.green,
-              onTap: () => context.go('/admin/financeiro'),
-            ),
-            _StatCard(
-              title: 'Pagtos Pendentes',
-              value: '${_overduePayments?.length ?? 0}',
-              icon: Icons.warning_amber,
-              color: Colors.orange,
-              onTap: () => context.go('/admin/financeiro'),
-            ),
-          ],
+        const SizedBox(height: 12),
+        // Dot indicators
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(
+            2,
+            (index) {
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                width: _currentStatsPage == index ? 20 : 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: _currentStatsPage == index
+                      ? AppTheme.textPrimary
+                      : AppTheme.divider,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              );
+            },
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildQuickActionsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Ações Rápidas',
-          style: AppTheme.headlineSmall.copyWith(fontWeight: FontWeight.bold),
+  Widget _buildMonthlyFinancialCard() {
+    final summary = _monthlySummary ?? {};
+    final totalExpected = (summary['totalExpected'] ?? 0).toDouble();
+    final totalPaid = (summary['paid']?['value'] ?? 0).toDouble();
+    final totalPending = (summary['pending']?['value'] ?? 0).toDouble();
+    final totalOverdue = (summary['overdue']?['value'] ?? 0).toDouble();
+    final paidCount = summary['paid']?['count'] ?? 0;
+    final pendingCount = summary['pending']?['count'] ?? 0;
+    final overdueCount = summary['overdue']?['count'] ?? 0;
+
+    final percentPaid =
+        totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.divider),
         ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _QuickActionButton(
-              icon: Icons.person_add,
-              label: 'Novo Aluno',
-              color: AppTheme.primary,
-              onTap: () => context.go('/admin/alunos/novo'),
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              child: Text(
+                'Financeiro do Mes',
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
-            _QuickActionButton(
-              icon: Icons.check_circle,
-              label: 'Fazer Chamada',
-              color: Colors.green,
-              onTap: () => context.go('/admin/chamada'),
+
+            // Dark summary card
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppTheme.textPrimary,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                children: [
+                  // Main value
+                  Text(
+                    _formatCurrency(totalPaid),
+                    style: AppTheme.headlineMedium.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'recebido de ${_formatCurrency(totalExpected)}',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: Colors.white70,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Progress bar
+                  Row(
+                    children: [
+                      Text(
+                        'Taxa de recebimento',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: Colors.white70,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${percentPaid.toStringAsFixed(0)}%',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: percentPaid / 100,
+                      backgroundColor: Colors.white24,
+                      valueColor:
+                          const AlwaysStoppedAnimation<Color>(AppTheme.success),
+                      minHeight: 6,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            _QuickActionButton(
-              icon: Icons.receipt_long,
-              label: 'Gerar Mensalidades',
-              color: Colors.blue,
-              onTap: () => _showGenerateTuitionsDialog(),
+
+            const SizedBox(height: 16),
+
+            // Breakdown rows
+            _FinancialBreakdownRow(
+              icon: LucideIcons.dollarSign,
+              label: 'Recebido',
+              count: paidCount,
+              value: _formatCurrency(totalPaid),
             ),
-            _QuickActionButton(
-              icon: Icons.military_tech,
-              label: 'Graduar Aluno',
-              color: Colors.purple,
-              onTap: () => context.go('/admin/graduacao'),
+            _FinancialBreakdownRow(
+              icon: LucideIcons.clock,
+              label: 'Pendente',
+              count: pendingCount,
+              value: _formatCurrency(totalPending),
+            ),
+            _FinancialBreakdownRow(
+              icon: LucideIcons.alertTriangle,
+              label: 'Vencido',
+              count: overdueCount,
+              value: _formatCurrency(totalOverdue),
+              isLast: true,
             ),
           ],
         ),
-      ],
+      ),
     );
   }
 
   Widget _buildAlertsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Alertas',
-              style: AppTheme.headlineSmall.copyWith(fontWeight: FontWeight.bold),
+    final hasOverdue = _overduePayments != null && _overduePayments!.isNotEmpty;
+
+    if (!hasOverdue) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Alertas',
+            style: AppTheme.titleMedium.copyWith(
+              fontWeight: FontWeight.w600,
             ),
-            TextButton(
-              onPressed: () => context.go('/admin/financeiro'),
-              child: const Text('Ver todos'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Card(
-          color: Colors.orange.shade50,
-          child: ListTile(
-            leading: Icon(Icons.warning_amber, color: Colors.orange.shade700),
-            title: Text(
-              '${_overduePayments!.length} pagamento(s) em atraso',
-              style: TextStyle(color: Colors.orange.shade900),
-            ),
-            subtitle: Text(
-              'Clique para ver detalhes',
-              style: TextStyle(color: Colors.orange.shade700),
-            ),
-            trailing: const Icon(Icons.chevron_right),
+          ),
+          const SizedBox(height: 12),
+          _AlertCard(
+            icon: LucideIcons.alertTriangle,
+            title: '${_overduePayments!.length} pagamento(s) em atraso',
+            subtitle: 'Verificar cobrancas pendentes',
+            color: AppTheme.error,
             onTap: () => context.go('/admin/financeiro'),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildEligibleStudentsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Prontos para Graduação',
-              style: AppTheme.headlineSmall.copyWith(fontWeight: FontWeight.bold),
-            ),
-            TextButton(
-              onPressed: () => context.go('/admin/graduacao'),
-              child: const Text('Ver todos'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Card(
-          color: Colors.green.shade50,
-          child: ListTile(
-            leading: Icon(Icons.military_tech, color: Colors.green.shade700),
-            title: Text(
-              '${_eligibleStudents!.length} aluno(s) elegível(is)',
-              style: TextStyle(color: Colors.green.shade900),
-            ),
-            subtitle: Text(
-              'Prontos para receber grau ou faixa',
-              style: TextStyle(color: Colors.green.shade700),
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.go('/admin/graduacao'),
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _showGenerateTuitionsDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Gerar Mensalidades'),
-        content: const Text(
-          'Deseja gerar as mensalidades do mês atual para todos os alunos ativos?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                final service = PaymentService(FirebaseService.academyId);
-                final referenceMonth = DateFormat('yyyy-MM').format(DateTime.now());
-                await service.generateMonthlyTuitions(referenceMonth: referenceMonth);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Mensalidades geradas com sucesso!')),
-                  );
-                  _loadDashboardData();
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Erro: $e')),
-                  );
-                }
-              }
-            },
-            child: const Text('Gerar'),
           ),
         ],
       ),
@@ -321,88 +436,280 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   }
 }
 
-/// Stat Card Widget
-class _StatCard extends StatelessWidget {
-  final String title;
-  final String value;
+/// Quick Action Card - Matches webapp design
+class _QuickActionCard extends StatelessWidget {
   final IconData icon;
-  final Color color;
-  final VoidCallback? onTap;
+  final String label;
+  final bool isPrimary;
+  final VoidCallback onTap;
 
-  const _StatCard({
-    required this.title,
-    required this.value,
+  const _QuickActionCard({
     required this.icon,
-    required this.color,
-    this.onTap,
+    required this.label,
+    required this.isPrimary,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, color: color, size: 24),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        decoration: BoxDecoration(
+          color: isPrimary ? AppTheme.textPrimary : AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: isPrimary ? null : Border.all(color: AppTheme.divider),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: isPrimary
+                    ? Colors.white.withValues(alpha: 0.15)
+                    : AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(12),
               ),
-              const Spacer(),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: Icon(
+                icon,
+                color: isPrimary ? Colors.white : AppTheme.textPrimary,
+                size: 22,
               ),
-              const SizedBox(height: 4),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppTheme.textSecondary,
-                ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              label,
+              style: AppTheme.bodySmall.copyWith(
+                fontWeight: FontWeight.w500,
+                color: isPrimary ? Colors.white : AppTheme.textPrimary,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// Quick Action Button
-class _QuickActionButton extends StatelessWidget {
+/// Stats Carousel Card
+class _StatsCarouselCard extends StatelessWidget {
+  final IconData icon;
+  final Color? iconBgColor;
+  final Color? iconColor;
+  final String label;
+  final String value;
+  final String subtitle;
+  final VoidCallback? onTap;
+
+  const _StatsCarouselCard({
+    required this.icon,
+    this.iconBgColor,
+    this.iconColor,
+    required this.label,
+    required this.value,
+    required this.subtitle,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.divider),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: iconBgColor ?? AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                icon,
+                color: iconColor ?? AppTheme.textPrimary,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    label,
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    value,
+                    style: AppTheme.headlineSmall.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Financial Breakdown Row
+class _FinancialBreakdownRow extends StatelessWidget {
   final IconData icon;
   final String label;
+  final int count;
+  final String value;
+  final bool isLast;
+
+  const _FinancialBreakdownRow({
+    required this.icon,
+    required this.label,
+    required this.count,
+    required this.value,
+    this.isLast = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        border: isLast
+            ? null
+            : const Border(
+                bottom: BorderSide(color: AppTheme.divider, width: 1),
+              ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 18, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Text(
+                  '$count pag.',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            value,
+            style: AppTheme.titleMedium.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Alert Card
+class _AlertCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
   final Color color;
   final VoidCallback onTap;
 
-  const _QuickActionButton({
+  const _AlertCard({
     required this.icon,
-    required this.label,
+    required this.title,
+    required this.subtitle,
     required this.color,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: onTap,
-      icon: Icon(icon, color: color),
-      label: Text(label),
-      style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              LucideIcons.chevronRight,
+              size: 20,
+              color: color,
+            ),
+          ],
+        ),
       ),
     );
   }

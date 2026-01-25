@@ -154,3 +154,94 @@ final assessmentAveragesProvider = FutureProvider.family<Map<AssessmentCategory,
   final service = AssessmentService(currentUser!.academyId!);
   return await service.getAveragesByCategory(studentId);
 });
+
+/// Student attendance streak provider (consecutive training days)
+final studentStreakProvider = FutureProvider.family<int, String>((ref, studentId) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+
+  if (currentUser?.academyId == null) return 0;
+
+  final service = AttendanceService(currentUser!.academyId!);
+  return await service.getStudentStreak(studentId);
+});
+
+/// Student monthly attendance count provider
+final studentMonthlyAttendanceProvider = FutureProvider.family<int, String>((ref, studentId) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+
+  if (currentUser?.academyId == null) return 0;
+
+  final now = DateTime.now();
+  final startOfMonth = DateTime(now.year, now.month, 1);
+
+  final service = AttendanceService(currentUser!.academyId!);
+  final attendance = await service.getByDateRange(startOfMonth, now, studentId: studentId);
+  return attendance.length;
+});
+
+/// Next class for student provider
+final studentNextClassProvider = FutureProvider.family<({BJJClass? classInfo, ClassSchedule? schedule, DateTime? nextDate})?, String>((ref, studentId) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+
+  if (currentUser?.academyId == null) return null;
+
+  final classService = ClassService(currentUser!.academyId!);
+  final allClasses = await classService.list();
+
+  // Filter classes where student is enrolled or classes have no restrictions
+  final studentClasses = allClasses.where((c) =>
+    c.studentIds.contains(studentId) || c.studentIds.isEmpty
+  ).toList();
+
+  if (studentClasses.isEmpty) return null;
+
+  final now = DateTime.now();
+  final currentDayOfWeek = now.weekday % 7;
+  final currentMinutes = now.hour * 60 + now.minute;
+
+  // Find next class considering current time
+  BJJClass? nextClass;
+  ClassSchedule? nextSchedule;
+  int daysUntilNext = 8; // More than a week
+  int minutesDiff = 9999;
+
+  for (final cls in studentClasses) {
+    for (final schedule in cls.schedule) {
+      final startParts = schedule.startTime.split(':').map(int.parse).toList();
+      final startMinutes = startParts[0] * 60 + startParts[1];
+
+      // Calculate days until this class
+      int daysUntil = (schedule.dayOfWeek - currentDayOfWeek + 7) % 7;
+
+      // If same day, check if class hasn't started yet
+      if (daysUntil == 0) {
+        if (startMinutes <= currentMinutes) {
+          // Class already started or passed today, check next week
+          daysUntil = 7;
+        }
+      }
+
+      // Find the closest class
+      if (daysUntil < daysUntilNext || (daysUntil == daysUntilNext && startMinutes < minutesDiff)) {
+        daysUntilNext = daysUntil;
+        minutesDiff = startMinutes;
+        nextClass = cls;
+        nextSchedule = schedule;
+      }
+    }
+  }
+
+  if (nextClass == null || nextSchedule == null) return null;
+
+  // Calculate the actual next date
+  final nextDate = now.add(Duration(days: daysUntilNext));
+  final nextDateTime = DateTime(
+    nextDate.year,
+    nextDate.month,
+    nextDate.day,
+    int.parse(nextSchedule.startTime.split(':')[0]),
+    int.parse(nextSchedule.startTime.split(':')[1]),
+  );
+
+  return (classInfo: nextClass, schedule: nextSchedule, nextDate: nextDateTime);
+});

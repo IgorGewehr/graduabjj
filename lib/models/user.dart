@@ -89,8 +89,12 @@ class AppUser {
 
   factory AppUser.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    return AppUser.fromMap(doc.id, data);
+  }
+
+  factory AppUser.fromMap(String id, Map<String, dynamic> data) {
     return AppUser(
-      id: doc.id,
+      id: id,
       email: data['email'] ?? '',
       displayName: data['displayName'] ?? '',
       photoUrl: data['photoUrl'],
@@ -104,10 +108,20 @@ class AppUser {
       instructorId: data['instructorId'],
       pendingStudentLink: data['pendingStudentLink'],
       approvedAt: data['approvedAt'] != null
-          ? (data['approvedAt'] as Timestamp).toDate()
+          ? (data['approvedAt'] is Timestamp
+              ? (data['approvedAt'] as Timestamp).toDate()
+              : DateTime.parse(data['approvedAt'].toString()))
           : null,
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      createdAt: data['createdAt'] != null
+          ? (data['createdAt'] is Timestamp
+              ? (data['createdAt'] as Timestamp).toDate()
+              : DateTime.parse(data['createdAt'].toString()))
+          : DateTime.now(),
+      updatedAt: data['updatedAt'] != null
+          ? (data['updatedAt'] is Timestamp
+              ? (data['updatedAt'] as Timestamp).toDate()
+              : DateTime.parse(data['updatedAt'].toString()))
+          : DateTime.now(),
     );
   }
 
@@ -164,7 +178,7 @@ class AppUser {
   }
 
   bool get isAdmin => role == UserRole.admin;
-  bool get isInstructor => role == UserRole.instructor;
+  bool get isInstructor => role == UserRole.instructor || role == UserRole.admin; // Admin is also instructor
   bool get isStudent => role == UserRole.student;
   bool get isGuardian => role == UserRole.guardian;
   bool get hasLinkedStudent => studentId != null || (linkedStudentIds?.isNotEmpty ?? false);

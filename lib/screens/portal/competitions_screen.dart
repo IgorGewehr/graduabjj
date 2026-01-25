@@ -8,122 +8,145 @@ import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 
-/// Competitions Screen - Competicoes
-class CompetitionsScreen extends ConsumerWidget {
+/// Competitions Screen - Competicoes (with Tabs)
+class CompetitionsScreen extends ConsumerStatefulWidget {
   const CompetitionsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CompetitionsScreen> createState() => _CompetitionsScreenState();
+}
+
+class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final studentAsync = ref.watch(currentStudentProvider);
     final competitionsAsync = ref.watch(competitionsProvider);
 
-    return RefreshIndicator(
-      onRefresh: () async {
-        ref.invalidate(competitionsProvider);
-        ref.invalidate(currentStudentProvider);
-      },
-      child: competitionsAsync.when(
-        data: (competitions) {
-          final student = studentAsync.valueOrNull;
-          final upcomingCompetitions =
-              competitions.where((c) => c.status == CompetitionStatus.upcoming).toList();
-          final pastCompetitions = competitions
-              .where((c) =>
-                  c.status == CompetitionStatus.completed ||
-                  c.status == CompetitionStatus.cancelled)
-              .toList();
+    return studentAsync.when(
+      data: (student) {
+        if (student == null) {
+          return _buildEmptyState('Perfil nao encontrado');
+        }
 
-          return SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Text(
-                  'Competicoes',
-                  style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Acompanhe as competicoes e inscricoes',
-                  style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-                ),
-                const SizedBox(height: 24),
+        return competitionsAsync.when(
+          data: (competitions) {
+            // Separate competitions by status
+            final upcomingCompetitions = competitions
+                .where((c) => c.status == CompetitionStatus.upcoming)
+                .toList();
 
-                // Student results summary
-                if (student != null) ...[
-                  _StudentResultsSummary(student: student),
-                  const SizedBox(height: 24),
-                ],
+            final pastCompetitions = competitions
+                .where((c) =>
+                    c.status == CompetitionStatus.completed ||
+                    c.status == CompetitionStatus.cancelled)
+                .toList();
 
-                // Upcoming Competitions
-                if (upcomingCompetitions.isNotEmpty) ...[
-                  Text(
-                    'PROXIMAS COMPETICOES',
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.textSecondary,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.5,
-                    ),
+            // Get student enrollments
+            final enrollmentsAsync = ref.watch(studentEnrollmentsProvider(student.id));
+            final enrollments = enrollmentsAsync.valueOrNull ?? [];
+
+            // Filter for enrolled upcoming competitions
+            final enrolledUpcoming = upcomingCompetitions.where((c) {
+              return enrollments.any((e) => e.competitionId == c.id);
+            }).toList();
+
+            return RefreshIndicator(
+              onRefresh: () async {
+                ref.invalidate(competitionsProvider);
+                ref.invalidate(currentStudentProvider);
+                ref.invalidate(studentEnrollmentsProvider(student.id));
+                ref.invalidate(studentMedalCountProvider(student.id));
+              },
+              child: Column(
+                children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                    child: _ConquistasCard(studentId: student.id),
                   ),
-                  const SizedBox(height: 12),
-                  ...upcomingCompetitions.map((competition) {
-                    // Check if enrolled
-                    bool isEnrolled = false;
-                    if (student != null) {
-                      final enrolledAsync = ref.watch(
-                        isStudentEnrolledProvider((
-                          competitionId: competition.id,
-                          studentId: student.id,
-                        )),
-                      );
-                      isEnrolled = enrolledAsync.valueOrNull ?? false;
-                    }
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _CompetitionCard(
-                        competition: competition,
-                        isEnrolled: isEnrolled,
-                        isUpcoming: true,
+
+                  // Tab Bar
+                  Container(
+                    decoration: const BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: AppTheme.divider, width: 1),
                       ),
-                    );
-                  }),
-                  const SizedBox(height: 24),
-                ],
-
-                // Past Competitions
-                if (pastCompetitions.isNotEmpty) ...[
-                  Text(
-                    'COMPETICOES ANTERIORES',
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.textSecondary,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.5,
+                    ),
+                    child: TabBar(
+                      controller: _tabController,
+                      labelColor: AppTheme.textPrimary,
+                      unselectedLabelColor: AppTheme.textSecondary,
+                      labelStyle: AppTheme.labelMedium.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                      unselectedLabelStyle: AppTheme.labelMedium,
+                      indicatorColor: AppTheme.primary,
+                      indicatorWeight: 2,
+                      tabs: [
+                        Tab(text: 'Proximas (${upcomingCompetitions.length})'),
+                        Tab(text: 'Inscricoes (${enrolledUpcoming.length})'),
+                        Tab(text: 'Historico (${pastCompetitions.length})'),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  ...pastCompetitions.map((competition) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _CompetitionCard(
-                          competition: competition,
-                          isEnrolled: false,
-                          isUpcoming: false,
+
+                  // Tab Views
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        // Proximas Tab
+                        _CompetitionsList(
+                          competitions: upcomingCompetitions,
+                          student: student,
+                          isUpcoming: true,
+                          emptyMessage: 'Nenhuma competicao programada',
                         ),
-                      )),
+
+                        // Inscricoes Tab
+                        _CompetitionsList(
+                          competitions: enrolledUpcoming,
+                          student: student,
+                          isUpcoming: true,
+                          showEnrolledBadge: true,
+                          emptyMessage: 'Voce nao esta inscrito em nenhuma competicao',
+                        ),
+
+                        // Historico Tab
+                        _CompetitionsList(
+                          competitions: pastCompetitions,
+                          student: student,
+                          isUpcoming: false,
+                          emptyMessage: 'Nenhuma competicao no historico',
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
-
-                // Empty state
-                if (competitions.isEmpty) _buildEmptyState(),
-
-                const SizedBox(height: 80),
-              ],
-            ),
-          );
-        },
-        loading: () => _buildLoadingState(),
-        error: (_, __) => _buildErrorState(),
-      ),
+              ),
+            );
+          },
+          loading: () => _buildLoadingState(),
+          error: (_, __) => _buildErrorState(),
+        );
+      },
+      loading: () => _buildLoadingState(),
+      error: (_, __) => _buildErrorState(),
     );
   }
 
@@ -139,6 +162,14 @@ class CompetitionsScreen extends ConsumerWidget {
             decoration: BoxDecoration(
               color: AppTheme.surfaceVariant,
               borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Container(
+            height: 100,
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(8),
             ),
           ),
           const SizedBox(height: 24),
@@ -179,23 +210,18 @@ class CompetitionsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildEmptyState() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Center(
+  Widget _buildEmptyState(String message) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(LucideIcons.trophy, size: 48, color: AppTheme.textDisabled),
+            Icon(LucideIcons.userX, size: 64, color: AppTheme.textDisabled),
             const SizedBox(height: 16),
             Text(
-              'Nenhuma competicao cadastrada',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              message,
+              style: AppTheme.titleLarge.copyWith(color: AppTheme.textSecondary),
             ),
           ],
         ),
@@ -204,74 +230,70 @@ class CompetitionsScreen extends ConsumerWidget {
   }
 }
 
-/// Student Results Summary
-class _StudentResultsSummary extends ConsumerWidget {
-  final Student student;
+/// Conquistas Card with 4 columns
+class _ConquistasCard extends ConsumerWidget {
+  final String studentId;
 
-  const _StudentResultsSummary({required this.student});
+  const _ConquistasCard({required this.studentId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final medalCountAsync = ref.watch(studentMedalCountProvider(student.id));
+    final medalCountAsync = ref.watch(studentMedalCountProvider(studentId));
 
     return medalCountAsync.when(
       data: (medals) {
-        final total = medals['total'] ?? 0;
-        if (total == 0) {
-          return const SizedBox.shrink();
-        }
-
         final gold = medals['gold'] ?? 0;
         final silver = medals['silver'] ?? 0;
         final bronze = medals['bronze'] ?? 0;
+        final total = medals['total'] ?? 0;
 
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: AppTheme.surface,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppTheme.divider),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  const Icon(LucideIcons.trophy, size: 18, color: AppTheme.warning),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Minhas Conquistas',
-                    style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
-                  ),
-                ],
+              Text(
+                'MINHAS CONQUISTAS',
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.textSecondary,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.5,
+                ),
               ),
               const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
-                    child: _MedalCard(
-                      icon: LucideIcons.medal,
-                      color: const Color(0xFFFFD700), // Gold
+                    child: _MedalColumn(
+                      emoji: '🥇',
                       count: gold,
-                      label: 'Ouro',
+                      label: 'Ouros',
                     ),
                   ),
-                  const SizedBox(width: 8),
                   Expanded(
-                    child: _MedalCard(
-                      icon: LucideIcons.medal,
-                      color: const Color(0xFFC0C0C0), // Silver
+                    child: _MedalColumn(
+                      emoji: '🥈',
                       count: silver,
-                      label: 'Prata',
+                      label: 'Pratas',
                     ),
                   ),
-                  const SizedBox(width: 8),
                   Expanded(
-                    child: _MedalCard(
-                      icon: LucideIcons.medal,
-                      color: const Color(0xFFCD7F32), // Bronze
+                    child: _MedalColumn(
+                      emoji: '🥉',
                       count: bronze,
-                      label: 'Bronze',
+                      label: 'Bronzes',
+                    ),
+                  ),
+                  Expanded(
+                    child: _MedalColumn(
+                      emoji: '⭐',
+                      count: total,
+                      label: 'Participacoes',
                     ),
                   ),
                 ],
@@ -281,56 +303,148 @@ class _StudentResultsSummary extends ConsumerWidget {
         );
       },
       loading: () => Container(
-        height: 120,
+        height: 100,
         decoration: BoxDecoration(
           color: AppTheme.surfaceVariant,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
         ),
       ),
-      error: (_, __) => const SizedBox.shrink(),
+      error: (_, __) => Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.divider),
+        ),
+        child: Row(
+          children: [
+            const Text('🏆', style: TextStyle(fontSize: 24)),
+            const SizedBox(width: 12),
+            Text(
+              'Nenhuma conquista ainda',
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
-/// Medal Card
-class _MedalCard extends StatelessWidget {
-  final IconData icon;
-  final Color color;
+/// Medal column for conquistas card
+class _MedalColumn extends StatelessWidget {
+  final String emoji;
   final int count;
   final String label;
 
-  const _MedalCard({
-    required this.icon,
-    required this.color,
+  const _MedalColumn({
+    required this.emoji,
     required this.count,
     required this.label,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 24),
-          const SizedBox(height: 4),
-          Text(
-            count.toString(),
-            style: AppTheme.titleLarge.copyWith(
-              fontWeight: FontWeight.w700,
-              color: color,
-            ),
+    return Column(
+      children: [
+        Text(
+          emoji,
+          style: const TextStyle(fontSize: 28),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          count.toString(),
+          style: AppTheme.titleLarge.copyWith(
+            fontWeight: FontWeight.w700,
           ),
-          Text(
-            label,
-            style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+        ),
+        Text(
+          label,
+          style: AppTheme.labelSmall.copyWith(
+            color: AppTheme.textSecondary,
           ),
-        ],
-      ),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+}
+
+/// Competitions list for each tab
+class _CompetitionsList extends ConsumerWidget {
+  final List<Competition> competitions;
+  final Student student;
+  final bool isUpcoming;
+  final bool showEnrolledBadge;
+  final String emptyMessage;
+
+  const _CompetitionsList({
+    required this.competitions,
+    required this.student,
+    required this.isUpcoming,
+    this.showEnrolledBadge = false,
+    required this.emptyMessage,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (competitions.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                LucideIcons.trophy,
+                size: 48,
+                color: AppTheme.textDisabled,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                emptyMessage,
+                style: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(20),
+      itemCount: competitions.length,
+      itemBuilder: (context, index) {
+        final competition = competitions[index];
+
+        // Check enrollment status
+        bool isEnrolled = false;
+        if (!showEnrolledBadge) {
+          final enrolledAsync = ref.watch(
+            isStudentEnrolledProvider((
+              competitionId: competition.id,
+              studentId: student.id,
+            )),
+          );
+          isEnrolled = enrolledAsync.valueOrNull ?? false;
+        } else {
+          isEnrolled = true;
+        }
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _CompetitionCard(
+            competition: competition,
+            isEnrolled: isEnrolled,
+            isUpcoming: isUpcoming,
+          ),
+        );
+      },
     );
   }
 }
@@ -356,7 +470,7 @@ class _CompetitionCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isSoon && isUpcoming ? AppTheme.warning : AppTheme.divider,
         ),
@@ -386,7 +500,9 @@ class _CompetitionCard extends StatelessWidget {
                   children: [
                     Text(
                       competition.name,
-                      style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+                      style: AppTheme.titleMedium.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     if (competition.location != null)
                       Row(
@@ -451,7 +567,9 @@ class _CompetitionCard extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text(
                         DateFormat("d 'de' MMM", 'pt_BR').format(competition.date),
-                        style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w500),
+                        style: AppTheme.bodySmall.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ],
                   ),
@@ -493,18 +611,23 @@ class _CompetitionCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   'Inscricoes ate ${DateFormat("d 'de' MMM", 'pt_BR').format(competition.registrationDeadline!)}',
-                  style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
               ],
             ),
           ],
 
           // Description
-          if (competition.description != null && competition.description!.isNotEmpty) ...[
+          if (competition.description != null &&
+              competition.description!.isNotEmpty) ...[
             const Divider(height: 24),
             Text(
               competition.description!,
-              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodySmall.copyWith(
+                color: AppTheme.textSecondary,
+              ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),

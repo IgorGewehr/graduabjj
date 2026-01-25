@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/user.dart';
+import '../services/firebase_service.dart';
 
 /// Firebase Auth instance provider
 final firebaseAuthProvider = Provider<FirebaseAuth>((ref) {
@@ -20,19 +21,108 @@ final authStateProvider = StreamProvider<User?>((ref) {
   return auth.authStateChanges();
 });
 
-/// Current user provider
-final currentUserProvider = FutureProvider<AppUser?>((ref) async {
+/// User academy mapping provider - fetches from userAcademyMapping collection
+final userAcademyMappingProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
   final authState = ref.watch(authStateProvider);
   final firebaseUser = authState.valueOrNull;
 
   if (firebaseUser == null) return null;
 
   final firestore = ref.watch(firestoreProvider);
-  final doc = await firestore.collection('users').doc(firebaseUser.uid).get();
+  final mappingDoc = await firestore.collection('userAcademyMapping').doc(firebaseUser.uid).get();
 
-  if (!doc.exists) return null;
+  if (!mappingDoc.exists) return null;
 
-  return AppUser.fromFirestore(doc);
+  return mappingDoc.data();
+});
+
+/// Current user provider with robust fallback logic
+final currentUserProvider = FutureProvider<AppUser?>((ref) async {
+  final authState = ref.watch(authStateProvider);
+  final firebaseUser = authState.valueOrNull;
+
+  if (firebaseUser == null) {
+    print('[AUTH] No firebase user');
+    return null;
+  }
+
+  print('[AUTH] Loading user data for: ${firebaseUser.uid}');
+  final firestore = ref.watch(firestoreProvider);
+
+  // Step 1: Try to get academy mapping
+  final mappingDoc = await firestore.collection('userAcademyMapping').doc(firebaseUser.uid).get();
+  String? academyId;
+
+  if (mappingDoc.exists) {
+    final mappingData = mappingDoc.data()!;
+    print('[AUTH] Found userAcademyMapping: $mappingData');
+
+    // Support both old format (academyId) and new format (academyIds/primaryAcademyId)
+    if (mappingData['primaryAcademyId'] != null) {
+      academyId = mappingData['primaryAcademyId'] as String;
+    } else if (mappingData['academyIds'] != null && (mappingData['academyIds'] as List).isNotEmpty) {
+      academyId = (mappingData['academyIds'] as List).first as String;
+    } else if (mappingData['academyId'] != null) {
+      academyId = mappingData['academyId'] as String;
+    }
+  } else {
+    print('[AUTH] No userAcademyMapping found, checking root users collection...');
+
+    // Fallback: Check root users collection for backwards compatibility
+    final rootUserDoc = await firestore.collection('users').doc(firebaseUser.uid).get();
+    if (rootUserDoc.exists) {
+      final userData = rootUserDoc.data()!;
+      print('[AUTH] Found user in root collection: role=${userData['role']}');
+
+      // If user exists in root and has academyId, use it
+      if (userData['academyId'] != null) {
+        academyId = userData['academyId'] as String;
+      } else {
+        // Default to first academy (for backwards compatibility with single-tenant)
+        academyId = 'academia-principal';
+        print('[AUTH] Using default academyId: $academyId');
+      }
+    }
+  }
+
+  if (academyId == null) {
+    print('[AUTH] Could not determine academyId');
+    return null;
+  }
+
+  print('[AUTH] Using academyId: $academyId');
+
+  // Set the academy context for FirebaseService
+  FirebaseService.setAcademyId(academyId);
+
+  // Step 2: Try to get user from academy's users subcollection
+  final userDoc = await firestore
+      .collection('academies')
+      .doc(academyId)
+      .collection('users')
+      .doc(firebaseUser.uid)
+      .get();
+
+  if (userDoc.exists) {
+    final userData = userDoc.data()!;
+    print('[AUTH] Found user in academy subcollection: role=${userData['role']}');
+    userData['academyId'] = academyId;
+    return AppUser.fromMap(userDoc.id, userData);
+  }
+
+  // Step 3: Fallback to root users collection
+  print('[AUTH] User not in academy subcollection, checking root...');
+  final rootUserDoc = await firestore.collection('users').doc(firebaseUser.uid).get();
+
+  if (rootUserDoc.exists) {
+    final userData = rootUserDoc.data()!;
+    print('[AUTH] Found user in root: role=${userData['role']}');
+    userData['academyId'] = academyId;
+    return AppUser.fromMap(rootUserDoc.id, userData);
+  }
+
+  print('[AUTH] User not found anywhere');
+  return null;
 });
 
 /// Auth service provider
@@ -132,13 +222,15 @@ class AuthService {
     await _firestore.collection('users').doc(user.uid).update(updates);
   }
 
-  /// Link student account with code
-  Future<void> linkStudentAccount(String linkCode) async {
+  /// Link student account with code (multi-tenant)
+  Future<void> linkStudentAccount(String linkCode, String academyId) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('Usuario nao autenticado');
 
-    // Find link code document
-    final codeQuery = await _firestore
+    final academyRef = _firestore.collection('academies').doc(academyId);
+
+    // Find link code document in academy's linkCodes subcollection
+    final codeQuery = await academyRef
         .collection('linkCodes')
         .where('code', isEqualTo: linkCode.toUpperCase())
         .where('usedAt', isNull: true)
@@ -160,16 +252,19 @@ class AuthService {
 
     final studentId = codeData['studentId'] as String;
 
-    // Update user document
-    await _firestore.collection('users').doc(user.uid).update({
+    // Update user document in academy's users subcollection
+    await academyRef.collection('users').doc(user.uid).set({
       'studentId': studentId,
       'role': 'student',
+      'email': user.email,
+      'displayName': user.displayName,
       'approvedAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
-    });
+      'createdAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
 
-    // Update student document
-    await _firestore.collection('students').doc(studentId).update({
+    // Update student document in academy's students subcollection
+    await academyRef.collection('students').doc(studentId).update({
       'linkedUserId': user.uid,
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -179,5 +274,12 @@ class AuthService {
       'usedAt': FieldValue.serverTimestamp(),
       'usedBy': user.uid,
     });
+
+    // Create/update userAcademyMapping
+    await _firestore.collection('userAcademyMapping').doc(user.uid).set({
+      'academyIds': FieldValue.arrayUnion([academyId]),
+      'primaryAcademyId': academyId,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 }

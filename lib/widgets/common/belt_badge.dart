@@ -2,91 +2,220 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 
-/// Belt Badge - Displays a belt with stripes
+// ============================================
+// Belt Labels
+// ============================================
+const Map<String, String> _beltLabels = {
+  // Adult belts
+  'white': 'Branca',
+  'blue': 'Azul',
+  'purple': 'Roxa',
+  'brown': 'Marrom',
+  'black': 'Preta',
+  // Kids belts
+  'grey': 'Cinza',
+  'grey-white': 'Cinza/Branca',
+  'grey-black': 'Cinza/Preta',
+  'yellow': 'Amarela',
+  'yellow-white': 'Amarela/Branca',
+  'yellow-black': 'Amarela/Preta',
+  'orange': 'Laranja',
+  'orange-white': 'Laranja/Branca',
+  'orange-black': 'Laranja/Preta',
+  'green': 'Verde',
+  'green-white': 'Verde/Branca',
+  'green-black': 'Verde/Preta',
+};
+
+String getBeltLabel(String belt) => _beltLabels[belt] ?? belt;
+bool _hasWhiteStripe(String belt) => belt.endsWith('-white');
+bool _hasBlackStripe(String belt) => belt.endsWith('-black');
+
+// ============================================
+// Size Configurations (matching webapp exactly)
+// ============================================
+enum BeltSize { small, medium, large }
+
+class _BeltSizeConfig {
+  final double width;
+  final double height;
+  final double tipWidth;
+  final double stripeWidth;
+  final double stripeGap;
+  final double fontSize;
+
+  const _BeltSizeConfig({
+    required this.width,
+    required this.height,
+    required this.tipWidth,
+    required this.stripeWidth,
+    required this.stripeGap,
+    required this.fontSize,
+  });
+}
+
+const Map<BeltSize, _BeltSizeConfig> _sizeConfig = {
+  BeltSize.small: _BeltSizeConfig(
+    width: 70,
+    height: 16,
+    tipWidth: 20,
+    stripeWidth: 2.5,
+    stripeGap: 1.5,
+    fontSize: 10,
+  ),
+  BeltSize.medium: _BeltSizeConfig(
+    width: 100,
+    height: 22,
+    tipWidth: 28,
+    stripeWidth: 3.5,
+    stripeGap: 2,
+    fontSize: 11,
+  ),
+  BeltSize.large: _BeltSizeConfig(
+    width: 140,
+    height: 28,
+    tipWidth: 38,
+    stripeWidth: 5,
+    stripeGap: 2.5,
+    fontSize: 13,
+  ),
+};
+
+// ============================================
+// BeltBadge - Realistic belt display (matching webapp)
+// ============================================
 class BeltBadge extends StatelessWidget {
   final String belt;
   final int stripes;
-  final double size;
+  final BeltSize size;
+  final bool showLabel;
 
   const BeltBadge({
     super.key,
     required this.belt,
     this.stripes = 0,
-    this.size = 48,
+    this.size = BeltSize.medium,
+    this.showLabel = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final config = _sizeConfig[size]!;
     final beltColor = AppTheme.getBeltColor(belt);
+    final beltLabel = getBeltLabel(belt);
+    final isWhiteBelt = belt == 'white';
+    final isBlackBelt = belt == 'black';
+    final showWhiteStripe = _hasWhiteStripe(belt);
+    final showBlackStripe = _hasBlackStripe(belt);
 
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: beltColor,
-        borderRadius: BorderRadius.circular(size / 4),
-        border: Border.all(
-          color: belt == 'white' ? AppTheme.divider : Colors.transparent,
-          width: 2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: beltColor.withOpacity(0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Belt container
+        Container(
+          width: config.width,
+          height: config.height,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.2),
+                blurRadius: 3,
+                offset: const Offset(0, 1),
+              ),
+            ],
+            border: isWhiteBelt
+                ? Border.all(color: AppTheme.divider, width: 1)
+                : null,
           ),
-        ],
-      ),
-      child: stripes > 0
-          ? Stack(
-              alignment: Alignment.center,
-              children: [
-                // Stripes indicator at the bottom
-                Positioned(
-                  bottom: size * 0.15,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: List.generate(
-                      stripes,
-                      (index) => Container(
-                        width: size * 0.12,
-                        height: size * 0.35,
-                        margin: EdgeInsets.symmetric(horizontal: size * 0.02),
-                        decoration: BoxDecoration(
-                          color: _getStripeColor(belt),
-                          borderRadius: BorderRadius.circular(1),
+          clipBehavior: Clip.antiAlias,
+          child: Row(
+            children: [
+              // Belt body (colored part)
+              Expanded(
+                child: Container(
+                  color: beltColor,
+                  child: Stack(
+                    children: [
+                      // White stripe in middle (for combo belts like grey-white)
+                      if (showWhiteStripe)
+                        Positioned.fill(
+                          child: Center(
+                            child: Container(
+                              height: config.height * 0.2,
+                              color: Colors.white,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
+                      // Black stripe in middle (for combo belts like grey-black)
+                      if (showBlackStripe)
+                        Positioned.fill(
+                          child: Center(
+                            child: Container(
+                              height: config.height * 0.2,
+                              color: const Color(0xFF171717),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-              ],
-            )
-          : null,
+              ),
+
+              // Black tip (ponta preta) - FULL HEIGHT
+              Container(
+                width: config.tipWidth,
+                height: config.height, // Full height
+                color: isBlackBelt
+                    ? const Color(0xFF2D2D2D)
+                    : const Color(0xFF171717),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: stripes > 0
+                      ? List.generate(
+                          stripes,
+                          (index) => Container(
+                            width: config.stripeWidth,
+                            height: config.height * 0.65, // Stripes at ~65% of belt height
+                            margin: EdgeInsets.symmetric(
+                              horizontal: config.stripeGap / 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isBlackBelt
+                                  ? const Color(0xFFDC2626) // Red for black belt
+                                  : Colors.white,
+                              borderRadius: BorderRadius.circular(1),
+                            ),
+                          ),
+                        )
+                      : [],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Label below
+        if (showLabel) ...[
+          const SizedBox(height: 4),
+          Text(
+            stripes > 0 ? '$beltLabel $stripes°' : beltLabel,
+            style: TextStyle(
+              fontSize: config.fontSize,
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ],
     );
-  }
-
-  Color _getStripeColor(String belt) {
-    // Kids belts have white stripes on solid belts, or black/white stripes on combo belts
-    if (belt.contains('-white')) return Colors.white;
-    if (belt.contains('-black')) return Colors.black;
-
-    // Adult belts
-    switch (belt) {
-      case 'white':
-      case 'blue':
-      case 'purple':
-      case 'brown':
-        return Colors.white;
-      case 'black':
-        return const Color(0xFFDC2626); // Red stripes for black belt
-      default:
-        return Colors.white;
-    }
   }
 }
 
-/// Large belt display with label
+// ============================================
+// BeltDisplay - Large belt with label (for profile)
+// ============================================
 class BeltDisplay extends StatelessWidget {
   final String belt;
   final int stripes;
@@ -107,21 +236,13 @@ class BeltDisplay extends StatelessWidget {
         BeltBadge(
           belt: belt,
           stripes: stripes,
-          size: 64,
+          size: BeltSize.large,
+          showLabel: true,
         ),
         if (label != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            label!,
-            style: AppTheme.labelMedium.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-        if (stripes > 0) ...[
           const SizedBox(height: 4),
           Text(
-            '$stripes ${stripes == 1 ? 'grau' : 'graus'}',
+            label!,
             style: AppTheme.bodySmall.copyWith(
               color: AppTheme.textSecondary,
             ),
@@ -132,7 +253,87 @@ class BeltDisplay extends StatelessWidget {
   }
 }
 
-/// Belt progress indicator
+// ============================================
+// Compact Belt Chip (for lists, tables)
+// ============================================
+class BeltChip extends StatelessWidget {
+  final String belt;
+  final int stripes;
+
+  const BeltChip({
+    super.key,
+    required this.belt,
+    this.stripes = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final beltColor = AppTheme.getBeltColor(belt);
+    final beltLabel = getBeltLabel(belt);
+    final isWhiteBelt = belt == 'white';
+    final isBlackBelt = belt == 'black';
+    final isLightBelt = belt == 'white' || belt == 'yellow';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: beltColor,
+        borderRadius: BorderRadius.circular(4),
+        border: isWhiteBelt
+            ? Border.all(color: AppTheme.divider, width: 1)
+            : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            beltLabel.length >= 3
+                ? beltLabel.substring(0, 3).toUpperCase()
+                : beltLabel.toUpperCase(),
+            style: TextStyle(
+              color: isLightBelt ? const Color(0xFF171717) : Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 10,
+              letterSpacing: 0.5,
+            ),
+          ),
+          if (stripes > 0) ...[
+            const SizedBox(width: 4),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(
+                stripes,
+                (index) => Container(
+                  width: 3,
+                  height: 8,
+                  margin: const EdgeInsets.only(left: 2),
+                  decoration: BoxDecoration(
+                    color: isBlackBelt
+                        ? const Color(0xFFDC2626)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(1),
+                    boxShadow: isWhiteBelt
+                        ? [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.3),
+                              blurRadius: 1,
+                            ),
+                          ]
+                        : null,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================
+// Belt progress indicator
+// ============================================
 class BeltProgressIndicator extends StatelessWidget {
   final String currentBelt;
   final int currentStripes;
@@ -149,11 +350,10 @@ class BeltProgressIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // stripesFromAttendance can be used in future for auto-graduation calculation
-    // final stripesFromAttendance = attendanceCount ~/ attendancesPerStripe;
     final attendancesToNextStripe =
         attendancesPerStripe - (attendanceCount % attendancesPerStripe);
     final progress = (attendanceCount % attendancesPerStripe) / attendancesPerStripe;
+    final beltLabel = getBeltLabel(currentBelt);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -170,6 +370,7 @@ class BeltProgressIndicator extends StatelessWidget {
               BeltBadge(
                 belt: currentBelt,
                 stripes: currentStripes,
+                size: BeltSize.large,
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -177,7 +378,7 @@ class BeltProgressIndicator extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _getBeltLabel(currentBelt),
+                      'Faixa $beltLabel',
                       style: AppTheme.titleMedium.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
@@ -194,48 +395,42 @@ class BeltProgressIndicator extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          Row(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Proximo grau',
-                          style: AppTheme.labelSmall.copyWith(
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                        Text(
-                          '${attendanceCount % attendancesPerStripe}/$attendancesPerStripe',
-                          style: AppTheme.labelSmall.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Proximo grau',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
                     ),
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: progress,
-                        minHeight: 6,
-                        backgroundColor: AppTheme.surfaceVariant,
-                        valueColor:
-                            const AlwaysStoppedAnimation<Color>(AppTheme.primary),
-                      ),
+                  ),
+                  Text(
+                    '${attendanceCount % attendancesPerStripe}/$attendancesPerStripe',
+                    style: AppTheme.labelSmall.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Faltam $attendancesToNextStripe presencas',
-                      style: AppTheme.labelSmall.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 6,
+                  backgroundColor: AppTheme.surfaceVariant,
+                  valueColor:
+                      const AlwaysStoppedAnimation<Color>(AppTheme.primary),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Faltam $attendancesToNextStripe presencas',
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.textSecondary,
                 ),
               ),
             ],
@@ -243,24 +438,6 @@ class BeltProgressIndicator extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  String _getBeltLabel(String belt) {
-    final labels = {
-      'white': 'Faixa Branca',
-      'blue': 'Faixa Azul',
-      'purple': 'Faixa Roxa',
-      'brown': 'Faixa Marrom',
-      'black': 'Faixa Preta',
-      'grey': 'Faixa Cinza',
-      'yellow': 'Faixa Amarela',
-      'orange': 'Faixa Laranja',
-      'green': 'Faixa Verde',
-    };
-
-    // Handle combo belts
-    final baseBelt = belt.split('-').first;
-    return labels[baseBelt] ?? 'Faixa ${belt.capitalize()}';
   }
 }
 
