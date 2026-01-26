@@ -134,13 +134,13 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
 
     // Calculate average per training day (weekdays with classes)
     final daysWithClasses = byDay.values.where((v) => v > 0).length;
-    final average = daysWithClasses > 0 ? attendances.length / daysWithClasses : 0;
+    final average = daysWithClasses > 0 ? attendances.length / daysWithClasses : 0.0;
 
     setState(() {
       _attendanceByDay = byDay;
       _totalAttendanceThisMonth = attendances.length;
       _totalAttendanceLastMonth = lastMonthAttendances.length;
-      _averageAttendancePerDay = average;
+      _averageAttendancePerDay = average.toDouble();
       _peakDay = peakCount;
       _peakDayName = peakDayName;
     });
@@ -165,12 +165,12 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
 
     // Calculate average ticket
     final avgTicket = paid.isNotEmpty
-        ? paid.map((p) => p.amount).reduce((a, b) => a + b) / paid.length
+        ? paid.map((p) => p.value).reduce((a, b) => a + b) / paid.length
         : 0.0;
 
     // Calculate overdue total
     final overdueTotal = overdue.isNotEmpty
-        ? overdue.map((p) => p.amount).reduce((a, b) => a + b)
+        ? overdue.map((p) => p.value).reduce((a, b) => a + b)
         : 0.0;
 
     setState(() {

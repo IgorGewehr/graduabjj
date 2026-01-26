@@ -187,7 +187,7 @@ class PaymentService {
   CollectionReference get _paymentsRef => _collections.payments;
 
   // ============================================
-  // Get Payments by Student
+  // Get Payments by Student (One-time fetch)
   // ============================================
   Future<List<Payment>> getByStudent(String studentId, {int? limit}) async {
     final query = await _paymentsRef
@@ -202,6 +202,65 @@ class PaymentService {
     }
 
     return payments;
+  }
+
+  // ============================================
+  // Stream Payments by Student (Real-time updates)
+  // ============================================
+  Stream<List<Payment>> streamByStudent(String studentId) {
+    return _paymentsRef
+        .where('studentId', isEqualTo: studentId)
+        .snapshots()
+        .map((snapshot) {
+      var payments = snapshot.docs.map((doc) => Payment.fromFirestore(doc)).toList();
+      payments.sort((a, b) => b.dueDate.compareTo(a.dueDate));
+      return payments;
+    });
+  }
+
+  // ============================================
+  // Stream Payment Stats by Student (Real-time)
+  // ============================================
+  Stream<Map<String, dynamic>> streamStatsByStudent(String studentId) {
+    return streamByStudent(studentId).map((payments) {
+      int pendingCount = 0;
+      int overdueCount = 0;
+      int paidCount = 0;
+      double pendingTotal = 0;
+      double overdueTotal = 0;
+      double paidTotal = 0;
+
+      for (final p in payments) {
+        switch (p.status) {
+          case PaymentStatus.pending:
+            if (p.isOverdue) {
+              overdueCount++;
+              overdueTotal += p.value;
+            } else {
+              pendingCount++;
+              pendingTotal += p.value;
+            }
+            break;
+          case PaymentStatus.paid:
+            paidCount++;
+            paidTotal += p.value;
+            break;
+          case PaymentStatus.overdue:
+            overdueCount++;
+            overdueTotal += p.value;
+            break;
+          case PaymentStatus.cancelled:
+            // Ignore cancelled
+            break;
+        }
+      }
+
+      return {
+        'pending': {'count': pendingCount, 'total': pendingTotal},
+        'overdue': {'count': overdueCount, 'total': overdueTotal},
+        'paid': {'count': paidCount, 'total': paidTotal},
+      };
+    });
   }
 
   // ============================================

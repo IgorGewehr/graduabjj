@@ -171,7 +171,7 @@ class NotificationService {
   CollectionReference get _notificationsRef => _collections.notifications;
 
   // ============================================
-  // Get User Notifications
+  // Get User Notifications (One-time fetch)
   // ============================================
   Future<List<AppNotification>> getByUser(String userId, {int limit = 50}) async {
     final query = await _notificationsRef
@@ -187,7 +187,24 @@ class NotificationService {
   }
 
   // ============================================
-  // Get Unread Count
+  // Stream User Notifications (Real-time updates)
+  // ============================================
+  Stream<List<AppNotification>> streamByUser(String userId, {int limit = 50}) {
+    return _notificationsRef
+        .where('userId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs
+          .map((doc) => AppNotification.fromFirestore(doc))
+          .where((n) => !n.isExpired)
+          .toList();
+    });
+  }
+
+  // ============================================
+  // Get Unread Count (One-time fetch)
   // ============================================
   Future<int> getUnreadCount(String userId) async {
     final query = await _notificationsRef
@@ -199,6 +216,22 @@ class NotificationService {
         .map((doc) => AppNotification.fromFirestore(doc))
         .where((n) => !n.isExpired)
         .length;
+  }
+
+  // ============================================
+  // Stream Unread Count (Real-time updates)
+  // ============================================
+  Stream<int> streamUnreadCount(String userId) {
+    return _notificationsRef
+        .where('userId', isEqualTo: userId)
+        .where('read', isEqualTo: false)
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs
+          .map((doc) => AppNotification.fromFirestore(doc))
+          .where((n) => !n.isExpired)
+          .length;
+    });
   }
 
   // ============================================

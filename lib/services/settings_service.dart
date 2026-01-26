@@ -93,6 +93,9 @@ class AcademySettings {
   final String? storeWelcomeMessage;
   final double? storeMinOrderAmount;
 
+  // Monitors (students with additional permissions)
+  final List<String> monitorIds;
+
   final DateTime? updatedAt;
 
   AcademySettings({
@@ -121,6 +124,7 @@ class AcademySettings {
     this.storePublished = false,
     this.storeWelcomeMessage,
     this.storeMinOrderAmount,
+    this.monitorIds = const [],
     this.updatedAt,
   });
 
@@ -154,6 +158,7 @@ class AcademySettings {
       storePublished: data['storePublished'] ?? false,
       storeWelcomeMessage: data['storeWelcomeMessage'],
       storeMinOrderAmount: data['storeMinOrderAmount']?.toDouble(),
+      monitorIds: List<String>.from(data['monitorIds'] ?? []),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
   }
@@ -395,6 +400,40 @@ class SettingsService {
     if (sidebarBackgroundUrl != null) data['sidebarBackgroundUrl'] = sidebarBackgroundUrl;
 
     await _academyRef.update(data);
+  }
+
+  // ============================================
+  // Monitor Management
+  // ============================================
+
+  /// Get list of monitor IDs
+  Future<List<String>> getMonitors() async {
+    try {
+      final doc = await _academyRef.get();
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        return List<String>.from(data['monitorIds'] ?? []);
+      }
+      return [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// Add a student as monitor
+  Future<void> addMonitor(String studentId) async {
+    await _academyRef.update({
+      'monitorIds': FieldValue.arrayUnion([studentId]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Remove a student from monitors
+  Future<void> removeMonitor(String studentId) async {
+    await _academyRef.update({
+      'monitorIds': FieldValue.arrayRemove([studentId]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 }
 

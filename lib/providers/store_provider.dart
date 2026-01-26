@@ -20,22 +20,22 @@ final activeProductsProvider = FutureProvider<List<StoreProduct>>((ref) async {
   return service.getActiveProducts();
 });
 
-/// Orders Provider
-final ordersProvider = FutureProvider<List<StoreOrder>>((ref) async {
+/// Orders Provider (Real-time Stream)
+final ordersProvider = StreamProvider<List<StoreOrder>>((ref) {
   final service = ref.watch(storeServiceProvider);
-  return service.getOrders();
+  return service.streamOrders();
 });
 
-/// Student Orders Provider
-final studentOrdersProvider = FutureProvider.family<List<StoreOrder>, String>((ref, studentId) async {
+/// Student Orders Provider (Real-time Stream)
+final studentOrdersProvider = StreamProvider.family<List<StoreOrder>, String>((ref, studentId) {
   final service = ref.watch(storeServiceProvider);
-  return service.getOrdersByStudent(studentId);
+  return service.streamOrdersByStudent(studentId);
 });
 
-/// Pending Orders Provider
-final pendingOrdersProvider = FutureProvider<List<StoreOrder>>((ref) async {
+/// Pending Orders Provider (Real-time Stream)
+final pendingOrdersProvider = StreamProvider<List<StoreOrder>>((ref) {
   final service = ref.watch(storeServiceProvider);
-  return service.getPendingOrders();
+  return service.streamPendingOrders();
 });
 
 /// Store Stats Provider

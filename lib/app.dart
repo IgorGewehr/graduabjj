@@ -19,6 +19,11 @@ import 'screens/portal/behavior_screen.dart';
 import 'screens/portal/store_screen.dart';
 import 'screens/portal/cart_screen.dart';
 import 'screens/portal/store_orders_screen.dart';
+// Monitor screens
+import 'screens/portal/monitor_attendance_screen.dart';
+import 'screens/portal/monitor_students_screen.dart';
+import 'screens/portal/monitor_student_detail_screen.dart';
+import 'screens/portal/monitor_student_form_screen.dart';
 import 'screens/splash_screen.dart';
 // Admin screens
 import 'screens/admin/admin_screens.dart';
@@ -350,6 +355,51 @@ final routerProvider = Provider<GoRouter>((ref) {
               child: const PortalStoreOrdersScreen(),
             ),
           ),
+          // Monitor routes
+          GoRoute(
+            path: '/portal/chamada',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const MonitorAttendanceScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/alunos',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const MonitorStudentsScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/alunos/novo',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const MonitorStudentFormScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/alunos/:id',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: MonitorStudentDetailScreen(
+                studentId: state.pathParameters['id']!,
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/alunos/:id/editar',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: MonitorStudentFormScreen(
+                studentId: state.pathParameters['id'],
+              ),
+            ),
+          ),
         ],
       ),
 
@@ -466,6 +516,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const AdminStoreScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/carteira',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminWalletScreen(),
             ),
           ),
           // Sub-pages

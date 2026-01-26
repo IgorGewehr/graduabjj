@@ -243,22 +243,26 @@ final notificationServiceProvider = Provider<NotificationService?>((ref) {
   return NotificationService(currentUser!.academyId!);
 });
 
-/// User notifications provider
-final userNotificationsProvider = FutureProvider<List<AppNotification>>((ref) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser == null || currentUser.academyId == null) return [];
+/// User notifications provider (Real-time Stream)
+final userNotificationsProvider = StreamProvider<List<AppNotification>>((ref) {
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+  if (currentUser == null || currentUser.academyId == null) {
+    return Stream.value([]);
+  }
 
   final service = NotificationService(currentUser.academyId!);
-  return await service.getByUser(currentUser.id);
+  return service.streamByUser(currentUser.id);
 });
 
-/// Unread notification count provider
-final unreadNotificationCountProvider = FutureProvider<int>((ref) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser == null || currentUser.academyId == null) return 0;
+/// Unread notification count provider (Real-time Stream)
+final unreadNotificationCountProvider = StreamProvider<int>((ref) {
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+  if (currentUser == null || currentUser.academyId == null) {
+    return Stream.value(0);
+  }
 
   final service = NotificationService(currentUser.academyId!);
-  return await service.getUnreadCount(currentUser.id);
+  return service.streamUnreadCount(currentUser.id);
 });
 
 // ============================================

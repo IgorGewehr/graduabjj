@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'achievement_service.dart';
 import 'firebase_service.dart';
+import 'student_service.dart';
 
 /// Attendance Model
 class Attendance {
@@ -316,6 +318,10 @@ class AttendanceService {
     // Update student's attendance count
     await _updateStudentAttendanceCount(studentId, 1);
 
+    // Check for milestones (fire and forget)
+    checkAttendanceMilestone(studentId, studentName, verifiedBy).ignore();
+    checkAnniversaryMilestone(studentId, studentName, verifiedBy).ignore();
+
     final doc = await docRef.get();
     return Attendance.fromFirestore(doc);
   }
@@ -387,7 +393,20 @@ class AttendanceService {
     // Fetch created records
     for (final docRef in newRecords) {
       final doc = await docRef.get();
-      results.add(Attendance.fromFirestore(doc));
+      final attendance = Attendance.fromFirestore(doc);
+      results.add(attendance);
+
+      // Check for milestones (fire and forget)
+      checkAttendanceMilestone(
+        attendance.studentId,
+        attendance.studentName,
+        verifiedBy,
+      ).ignore();
+      checkAnniversaryMilestone(
+        attendance.studentId,
+        attendance.studentName,
+        verifiedBy,
+      ).ignore();
     }
 
     return results;
@@ -456,6 +475,117 @@ class AttendanceService {
     );
 
     return (attendance.length / totalPossibleClasses * 100).clamp(0.0, 100.0);
+  }
+
+  // ============================================
+  // Check Attendance Milestone
+  // ============================================
+  Future<void> checkAttendanceMilestone(
+    String studentId,
+    String studentName,
+    String createdBy,
+  ) async {
+    const attendeesMilestones = [50, 100, 200, 500, 1000];
+
+    // Get system attendance count
+    final systemCount = await getStudentAttendanceCount(studentId);
+
+    // Get student to access initialAttendanceCount
+    final studentService = StudentService(academyId);
+    final student = await studentService.getById(studentId);
+    final initialCount = student?.initialAttendanceCount ?? 0;
+
+    // Total count
+    final totalCount = systemCount + initialCount;
+
+    // Check if matches milestone
+    if (attendeesMilestones.contains(totalCount)) {
+      // Only create if reached through system attendance (not just initial)
+      if (initialCount >= totalCount) return;
+
+      final achievementService = AchievementService(academyId);
+      final existing = await achievementService.getByStudent(studentId);
+
+      final alreadyHas = existing.any((a) =>
+          a.type == AchievementType.milestone &&
+          a.milestone == 'attendance_$totalCount');
+
+      if (!alreadyHas) {
+        // Find exact date
+        final diff = totalCount - initialCount;
+        final allAttendance = await getByStudent(studentId, limit: 10000);
+        // Sort ascending to find N-th attendance
+        allAttendance.sort((a, b) => a.date.compareTo(b.date));
+
+        DateTime? milestoneDate;
+        if (allAttendance.length >= diff) {
+          milestoneDate = allAttendance[diff - 1].date;
+        }
+
+        await achievementService.createAttendanceMilestone(
+          studentId: studentId,
+          studentName: studentName,
+          attendanceCount: totalCount,
+          milestoneDate: milestoneDate,
+          createdBy: createdBy,
+        );
+      }
+    }
+  }
+
+  // ============================================
+  // Check Anniversary Milestone
+  // ============================================
+  Future<void> checkAnniversaryMilestone(
+    String studentId,
+    String studentName,
+    String createdBy,
+  ) async {
+    const anniversaryMilestones = [1, 2, 3, 5, 10];
+
+    final studentService = StudentService(academyId);
+    final student = await studentService.getById(studentId);
+
+    if (student == null) return;
+
+    final startDate = student.startDate;
+    final now = DateTime.now();
+    
+    // Calculate difference in years
+    int yearsTraining = 0;
+    if (now.year > startDate.year) {
+      yearsTraining = now.year - startDate.year;
+      if (now.month < startDate.month || 
+          (now.month == startDate.month && now.day < startDate.day)) {
+        yearsTraining--;
+      }
+    }
+
+    if (anniversaryMilestones.contains(yearsTraining)) {
+      final achievementService = AchievementService(academyId);
+      final existing = await achievementService.getByStudent(studentId);
+
+      final alreadyHas = existing.any((a) =>
+          a.type == AchievementType.milestone &&
+          a.milestone == 'anniversary_$yearsTraining');
+
+      if (!alreadyHas) {
+        // Calculate anniversary date
+        final anniversaryDate = DateTime(
+          startDate.year + yearsTraining,
+          startDate.month,
+          startDate.day,
+        );
+
+        await achievementService.createAnniversaryMilestone(
+          studentId: studentId,
+          studentName: studentName,
+          years: yearsTraining,
+          anniversaryDate: anniversaryDate,
+          createdBy: createdBy,
+        );
+      }
+    }
   }
 
   // ============================================

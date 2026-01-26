@@ -3,10 +3,21 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
+import '../../services/abacate_pay_service.dart';
+
+/// AbacatePay enabled provider
+final abacatePayEnabledProvider = FutureProvider<bool>((ref) async {
+  final academyId = FirebaseService.academyId;
+  if (academyId == null) return false;
+
+  final service = AbacatePayService(academyId);
+  return service.isEnabled();
+});
 
 /// Financial Screen - Financeiro (Redesigned)
 class FinancialScreen extends ConsumerStatefulWidget {
@@ -50,10 +61,24 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen>
     );
   }
 
+  void _showPixPaymentDialog(Payment payment, String studentName) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _PixPaymentBottomSheet(
+        payment: payment,
+        studentName: studentName,
+        formatCurrency: _formatCurrency,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final studentAsync = ref.watch(currentStudentProvider);
     final pixInfoAsync = ref.watch(pixInfoProvider);
+    final abacatePayEnabled = ref.watch(abacatePayEnabledProvider).valueOrNull ?? false;
 
     return studentAsync.when(
       data: (student) {
@@ -71,6 +96,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen>
             ref.invalidate(studentPaymentsProvider(student.id));
             ref.invalidate(studentPaymentStatsProvider(student.id));
             ref.invalidate(pixInfoProvider);
+            ref.invalidate(abacatePayEnabledProvider);
           },
           child: paymentsAsync.when(
             data: (payments) {
@@ -203,6 +229,11 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen>
                           emptyTitle: 'Nenhum pagamento pendente',
                           emptySubtitle: 'Voce esta em dia!',
                           formatCurrency: _formatCurrency,
+                          abacatePayEnabled: abacatePayEnabled,
+                          onPayPix: (payment) => _showPixPaymentDialog(
+                            payment,
+                            student.fullName ?? student.nickname ?? 'Aluno',
+                          ),
                         ),
 
                         // Em Atraso Tab
@@ -212,6 +243,11 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen>
                           emptyTitle: 'Nenhum pagamento atrasado',
                           emptySubtitle: 'Continue assim!',
                           formatCurrency: _formatCurrency,
+                          abacatePayEnabled: abacatePayEnabled,
+                          onPayPix: (payment) => _showPixPaymentDialog(
+                            payment,
+                            student.fullName ?? student.nickname ?? 'Aluno',
+                          ),
                         ),
 
                         // Historico Tab
@@ -598,6 +634,8 @@ class _PaymentsList extends StatelessWidget {
   final String emptySubtitle;
   final String Function(double) formatCurrency;
   final bool showStatus;
+  final bool abacatePayEnabled;
+  final void Function(Payment)? onPayPix;
 
   const _PaymentsList({
     required this.payments,
@@ -606,6 +644,8 @@ class _PaymentsList extends StatelessWidget {
     required this.emptySubtitle,
     required this.formatCurrency,
     this.showStatus = false,
+    this.abacatePayEnabled = false,
+    this.onPayPix,
   });
 
   @override
@@ -660,6 +700,8 @@ class _PaymentsList extends StatelessWidget {
             payment: payments[index],
             formatCurrency: formatCurrency,
             showStatus: showStatus,
+            showPayButton: abacatePayEnabled && onPayPix != null,
+            onPayPix: onPayPix,
           ),
         );
       },
@@ -672,17 +714,23 @@ class _PaymentCard extends StatelessWidget {
   final Payment payment;
   final String Function(double) formatCurrency;
   final bool showStatus;
+  final bool showPayButton;
+  final void Function(Payment)? onPayPix;
 
   const _PaymentCard({
     required this.payment,
     required this.formatCurrency,
     this.showStatus = false,
+    this.showPayButton = false,
+    this.onPayPix,
   });
 
   @override
   Widget build(BuildContext context) {
     final isOverdue = payment.status == PaymentStatus.overdue;
     final isPaid = payment.status == PaymentStatus.paid;
+    final canPay = (payment.status == PaymentStatus.pending ||
+        payment.status == PaymentStatus.overdue);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -693,94 +741,120 @@ class _PaymentCard extends StatelessWidget {
           color: isOverdue ? AppTheme.error : AppTheme.divider,
         ),
       ),
-      child: Row(
+      child: Column(
         children: [
-          // Icon
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: isOverdue
-                  ? AppTheme.errorLight
-                  : isPaid
-                      ? AppTheme.successLight
-                      : AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              isOverdue
-                  ? LucideIcons.alertTriangle
-                  : isPaid
-                      ? LucideIcons.checkCircle
-                      : LucideIcons.receipt,
-              size: 20,
-              color: isOverdue
-                  ? AppTheme.error
-                  : isPaid
-                      ? AppTheme.success
-                      : AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(width: 16),
-          // Info
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  payment.description ?? 'Mensalidade',
-                  style: AppTheme.bodyMedium.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Icon(
-                      LucideIcons.calendar,
-                      size: 12,
-                      color: AppTheme.textSecondary,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      DateFormat("dd/MM/yyyy").format(payment.dueDate),
-                      style: AppTheme.labelSmall.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                    if (payment.referenceMonth != null) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        '(${payment.referenceMonth})',
-                        style: AppTheme.labelSmall.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-          // Value & Status
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          Row(
             children: [
-              Text(
-                formatCurrency(payment.value),
-                style: AppTheme.titleMedium.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: isOverdue ? AppTheme.error : AppTheme.textPrimary,
+              // Icon
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: isOverdue
+                      ? AppTheme.errorLight
+                      : isPaid
+                          ? AppTheme.successLight
+                          : AppTheme.surfaceVariant,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  isOverdue
+                      ? LucideIcons.alertTriangle
+                      : isPaid
+                          ? LucideIcons.checkCircle
+                          : LucideIcons.receipt,
+                  size: 20,
+                  color: isOverdue
+                      ? AppTheme.error
+                      : isPaid
+                          ? AppTheme.success
+                          : AppTheme.textSecondary,
                 ),
               ),
-              if (showStatus) ...[
-                const SizedBox(height: 4),
-                _StatusChip(status: payment.status),
-              ],
+              const SizedBox(width: 16),
+              // Info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      payment.description ?? 'Mensalidade',
+                      style: AppTheme.bodyMedium.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          LucideIcons.calendar,
+                          size: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          DateFormat("dd/MM/yyyy").format(payment.dueDate),
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        if (payment.referenceMonth != null) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '(${payment.referenceMonth})',
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // Value & Status
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    formatCurrency(payment.value),
+                    style: AppTheme.titleMedium.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: isOverdue ? AppTheme.error : AppTheme.textPrimary,
+                    ),
+                  ),
+                  if (showStatus) ...[
+                    const SizedBox(height: 4),
+                    _StatusChip(status: payment.status),
+                  ],
+                ],
+              ),
             ],
           ),
+          // Pay Button
+          if (showPayButton && canPay) ...[
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => onPayPix?.call(payment),
+                icon: const Icon(LucideIcons.qrCode, size: 18),
+                label: const Text('Pagar com PIX'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -834,6 +908,253 @@ class _StatusChip extends StatelessWidget {
           color: textColor,
           fontWeight: FontWeight.w600,
           fontSize: 10,
+        ),
+      ),
+    );
+  }
+}
+
+/// PIX Payment Bottom Sheet
+class _PixPaymentBottomSheet extends ConsumerStatefulWidget {
+  final Payment payment;
+  final String studentName;
+  final String Function(double) formatCurrency;
+
+  const _PixPaymentBottomSheet({
+    required this.payment,
+    required this.studentName,
+    required this.formatCurrency,
+  });
+
+  @override
+  ConsumerState<_PixPaymentBottomSheet> createState() =>
+      _PixPaymentBottomSheetState();
+}
+
+class _PixPaymentBottomSheetState
+    extends ConsumerState<_PixPaymentBottomSheet> {
+  bool _isLoading = true;
+  PaymentLink? _paymentLink;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _generatePixPayment();
+  }
+
+  Future<void> _generatePixPayment() async {
+    final academyId = FirebaseService.academyId;
+    if (academyId == null) {
+      setState(() {
+        _error = 'Academia nao encontrada';
+        _isLoading = false;
+      });
+      return;
+    }
+
+    try {
+      final service = AbacatePayService(academyId);
+      final link = await service.createPixPayment(
+        amount: widget.payment.value,
+        financialId: widget.payment.id,
+        studentId: widget.payment.studentId,
+        studentName: widget.studentName,
+        description:
+            widget.payment.description ?? 'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
+      );
+
+      setState(() {
+        _paymentLink = link;
+        _isLoading = false;
+        if (link == null) {
+          _error = 'Erro ao gerar pagamento PIX';
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Erro ao gerar pagamento: $e';
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _copyPixCode() {
+    if (_paymentLink?.pixCode != null) {
+      Clipboard.setData(ClipboardData(text: _paymentLink!.pixCode));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Codigo PIX copiado!'),
+          backgroundColor: AppTheme.success,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Handle
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.divider,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Title
+              Text(
+                'Pagar com PIX',
+                style: AppTheme.titleLarge.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${widget.payment.description ?? 'Mensalidade'} - ${widget.formatCurrency(widget.payment.value)}',
+                style: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Content
+              if (_isLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: Column(
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Gerando QR Code...'),
+                    ],
+                  ),
+                )
+              else if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 40),
+                  child: Column(
+                    children: [
+                      const Icon(
+                        LucideIcons.alertCircle,
+                        size: 48,
+                        color: AppTheme.error,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        _error!,
+                        style: AppTheme.bodyMedium.copyWith(
+                          color: AppTheme.error,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                )
+              else if (_paymentLink != null)
+                Column(
+                  children: [
+                    // QR Code
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppTheme.divider),
+                      ),
+                      child: QrImageView(
+                        data: _paymentLink!.pixCode,
+                        version: QrVersions.auto,
+                        size: 200,
+                        backgroundColor: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Instructions
+                    Text(
+                      'Escaneie o QR Code ou copie o codigo PIX',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Copy Button
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _copyPixCode,
+                        icon: const Icon(LucideIcons.copy, size: 18),
+                        label: const Text('Copiar Codigo PIX'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Info
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            LucideIcons.info,
+                            size: 18,
+                            color: AppTheme.primary,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Apos o pagamento, seu status sera atualizado automaticamente.',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+              const SizedBox(height: 16),
+
+              // Close Button
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Fechar'),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

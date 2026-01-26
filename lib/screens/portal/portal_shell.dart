@@ -96,6 +96,11 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       }
     }
 
+    // Check monitor routes
+    if (location.startsWith('/portal/chamada') || location.startsWith('/portal/alunos')) {
+      return 4; // "Mais" index
+    }
+
     return 0; // Default to first item
   }
 
@@ -231,22 +236,47 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     final student = ref.read(currentStudentProvider).valueOrNull;
     final isKids = student?.category == StudentCategory.kids;
 
-    // Get academy settings to check if store is enabled
+    // Get academy settings to check if store is enabled and monitors
     final settings = ref.read(academySettingsProvider).valueOrNull;
     final isStoreEnabled = settings?.storeEnabled ?? false;
 
-    // Filter menu items based on conditions
-    final filteredItems = _moreMenuItems.where((item) {
+    // Check if user is a monitor
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    final studentId = currentUser?.studentId;
+    final linkedStudentIds = currentUser?.linkedStudentIds ?? [];
+    final allStudentIds = studentId != null ? [studentId, ...linkedStudentIds] : linkedStudentIds;
+    final monitorIds = settings?.monitorIds ?? [];
+    final isMonitor = allStudentIds.any((id) => monitorIds.contains(id));
+
+    // Build filtered items list
+    final List<_NavItem> filteredItems = [];
+
+    // Add monitor-specific items first if user is a monitor
+    if (isMonitor) {
+      filteredItems.add(const _NavItem(
+        label: 'Chamada',
+        icon: LucideIcons.clipboardCheck,
+        path: '/portal/chamada',
+      ));
+      filteredItems.add(const _NavItem(
+        label: 'Alunos',
+        icon: LucideIcons.users,
+        path: '/portal/alunos',
+      ));
+    }
+
+    // Filter and add standard menu items
+    for (final item in _moreMenuItems) {
       // Comportamento only shows for kids
-      if (item.path == '/portal/comportamento') {
-        return isKids;
+      if (item.path == '/portal/comportamento' && !isKids) {
+        continue;
       }
       // Loja only shows if store is enabled
-      if (item.path == '/portal/loja') {
-        return isStoreEnabled;
+      if (item.path == '/portal/loja' && !isStoreEnabled) {
+        continue;
       }
-      return true;
-    }).toList();
+      filteredItems.add(item);
+    }
 
     showModalBottomSheet(
       context: context,

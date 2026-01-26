@@ -6,6 +6,7 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'core/firebase_options.dart';
 import 'core/theme.dart';
+import 'services/push_notification_service.dart';
 import 'app.dart';
 
 void main() async {
@@ -15,6 +16,9 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Initialize Push Notifications
+  await pushNotificationService.initialize();
 
   // Initialize date formatting for pt_BR
   await initializeDateFormatting('pt_BR', null);

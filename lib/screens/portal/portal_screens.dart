@@ -11,3 +11,8 @@ export 'portal_shell.dart';
 export 'store_screen.dart';
 export 'cart_screen.dart';
 export 'store_orders_screen.dart';
+// Monitor screens
+export 'monitor_attendance_screen.dart';
+export 'monitor_students_screen.dart';
+export 'monitor_student_detail_screen.dart';
+export 'monitor_student_form_screen.dart';

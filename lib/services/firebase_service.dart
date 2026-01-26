@@ -74,10 +74,33 @@ class Collections {
   static Collections get current => Collections(FirebaseService.academyId);
 }
 
-/// Users collection (global, not per-academy)
-class UserCollections {
+/// Root Collections (global, not per-academy)
+class RootCollections {
+  static CollectionReference get academies =>
+      FirebaseService.firestore.collection('academies');
+
+  /// Global users (identity independent of academies)
   static CollectionReference get users =>
       FirebaseService.firestore.collection('users');
 
   static DocumentReference user(String uid) => users.doc(uid);
+
+  /// User-to-Academy mapping
+  static CollectionReference get userAcademyMapping =>
+      FirebaseService.firestore.collection('userAcademyMapping');
+
+  static DocumentReference userAcademyMappingDoc(String uid) =>
+      userAcademyMapping.doc(uid);
+}
+
+/// Academy-scoped users (user context within a specific academy)
+class AcademyUserCollections {
+  final String academyId;
+
+  AcademyUserCollections(this.academyId);
+
+  CollectionReference get users =>
+      FirebaseService.firestore.collection('academies/$academyId/users');
+
+  DocumentReference user(String uid) => users.doc(uid);
 }

@@ -452,6 +452,39 @@ class StoreService {
     return orders;
   }
 
+  /// Stream orders by student (Real-time updates)
+  Stream<List<StoreOrder>> streamOrdersByStudent(String studentId) {
+    return _ordersRef
+        .where('studentId', isEqualTo: studentId)
+        .snapshots()
+        .map((snapshot) {
+      var orders = snapshot.docs.map((doc) => StoreOrder.fromFirestore(doc)).toList();
+      orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return orders;
+    });
+  }
+
+  /// Stream all orders (Real-time updates)
+  Stream<List<StoreOrder>> streamOrders() {
+    return _ordersRef.snapshots().map((snapshot) {
+      var orders = snapshot.docs.map((doc) => StoreOrder.fromFirestore(doc)).toList();
+      orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return orders;
+    });
+  }
+
+  /// Stream pending orders (Real-time updates)
+  Stream<List<StoreOrder>> streamPendingOrders() {
+    return streamOrders().map((orders) {
+      return orders.where((o) =>
+          o.status == StoreOrderStatus.pendingPayment ||
+          o.status == StoreOrderStatus.paid ||
+          o.status == StoreOrderStatus.preparing ||
+          o.status == StoreOrderStatus.ready
+      ).toList();
+    });
+  }
+
   /// Get order by ID
   Future<StoreOrder?> getOrderById(String id) async {
     final doc = await _ordersRef.doc(id).get();

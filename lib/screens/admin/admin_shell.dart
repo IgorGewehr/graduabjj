@@ -92,29 +92,7 @@ class AdminShell extends ConsumerWidget {
                   icon: const Icon(LucideIcons.bell, size: 20),
                   onPressed: () {},
                 ),
-                const SizedBox(width: 4),
-                // User avatar
-                Container(
-                  margin: const EdgeInsets.only(right: 12),
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: AppTheme.textPrimary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Text(
-                      user?.displayName.isNotEmpty == true
-                          ? user!.displayName[0].toUpperCase()
-                          : 'U',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ),
+                const SizedBox(width: 8),
               ],
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(1),
@@ -421,11 +399,6 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       path: '/admin/campeonatos',
     ),
     _AdminNavItem(
-      label: 'Graduacao',
-      icon: LucideIcons.award,
-      path: '/admin/graduacao',
-    ),
-    _AdminNavItem(
       label: 'Relatorios',
       icon: LucideIcons.barChart3,
       path: '/admin/relatorios',
@@ -434,6 +407,11 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       label: 'Loja',
       icon: LucideIcons.store,
       path: '/admin/loja',
+    ),
+    _AdminNavItem(
+      label: 'Carteira',
+      icon: LucideIcons.wallet,
+      path: '/admin/carteira',
     ),
     _AdminNavItem(
       label: 'Configuracoes',
@@ -478,15 +456,24 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     final currentLocation = widget.currentPath;
     final navigator = GoRouter.of(context);
 
-    // Get academy settings to check if store is enabled
+    // Get academy settings to check if store/abacatepay is enabled
     final settings = ref.read(academySettingsProvider).valueOrNull;
     final isStoreEnabled = settings?.storeEnabled ?? false;
+    final isAbacatePayEnabled = settings?.abacatePayEnabled ?? false;
+
+    // Get current user to check role
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    final isAdmin = currentUser?.isAdmin ?? false;
 
     // Filter menu items based on conditions
     final filteredItems = _moreMenuItems.where((item) {
       // Loja only shows if store is enabled
       if (item.path == '/admin/loja') {
         return isStoreEnabled;
+      }
+      // Carteira only shows if AbacatePay is enabled
+      if (item.path == '/admin/carteira') {
+        return isAbacatePayEnabled;
       }
       return true;
     }).toList();

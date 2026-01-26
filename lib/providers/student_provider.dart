@@ -91,30 +91,32 @@ final studentTimelineProvider = FutureProvider.family<Map<int, List<Achievement>
   return await service.getTimeline(studentId);
 });
 
-/// Student payments provider
-final studentPaymentsProvider = FutureProvider.family<List<Payment>, String>((ref, studentId) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-
-  if (currentUser?.academyId == null) return [];
-
-  final service = PaymentService(currentUser!.academyId!);
-  return await service.getByStudent(studentId);
-});
-
-/// Student payment stats provider
-final studentPaymentStatsProvider = FutureProvider.family<Map<String, dynamic>, String>((ref, studentId) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
+/// Student payments provider (Real-time Stream)
+final studentPaymentsProvider = StreamProvider.family<List<Payment>, String>((ref, studentId) {
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
 
   if (currentUser?.academyId == null) {
-    return {
-      'pending': {'count': 0, 'total': 0.0},
-      'overdue': {'count': 0, 'total': 0.0},
-      'paid': {'count': 0, 'total': 0.0},
-    };
+    return Stream.value([]);
   }
 
   final service = PaymentService(currentUser!.academyId!);
-  return await service.getStatsByStudent(studentId);
+  return service.streamByStudent(studentId);
+});
+
+/// Student payment stats provider (Real-time Stream)
+final studentPaymentStatsProvider = StreamProvider.family<Map<String, dynamic>, String>((ref, studentId) {
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+
+  if (currentUser?.academyId == null) {
+    return Stream.value({
+      'pending': {'count': 0, 'total': 0.0},
+      'overdue': {'count': 0, 'total': 0.0},
+      'paid': {'count': 0, 'total': 0.0},
+    });
+  }
+
+  final service = PaymentService(currentUser!.academyId!);
+  return service.streamStatsByStudent(studentId);
 });
 
 /// Student assessments provider

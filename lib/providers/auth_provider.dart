@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/user.dart';
 import '../services/firebase_service.dart';
+import '../services/global_user_service.dart';
+import '../services/push_notification_service.dart';
 
 /// Firebase Auth instance provider
 final firebaseAuthProvider = Provider<FirebaseAuth>((ref) {
@@ -21,19 +23,30 @@ final authStateProvider = StreamProvider<User?>((ref) {
   return auth.authStateChanges();
 });
 
-/// User academy mapping provider - fetches from userAcademyMapping collection
-final userAcademyMappingProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
+/// Global user provider - fetches from ROOT /users collection
+final globalUserProvider = FutureProvider<GlobalUser?>((ref) async {
   final authState = ref.watch(authStateProvider);
   final firebaseUser = authState.valueOrNull;
 
   if (firebaseUser == null) return null;
 
-  final firestore = ref.watch(firestoreProvider);
-  final mappingDoc = await firestore.collection('userAcademyMapping').doc(firebaseUser.uid).get();
+  return await globalUserService.getGlobalUser(firebaseUser.uid);
+});
 
-  if (!mappingDoc.exists) return null;
+/// User academy mapping provider - fetches from userAcademyMapping collection
+final userAcademyMappingProvider = FutureProvider<UserAcademyMapping?>((ref) async {
+  final authState = ref.watch(authStateProvider);
+  final firebaseUser = authState.valueOrNull;
 
-  return mappingDoc.data();
+  if (firebaseUser == null) return null;
+
+  return await globalUserService.getUserAcademyMapping(firebaseUser.uid);
+});
+
+/// Whether the current user is a free user (not linked to any academy)
+final isFreeUserProvider = Provider<bool>((ref) {
+  final globalUser = ref.watch(globalUserProvider).valueOrNull;
+  return globalUser?.accountType == AccountType.free;
 });
 
 /// Current user provider with robust fallback logic
@@ -49,53 +62,53 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   print('[AUTH] Loading user data for: ${firebaseUser.uid}');
   final firestore = ref.watch(firestoreProvider);
 
-  // Step 1: Try to get academy mapping
-  final mappingDoc = await firestore.collection('userAcademyMapping').doc(firebaseUser.uid).get();
+  // Step 1: Get or create global user
+  GlobalUser? globalUser = await globalUserService.getGlobalUser(firebaseUser.uid);
+
+  if (globalUser == null) {
+    print('[AUTH] Creating new global user...');
+    // Create new global user (free account)
+    globalUser = await globalUserService.createGlobalUser(
+      userId: firebaseUser.uid,
+      email: firebaseUser.email ?? '',
+      displayName: firebaseUser.displayName ?? '',
+      photoUrl: firebaseUser.photoURL,
+    );
+  }
+
+  // Step 2: Get academy mapping
+  final mapping = await globalUserService.getUserAcademyMapping(firebaseUser.uid);
   String? academyId;
 
-  if (mappingDoc.exists) {
-    final mappingData = mappingDoc.data()!;
-    print('[AUTH] Found userAcademyMapping: $mappingData');
-
-    // Support both old format (academyId) and new format (academyIds/primaryAcademyId)
-    if (mappingData['primaryAcademyId'] != null) {
-      academyId = mappingData['primaryAcademyId'] as String;
-    } else if (mappingData['academyIds'] != null && (mappingData['academyIds'] as List).isNotEmpty) {
-      academyId = (mappingData['academyIds'] as List).first as String;
-    } else if (mappingData['academyId'] != null) {
-      academyId = mappingData['academyId'] as String;
-    }
+  if (mapping != null && mapping.academyIds.isNotEmpty) {
+    // User is linked to academy(ies)
+    academyId = mapping.primaryAcademyId ?? mapping.academyIds.first;
+    print('[AUTH] User is linked to academy: $academyId');
   } else {
-    print('[AUTH] No userAcademyMapping found, checking root users collection...');
-
-    // Fallback: Check root users collection for backwards compatibility
-    final rootUserDoc = await firestore.collection('users').doc(firebaseUser.uid).get();
-    if (rootUserDoc.exists) {
-      final userData = rootUserDoc.data()!;
-      print('[AUTH] Found user in root collection: role=${userData['role']}');
-
-      // If user exists in root and has academyId, use it
-      if (userData['academyId'] != null) {
-        academyId = userData['academyId'] as String;
-      } else {
-        // Default to first academy (for backwards compatibility with single-tenant)
-        academyId = 'academia-principal';
-        print('[AUTH] Using default academyId: $academyId');
-      }
-    }
+    print('[AUTH] User is a free user (not linked to any academy)');
+    // Return as free user without academy context
+    return AppUser(
+      id: globalUser.id,
+      email: globalUser.email,
+      displayName: globalUser.displayName,
+      photoUrl: globalUser.photoUrl,
+      role: UserRole.student,
+      phone: globalUser.phone,
+      accountType: AccountType.free,
+      jiujitsuStartDate: globalUser.jiujitsuStartDate,
+      highestBelt: globalUser.highestBelt,
+      highestStripes: globalUser.highestStripes,
+      isProfilePublic: globalUser.isProfilePublic,
+      createdAt: globalUser.createdAt,
+      updatedAt: globalUser.updatedAt,
+    );
   }
-
-  if (academyId == null) {
-    print('[AUTH] Could not determine academyId');
-    return null;
-  }
-
-  print('[AUTH] Using academyId: $academyId');
 
   // Set the academy context for FirebaseService
   FirebaseService.setAcademyId(academyId);
 
-  // Step 2: Try to get user from academy's users subcollection
+  // Step 3: Get academy-specific user data
+  final academyDetails = mapping.academyDetails?[academyId];
   final userDoc = await firestore
       .collection('academies')
       .doc(academyId)
@@ -106,23 +119,32 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   if (userDoc.exists) {
     final userData = userDoc.data()!;
     print('[AUTH] Found user in academy subcollection: role=${userData['role']}');
-    userData['academyId'] = academyId;
-    return AppUser.fromMap(userDoc.id, userData);
+
+    // Combine global user data with academy-specific data
+    return AppUser.fromGlobalAndAcademy(
+      globalUser: globalUser,
+      academyId: academyId,
+      role: academyDetails?.role ?? UserRoleExtension.fromString(userData['role'] ?? 'student'),
+      studentId: academyDetails?.studentId ?? userData['studentId'],
+      linkedStudentIds: userData['linkedStudentIds'] != null
+          ? List<String>.from(userData['linkedStudentIds'])
+          : null,
+      instructorId: userData['instructorId'],
+      pendingStudentLink: userData['pendingStudentLink'],
+      approvedAt: userData['approvedAt'] != null
+          ? (userData['approvedAt'] as Timestamp).toDate()
+          : null,
+    );
   }
 
-  // Step 3: Fallback to root users collection
-  print('[AUTH] User not in academy subcollection, checking root...');
-  final rootUserDoc = await firestore.collection('users').doc(firebaseUser.uid).get();
-
-  if (rootUserDoc.exists) {
-    final userData = rootUserDoc.data()!;
-    print('[AUTH] Found user in root: role=${userData['role']}');
-    userData['academyId'] = academyId;
-    return AppUser.fromMap(rootUserDoc.id, userData);
-  }
-
-  print('[AUTH] User not found anywhere');
-  return null;
+  // Fallback: user is linked to academy but doesn't have academy user document yet
+  print('[AUTH] Creating academy user document...');
+  return AppUser.fromGlobalAndAcademy(
+    globalUser: globalUser,
+    academyId: academyId,
+    role: academyDetails?.role ?? UserRole.student,
+    studentId: academyDetails?.studentId,
+  );
 });
 
 /// Auth service provider
@@ -143,13 +165,18 @@ class AuthService {
 
   /// Sign in with email and password
   Future<UserCredential> signInWithEmail(String email, String password) async {
-    return await _auth.signInWithEmailAndPassword(
+    final credential = await _auth.signInWithEmailAndPassword(
       email: email,
       password: password,
     );
+
+    // Update FCM token for push notifications
+    await pushNotificationService.onUserLogin();
+
+    return credential;
   }
 
-  /// Create account with email and password
+  /// Create account with email and password (creates free user)
   Future<UserCredential> createAccount(
     String email,
     String password,
@@ -160,23 +187,28 @@ class AuthService {
       password: password,
     );
 
-    // Update display name
+    // Update display name in Firebase Auth
     await credential.user?.updateDisplayName(displayName);
 
-    // Create user document
-    await _firestore.collection('users').doc(credential.user!.uid).set({
-      'email': email,
-      'displayName': displayName,
-      'role': 'student',
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    // Create global user document using globalUserService
+    // This also creates the empty userAcademyMapping
+    await globalUserService.createGlobalUser(
+      userId: credential.user!.uid,
+      email: email,
+      displayName: displayName,
+      accountType: AccountType.free, // New users start as free
+    );
+
+    // Register FCM token for push notifications
+    await pushNotificationService.onUserLogin();
 
     return credential;
   }
 
   /// Sign out
   Future<void> signOut() async {
+    // Remove FCM token before signing out
+    await pushNotificationService.onUserLogout();
     await _auth.signOut();
   }
 
@@ -185,25 +217,25 @@ class AuthService {
     await _auth.sendPasswordResetEmail(email: email);
   }
 
-  /// Get user document
-  Future<AppUser?> getUserData(String uid) async {
-    final doc = await _firestore.collection('users').doc(uid).get();
-    if (!doc.exists) return null;
-    return AppUser.fromFirestore(doc);
+  /// Get global user document
+  Future<GlobalUser?> getGlobalUser(String uid) async {
+    return await globalUserService.getGlobalUser(uid);
   }
 
-  /// Update user profile
-  Future<void> updateProfile({
+  /// Update global user profile
+  Future<void> updateGlobalProfile({
     String? displayName,
     String? photoUrl,
     String? phone,
+    DateTime? birthDate,
+    String? cpf,
+    double? weight,
+    bool? isProfilePublic,
   }) async {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    final updates = <String, dynamic>{
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
+    final updates = <String, dynamic>{};
 
     if (displayName != null) {
       updates['displayName'] = displayName;
@@ -215,11 +247,15 @@ class AuthService {
       await user.updatePhotoURL(photoUrl);
     }
 
-    if (phone != null) {
-      updates['phone'] = phone;
-    }
+    if (phone != null) updates['phone'] = phone;
+    if (birthDate != null) updates['birthDate'] = birthDate;
+    if (cpf != null) updates['cpf'] = cpf;
+    if (weight != null) updates['weight'] = weight;
+    if (isProfilePublic != null) updates['isProfilePublic'] = isProfilePublic;
 
-    await _firestore.collection('users').doc(user.uid).update(updates);
+    if (updates.isNotEmpty) {
+      await globalUserService.updateGlobalUser(user.uid, updates);
+    }
   }
 
   /// Link student account with code (multi-tenant)
@@ -252,16 +288,27 @@ class AuthService {
 
     final studentId = codeData['studentId'] as String;
 
-    // Update user document in academy's users subcollection
-    await academyRef.collection('users').doc(user.uid).set({
-      'studentId': studentId,
-      'role': 'student',
-      'email': user.email,
-      'displayName': user.displayName,
-      'approvedAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'createdAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    // Link user to academy using globalUserService
+    await globalUserService.linkUserToAcademy(
+      userId: user.uid,
+      academyId: academyId,
+      studentId: studentId,
+      role: UserRole.student,
+    );
+
+    // Update/create academy user document
+    await globalUserService.upsertAcademyUser(
+      academyId: academyId,
+      userId: user.uid,
+      data: {
+        'studentId': studentId,
+        'role': 'student',
+        'email': user.email,
+        'displayName': user.displayName,
+        'approvedAt': DateTime.now(),
+        'status': 'active',
+      },
+    );
 
     // Update student document in academy's students subcollection
     await academyRef.collection('students').doc(studentId).update({
@@ -275,11 +322,71 @@ class AuthService {
       'usedBy': user.uid,
     });
 
-    // Create/update userAcademyMapping
-    await _firestore.collection('userAcademyMapping').doc(user.uid).set({
-      'academyIds': FieldValue.arrayUnion([academyId]),
-      'primaryAcademyId': academyId,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    // Sync highest belt from all linked academies
+    await globalUserService.syncHighestBelt(user.uid);
+
+    // Subscribe to academy push notifications topic
+    await pushNotificationService.subscribeToTopic('academy_$academyId');
+  }
+
+  /// Unlink from academy
+  Future<void> unlinkFromAcademy(String academyId) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('Usuario nao autenticado');
+
+    // Get the mapping to find studentId
+    final mapping = await globalUserService.getUserAcademyMapping(user.uid);
+    final academyDetail = mapping?.academyDetails?[academyId];
+    final studentId = academyDetail?.studentId;
+
+    // Unlink student from user
+    if (studentId != null) {
+      await _firestore
+          .collection('academies')
+          .doc(academyId)
+          .collection('students')
+          .doc(studentId)
+          .update({
+        'linkedUserId': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    // Remove academy user document
+    await globalUserService.deleteAcademyUser(
+      academyId: academyId,
+      userId: user.uid,
+    );
+
+    // Unlink user from academy
+    await globalUserService.unlinkUserFromAcademy(
+      userId: user.uid,
+      academyId: academyId,
+    );
+
+    // Unsubscribe from academy push notifications topic
+    await pushNotificationService.unsubscribeFromTopic('academy_$academyId');
+  }
+
+  /// Switch primary academy (for multi-academy users)
+  Future<void> switchPrimaryAcademy(String newAcademyId) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('Usuario nao autenticado');
+
+    await globalUserService.setPrimaryAcademy(
+      userId: user.uid,
+      academyId: newAcademyId,
+    );
+
+    // Update FirebaseService context
+    FirebaseService.setAcademyId(newAcademyId);
+  }
+
+  /// Get user's academy IDs
+  Future<List<String>> getUserAcademyIds() async {
+    final user = _auth.currentUser;
+    if (user == null) return [];
+
+    return await globalUserService.getUserAcademyIds(user.uid);
   }
 }
