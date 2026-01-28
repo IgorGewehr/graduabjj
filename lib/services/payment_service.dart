@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_service.dart';
+import 'notification_dispatcher.dart';
+import 'student_service.dart';
 
 /// Payment Status
 enum PaymentStatus { pending, paid, overdue, cancelled }
@@ -179,9 +181,13 @@ class Payment {
 class PaymentService {
   final String academyId;
   late final Collections _collections;
+  late final NotificationDispatcher _notificationDispatcher;
+  late final StudentService _studentService;
 
   PaymentService(this.academyId) {
     _collections = Collections(academyId);
+    _notificationDispatcher = NotificationDispatcher(academyId);
+    _studentService = StudentService(academyId);
   }
 
   CollectionReference get _paymentsRef => _collections.payments;
@@ -423,6 +429,7 @@ class PaymentService {
     String? referenceMonth,
     String? createdBy,
     String type = 'monthly_tuition',
+    bool sendNotification = true,
   }) async {
     final docRef = await _paymentsRef.add({
       'studentId': studentId,
@@ -439,7 +446,27 @@ class PaymentService {
     });
 
     final doc = await docRef.get();
-    return Payment.fromFirestore(doc);
+    final payment = Payment.fromFirestore(doc);
+
+    // Send notification to student if they have a linked account
+    if (sendNotification && type == 'monthly_tuition') {
+      try {
+        final student = await _studentService.getById(studentId);
+        if (student != null && student.linkedUserId != null) {
+          await _notificationDispatcher.notifyNewTuition(
+            userId: student.linkedUserId!,
+            studentName: studentName,
+            amount: (value * 100).toInt(), // Convert to cents
+            dueDate: dueDate,
+            financialId: payment.id,
+          );
+        }
+      } catch (e) {
+        print('Failed to send new tuition notification: $e');
+      }
+    }
+
+    return payment;
   }
 
   // ============================================
@@ -588,7 +615,7 @@ class PaymentService {
   // ============================================
   // Mark Overdue Payments (batch job)
   // ============================================
-  Future<int> markOverduePayments() async {
+  Future<int> markOverduePayments({bool sendNotifications = true}) async {
     final snapshot = await _paymentsRef.get();
     int count = 0;
 
@@ -600,6 +627,24 @@ class PaymentService {
           'updatedAt': FieldValue.serverTimestamp(),
         });
         count++;
+
+        // Send overdue notification to student
+        if (sendNotifications) {
+          try {
+            final student = await _studentService.getById(payment.studentId);
+            if (student != null && student.linkedUserId != null) {
+              await _notificationDispatcher.notifyOverdueTuition(
+                userId: student.linkedUserId!,
+                studentName: payment.studentName,
+                amount: (payment.value * 100).toInt(),
+                daysOverdue: payment.daysOverdue,
+                financialId: payment.id,
+              );
+            }
+          } catch (e) {
+            print('Failed to send overdue notification: $e');
+          }
+        }
       }
     }
 

@@ -274,6 +274,53 @@ class NotificationService {
   Future<List<AppNotification>> getRecent(String userId, {int limit = 5}) async {
     return getByUser(userId, limit: limit);
   }
+
+  // ============================================
+  // Create Notification
+  // ============================================
+  Future<AppNotification> create({
+    required String userId,
+    required NotificationType type,
+    required String title,
+    required String message,
+    NotificationPriority priority = NotificationPriority.normal,
+    String? actionUrl,
+    String? actionLabel,
+    String? studentId,
+    String? financialId,
+    String? competitionId,
+    int? expiresInDays,
+  }) async {
+    final expiresAt = expiresInDays != null
+        ? DateTime.now().add(Duration(days: expiresInDays))
+        : null;
+
+    final data = <String, dynamic>{
+      'academyId': academyId,
+      'userId': userId,
+      'type': type.value,
+      'priority': priority.value,
+      'title': title,
+      'message': message,
+      'read': false,
+      'channels': ['in_app'],
+      'sentVia': ['in_app'],
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+
+    // Only add optional fields if they have values
+    if (actionUrl != null) data['actionUrl'] = actionUrl;
+    if (actionLabel != null) data['actionLabel'] = actionLabel;
+    if (studentId != null) data['studentId'] = studentId;
+    if (financialId != null) data['financialId'] = financialId;
+    if (competitionId != null) data['competitionId'] = competitionId;
+    if (expiresAt != null) data['expiresAt'] = Timestamp.fromDate(expiresAt);
+
+    final docRef = await _notificationsRef.add(data);
+    final doc = await docRef.get();
+
+    return AppNotification.fromFirestore(doc);
+  }
 }
 
 // ============================================

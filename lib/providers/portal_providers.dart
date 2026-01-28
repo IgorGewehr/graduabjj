@@ -103,10 +103,21 @@ final competitionEnrollmentServiceProvider = Provider<CompetitionEnrollmentServi
 /// Student enrollments provider
 final studentEnrollmentsProvider = FutureProvider.family<List<CompetitionEnrollment>, String>((ref, studentId) async {
   final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser?.academyId == null) return [];
+  if (currentUser?.academyId == null) {
+    print('[ENROLLMENTS] No academyId found for current user');
+    return [];
+  }
 
-  final service = CompetitionEnrollmentService(currentUser!.academyId!);
-  return await service.getByStudent(studentId);
+  if (studentId.isEmpty) {
+    print('[ENROLLMENTS] Empty studentId provided');
+    return [];
+  }
+
+  print('[ENROLLMENTS] Fetching enrollments for studentId: $studentId in academy: ${currentUser!.academyId}');
+  final service = CompetitionEnrollmentService(currentUser.academyId!);
+  final enrollments = await service.getByStudent(studentId);
+  print('[ENROLLMENTS] Found ${enrollments.length} enrollments for student $studentId');
+  return enrollments;
 });
 
 /// Check if student is enrolled in competition

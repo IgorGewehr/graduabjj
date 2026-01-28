@@ -325,21 +325,25 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
   }
 
   void _showProductDetails(StoreProduct product) {
+    // Capture parent context before showing bottom sheet
+    final parentContext = context;
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _ProductDetailsSheet(
+      builder: (sheetContext) => _ProductDetailsSheet(
         product: product,
         onAddToCart: (item) {
           ref.read(cartProvider.notifier).addItem(item);
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
+          Navigator.pop(sheetContext);
+          scaffoldMessenger.showSnackBar(
             SnackBar(
               content: const Text('Produto adicionado ao carrinho'),
               action: SnackBarAction(
                 label: 'Ver Carrinho',
-                onPressed: () => context.push('/portal/loja/carrinho'),
+                onPressed: () => parentContext.push('/portal/loja/carrinho'),
               ),
             ),
           );

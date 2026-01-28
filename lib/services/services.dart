@@ -14,6 +14,7 @@ export 'settings_service.dart';
 export 'link_code_service.dart';
 export 'belt_progression_service.dart';
 export 'notification_service.dart';
+export 'notification_dispatcher.dart';
 export 'push_notification_service.dart';
 export 'store_service.dart';
 export 'abacate_pay_service.dart';

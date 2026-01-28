@@ -52,28 +52,20 @@ class MoreMenuSheet extends StatelessWidget {
             ),
           ),
 
-          // Title
+          // Close button
           Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              children: [
-                Text(
-                  'Mais opcoes',
-                  style: AppTheme.headlineSmall,
+            padding: const EdgeInsets.only(top: 8, right: 16),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                icon: const Icon(LucideIcons.x, size: 20),
+                onPressed: () => Navigator.pop(context),
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.surfaceVariant,
                 ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(LucideIcons.x, size: 20),
-                  onPressed: () => Navigator.pop(context),
-                  style: IconButton.styleFrom(
-                    backgroundColor: AppTheme.surfaceVariant,
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
-
-          const Divider(height: 1),
 
           // Menu items
           Padding(

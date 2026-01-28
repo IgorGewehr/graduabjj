@@ -87,28 +87,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Logo
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Center(
-                      child: Text(
-                        'G',
-                        style: TextStyle(
-                          fontSize: 40,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
+                  Image.asset(
+                    'assets/images/bjjeasy_logo.png',
+                    width: 120,
+                    height: 120,
                   ).animate().fadeIn(duration: 300.ms).scale(
                         begin: const Offset(0.8, 0.8),
                       ),
 
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
 
                   // Title
                   Text(

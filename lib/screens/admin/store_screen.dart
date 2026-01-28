@@ -294,7 +294,7 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
               description: data['description'],
               price: data['price'],
               category: data['category'],
-              imageUrls: data['imageUrls'],
+              imageUrls: data['images'],
               stockType: data['stockType'],
               stockQuantity: data['stockQuantity'],
               sizes: data['sizes'],
@@ -976,7 +976,7 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
             : null,
         'sizes': sizes.isEmpty ? null : sizes,
         'colors': colors.isEmpty ? null : colors,
-        'imageUrls': _imageUrls,
+        'images': _imageUrls,
       };
 
       await widget.onSave(data);

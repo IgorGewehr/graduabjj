@@ -447,14 +447,14 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                       color: AppTheme.surfaceVariant,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: AppTheme.divider, width: 2),
-                      image: _settings?.logoUrl != null
+                      image: (_settings?.logoUrl ?? '').isNotEmpty
                           ? DecorationImage(
                               image: NetworkImage(_settings!.logoUrl!),
                               fit: BoxFit.cover,
                             )
                           : null,
                     ),
-                    child: _settings?.logoUrl == null
+                    child: (_settings?.logoUrl ?? '').isEmpty
                         ? Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [

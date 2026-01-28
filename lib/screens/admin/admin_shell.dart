@@ -36,16 +36,16 @@ class AdminShell extends ConsumerWidget {
                     width: 32,
                     height: 32,
                     decoration: BoxDecoration(
-                      color: settings?.logoUrl == null ? AppTheme.textPrimary : null,
+                      color: (settings?.logoUrl ?? '').isEmpty ? AppTheme.textPrimary : null,
                       borderRadius: BorderRadius.circular(6),
-                      image: settings?.logoUrl != null
+                      image: (settings?.logoUrl ?? '').isNotEmpty
                           ? DecorationImage(
                               image: NetworkImage(settings!.logoUrl!),
                               fit: BoxFit.cover,
                             )
                           : null,
                     ),
-                    child: settings?.logoUrl == null
+                    child: (settings?.logoUrl ?? '').isEmpty
                         ? Center(
                             child: Text(
                               settings?.name.isNotEmpty == true
@@ -144,16 +144,16 @@ class AdminSidebar extends ConsumerWidget {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: settings?.logoUrl == null ? AppTheme.primary : null,
+                    color: (settings?.logoUrl ?? '').isEmpty ? AppTheme.primary : null,
                     borderRadius: BorderRadius.circular(8),
-                    image: settings?.logoUrl != null
+                    image: (settings?.logoUrl ?? '').isNotEmpty
                         ? DecorationImage(
                             image: NetworkImage(settings!.logoUrl!),
                             fit: BoxFit.cover,
                           )
                         : null,
                   ),
-                  child: settings?.logoUrl == null
+                  child: (settings?.logoUrl ?? '').isEmpty
                       ? Center(
                           child: Text(
                             settings?.name.isNotEmpty == true

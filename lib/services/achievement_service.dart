@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_service.dart';
+import 'notification_dispatcher.dart';
+import 'student_service.dart';
 
 /// Achievement Type
 enum AchievementType { graduation, stripe, competition, milestone }
@@ -192,9 +194,13 @@ String getBeltName(String belt) {
 class AchievementService {
   final String academyId;
   late final Collections _collections;
+  late final NotificationDispatcher _notificationDispatcher;
+  late final StudentService _studentService;
 
   AchievementService(this.academyId) {
     _collections = Collections(academyId);
+    _notificationDispatcher = NotificationDispatcher(academyId);
+    _studentService = StudentService(academyId);
   }
 
   CollectionReference get _achievementsRef => _collections.achievements;
@@ -366,6 +372,7 @@ class AchievementService {
     String? photoUrl,
     bool isPublic = true,
     String? createdBy,
+    bool sendNotification = true,
   }) async {
     final docRef = await _achievementsRef.add({
       'studentId': studentId,
@@ -389,7 +396,26 @@ class AchievementService {
     });
 
     final doc = await docRef.get();
-    return Achievement.fromFirestore(doc);
+    final achievement = Achievement.fromFirestore(doc);
+
+    // Send notification to student about new achievement
+    if (sendNotification) {
+      try {
+        final student = await _studentService.getById(studentId);
+        if (student != null && student.linkedUserId != null) {
+          await _notificationDispatcher.notifyNewAchievement(
+            userId: student.linkedUserId!,
+            studentName: studentName,
+            achievementTitle: title,
+            studentId: studentId,
+          );
+        }
+      } catch (e) {
+        print('Failed to send achievement notification: $e');
+      }
+    }
+
+    return achievement;
   }
 
   // ============================================

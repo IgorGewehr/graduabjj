@@ -1,5 +1,5 @@
 name: graduabjj
-description: "GraduaBJJ - Sistema de Gestão para Academia de Jiu-Jitsu"
+description: "BJJEasy - Sistema Whitelabel para Academias de Jiu-Jitsu"
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -59,6 +59,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/images/
 
   # Note: Font files need to be added to assets/fonts/
   # Download Inter font from https://fonts.google.com/specimen/Inter

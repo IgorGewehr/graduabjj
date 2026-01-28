@@ -157,7 +157,7 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
                   Row(
                     children: [
                       // Avatar
-                      _student!.photoUrl != null
+                      (_student!.photoUrl ?? '').isNotEmpty
                           ? CircleAvatar(
                               radius: 40,
                               backgroundImage: NetworkImage(_student!.photoUrl!),

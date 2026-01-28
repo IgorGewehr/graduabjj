@@ -17,7 +17,7 @@ import '../../services/firebase_service.dart';
 import '../../providers/store_provider.dart';
 import '../../providers/auth_provider.dart';
 
-/// Portal Store Orders Screen - Student's Orders
+/// Portal Store Orders Screen - Student's Orders or All Orders for Admin/Instructor
 class PortalStoreOrdersScreen extends ConsumerWidget {
   const PortalStoreOrdersScreen({super.key});
 
@@ -25,8 +25,11 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
     final studentId = currentUser?.studentId;
+    final isAdminOrInstructor = currentUser?.isAdmin == true || currentUser?.isInstructor == true;
 
-    if (studentId == null) {
+    // For students without studentId, show error
+    // For admin/instructor, show all orders
+    if (studentId == null && !isAdminOrInstructor) {
       return Scaffold(
         backgroundColor: AppTheme.background,
         body: Center(
@@ -53,13 +56,23 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
       );
     }
 
-    final ordersAsync = ref.watch(studentOrdersProvider(studentId));
+    // Use all orders for admin/instructor, student orders for students
+    final ordersAsync = isAdminOrInstructor
+        ? ref.watch(ordersProvider)
+        : ref.watch(studentOrdersProvider(studentId!));
+
+    final title = isAdminOrInstructor ? 'Pedidos da Loja' : 'Meus Pedidos';
+    final subtitle = isAdminOrInstructor ? 'Gerencie os pedidos recebidos' : 'Acompanhe seus pedidos';
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: RefreshIndicator(
         onRefresh: () async {
-          ref.invalidate(studentOrdersProvider(studentId));
+          if (isAdminOrInstructor) {
+            ref.invalidate(ordersProvider);
+          } else {
+            ref.invalidate(studentOrdersProvider(studentId!));
+          }
         },
         child: CustomScrollView(
           slivers: [
@@ -81,9 +94,9 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Meus Pedidos', style: AppTheme.headlineMedium),
+                          Text(title, style: AppTheme.headlineMedium),
                           Text(
-                            'Acompanhe seus pedidos',
+                            subtitle,
                             style: AppTheme.bodyMedium.copyWith(
                               color: AppTheme.textSecondary,
                             ),
@@ -115,6 +128,7 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                         child: _OrderCard(
                           order: orders[index],
                           onTap: () => _showOrderDetails(context, orders[index]),
+                          showStudentName: isAdminOrInstructor,
                         ),
                       ),
                       childCount: orders.length,
@@ -146,8 +160,13 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                       Text('Erro ao carregar pedidos', style: AppTheme.titleMedium),
                       const SizedBox(height: 8),
                       TextButton(
-                        onPressed: () =>
-                            ref.invalidate(studentOrdersProvider(studentId)),
+                        onPressed: () {
+                          if (isAdminOrInstructor) {
+                            ref.invalidate(ordersProvider);
+                          } else {
+                            ref.invalidate(studentOrdersProvider(studentId!));
+                          }
+                        },
                         child: const Text('Tentar novamente'),
                       ),
                     ],
@@ -229,10 +248,12 @@ class _EmptyState extends StatelessWidget {
 class _OrderCard extends StatelessWidget {
   final StoreOrder order;
   final VoidCallback onTap;
+  final bool showStudentName;
 
   const _OrderCard({
     required this.order,
     required this.onTap,
+    this.showStudentName = false,
   });
 
   Color _getStatusColor() {
@@ -314,20 +335,23 @@ class _OrderCard extends StatelessWidget {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: statusColor.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                order.status.label,
-                                style: AppTheme.labelSmall.copyWith(
-                                  color: statusColor,
-                                  fontWeight: FontWeight.w600,
+                            Flexible(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: statusColor.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  order.status.label,
+                                  style: AppTheme.labelSmall.copyWith(
+                                    color: statusColor,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ),
@@ -340,6 +364,16 @@ class _OrderCard extends StatelessWidget {
                             color: AppTheme.textSecondary,
                           ),
                         ),
+                        if (showStudentName) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            order.studentName,
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.primary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

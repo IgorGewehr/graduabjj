@@ -265,6 +265,9 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       ));
     }
 
+    // Check if student has a plan (for showing Financeiro)
+    final hasPlan = student?.planId != null;
+
     // Filter and add standard menu items
     for (final item in _moreMenuItems) {
       // Comportamento only shows for kids
@@ -273,6 +276,10 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       }
       // Loja only shows if store is enabled
       if (item.path == '/portal/loja' && !isStoreEnabled) {
+        continue;
+      }
+      // Financeiro only shows if student has a plan
+      if (item.path == '/portal/financeiro' && !hasPlan) {
         continue;
       }
       filteredItems.add(item);

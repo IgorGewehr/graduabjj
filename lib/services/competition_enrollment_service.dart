@@ -130,9 +130,14 @@ class CompetitionEnrollmentService {
   // Get All Enrollments for a Student (History)
   // ============================================
   Future<List<CompetitionEnrollment>> getByStudent(String studentId) async {
+    print('[CompetitionEnrollmentService] Querying enrollments for studentId: $studentId');
+    print('[CompetitionEnrollmentService] Collection path: ${_enrollmentsRef.path}');
+
     final query = await _enrollmentsRef
         .where('studentId', isEqualTo: studentId)
         .get();
+
+    print('[CompetitionEnrollmentService] Query returned ${query.docs.length} documents');
 
     var enrollments = query.docs
         .map((doc) => CompetitionEnrollment.fromFirestore(doc))

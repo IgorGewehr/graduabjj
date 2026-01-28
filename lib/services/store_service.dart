@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_service.dart';
+import 'notification_dispatcher.dart';
 
 /// Product Category
 enum StoreProductCategory { uniform, equipment, accessory, other }
@@ -178,8 +179,8 @@ class StoreProduct {
       description: data['description'],
       price: (data['price'] ?? 0).toDouble(),
       category: StoreProductCategoryExtension.fromString(data['category'] ?? 'other'),
-      imageUrls: data['imageUrls'] != null
-          ? List<String>.from(data['imageUrls'])
+      imageUrls: data['images'] != null
+          ? List<String>.from(data['images'])
           : [],
       stockType: StoreStockTypeExtension.fromString(data['stockType'] ?? 'in_stock'),
       stockQuantity: data['stockQuantity'],
@@ -339,9 +340,11 @@ class StoreOrder {
 class StoreService {
   final String academyId;
   late final Collections _collections;
+  late final NotificationDispatcher _notificationDispatcher;
 
   StoreService(this.academyId) {
     _collections = Collections(academyId);
+    _notificationDispatcher = NotificationDispatcher(academyId);
   }
 
   CollectionReference get _productsRef => _collections.storeProducts;
@@ -399,7 +402,7 @@ class StoreService {
       'description': description,
       'price': price,
       'category': category.value,
-      'imageUrls': imageUrls ?? [],
+      'images': imageUrls ?? [],
       'stockType': stockType.value,
       'stockQuantity': stockQuantity,
       'sizes': sizes,
@@ -536,6 +539,7 @@ class StoreService {
     required String studentName,
     required List<StoreOrderItem> items,
     String? notes,
+    String? adminUserIdToNotify,
   }) async {
     // SECURITY: Validate and fetch server-side prices for all items
     final validatedItems = <Map<String, dynamic>>[];
@@ -602,7 +606,23 @@ class StoreService {
     });
 
     final doc = await docRef.get();
-    return StoreOrder.fromFirestore(doc);
+    final order = StoreOrder.fromFirestore(doc);
+
+    // Notify admin about new order if admin ID is provided
+    if (adminUserIdToNotify != null) {
+      try {
+        await _notificationDispatcher.notifyStoreOrder(
+          adminUserId: adminUserIdToNotify,
+          studentName: studentName,
+          total: (total * 100).toInt(), // Convert to cents
+          orderId: order.id,
+        );
+      } catch (e) {
+        print('Failed to send store order notification: $e');
+      }
+    }
+
+    return order;
   }
 
   /// Update order status

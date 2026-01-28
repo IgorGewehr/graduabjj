@@ -318,25 +318,30 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
 
       final attendanceService = AttendanceService(currentUser!.academyId!);
 
-      for (final student in filteredStudents) {
-        if (!_presentStudentIds.contains(student.id)) {
-          await attendanceService.markPresent(
-            studentId: student.id,
-            studentName: student.fullName,
-            classId: _selectedClass!.id,
-            className: _selectedClass!.name,
-            verifiedBy: 'admin',
-            verifiedByName: 'Administrador',
-            date: _selectedDate,
-          );
-          _presentStudentIds.add(student.id);
-        }
-      }
+      // Filter students not already marked present
+      final studentsToMark = filteredStudents
+          .where((s) => !_presentStudentIds.contains(s.id))
+          .toList();
 
+      // Execute all operations in parallel for better performance
+      await Future.wait(
+        studentsToMark.map((student) => attendanceService.markPresent(
+          studentId: student.id,
+          studentName: student.fullName,
+          classId: _selectedClass!.id,
+          className: _selectedClass!.name,
+          verifiedBy: 'admin',
+          verifiedByName: 'Administrador',
+          date: _selectedDate,
+        )),
+      );
+
+      // Update local state
+      _presentStudentIds.addAll(studentsToMark.map((s) => s.id));
       setState(() {});
 
       if (mounted) {
-        context.showSuccess('${filteredStudents.length} alunos marcados!');
+        context.showSuccess('${studentsToMark.length} alunos marcados!');
       }
     } catch (e) {
       if (mounted) {
@@ -381,14 +386,16 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       if (currentUser?.academyId == null) return;
 
       final attendanceService = AttendanceService(currentUser!.academyId!);
+      final studentIdsToRemove = _presentStudentIds.toList();
 
-      for (final studentId in _presentStudentIds.toList()) {
-        await attendanceService.unmarkPresent(
+      // Execute all operations in parallel for better performance
+      await Future.wait(
+        studentIdsToRemove.map((studentId) => attendanceService.unmarkPresent(
           studentId,
           _selectedClass!.id,
           _selectedDate,
-        );
-      }
+        )),
+      );
 
       setState(() {
         _presentStudentIds.clear();
