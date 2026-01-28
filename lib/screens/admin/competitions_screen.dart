@@ -6,6 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 
 /// Admin Competitions Screen - Fintech style matching webapp
@@ -21,20 +22,38 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
   List<Competition> _pastCompetitions = [];
   bool _isLoading = true;
   int _selectedTabIndex = 0;
+  String? _academyId;
 
   final _tabs = ['Proximos', 'Passados'];
 
   @override
   void initState() {
     super.initState();
-    _loadCompetitions();
+    // Load will be triggered by didChangeDependencies when user is ready
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadCompetitionsIfReady();
+  }
+
+  void _loadCompetitionsIfReady() {
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser?.academyId != null && _academyId != currentUser!.academyId) {
+      _academyId = currentUser.academyId;
+      _loadCompetitions();
+    }
   }
 
   Future<void> _loadCompetitions() async {
+    final academyId = _academyId;
+    if (academyId == null) return;
+
     setState(() => _isLoading = true);
 
     try {
-      final service = CompetitionService(FirebaseService.academyId);
+      final service = CompetitionService(academyId);
       final upcoming = await service.getUpcoming();
       final all = await service.list();
       final now = DateTime.now();
@@ -55,6 +74,17 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
 
   @override
   Widget build(BuildContext context) {
+    // Watch user provider to trigger loading when user data is available
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    if (currentUser?.academyId != null && _academyId != currentUser!.academyId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _academyId = currentUser.academyId;
+          _loadCompetitions();
+        }
+      });
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: RefreshIndicator(
@@ -408,7 +438,11 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                         Navigator.pop(sheetContext);
 
                         try {
-                          final service = CompetitionService(FirebaseService.academyId);
+                          if (_academyId == null) {
+                            sheetContext.showError('Academia nao encontrada');
+                            return;
+                          }
+                          final service = CompetitionService(_academyId!);
                           await service.create(
                             name: nameController.text,
                             date: selectedDate!,
@@ -589,7 +623,11 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                         Navigator.pop(sheetContext);
 
                         try {
-                          final service = CompetitionService(FirebaseService.academyId);
+                          if (_academyId == null) {
+                            sheetContext.showError('Academia nao encontrada');
+                            return;
+                          }
+                          final service = CompetitionService(_academyId!);
                           await service.update(competition.id, {
                             'name': nameController.text,
                             'date': selectedDate,
@@ -832,7 +870,8 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
   }
 
   void _showEnrollmentsSheet(Competition competition) async {
-    final enrollmentService = CompetitionEnrollmentService(FirebaseService.academyId);
+    if (_academyId == null) return;
+    final enrollmentService = CompetitionEnrollmentService(_academyId!);
     final enrollments = await enrollmentService.getByCompetition(competition.id);
 
     if (!mounted) return;
@@ -1013,7 +1052,8 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
   }
 
   void _showAddEnrollmentSheet(Competition competition) async {
-    final studentService = StudentService(FirebaseService.academyId);
+    if (_academyId == null) return;
+    final studentService = StudentService(_academyId!);
     final students = await studentService.getActive();
 
     if (!mounted) return;
@@ -1134,7 +1174,11 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                         Navigator.pop(sheetContext);
 
                         try {
-                          final service = CompetitionEnrollmentService(FirebaseService.academyId);
+                          if (_academyId == null) {
+                            sheetContext.showError('Academia nao encontrada');
+                            return;
+                          }
+                          final service = CompetitionEnrollmentService(_academyId!);
                           await service.enroll(
                             competitionId: competition.id,
                             competitionName: competition.name,
@@ -1252,7 +1296,11 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                       Navigator.pop(context);
 
                       try {
-                        final service = CompetitionService(FirebaseService.academyId);
+                        if (_academyId == null) {
+                          this.context.showError('Academia nao encontrada');
+                          return;
+                        }
+                        final service = CompetitionService(_academyId!);
                         await service.delete(competition.id);
 
                         if (mounted) {
