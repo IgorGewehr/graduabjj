@@ -127,7 +127,7 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                         padding: const EdgeInsets.only(bottom: 12),
                         child: _OrderCard(
                           order: orders[index],
-                          onTap: () => _showOrderDetails(context, orders[index]),
+                          onTap: () => _showOrderDetails(context, orders[index], isAdminView: isAdminOrInstructor),
                           showStudentName: isAdminOrInstructor,
                         ),
                       ),
@@ -185,12 +185,12 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
     );
   }
 
-  void _showOrderDetails(BuildContext context, StoreOrder order) {
+  void _showOrderDetails(BuildContext context, StoreOrder order, {bool isAdminView = false}) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _OrderDetailsSheet(order: order),
+      builder: (context) => _OrderDetailsSheet(order: order, isAdminView: isAdminView),
     );
   }
 }
@@ -499,8 +499,9 @@ class _OrderCardSkeleton extends StatelessWidget {
 /// Order Details Bottom Sheet
 class _OrderDetailsSheet extends ConsumerStatefulWidget {
   final StoreOrder order;
+  final bool isAdminView;
 
-  const _OrderDetailsSheet({required this.order});
+  const _OrderDetailsSheet({required this.order, this.isAdminView = false});
 
   @override
   ConsumerState<_OrderDetailsSheet> createState() => _OrderDetailsSheetState();
@@ -508,6 +509,57 @@ class _OrderDetailsSheet extends ConsumerStatefulWidget {
 
 class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
   bool _isLoadingPayment = false;
+  bool _isUpdatingStatus = false;
+
+  Future<void> _updateStatus(StoreOrderStatus newStatus) async {
+    final academyId = FirebaseService.academyId;
+    if (academyId == null) return;
+
+    setState(() => _isUpdatingStatus = true);
+
+    try {
+      final storeService = StoreService(academyId);
+      await storeService.updateOrderStatus(widget.order.id, newStatus);
+      if (mounted) {
+        Navigator.pop(context);
+        context.showSuccess('Status atualizado!');
+        ref.invalidate(ordersProvider);
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showError('Erro ao atualizar status: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingStatus = false);
+      }
+    }
+  }
+
+  Future<void> _cancelOrder() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancelar Pedido'),
+        content: const Text('Tem certeza que deseja cancelar este pedido?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Nao'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            child: const Text('Sim, Cancelar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _updateStatus(StoreOrderStatus.cancelled);
+    }
+  }
 
   Color _getStatusColor() {
     switch (widget.order.status) {
@@ -605,6 +657,68 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
     );
   }
 
+  Widget _buildAdminActionButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onPressed,
+    bool outlined = false,
+  }) {
+    if (outlined) {
+      return SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: _isUpdatingStatus ? null : onPressed,
+          icon: _isUpdatingStatus
+              ? SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: color,
+                  ),
+                )
+              : Icon(icon, color: color),
+          label: Text(label),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            foregroundColor: color,
+            side: BorderSide(color: color.withValues(alpha: 0.5)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _isUpdatingStatus ? null : onPressed,
+        icon: _isUpdatingStatus
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : Icon(icon),
+        label: Text(label),
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
@@ -637,36 +751,33 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
             Padding(
               padding: const EdgeInsets.all(20),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Text(
-                              'Pedido #${order.id.substring(order.id.length - 6).toUpperCase()}',
-                              style: AppTheme.headlineSmall,
+                        Text(
+                          'Pedido #${order.id.substring(order.id.length - 6).toUpperCase()}',
+                          style: AppTheme.headlineSmall,
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: statusColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            order.status.label,
+                            style: AppTheme.labelMedium.copyWith(
+                              color: statusColor,
+                              fontWeight: FontWeight.w600,
                             ),
-                            const SizedBox(width: 12),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: statusColor.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                order.status.label,
-                                style: AppTheme.labelMedium.copyWith(
-                                  color: statusColor,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -795,8 +906,119 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                       const SizedBox(height: 8),
                       Text(order.notes!),
                     ],
-                    // Payment Buttons for pending orders
-                    if (order.status == StoreOrderStatus.pendingPayment) ...[
+
+                    // ADMIN VIEW: Customer info and status actions
+                    if (widget.isAdminView) ...[
+                      const SizedBox(height: 24),
+                      // Customer Info
+                      Text(
+                        'Cliente',
+                        style: AppTheme.titleSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceVariant,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              child: const Icon(
+                                LucideIcons.user,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    order.studentName,
+                                    style: AppTheme.titleSmall.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  if (order.studentId.isNotEmpty)
+                                    Text(
+                                      'ID: ${order.studentId.substring(0, order.studentId.length.clamp(0, 8))}...',
+                                      style: AppTheme.bodySmall.copyWith(
+                                        color: AppTheme.textSecondary,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Status Actions for Admin
+                      if (order.status != StoreOrderStatus.delivered &&
+                          order.status != StoreOrderStatus.cancelled) ...[
+                        const SizedBox(height: 24),
+                        Text(
+                          'Acoes',
+                          style: AppTheme.titleSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Next status button based on current status
+                        if (order.status == StoreOrderStatus.pendingPayment)
+                          _buildAdminActionButton(
+                            label: 'Marcar como Pago',
+                            icon: LucideIcons.checkCircle,
+                            color: Colors.green,
+                            onPressed: () => _updateStatus(StoreOrderStatus.paid),
+                          ),
+                        if (order.status == StoreOrderStatus.paid)
+                          _buildAdminActionButton(
+                            label: 'Iniciar Preparo',
+                            icon: LucideIcons.package,
+                            color: Colors.purple,
+                            onPressed: () => _updateStatus(StoreOrderStatus.preparing),
+                          ),
+                        if (order.status == StoreOrderStatus.preparing)
+                          _buildAdminActionButton(
+                            label: 'Marcar como Pronto',
+                            icon: LucideIcons.packageCheck,
+                            color: Colors.green,
+                            onPressed: () => _updateStatus(StoreOrderStatus.ready),
+                          ),
+                        if (order.status == StoreOrderStatus.ready)
+                          _buildAdminActionButton(
+                            label: 'Marcar como Entregue',
+                            icon: LucideIcons.truck,
+                            color: Colors.blue,
+                            onPressed: () => _updateStatus(StoreOrderStatus.delivered),
+                          ),
+
+                        const SizedBox(height: 12),
+                        // Cancel button
+                        _buildAdminActionButton(
+                          label: 'Cancelar Pedido',
+                          icon: LucideIcons.xCircle,
+                          color: AppTheme.error,
+                          outlined: true,
+                          onPressed: _cancelOrder,
+                        ),
+                      ],
+                    ]
+
+                    // STUDENT VIEW: Payment Buttons for pending orders
+                    else if (order.status == StoreOrderStatus.pendingPayment) ...[
                       const SizedBox(height: 24),
                       Text(
                         'Formas de Pagamento',
