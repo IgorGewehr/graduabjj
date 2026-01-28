@@ -45,6 +45,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _abacatePayEnabled = false;
   bool _storeEnabled = false;
   bool _storePublished = false;
+  bool _storeCreditCardEnabled = false;
   bool _studentCheckinEnabled = false;
 
   // Monitors
@@ -104,6 +105,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _abacatePayEnabled = settings.abacatePayEnabled;
           _storeEnabled = settings.storeEnabled;
           _storePublished = settings.storePublished;
+          _storeCreditCardEnabled = settings.storeCreditCardEnabled;
           _studentCheckinEnabled = settings.studentCheckinEnabled;
           _monitorIds = settings.monitorIds;
         });
@@ -215,6 +217,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       await service.updateStoreSettings(
         enabled: _storeEnabled,
         published: _storePublished,
+        creditCardEnabled: _storeCreditCardEnabled,
         welcomeMessage: _storeWelcomeController.text.isEmpty
             ? null
             : _storeWelcomeController.text,
@@ -1017,6 +1020,17 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                     hint: '0.00',
                     icon: LucideIcons.dollarSign,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                  const SizedBox(height: 16),
+                  _ModernSwitch(
+                    title: 'Permitir Cartao de Credito',
+                    subtitle: 'Habilitar pagamento via cartao na loja',
+                    value: _storeCreditCardEnabled,
+                    onChanged: (value) {
+                      setState(() => _storeCreditCardEnabled = value);
+                    },
+                    icon: LucideIcons.creditCard,
+                    iconColor: AppTheme.info,
                   ),
                 ],
               ],

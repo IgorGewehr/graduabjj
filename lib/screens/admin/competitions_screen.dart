@@ -24,6 +24,10 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
   int _selectedTabIndex = 0;
   String? _academyId;
 
+  // Stats carousel
+  final _statsPageController = PageController(viewportFraction: 0.85);
+  int _currentStatsPage = 0;
+
   final _tabs = ['Proximos', 'Passados'];
 
   @override
@@ -179,6 +183,7 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
 
   Widget _buildStatsCards() {
     final totalUpcoming = _upcomingCompetitions.length;
+    final totalPast = _pastCompetitions.length;
     final totalEnrollments = _upcomingCompetitions.fold<int>(
       0,
       (sum, c) => sum + c.enrolledCount,
@@ -187,38 +192,81 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
         ? _upcomingCompetitions.first.date.difference(DateTime.now()).inDays
         : null;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        children: [
-          Expanded(
-            child: _StatCard(
-              label: 'Proximos',
-              value: totalUpcoming.toString(),
-              icon: LucideIcons.trophy,
-              color: AppTheme.warning,
-            ),
+    return Column(
+      children: [
+        SizedBox(
+          height: 100,
+          child: PageView.builder(
+            controller: _statsPageController,
+            onPageChanged: (page) {
+              setState(() => _currentStatsPage = page);
+            },
+            itemCount: 4,
+            itemBuilder: (context, index) {
+              final cards = [
+                _StatsCarouselCard(
+                  icon: LucideIcons.trophy,
+                  iconBgColor: AppTheme.warning.withValues(alpha: 0.1),
+                  iconColor: AppTheme.warning,
+                  label: 'Proximos',
+                  value: totalUpcoming.toString(),
+                  subtitle: 'campeonatos',
+                ),
+                _StatsCarouselCard(
+                  icon: LucideIcons.users,
+                  iconBgColor: AppTheme.success.withValues(alpha: 0.1),
+                  iconColor: AppTheme.success,
+                  label: 'Inscricoes',
+                  value: totalEnrollments.toString(),
+                  subtitle: 'atletas inscritos',
+                ),
+                _StatsCarouselCard(
+                  icon: LucideIcons.calendar,
+                  iconBgColor: AppTheme.primary.withValues(alpha: 0.1),
+                  iconColor: AppTheme.primary,
+                  label: 'Proximo em',
+                  value: nextCompetition != null ? '$nextCompetition' : '-',
+                  subtitle: nextCompetition != null ? 'dias' : 'nenhum proximo',
+                ),
+                _StatsCarouselCard(
+                  icon: LucideIcons.checkCircle,
+                  iconBgColor: AppTheme.textSecondary.withValues(alpha: 0.1),
+                  iconColor: AppTheme.textSecondary,
+                  label: 'Finalizados',
+                  value: totalPast.toString(),
+                  subtitle: 'campeonatos',
+                ),
+              ];
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: cards[index],
+              );
+            },
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _StatCard(
-              label: 'Inscricoes',
-              value: totalEnrollments.toString(),
-              icon: LucideIcons.users,
-              color: AppTheme.success,
-            ),
+        ),
+        const SizedBox(height: 12),
+        // Dot indicators
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(
+            4,
+            (index) {
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                width: _currentStatsPage == index ? 20 : 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: _currentStatsPage == index
+                      ? AppTheme.textPrimary
+                      : AppTheme.divider,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              );
+            },
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _StatCard(
-              label: 'Dias',
-              value: nextCompetition?.toString() ?? '-',
-              icon: LucideIcons.calendar,
-              color: AppTheme.primary,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -1381,6 +1429,82 @@ class _StatCard extends StatelessWidget {
             label,
             style: AppTheme.labelSmall.copyWith(
               color: AppTheme.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Stats Carousel Card Widget (for horizontal scrolling stats)
+class _StatsCarouselCard extends StatelessWidget {
+  final IconData icon;
+  final Color? iconBgColor;
+  final Color? iconColor;
+  final String label;
+  final String value;
+  final String subtitle;
+
+  const _StatsCarouselCard({
+    required this.icon,
+    this.iconBgColor,
+    this.iconColor,
+    required this.label,
+    required this.value,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: iconBgColor ?? AppTheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              icon,
+              color: iconColor ?? AppTheme.textPrimary,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  label,
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: AppTheme.headlineSmall.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

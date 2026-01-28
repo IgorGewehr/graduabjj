@@ -788,7 +788,7 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                         : null,
                     icon: const Icon(LucideIcons.shoppingCart),
                     label: Text(
-                      'Adicionar R\$ ${(product.price * _quantity).toStringAsFixed(2)}',
+                      'Adicionar R\$ ${(product.priceInReais * _quantity).toStringAsFixed(2)}',
                     ),
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),

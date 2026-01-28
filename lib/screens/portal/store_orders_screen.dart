@@ -714,13 +714,13 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
                                   Text(
-                                    'R\$ ${item.subtotal.toStringAsFixed(2)}',
+                                    item.formattedSubtotal,
                                     style: AppTheme.bodyMedium.copyWith(
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                   Text(
-                                    '${item.quantity}x R\$ ${item.price.toStringAsFixed(2)}',
+                                    '${item.quantity}x ${item.formattedPrice}',
                                     style: AppTheme.labelSmall.copyWith(
                                       color: AppTheme.textSecondary,
                                     ),
@@ -1187,7 +1187,7 @@ class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
                     ),
                   ),
                   Text(
-                    'R\$ ${widget.amount.toStringAsFixed(2)}',
+                    'R\$ ${(widget.amount / 100).toStringAsFixed(2)}',
                     style: AppTheme.headlineMedium.copyWith(
                       color: AppTheme.primary,
                       fontWeight: FontWeight.w700,
@@ -1574,7 +1574,7 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
                           ),
                         ),
                         Text(
-                          'R\$ ${widget.amount.toStringAsFixed(2)}',
+                          'R\$ ${(widget.amount / 100).toStringAsFixed(2)}',
                           style: AppTheme.titleMedium.copyWith(
                             color: AppTheme.primary,
                             fontWeight: FontWeight.w600,

@@ -89,6 +89,7 @@ class AcademySettings {
   // Store Settings
   final bool storeEnabled;
   final bool storePublished;
+  final bool storeCreditCardEnabled;
   final String? storeWelcomeMessage;
   final double? storeMinOrderAmount;
 
@@ -123,6 +124,7 @@ class AcademySettings {
     this.autoGraduationAttendances,
     this.storeEnabled = false,
     this.storePublished = false,
+    this.storeCreditCardEnabled = false,
     this.storeWelcomeMessage,
     this.storeMinOrderAmount,
     this.studentCheckinEnabled = false,
@@ -157,6 +159,7 @@ class AcademySettings {
       autoGraduationAttendances: data['autoGraduationAttendances'],
       storeEnabled: data['storeEnabled'] ?? false,
       storePublished: data['storePublished'] ?? false,
+      storeCreditCardEnabled: data['storeCreditCardEnabled'] ?? false,
       storeWelcomeMessage: data['storeWelcomeMessage'],
       storeMinOrderAmount: data['storeMinOrderAmount']?.toDouble(),
       studentCheckinEnabled: data['studentCheckinEnabled'] ?? false,
@@ -339,6 +342,7 @@ class SettingsService {
   Future<void> updateStoreSettings({
     bool? enabled,
     bool? published,
+    bool? creditCardEnabled,
     String? welcomeMessage,
     double? minOrderAmount,
   }) async {
@@ -347,6 +351,7 @@ class SettingsService {
     };
     if (enabled != null) data['storeEnabled'] = enabled;
     if (published != null) data['storePublished'] = published;
+    if (creditCardEnabled != null) data['storeCreditCardEnabled'] = creditCardEnabled;
     if (welcomeMessage != null) data['storeWelcomeMessage'] = welcomeMessage;
     if (minOrderAmount != null) data['storeMinOrderAmount'] = minOrderAmount;
 

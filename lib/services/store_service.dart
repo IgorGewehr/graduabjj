@@ -195,7 +195,11 @@ class StoreProduct {
   bool get isInStock =>
       stockType == StoreStockType.onDemand ||
       (stockQuantity != null && stockQuantity! > 0);
-  String get formattedPrice => 'R\$ ${price.toStringAsFixed(2)}';
+
+  /// Price in Reais (divide by 100 since stored in centavos)
+  double get priceInReais => price / 100;
+
+  String get formattedPrice => 'R\$ ${priceInReais.toStringAsFixed(2)}';
   String? get mainImageUrl => imageUrls.isNotEmpty ? imageUrls.first : null;
 }
 
@@ -203,7 +207,7 @@ class StoreProduct {
 class StoreOrderItem {
   final String productId;
   final String productName;
-  final double price;
+  final double price; // Price in centavos
   final int quantity;
   final String? size;
   final String? color;
@@ -221,7 +225,7 @@ class StoreOrderItem {
     return StoreOrderItem(
       productId: map['productId'] ?? '',
       productName: map['productName'] ?? '',
-      price: (map['price'] ?? 0).toDouble(),
+      price: (map['price'] ?? map['unitPrice'] ?? 0).toDouble(), // Support both 'price' and 'unitPrice' field names
       quantity: map['quantity'] ?? 1,
       size: map['size'],
       color: map['color'],
@@ -239,7 +243,20 @@ class StoreOrderItem {
     };
   }
 
+  /// Price in Reais (divide by 100 since stored in centavos)
+  double get priceInReais => price / 100;
+
+  /// Subtotal in centavos
   double get subtotal => price * quantity;
+
+  /// Subtotal in Reais
+  double get subtotalInReais => subtotal / 100;
+
+  /// Formatted price in Reais
+  String get formattedPrice => 'R\$ ${priceInReais.toStringAsFixed(2)}';
+
+  /// Formatted subtotal in Reais
+  String get formattedSubtotal => 'R\$ ${subtotalInReais.toStringAsFixed(2)}';
 }
 
 /// Store Order Model
@@ -306,7 +323,11 @@ class StoreOrder {
 
   // Computed properties
   int get itemCount => items.fold(0, (acc, item) => acc + item.quantity);
-  String get formattedTotal => 'R\$ ${total.toStringAsFixed(2)}';
+
+  /// Total in Reais (divide by 100 since stored in centavos)
+  double get totalInReais => total / 100;
+
+  String get formattedTotal => 'R\$ ${totalInReais.toStringAsFixed(2)}';
   bool get isPending => status == StoreOrderStatus.pendingPayment;
   bool get isPaid => status == StoreOrderStatus.paid ||
       status == StoreOrderStatus.preparing ||

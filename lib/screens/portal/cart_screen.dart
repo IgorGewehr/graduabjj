@@ -112,7 +112,7 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                                 ),
                               ),
                               Text(
-                                'R\$ ${cartNotifier.total.toStringAsFixed(2)}',
+                                cartNotifier.formattedTotal,
                                 style: AppTheme.bodyMedium,
                               ),
                             ],
@@ -128,7 +128,7 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                                 ),
                               ),
                               Text(
-                                'R\$ ${cartNotifier.total.toStringAsFixed(2)}',
+                                cartNotifier.formattedTotal,
                                 style: AppTheme.headlineSmall.copyWith(
                                   color: AppTheme.primary,
                                   fontWeight: FontWeight.w700,
@@ -344,7 +344,7 @@ class _CartItemCard extends StatelessWidget {
                 ],
                 const SizedBox(height: 8),
                 Text(
-                  'R\$ ${item.price.toStringAsFixed(2)} cada',
+                  '${item.formattedPrice} cada',
                   style: AppTheme.bodySmall.copyWith(
                     color: AppTheme.primary,
                   ),
@@ -406,7 +406,7 @@ class _CartItemCard extends StatelessWidget {
               const SizedBox(height: 8),
               // Subtotal
               Text(
-                'R\$ ${item.subtotal.toStringAsFixed(2)}',
+                item.formattedSubtotal,
                 style: AppTheme.titleSmall.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
