@@ -1,46 +1,56 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/store_service.dart';
-import '../services/firebase_service.dart';
+import 'auth_provider.dart';
 
-/// Store Service Provider
-final storeServiceProvider = Provider<StoreService>((ref) {
-  return StoreService(FirebaseService.academyId);
+/// Store Service Provider - uses current user's academyId for multi-tenant support
+final storeServiceProvider = Provider<StoreService?>((ref) {
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+
+  if (currentUser?.academyId == null) return null;
+
+  return StoreService(currentUser!.academyId!);
 });
 
 /// Products Provider
 final productsProvider = FutureProvider<List<StoreProduct>>((ref) async {
   final service = ref.watch(storeServiceProvider);
+  if (service == null) return [];
   return service.getProducts();
 });
 
 /// Active Products Provider (for portal)
 final activeProductsProvider = FutureProvider<List<StoreProduct>>((ref) async {
   final service = ref.watch(storeServiceProvider);
+  if (service == null) return [];
   return service.getActiveProducts();
 });
 
 /// Orders Provider (Real-time Stream)
 final ordersProvider = StreamProvider<List<StoreOrder>>((ref) {
   final service = ref.watch(storeServiceProvider);
+  if (service == null) return const Stream.empty();
   return service.streamOrders();
 });
 
 /// Student Orders Provider (Real-time Stream)
 final studentOrdersProvider = StreamProvider.family<List<StoreOrder>, String>((ref, studentId) {
   final service = ref.watch(storeServiceProvider);
+  if (service == null) return const Stream.empty();
   return service.streamOrdersByStudent(studentId);
 });
 
 /// Pending Orders Provider (Real-time Stream)
 final pendingOrdersProvider = StreamProvider<List<StoreOrder>>((ref) {
   final service = ref.watch(storeServiceProvider);
+  if (service == null) return const Stream.empty();
   return service.streamPendingOrders();
 });
 
 /// Store Stats Provider
 final storeStatsProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   final service = ref.watch(storeServiceProvider);
+  if (service == null) return {};
   return service.getOrderStats();
 });
 
