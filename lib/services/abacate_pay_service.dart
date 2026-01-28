@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/constants.dart';
 import 'firebase_service.dart';
 
 /// Payment Link Response
@@ -83,12 +84,8 @@ class CardData {
 class AbacatePayService {
   final String academyId;
 
-  // Base URL for the API - configured via dart-define at build time
-  // flutter build appbundle --dart-define=API_BASE_URL=https://your-app.vercel.app/api
-  static const String _baseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'https://marcusjj.vercel.app/api', // Update with your production URL
-  );
+  // Base URL for the API - uses AppConstants which is configured via dart-define
+  static String get _baseUrl => AppConstants.apiBaseUrl;
 
   AbacatePayService(this.academyId);
 

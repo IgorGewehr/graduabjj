@@ -1,5 +1,5 @@
 /// App Constants
-/// Constantes globais do aplicativo GraduaBJJ
+/// Constantes globais do aplicativo BJJEasy
 
 class AppConstants {
   AppConstants._();
@@ -7,8 +7,22 @@ class AppConstants {
   // ===========================================
   // App Info
   // ===========================================
-  static const String appName = 'GraduaBJJ';
+  static const String appName = 'BJJEasy';
   static const String appVersion = '1.0.0';
+
+  // ===========================================
+  // URLs - configured via dart-define at build time
+  // flutter build appbundle --dart-define=APP_BASE_URL=https://bjjeasy.netlify.app
+  // ===========================================
+  static const String appBaseUrl = String.fromEnvironment(
+    'APP_BASE_URL',
+    defaultValue: 'https://bjjeasy.netlify.app',
+  );
+
+  static const String apiBaseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://bjjeasy.netlify.app/api',
+  );
 
   // ===========================================
   // Firebase Collections
