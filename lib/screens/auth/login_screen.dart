@@ -89,30 +89,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   // Logo
                   Image.asset(
                     'assets/images/bjjeasy_logo.png',
-                    width: 120,
-                    height: 120,
+                    width: 180,
+                    height: 180,
                   ).animate().fadeIn(duration: 300.ms).scale(
                         begin: const Offset(0.8, 0.8),
                       ),
-
-                  const SizedBox(height: 24),
-
-                  // Title
-                  Text(
-                    'Bem-vindo de volta',
-                    style: AppTheme.displaySmall,
-                    textAlign: TextAlign.center,
-                  ).animate().fadeIn(delay: 100.ms),
-
-                  const SizedBox(height: 8),
-
-                  Text(
-                    'Entre com sua conta para continuar',
-                    style: AppTheme.bodyMedium.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                    textAlign: TextAlign.center,
-                  ).animate().fadeIn(delay: 200.ms),
 
                   const SizedBox(height: 40),
 
@@ -153,8 +134,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
                     decoration: const InputDecoration(
-                      labelText: 'Email',
-                      hintText: 'seu@email.com',
+                      hintText: 'Email',
                       prefixIcon: Icon(LucideIcons.mail, size: 20),
                     ),
                     validator: (value) {
@@ -177,8 +157,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     textInputAction: TextInputAction.done,
                     onFieldSubmitted: (_) => _handleLogin(),
                     decoration: InputDecoration(
-                      labelText: 'Senha',
-                      hintText: '******',
+                      hintText: 'Senha',
                       prefixIcon: const Icon(LucideIcons.lock, size: 20),
                       suffixIcon: IconButton(
                         icon: Icon(
