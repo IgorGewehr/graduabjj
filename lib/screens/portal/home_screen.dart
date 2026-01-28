@@ -6,6 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
+import '../../services/checkin_service.dart';
 import '../../widgets/common/belt_badge.dart';
 
 /// Home Screen - Portal do Aluno (New Layout)
@@ -427,6 +428,9 @@ class _DynamicCardsSection extends ConsumerWidget {
     final streakAsync = ref.watch(studentStreakProvider(studentId));
     final monthlyAttendanceAsync = ref.watch(studentMonthlyAttendanceProvider(studentId));
     final upcomingCompetitionsAsync = ref.watch(upcomingCompetitionsProvider);
+    final settingsAsync = ref.watch(academySettingsProvider);
+
+    final checkinEnabled = settingsAsync.valueOrNull?.studentCheckinEnabled ?? false;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -439,13 +443,28 @@ class _DynamicCardsSection extends ConsumerWidget {
                 className: null,
                 schedule: null,
                 nextDate: null,
+                checkinEnabled: false,
+                canCheckin: false,
                 onTap: () => onTap('/portal/horarios'),
               );
             }
+
+            // Check if within check-in window
+            final canCheckin = checkinEnabled &&
+                data.nextDate != null &&
+                data.schedule != null &&
+                isInCheckinWindow(
+                  startTime: data.schedule!.startTime,
+                  endTime: data.schedule!.endTime,
+                  date: data.nextDate!,
+                );
+
             return _NextClassCard(
               className: data.classInfo!.name,
               schedule: data.schedule,
               nextDate: data.nextDate,
+              checkinEnabled: checkinEnabled,
+              canCheckin: canCheckin,
               onTap: () => onTap('/portal/horarios'),
             );
           },
@@ -454,12 +473,16 @@ class _DynamicCardsSection extends ConsumerWidget {
             schedule: null,
             nextDate: null,
             isLoading: true,
+            checkinEnabled: false,
+            canCheckin: false,
             onTap: () => onTap('/portal/horarios'),
           ),
           error: (_, __) => _NextClassCard(
             className: null,
             schedule: null,
             nextDate: null,
+            checkinEnabled: false,
+            canCheckin: false,
             onTap: () => onTap('/portal/horarios'),
           ),
         ),
@@ -539,6 +562,8 @@ class _NextClassCard extends StatelessWidget {
   final dynamic schedule;
   final DateTime? nextDate;
   final bool isLoading;
+  final bool checkinEnabled;
+  final bool canCheckin;
   final VoidCallback onTap;
 
   const _NextClassCard({
@@ -546,6 +571,8 @@ class _NextClassCard extends StatelessWidget {
     required this.schedule,
     required this.nextDate,
     this.isLoading = false,
+    required this.checkinEnabled,
+    required this.canCheckin,
     required this.onTap,
   });
 
@@ -573,9 +600,11 @@ class _NextClassCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasClass = className != null && !isLoading;
+    // Use success color when check-in is available
+    final cardColor = canCheckin ? AppTheme.success : (hasClass ? AppTheme.textPrimary : AppTheme.surface);
 
     return Material(
-      color: hasClass ? AppTheme.textPrimary : AppTheme.surface,
+      color: cardColor,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: onTap,
@@ -598,7 +627,7 @@ class _NextClassCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(
-                  LucideIcons.calendar,
+                  canCheckin ? LucideIcons.userCheck : LucideIcons.calendar,
                   size: 28,
                   color: hasClass ? Colors.white : AppTheme.primary,
                 ),
@@ -609,7 +638,7 @@ class _NextClassCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'PROXIMA AULA',
+                      canCheckin ? 'CHECK-IN DISPONIVEL' : 'PROXIMA AULA',
                       style: AppTheme.labelSmall.copyWith(
                         color: hasClass
                             ? Colors.white.withValues(alpha: 0.7)
@@ -652,11 +681,38 @@ class _NextClassCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(
-                LucideIcons.chevronRight,
-                size: 20,
-                color: hasClass ? Colors.white.withValues(alpha: 0.5) : AppTheme.textSecondary,
-              ),
+              if (canCheckin)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Fazer Check-in',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(
+                        LucideIcons.chevronRight,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Icon(
+                  LucideIcons.chevronRight,
+                  size: 20,
+                  color: hasClass ? Colors.white.withValues(alpha: 0.5) : AppTheme.textSecondary,
+                ),
             ],
           ),
         ),
