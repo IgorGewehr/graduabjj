@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
@@ -44,6 +45,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _abacatePayEnabled = false;
   bool _storeEnabled = false;
   bool _storePublished = false;
+  bool _studentCheckinEnabled = false;
 
   // Monitors
   List<String> _monitorIds = [];
@@ -102,6 +104,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _abacatePayEnabled = settings.abacatePayEnabled;
           _storeEnabled = settings.storeEnabled;
           _storePublished = settings.storePublished;
+          _studentCheckinEnabled = settings.studentCheckinEnabled;
           _monitorIds = settings.monitorIds;
         });
       }
@@ -148,25 +151,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       });
       ref.invalidate(academySettingsProvider);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(LucideIcons.check, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                const Text('Monitor adicionado!'),
-              ],
-            ),
-            backgroundColor: AppTheme.success,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        context.showSuccess('Monitor adicionado!');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e'), backgroundColor: AppTheme.error),
-        );
+        context.showError('Erro: $e');
       }
     } finally {
       setState(() => _isLoadingMonitors = false);
@@ -183,25 +172,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       });
       ref.invalidate(academySettingsProvider);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(LucideIcons.check, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                const Text('Monitor removido!'),
-              ],
-            ),
-            backgroundColor: AppTheme.success,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        context.showSuccess('Monitor removido!');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e'), backgroundColor: AppTheme.error),
-        );
+        context.showError('Erro: $e');
       }
     } finally {
       setState(() => _isLoadingMonitors = false);
@@ -251,34 +226,20 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       // Save AbacatePay settings
       await service.toggleAbacatePay(_abacatePayEnabled);
 
+      // Save student check-in settings
+      await service.toggleStudentCheckin(_studentCheckinEnabled);
+
       // Invalidate the settings provider to refresh UI across the app
       ref.invalidate(academySettingsProvider);
       ref.invalidate(academyNameProvider);
       ref.invalidate(pixInfoProvider);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(LucideIcons.check, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                const Text('Configuracoes salvas!'),
-              ],
-            ),
-            backgroundColor: AppTheme.success,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        context.showSuccess('Configuracoes salvas!');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro: $e'),
-            backgroundColor: AppTheme.error,
-          ),
-        );
+        context.showError('Erro: $e');
       }
     } finally {
       setState(() => _isSaving = false);
@@ -321,25 +282,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       await _loadSettings();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(LucideIcons.check, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                const Text('Logo atualizado!'),
-              ],
-            ),
-            backgroundColor: AppTheme.success,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        context.showSuccess('Logo atualizado!');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao fazer upload: $e')),
-        );
+        context.showError('Erro ao fazer upload: $e');
       }
     } finally {
       setState(() => _isSaving = false);
@@ -980,6 +927,52 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 8),
+
+          // Student Check-in Settings
+          _SettingsCard(
+            title: 'Check-in de Alunos',
+            icon: LucideIcons.userCheck,
+            child: Column(
+              children: [
+                _ModernSwitch(
+                  title: 'Habilitar Check-in',
+                  subtitle: 'Alunos podem marcar presenca pelo app',
+                  value: _studentCheckinEnabled,
+                  onChanged: (value) {
+                    setState(() => _studentCheckinEnabled = value);
+                  },
+                  icon: LucideIcons.userCheck,
+                  iconColor: AppTheme.success,
+                ),
+                if (_studentCheckinEnabled) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.info.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppTheme.info.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(LucideIcons.info, size: 18, color: AppTheme.info),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Alunos podem fazer check-in de 30 min antes ate 1h apos o fim da aula. O professor confirma as presencas na tela de chamada.',
+                            style: AppTheme.labelSmall.copyWith(color: AppTheme.info),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
 
           // Store Settings
           _SettingsCard(

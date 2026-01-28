@@ -232,6 +232,20 @@ class StudentService {
   }
 
   // ============================================
+  // Create Student from Map (for forms)
+  // ============================================
+  Future<Student> createFromMap(Map<String, dynamic> data, {String? createdBy}) async {
+    data['createdAt'] = FieldValue.serverTimestamp();
+    data['updatedAt'] = FieldValue.serverTimestamp();
+    data['createdBy'] = createdBy;
+    data['attendanceCount'] = data['attendanceCount'] ?? 0;
+
+    final docRef = await _studentsRef.add(data);
+    final doc = await docRef.get();
+    return Student.fromFirestore(doc);
+  }
+
+  // ============================================
   // Quick Create (minimal data)
   // ============================================
   Future<Student> quickCreate({

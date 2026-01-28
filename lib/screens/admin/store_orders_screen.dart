@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
@@ -299,15 +300,11 @@ class _AdminStoreOrdersScreenState
       ref.invalidate(ordersProvider);
       ref.invalidate(storeStatsProvider);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Status atualizado para ${status.label}')),
-        );
+        context.showSuccess('Status atualizado para ${status.label}');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao atualizar: $e')),
-        );
+        context.showError('Erro ao atualizar: $e');
       }
     }
   }

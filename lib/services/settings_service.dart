@@ -79,9 +79,8 @@ class AcademySettings {
   final String? pixKey;
   final PixKeyType? pixKeyType;
 
-  // AbacatePay Integration
+  // AbacatePay Integration (API key is global in backend env, not per-academy)
   final bool abacatePayEnabled;
-  final String? abacatePayApiKey;
 
   // Auto-graduation Settings
   final bool autoGraduationEnabled;
@@ -92,6 +91,9 @@ class AcademySettings {
   final bool storePublished;
   final String? storeWelcomeMessage;
   final double? storeMinOrderAmount;
+
+  // Student Check-in Settings
+  final bool studentCheckinEnabled;
 
   // Monitors (students with additional permissions)
   final List<String> monitorIds;
@@ -117,13 +119,13 @@ class AcademySettings {
     this.pixKey,
     this.pixKeyType,
     this.abacatePayEnabled = false,
-    this.abacatePayApiKey,
     this.autoGraduationEnabled = false,
     this.autoGraduationAttendances,
     this.storeEnabled = false,
     this.storePublished = false,
     this.storeWelcomeMessage,
     this.storeMinOrderAmount,
+    this.studentCheckinEnabled = false,
     this.monitorIds = const [],
     this.updatedAt,
   });
@@ -151,13 +153,13 @@ class AcademySettings {
           ? PixKeyTypeExtension.fromString(data['pixKeyType'])
           : null,
       abacatePayEnabled: data['abacatePayEnabled'] ?? false,
-      abacatePayApiKey: data['abacatePayApiKey'],
       autoGraduationEnabled: data['autoGraduationEnabled'] ?? false,
       autoGraduationAttendances: data['autoGraduationAttendances'],
       storeEnabled: data['storeEnabled'] ?? false,
       storePublished: data['storePublished'] ?? false,
       storeWelcomeMessage: data['storeWelcomeMessage'],
       storeMinOrderAmount: data['storeMinOrderAmount']?.toDouble(),
+      studentCheckinEnabled: data['studentCheckinEnabled'] ?? false,
       monitorIds: List<String>.from(data['monitorIds'] ?? []),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
@@ -297,16 +299,13 @@ class SettingsService {
 
   // ============================================
   // Toggle AbacatePay
+  // API key is global (in backend environment variable), not per-academy
   // ============================================
-  Future<void> toggleAbacatePay(bool enabled, {String? apiKey}) async {
-    final data = <String, dynamic>{
+  Future<void> toggleAbacatePay(bool enabled) async {
+    await _academyRef.update({
       'abacatePayEnabled': enabled,
       'updatedAt': FieldValue.serverTimestamp(),
-    };
-    if (apiKey != null) {
-      data['abacatePayApiKey'] = apiKey;
-    }
-    await _academyRef.update(data);
+    });
   }
 
   // ============================================
@@ -352,6 +351,16 @@ class SettingsService {
     if (minOrderAmount != null) data['storeMinOrderAmount'] = minOrderAmount;
 
     await _academyRef.update(data);
+  }
+
+  // ============================================
+  // Toggle Student Check-in
+  // ============================================
+  Future<void> toggleStudentCheckin(bool enabled) async {
+    await _academyRef.update({
+      'studentCheckinEnabled': enabled,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   // ============================================

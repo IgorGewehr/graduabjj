@@ -338,7 +338,7 @@ class _PortalShellState extends ConsumerState<PortalShell> {
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
             child: Row(
               children: List.generate(
                 _bottomNavItems.length,
@@ -389,17 +389,17 @@ class _BottomNavItem extends StatelessWidget {
         behavior: HitTestBehavior.opaque,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: 4),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               // Icon without background
               Icon(
                 item.icon,
-                size: 22,
+                size: 20,
                 color: isSelected ? AppTheme.textPrimary : AppTheme.textSecondary,
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               // Label
               Text(
                 item.label,
@@ -411,10 +411,10 @@ class _BottomNavItem extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 4),
-              // Dot indicator
+              // Dot indicator (smaller spacing)
               AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.only(top: 2),
                 width: 4,
                 height: 4,
                 decoration: BoxDecoration(

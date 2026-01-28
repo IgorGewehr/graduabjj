@@ -4,8 +4,11 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../core/validators.dart';
 import '../../services/firebase_service.dart';
+import '../../services/abacate_pay_service.dart';
 import '../../providers/providers.dart';
 
 /// Wallet Transaction model
@@ -38,15 +41,16 @@ class WalletTransaction {
   });
 
   factory WalletTransaction.fromPayment(Map<String, dynamic> map, String id) {
-    // Check for AbacatePay specific fields
     final isAbacatePay = map['externalId'] != null;
-    
+
     return WalletTransaction(
       id: id,
       type: 'payment',
       source: map['type'] ?? 'mensalidade',
       amount: (map['amount'] ?? map['value'] ?? 0).toDouble(),
-      status: map['paymentDate'] != null ? 'completed' : (map['status'] ?? 'pending'),
+      status: map['paymentDate'] != null
+          ? 'completed'
+          : (map['status'] ?? 'pending'),
       description: map['description'],
       studentName: map['studentName'],
       createdAt: map['createdAt']?.toDate() ?? DateTime.now(),
@@ -55,8 +59,8 @@ class WalletTransaction {
     );
   }
 
-  factory WalletTransaction.fromStoreOrder(Map<String, dynamic> map, String id) {
-    // Check for AbacatePay specific fields for store orders
+  factory WalletTransaction.fromStoreOrder(
+      Map<String, dynamic> map, String id) {
     final isAbacatePay = map['externalPaymentId'] != null;
 
     return WalletTransaction(
@@ -64,7 +68,9 @@ class WalletTransaction {
       type: 'store_sale',
       source: 'loja',
       amount: (map['total'] ?? 0).toDouble(),
-      status: map['status'] == 'delivered' || map['status'] == 'completed' ? 'completed' : 'pending',
+      status: map['status'] == 'delivered' || map['status'] == 'completed'
+          ? 'completed'
+          : 'pending',
       description: 'Venda na loja',
       studentName: map['studentName'],
       productName: (map['items'] as List?)?.isNotEmpty == true
@@ -152,20 +158,10 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   bool _isLoading = true;
   bool _isRefreshing = false;
 
-  // Carousel controller
-  final PageController _carouselController = PageController(viewportFraction: 0.85);
-  int _currentCardIndex = 0;
-
   @override
   void initState() {
     super.initState();
     _loadWalletData();
-  }
-
-  @override
-  void dispose() {
-    _carouselController.dispose();
-    super.dispose();
   }
 
   Future<void> _loadWalletData() async {
@@ -179,24 +175,22 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
       // Load payments (financials)
       final paymentsSnapshot = await academyRef.collection('financials').get();
       final payments = paymentsSnapshot.docs
-          .map((doc) => WalletTransaction.fromPayment(
-              doc.data(), doc.id))
+          .map((doc) => WalletTransaction.fromPayment(doc.data(), doc.id))
           .toList();
 
       // Load store orders
       final ordersSnapshot = await academyRef.collection('storeOrders').get();
       final orders = ordersSnapshot.docs
-          .map((doc) => WalletTransaction.fromStoreOrder(
-              doc.data(), doc.id))
+          .map((doc) => WalletTransaction.fromStoreOrder(doc.data(), doc.id))
           .toList();
 
       // Combine and sort all transactions
       final allTransactions = [...payments, ...orders];
-      
+
       // Filter for only AbacatePay transactions
-      // Only show transactions that have an external ID associated (AbacatePay)
-      final abacatePayTransactions = allTransactions.where((tx) => tx.isAbacatePay).toList();
-      
+      final abacatePayTransactions =
+          allTransactions.where((tx) => tx.isAbacatePay).toList();
+
       abacatePayTransactions.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
       // Calculate wallet balances based on filtered transactions
@@ -215,10 +209,10 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
 
       setState(() {
         _wallet = AcademyWallet(
-          availableBalance: totalReceived, // In a real scenario, subtract withdrawals
+          availableBalance: totalReceived,
           pendingBalance: pendingBalance,
           totalReceived: totalReceived,
-          totalWithdrawn: 0, // TODO: Load from withdrawals collection
+          totalWithdrawn: 0,
           transactionCount: abacatePayTransactions.length,
         );
         _transactions = abacatePayTransactions;
@@ -239,6 +233,9 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   }
 
   void _showWithdrawalSheet() {
+    final academyId = FirebaseService.academyId;
+    if (academyId == null) return;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -246,14 +243,21 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
       builder: (context) => _WithdrawalBottomSheet(
         maxAmount: _wallet?.availableBalance ?? 0,
         onWithdraw: (amount, pixKey, pixKeyType) async {
-          // TODO: Implement withdrawal
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Saque solicitado com sucesso!'),
-              backgroundColor: Colors.green,
-            ),
+          final service = AbacatePayService(academyId);
+          final result = await service.requestWithdrawal(
+            amountInCents: amount,
+            pixKey: pixKey,
+            pixKeyType: pixKeyType,
           );
+
+          if (!mounted) return;
+          Navigator.pop(context);
+
+          if (result.success) {
+            context.showSuccess('Saque solicitado com sucesso!');
+          } else {
+            context.showError(result.message ?? 'Erro ao solicitar saque');
+          }
           _handleRefresh();
         },
       ),
@@ -264,6 +268,8 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   Widget build(BuildContext context) {
     final settings = ref.watch(academySettingsProvider).valueOrNull;
     final isAbacatePayEnabled = settings?.abacatePayEnabled ?? false;
+    final currencyFormat =
+        NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
 
     if (!isAbacatePayEnabled) {
       return Scaffold(
@@ -321,126 +327,93 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
         onRefresh: _handleRefresh,
         child: CustomScrollView(
           slivers: [
-            // Header
+            // Main Balance Card with Gradient
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.all(20),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Carteira', style: AppTheme.headlineMedium),
-                          Text(
-                            'Gerencie seu saldo e transacoes',
-                            style: AppTheme.bodyMedium.copyWith(
-                              color: AppTheme.textSecondary,
+                  child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF09090B),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: Colors.white.withOpacity(0.05)),
+                  ),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'Saldo Disponivel',
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _isLoading
+                          ? Container(
+                              height: 48,
+                              width: 180,
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            )
+                          : Text(
+                              currencyFormat
+                                  .format((_wallet?.availableBalance ?? 0) / 100),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 42,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -1.5,
+                                height: 1.1,
+                              ),
+                            ),
+                      if (!_isLoading && (_wallet?.pendingBalance ?? 0) > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            'A receber: ${currencyFormat.format((_wallet?.pendingBalance ?? 0) / 100)}',
+                            style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w400,
                             ),
                           ),
-                        ],
+                        ),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton.icon(
+                          onPressed: (_wallet?.availableBalance ?? 0) >= 100
+                              ? _showWithdrawalSheet
+                              : null,
+                          icon: const Icon(LucideIcons.arrowUpRight, size: 18),
+                          label: const Text('Solicitar Saque'),
+                          style: TextButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            disabledBackgroundColor: Colors.white.withOpacity(0.1),
+                            disabledForegroundColor: Colors.white.withOpacity(0.3),
+                          ),
+                        ),
                       ),
-                    ),
-                    IconButton(
-                      onPressed: _isRefreshing ? null : _handleRefresh,
-                      icon: _isRefreshing
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(LucideIcons.refreshCw),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: (_wallet?.availableBalance ?? 0) >= 100
-                          ? _showWithdrawalSheet
-                          : null,
-                      icon: const Icon(LucideIcons.banknote, size: 18),
-                      label: const Text('Sacar'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
 
-            // Balance Cards Carousel
-            SliverToBoxAdapter(
-              child: Column(
-                children: [
-                  SizedBox(
-                    height: 100,
-                    child: _isLoading
-                        ? Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: AppTheme.surfaceVariant,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                          )
-                        : PageView(
-                            controller: _carouselController,
-                            onPageChanged: (index) {
-                              setState(() => _currentCardIndex = index);
-                            },
-                            children: [
-                              _BalanceCarouselCard(
-                                title: 'Disponivel',
-                                value: _wallet?.availableBalance ?? 0,
-                                icon: LucideIcons.wallet,
-                                color: Colors.green,
-                              ),
-                              _BalanceCarouselCard(
-                                title: 'Pendente',
-                                value: _wallet?.pendingBalance ?? 0,
-                                icon: LucideIcons.clock,
-                                color: Colors.orange,
-                              ),
-                              _BalanceCarouselCard(
-                                title: 'Total Recebido',
-                                value: _wallet?.totalReceived ?? 0,
-                                icon: LucideIcons.trendingUp,
-                                color: AppTheme.primary,
-                              ),
-                              _BalanceCarouselCard(
-                                title: 'Total Sacado',
-                                value: _wallet?.totalWithdrawn ?? 0,
-                                icon: LucideIcons.arrowUpRight,
-                                color: Colors.purple,
-                              ),
-                            ],
-                          ),
-                  ),
-                  const SizedBox(height: 12),
-                  // Dot indicators
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(4, (index) {
-                      return AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        width: _currentCardIndex == index ? 20 : 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: _currentCardIndex == index
-                              ? AppTheme.textPrimary
-                              : AppTheme.divider,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      );
-                    }),
-                  ),
-                ],
-              ),
-            ),
 
-            // Transactions Header
+
+            // Transactions Section
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.all(20),
@@ -453,20 +426,23 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 4,
+                    if (!_isLoading && _transactions.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceVariant,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '${_transactions.length}',
+                          style: AppTheme.labelSmall.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surfaceVariant,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '${_transactions.length} transacoes',
-                        style: AppTheme.labelSmall,
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -493,41 +469,45 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                 ),
               )
             else if (_transactions.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: AppTheme.surfaceVariant,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            LucideIcons.dollarSign,
-                            size: 40,
-                            color: AppTheme.textSecondary,
-                          ),
+              SliverToBoxAdapter(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppTheme.divider),
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceVariant,
+                          shape: BoxShape.circle,
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Nenhuma transacao ainda',
-                          style: AppTheme.titleMedium,
+                        child: const Icon(
+                          LucideIcons.inbox,
+                          size: 32,
+                          color: AppTheme.textSecondary,
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'As transacoes aparecerao aqui quando seus alunos fizerem pagamentos',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.textSecondary,
-                          ),
-                          textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Nenhuma transacao ainda',
+                        style: AppTheme.titleMedium.copyWith(
+                          fontWeight: FontWeight.w600,
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'As transacoes aparecerao aqui quando seus alunos fizerem pagamentos pela plataforma',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ),
                 ),
               )
@@ -538,7 +518,8 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                   delegate: SliverChildBuilderDelegate(
                     (context, index) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
-                      child: _TransactionCard(transaction: _transactions[index]),
+                      child:
+                          _TransactionCard(transaction: _transactions[index]),
                     ),
                     childCount: _transactions.length,
                   ),
@@ -556,62 +537,74 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   }
 }
 
-/// Balance Carousel Card Widget
-class _BalanceCarouselCard extends StatelessWidget {
+/// Stat Card Widget
+class _StatCard extends StatelessWidget {
   final String title;
-  final double value;
+  final double? value;
+  final String? valueText;
   final IconData icon;
   final Color color;
+  final bool isLoading;
 
-  const _BalanceCarouselCard({
+  const _StatCard({
     required this.title,
-    required this.value,
+    this.value,
+    this.valueText,
     required this.icon,
     required this.color,
+    this.isLoading = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final currencyFormat = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+    final currencyFormat =
+        NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
 
     return Container(
-      margin: const EdgeInsets.only(right: 8),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
+        border: Border.all(color: AppTheme.divider),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, size: 24, color: color),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, size: 16, color: color),
+              ),
+              const Spacer(),
+            ],
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  currencyFormat.format(value / 100),
-                  style: AppTheme.headlineSmall.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  title,
-                  style: AppTheme.bodySmall.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-              ],
+          const SizedBox(height: 12),
+          if (isLoading)
+            Container(
+              height: 24,
+              width: 80,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            )
+          else
+            Text(
+              valueText ?? currencyFormat.format((value ?? 0) / 100),
+              style: AppTheme.titleMedium.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            style: AppTheme.bodySmall.copyWith(
+              color: AppTheme.textSecondary,
             ),
           ),
         ],
@@ -672,8 +665,9 @@ class _TransactionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dateFormat = DateFormat('dd MMM yyyy HH:mm', 'pt_BR');
-    final currencyFormat = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+    final dateFormat = DateFormat('dd MMM', 'pt_BR');
+    final currencyFormat =
+        NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
     final statusColor = _getStatusColor();
     final sourceColor = _getSourceColor();
 
@@ -687,10 +681,11 @@ class _TransactionCard extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: sourceColor.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
               transaction.sourceIcon,
@@ -707,28 +702,13 @@ class _TransactionCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        transaction.description ?? transaction.sourceLabel,
+                        transaction.studentName ??
+                            transaction.description ??
+                            transaction.sourceLabel,
                         style: AppTheme.bodyMedium.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
                         overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: statusColor.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        _getStatusLabel(),
-                        style: AppTheme.labelSmall.copyWith(
-                          color: statusColor,
-                          fontWeight: FontWeight.w600,
-                        ),
                       ),
                     ),
                   ],
@@ -737,7 +717,8 @@ class _TransactionCard extends StatelessWidget {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color: sourceColor.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(4),
@@ -752,17 +733,27 @@ class _TransactionCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        [
-                          if (transaction.studentName != null) transaction.studentName,
-                          if (transaction.productName != null) transaction.productName,
-                          dateFormat.format(transaction.createdAt),
-                        ].join(' • '),
-                        style: AppTheme.bodySmall.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                    Container(
+                      width: 4,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: statusColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _getStatusLabel(),
+                      style: AppTheme.labelSmall.copyWith(
+                        color: statusColor,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      dateFormat.format(transaction.createdAt),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
                       ),
                     ),
                   ],
@@ -771,12 +762,19 @@ class _TransactionCard extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          Text(
-            '${transaction.isCredit ? '+' : '-'} ${currencyFormat.format(transaction.amount / 100)}',
-            style: AppTheme.titleSmall.copyWith(
-              fontWeight: FontWeight.w700,
-              color: transaction.isCredit ? Colors.green : AppTheme.error,
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${transaction.isCredit ? '+' : '-'} ${currencyFormat.format(transaction.amount / 100)}',
+                style: AppTheme.titleSmall.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: transaction.isCredit
+                      ? const Color(0xFF16A34A)
+                      : AppTheme.error,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -812,6 +810,36 @@ class _WithdrawalBottomSheetState extends State<_WithdrawalBottomSheet> {
     _amountController.dispose();
     _pixKeyController.dispose();
     super.dispose();
+  }
+
+  String _getPixKeyHint(String type) {
+    switch (type) {
+      case 'cpf':
+        return '000.000.000-00';
+      case 'cnpj':
+        return '00.000.000/0000-00';
+      case 'email':
+        return 'email@exemplo.com';
+      case 'phone':
+        return '(00) 00000-0000';
+      case 'random':
+        return 'Chave aleatoria';
+      default:
+        return '';
+    }
+  }
+
+  TextInputType _getPixKeyKeyboardType(String type) {
+    switch (type) {
+      case 'cpf':
+      case 'cnpj':
+      case 'phone':
+        return TextInputType.number;
+      case 'email':
+        return TextInputType.emailAddress;
+      default:
+        return TextInputType.text;
+    }
   }
 
   Future<void> _handleWithdraw() async {
@@ -995,16 +1023,13 @@ class _WithdrawalBottomSheetState extends State<_WithdrawalBottomSheet> {
               // PIX Key Field
               TextFormField(
                 controller: _pixKeyController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Chave PIX',
-                  prefixIcon: Icon(LucideIcons.key),
+                  prefixIcon: const Icon(LucideIcons.key),
+                  hintText: _getPixKeyHint(_pixKeyType),
                 ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Informe a chave PIX';
-                  }
-                  return null;
-                },
+                keyboardType: _getPixKeyKeyboardType(_pixKeyType),
+                validator: (value) => Validators.pixKey(value, _pixKeyType),
               ),
               const SizedBox(height: 24),
 

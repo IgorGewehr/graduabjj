@@ -508,18 +508,71 @@ class StoreService {
   // ============================================
 
   /// Create order
+  /// SECURITY: This method fetches product prices from database
+  /// to prevent price manipulation attacks
   Future<StoreOrder> createOrder({
     required String studentId,
     required String studentName,
     required List<StoreOrderItem> items,
     String? notes,
   }) async {
-    final total = items.fold<double>(0, (acc, item) => acc + item.subtotal);
+    // SECURITY: Validate and fetch server-side prices for all items
+    final validatedItems = <Map<String, dynamic>>[];
+    double total = 0;
+
+    for (final item in items) {
+      final product = await getProductById(item.productId);
+
+      if (product == null) {
+        throw Exception('Produto nao encontrado: ${item.productId}');
+      }
+
+      if (!product.isActive) {
+        throw Exception('Produto indisponivel: ${product.name}');
+      }
+
+      // Validate stock for in_stock products
+      if (product.stockType == StoreStockType.inStock) {
+        final availableStock = product.stockQuantity ?? 0;
+        if (availableStock < item.quantity) {
+          throw Exception(
+            'Estoque insuficiente para "${product.name}". Disponivel: $availableStock, Solicitado: ${item.quantity}'
+          );
+        }
+      }
+
+      // Validate size if product has sizes
+      if (product.sizes != null && product.sizes!.isNotEmpty && item.size != null) {
+        if (!product.sizes!.contains(item.size)) {
+          throw Exception('Tamanho invalido para "${product.name}": ${item.size}');
+        }
+      }
+
+      // Validate color if product has colors
+      if (product.colors != null && product.colors!.isNotEmpty && item.color != null) {
+        if (!product.colors!.contains(item.color)) {
+          throw Exception('Cor invalida para "${product.name}": ${item.color}');
+        }
+      }
+
+      // Build validated item with SERVER-SIDE price
+      final itemTotal = product.price * item.quantity;
+      total += itemTotal;
+
+      validatedItems.add({
+        'productId': product.id,
+        'productName': product.name,
+        'price': product.price, // SECURITY: Always use database price
+        'quantity': item.quantity,
+        'size': item.size,
+        'color': item.color,
+      });
+    }
 
     final docRef = await _ordersRef.add({
       'studentId': studentId,
       'studentName': studentName,
-      'items': items.map((i) => i.toMap()).toList(),
+      'items': validatedItems,
       'total': total,
       'status': StoreOrderStatus.pendingPayment.value,
       'notes': notes,

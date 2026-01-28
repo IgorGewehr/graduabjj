@@ -1,41 +1,78 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../models/checkin.dart';
 import '../../providers/providers.dart';
+import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
+import '../../services/checkin_service.dart';
 
-/// Schedule Screen - Horarios das Aulas
-class ScheduleScreen extends ConsumerWidget {
+/// Schedule Screen - Horarios das Aulas / Meus Treinos
+class ScheduleScreen extends ConsumerStatefulWidget {
   const ScheduleScreen({super.key});
 
+  @override
+  ConsumerState<ScheduleScreen> createState() => _ScheduleScreenState();
+}
+
+class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
+  bool _isCreatingCheckin = false;
+
   static const List<WeekDay> _weekDays = [
+    WeekDay(value: 0, label: 'Domingo', short: 'Dom'),
     WeekDay(value: 1, label: 'Segunda', short: 'Seg'),
     WeekDay(value: 2, label: 'Terca', short: 'Ter'),
     WeekDay(value: 3, label: 'Quarta', short: 'Qua'),
     WeekDay(value: 4, label: 'Quinta', short: 'Qui'),
     WeekDay(value: 5, label: 'Sexta', short: 'Sex'),
     WeekDay(value: 6, label: 'Sabado', short: 'Sab'),
-    WeekDay(value: 0, label: 'Domingo', short: 'Dom'),
   ];
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final weeklyScheduleAsync = ref.watch(weeklyScheduleProvider);
-    final currentClassAsync = ref.watch(currentClassProvider);
+  Widget build(BuildContext context) {
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    final settingsAsync = ref.watch(academySettingsProvider);
+    final currentStudent = ref.watch(currentStudentProvider).valueOrNull;
 
-    final today = DateTime.now().weekday;
+    final studentId = currentStudent?.id ?? currentUser?.studentId;
+    final academyId = currentUser?.academyId;
+
+    if (studentId == null || academyId == null) {
+      return _buildEmptyState('Aluno nao encontrado');
+    }
+
+    final checkinEnabled = settingsAsync.valueOrNull?.studentCheckinEnabled ?? false;
+
+    // Fetch classes where student is enrolled
+    final classesAsync = ref.watch(_enrolledClassesProvider(
+      _EnrolledClassesParams(academyId: academyId, studentId: studentId),
+    ));
+
+    // Fetch student's pending check-ins
+    final studentCheckinsAsync = checkinEnabled
+        ? ref.watch(studentPendingCheckinsProvider(studentId))
+        : const AsyncValue<List<Checkin>>.data([]);
 
     return RefreshIndicator(
       onRefresh: () async {
-        ref.invalidate(weeklyScheduleProvider);
-        ref.invalidate(currentClassProvider);
+        ref.invalidate(_enrolledClassesProvider(
+          _EnrolledClassesParams(academyId: academyId, studentId: studentId),
+        ));
+        if (checkinEnabled) {
+          ref.invalidate(studentPendingCheckinsProvider(studentId));
+        }
       },
-      child: weeklyScheduleAsync.when(
-        data: (weeklySchedule) {
-          // Convert map to list of class schedules
-          final classes = _buildClassSchedules(weeklySchedule);
-          final currentClass = currentClassAsync.valueOrNull;
+      child: classesAsync.when(
+        data: (classes) {
+          final studentCheckins = studentCheckinsAsync.valueOrNull ?? [];
+          final upcomingSchedules = _buildUpcomingSchedules(
+            classes,
+            studentCheckins,
+            checkinEnabled,
+          );
 
           return SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -43,37 +80,68 @@ class ScheduleScreen extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Info banner for check-in
+                if (checkinEnabled) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.info.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppTheme.info.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, size: 20, color: AppTheme.info),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Check-in disponivel de 30 min antes do inicio ate 1h apos o fim da aula.',
+                            style: AppTheme.labelSmall.copyWith(color: AppTheme.info),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
                 // Schedule Cards
                 if (classes.isEmpty)
-                  _buildEmptyState()
+                  _buildEmptyState('Voce nao esta matriculado em nenhuma turma')
+                else if (upcomingSchedules.isEmpty)
+                  _buildEmptyState('Nenhuma aula programada')
                 else
-                  ...classes.map((classSchedule) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _ClassCard(
-                          classSchedule: classSchedule,
-                          weekDays: _weekDays,
-                          today: today,
-                          currentClassId: currentClass?.id,
-                        ),
-                      )),
+                  ..._buildSchedulesByDay(
+                    upcomingSchedules,
+                    studentId,
+                    currentStudent?.fullName ?? 'Aluno',
+                    checkinEnabled,
+                  ),
 
                 const SizedBox(height: 24),
 
                 // Legend
-                Row(
-                  children: [
-                    _LegendItem(
-                      color: AppTheme.primary,
-                      label: 'Agora',
-                    ),
-                    const SizedBox(width: 24),
-                    _LegendItem(
-                      color: AppTheme.primary,
-                      label: 'Hoje',
-                      isOutlined: true,
-                    ),
-                  ],
-                ),
+                if (checkinEnabled && classes.isNotEmpty)
+                  Row(
+                    children: [
+                      _LegendItem(
+                        color: AppTheme.success,
+                        label: 'Check-in disponivel',
+                        isOutlined: true,
+                      ),
+                      const SizedBox(width: 24),
+                      Row(
+                        children: [
+                          Icon(Icons.check_circle, size: 14, color: AppTheme.success),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Check-in realizado',
+                            style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
 
                 const SizedBox(height: 80),
               ],
@@ -86,32 +154,156 @@ class ScheduleScreen extends ConsumerWidget {
     );
   }
 
-  List<ClassScheduleData> _buildClassSchedules(Map<int, List<BJJClass>> weeklySchedule) {
-    // Group by class name to create schedule data
-    final classMap = <String, ClassScheduleData>{};
+  List<UpcomingSchedule> _buildUpcomingSchedules(
+    List<BJJClass> classes,
+    List<Checkin> studentCheckins,
+    bool checkinEnabled,
+  ) {
+    final now = DateTime.now();
+    final schedules = <UpcomingSchedule>[];
 
-    for (final entry in weeklySchedule.entries) {
-      final dayOfWeek = entry.key;
-      for (final bjjClass in entry.value) {
-        if (!classMap.containsKey(bjjClass.id)) {
-          classMap[bjjClass.id] = ClassScheduleData(
-            id: bjjClass.id,
-            name: bjjClass.name,
-            instructor: bjjClass.instructorName,
-            scheduleByDay: {},
+    // Get next 7 days
+    for (int i = 0; i < 7; i++) {
+      final date = DateTime(now.year, now.month, now.day).add(Duration(days: i));
+      final dayOfWeek = date.weekday % 7; // Convert to 0-6
+
+      for (final bjjClass in classes) {
+        final classSchedules = bjjClass.schedule
+            .where((s) => s.dayOfWeek == dayOfWeek)
+            .toList();
+
+        for (final schedule in classSchedules) {
+          final isToday = i == 0;
+          final inWindow = isToday && isInCheckinWindow(
+            startTime: schedule.startTime,
+            endTime: schedule.endTime,
+            date: date,
           );
-        }
-        final scheduleForDay = bjjClass.getScheduleForDay(dayOfWeek);
-        if (scheduleForDay != null) {
-          classMap[bjjClass.id]!.scheduleByDay[dayOfWeek] = TimeSlot(
-            startTime: scheduleForDay.startTime,
-            endTime: scheduleForDay.endTime,
+          final timeUntilWindow = isToday
+              ? getTimeUntilCheckinOpens(startTime: schedule.startTime, date: date)
+              : null;
+
+          final hasCheckin = studentCheckins.any(
+            (c) =>
+                c.classId == bjjClass.id &&
+                c.scheduleDate.year == date.year &&
+                c.scheduleDate.month == date.month &&
+                c.scheduleDate.day == date.day,
           );
+
+          schedules.add(UpcomingSchedule(
+            bjjClass: bjjClass,
+            date: date,
+            dayOfWeek: dayOfWeek,
+            startTime: schedule.startTime,
+            endTime: schedule.endTime,
+            isToday: isToday,
+            inWindow: inWindow,
+            timeUntilWindow: timeUntilWindow,
+            hasCheckin: hasCheckin,
+          ));
         }
       }
     }
 
-    return classMap.values.toList();
+    // Sort by date, then start time
+    schedules.sort((a, b) {
+      final dateCompare = a.date.compareTo(b.date);
+      if (dateCompare != 0) return dateCompare;
+      return a.startTime.compareTo(b.startTime);
+    });
+
+    return schedules;
+  }
+
+  List<Widget> _buildSchedulesByDay(
+    List<UpcomingSchedule> schedules,
+    String studentId,
+    String studentName,
+    bool checkinEnabled,
+  ) {
+    final widgets = <Widget>[];
+    final groupedByDate = <String, List<UpcomingSchedule>>{};
+
+    for (final schedule in schedules) {
+      final key = DateFormat('yyyy-MM-dd').format(schedule.date);
+      groupedByDate.putIfAbsent(key, () => []).add(schedule);
+    }
+
+    for (final entry in groupedByDate.entries) {
+      final dateSchedules = entry.value;
+      final isToday = dateSchedules.first.isToday;
+
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 8, bottom: 8),
+          child: Text(
+            isToday
+                ? 'HOJE'
+                : DateFormat("EEEE, d 'de' MMMM", 'pt_BR').format(dateSchedules.first.date),
+            style: AppTheme.labelSmall.copyWith(
+              color: isToday ? AppTheme.success : AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+      );
+
+      for (final schedule in dateSchedules) {
+        widgets.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _ScheduleCard(
+              schedule: schedule,
+              studentId: studentId,
+              studentName: studentName,
+              checkinEnabled: checkinEnabled,
+              isCreating: _isCreatingCheckin,
+              onCheckin: () => _handleCheckin(schedule, studentId, studentName),
+            ),
+          ),
+        );
+      }
+    }
+
+    return widgets;
+  }
+
+  Future<void> _handleCheckin(
+    UpcomingSchedule schedule,
+    String studentId,
+    String studentName,
+  ) async {
+    if (_isCreatingCheckin) return;
+
+    setState(() => _isCreatingCheckin = true);
+
+    try {
+      final actions = ref.read(checkinActionsProvider.notifier);
+      await actions.createCheckin(
+        studentId: studentId,
+        studentName: studentName,
+        classId: schedule.bjjClass.id,
+        className: schedule.bjjClass.name,
+        scheduleStartTime: schedule.startTime,
+        scheduleEndTime: schedule.endTime,
+        scheduleDayOfWeek: schedule.dayOfWeek,
+      );
+
+      if (mounted) {
+        context.showSuccess('Check-in realizado com sucesso!');
+        ref.invalidate(studentPendingCheckinsProvider(studentId));
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showError(e.toString().replaceAll('Exception: ', ''));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isCreatingCheckin = false);
+      }
+    }
   }
 
   Widget _buildLoadingState() {
@@ -119,39 +311,19 @@ class ScheduleScreen extends ConsumerWidget {
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 200,
-            height: 24,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            width: 150,
-            height: 16,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 24),
-          ...List.generate(
-            3,
-            (index) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Container(
-                height: 100,
-                decoration: BoxDecoration(
-                  color: AppTheme.surfaceVariant,
-                  borderRadius: BorderRadius.circular(8),
-                ),
+        children: List.generate(
+          3,
+          (index) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Container(
+              height: 100,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(8),
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -175,7 +347,7 @@ class ScheduleScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(String message) {
     return Container(
       padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
@@ -185,7 +357,7 @@ class ScheduleScreen extends ConsumerWidget {
       ),
       child: Center(
         child: Text(
-          'Nenhuma aula cadastrada',
+          message,
           style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
         ),
       ),
@@ -193,49 +365,33 @@ class ScheduleScreen extends ConsumerWidget {
   }
 }
 
-/// Class Card Widget
-class _ClassCard extends StatelessWidget {
-  final ClassScheduleData classSchedule;
-  final List<WeekDay> weekDays;
-  final int today;
-  final String? currentClassId;
+/// Schedule Card Widget
+class _ScheduleCard extends StatelessWidget {
+  final UpcomingSchedule schedule;
+  final String studentId;
+  final String studentName;
+  final bool checkinEnabled;
+  final bool isCreating;
+  final VoidCallback onCheckin;
 
-  const _ClassCard({
-    required this.classSchedule,
-    required this.weekDays,
-    required this.today,
-    this.currentClassId,
+  const _ScheduleCard({
+    required this.schedule,
+    required this.studentId,
+    required this.studentName,
+    required this.checkinEnabled,
+    required this.isCreating,
+    required this.onCheckin,
   });
-
-  bool _isClassNow(String startTime, String endTime, int dayOfWeek) {
-    if (dayOfWeek != today) return false;
-    final now = DateTime.now();
-    final currentHour = now.hour;
-    final currentMinutes = now.minute;
-    final startParts = startTime.split(':').map(int.parse).toList();
-    final endParts = endTime.split(':').map(int.parse).toList();
-    final currentTotal = currentHour * 60 + currentMinutes;
-    return currentTotal >= startParts[0] * 60 + startParts[1] &&
-        currentTotal <= endParts[0] * 60 + endParts[1];
-  }
 
   @override
   Widget build(BuildContext context) {
-    final daysWithClass =
-        weekDays.where((day) => classSchedule.scheduleByDay.containsKey(day.value)).toList();
-    final hasClassNow = currentClassId == classSchedule.id ||
-        daysWithClass.any((day) {
-          final schedule = classSchedule.scheduleByDay[day.value];
-          return schedule != null && _isClassNow(schedule.startTime, schedule.endTime, day.value);
-        });
-
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: hasClassNow ? AppTheme.primary : AppTheme.surface,
+        color: schedule.inWindow ? AppTheme.success.withOpacity(0.05) : AppTheme.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: hasClassNow ? AppTheme.primary : AppTheme.divider,
+          color: schedule.inWindow ? AppTheme.success.withOpacity(0.3) : AppTheme.divider,
         ),
       ),
       child: Column(
@@ -245,99 +401,117 @@ class _ClassCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    classSchedule.name,
-                    style: AppTheme.bodyLarge.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: hasClassNow ? Colors.white : AppTheme.textPrimary,
-                    ),
-                  ),
-                  if (classSchedule.instructor != null)
-                    Text(
-                      classSchedule.instructor!,
-                      style: AppTheme.labelSmall.copyWith(
-                        color: hasClassNow ? Colors.white70 : AppTheme.textSecondary,
-                      ),
-                    ),
-                ],
-              ),
-              if (hasClassNow)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    'AGORA',
-                    style: AppTheme.labelSmall.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 10,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // Day chips
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: daysWithClass.map((day) {
-              final schedule = classSchedule.scheduleByDay[day.value]!;
-              final isToday = day.value == today;
-              final isNow = _isClassNow(schedule.startTime, schedule.endTime, day.value);
-
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                decoration: BoxDecoration(
-                  color: hasClassNow
-                      ? isNow
-                          ? Colors.white.withOpacity(0.25)
-                          : Colors.white.withOpacity(0.1)
-                      : isToday
-                          ? AppTheme.primary
-                          : AppTheme.surfaceVariant,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      day.short,
-                      style: AppTheme.labelSmall.copyWith(
+                      schedule.bjjClass.name,
+                      style: AppTheme.bodyLarge.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: hasClassNow
-                            ? Colors.white
-                            : isToday
-                                ? Colors.white
-                                : AppTheme.textSecondary,
+                        color: AppTheme.textPrimary,
                       ),
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      schedule.startTime,
-                      style: AppTheme.labelSmall.copyWith(
-                        color: hasClassNow
-                            ? Colors.white
-                            : isToday
-                                ? Colors.white
-                                : AppTheme.textPrimary,
+                    if (schedule.bjjClass.instructorName != null)
+                      Text(
+                        schedule.bjjClass.instructorName!,
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
-                    ),
                   ],
                 ),
-              );
-            }).toList(),
+              ),
+              Row(
+                children: [
+                  Icon(Icons.access_time, size: 14, color: AppTheme.textSecondary),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${schedule.startTime} - ${schedule.endTime}',
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
+
+          // Check-in section
+          if (checkinEnabled && schedule.isToday) ...[
+            const SizedBox(height: 12),
+            _buildCheckinSection(),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _buildCheckinSection() {
+    if (schedule.hasCheckin) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppTheme.success.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.check_circle, size: 16, color: AppTheme.success),
+            const SizedBox(width: 6),
+            Text(
+              'Check-in feito',
+              style: AppTheme.labelSmall.copyWith(
+                color: AppTheme.success,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (schedule.inWindow) {
+      return SizedBox(
+        height: 36,
+        child: ElevatedButton.icon(
+          onPressed: isCreating ? null : onCheckin,
+          icon: isCreating
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.how_to_reg, size: 18),
+          label: Text(isCreating ? 'Aguarde...' : 'Marcar Presenca'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.success,
+            foregroundColor: Colors.white,
+            textStyle: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (schedule.timeUntilWindow != null) {
+      final hours = schedule.timeUntilWindow!['hours']!;
+      final minutes = schedule.timeUntilWindow!['minutes']!;
+      final timeText = hours > 0 ? '${hours}h ${minutes}min' : '${minutes}min';
+
+      return Text(
+        'Abre em $timeText',
+        style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 }
 
@@ -377,25 +551,28 @@ class _LegendItem extends StatelessWidget {
 }
 
 /// Data Models
-class ClassScheduleData {
-  final String id;
-  final String name;
-  final String? instructor;
-  final Map<int, TimeSlot> scheduleByDay;
-
-  ClassScheduleData({
-    required this.id,
-    required this.name,
-    this.instructor,
-    required this.scheduleByDay,
-  });
-}
-
-class TimeSlot {
+class UpcomingSchedule {
+  final BJJClass bjjClass;
+  final DateTime date;
+  final int dayOfWeek;
   final String startTime;
   final String endTime;
+  final bool isToday;
+  final bool inWindow;
+  final Map<String, int>? timeUntilWindow;
+  final bool hasCheckin;
 
-  TimeSlot({required this.startTime, required this.endTime});
+  UpcomingSchedule({
+    required this.bjjClass,
+    required this.date,
+    required this.dayOfWeek,
+    required this.startTime,
+    required this.endTime,
+    required this.isToday,
+    required this.inWindow,
+    this.timeUntilWindow,
+    required this.hasCheckin,
+  });
 }
 
 class WeekDay {
@@ -405,3 +582,29 @@ class WeekDay {
 
   const WeekDay({required this.value, required this.label, required this.short});
 }
+
+/// Provider for enrolled classes
+class _EnrolledClassesParams {
+  final String academyId;
+  final String studentId;
+
+  _EnrolledClassesParams({required this.academyId, required this.studentId});
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! _EnrolledClassesParams) return false;
+    return academyId == other.academyId && studentId == other.studentId;
+  }
+
+  @override
+  int get hashCode => Object.hash(academyId, studentId);
+}
+
+final _enrolledClassesProvider = FutureProvider.family<List<BJJClass>, _EnrolledClassesParams>((ref, params) async {
+  final classService = ClassService(params.academyId);
+  final allClasses = await classService.list();
+
+  // Filter classes where student is enrolled
+  return allClasses.where((c) => c.studentIds.contains(params.studentId)).toList();
+});

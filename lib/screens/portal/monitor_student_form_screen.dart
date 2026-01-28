@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -112,9 +113,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
   Future<void> _saveStudent() async {
     if (!_formKey.currentState!.validate()) return;
     if (_category == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecione a categoria do aluno')),
-      );
+      context.showWarning('Selecione a categoria do aluno');
       return;
     }
 
@@ -163,12 +162,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
       if (isEditing) {
         await studentService.update(widget.studentId!, studentData);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Aluno atualizado com sucesso!'),
-              backgroundColor: AppTheme.success,
-            ),
-          );
+          context.showSuccess('Aluno atualizado com sucesso!');
           context.pop();
         }
       } else {
@@ -178,22 +172,15 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
         studentData['totalAttendanceCount'] = 0;
         studentData['monthlyAttendanceCount'] = 0;
 
-        final newStudent = await studentService.create(studentData);
+        final newStudent = await studentService.createFromMap(studentData);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Aluno cadastrado com sucesso!'),
-              backgroundColor: AppTheme.success,
-            ),
-          );
+          context.showSuccess('Aluno cadastrado com sucesso!');
           context.pop();
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        context.showError('Erro: $e');
       }
     } finally {
       setState(() => _isSaving = false);

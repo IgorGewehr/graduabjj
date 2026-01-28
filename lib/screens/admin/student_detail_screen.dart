@@ -1,8 +1,12 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -30,7 +34,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _loadData();
   }
 
@@ -85,10 +89,13 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                     children: [
                       TabBar(
                         controller: _tabController,
+                        isScrollable: true,
+                        tabAlignment: TabAlignment.start,
                         tabs: const [
                           Tab(text: 'Info'),
                           Tab(text: 'Presenças'),
                           Tab(text: 'Financeiro'),
+                          Tab(text: 'Conquistas'),
                           Tab(text: 'Histórico'),
                         ],
                       ),
@@ -99,6 +106,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                             _buildInfoTab(),
                             _buildAttendanceTab(),
                             _buildFinancialTab(),
+                            _buildAchievementsTab(),
                             _buildHistoryTab(),
                           ],
                         ),
@@ -124,6 +132,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
           onSelected: (value) {
             if (value == 'promote') _showPromoteDialog();
             if (value == 'toggle_status') _toggleStatus();
+            if (value == 'generate_code') _generateLinkCode();
             if (value == 'delete') _showDeleteConfirmation();
           },
           itemBuilder: (context) => [
@@ -151,6 +160,18 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 ],
               ),
             ),
+            // Only show if student doesn't have a linked account
+            if (_student!.linkedUserId == null)
+              const PopupMenuItem(
+                value: 'generate_code',
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.link),
+                    SizedBox(width: 8),
+                    Text('Gerar Codigo de Acesso'),
+                  ],
+                ),
+              ),
             const PopupMenuItem(
               value: 'delete',
               child: Row(
@@ -470,6 +491,416 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
     );
   }
 
+  Widget _buildAchievementsTab() {
+    return Stack(
+      children: [
+        _achievements.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.emoji_events_outlined,
+                      size: 64,
+                      color: AppTheme.textDisabled,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Nenhuma conquista registrada',
+                      style: AppTheme.bodyLarge.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Adicione conquistas do aluno',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textDisabled,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+                itemCount: _achievements.length,
+                itemBuilder: (context, index) {
+                  final achievement = _achievements[index];
+                  return _AchievementCard(
+                    achievement: achievement,
+                    onEdit: () => _showEditAchievementDialog(achievement),
+                    onDelete: () => _showDeleteAchievementConfirmation(achievement),
+                  );
+                },
+              ),
+        // FAB to add achievement
+        Positioned(
+          bottom: 16,
+          right: 16,
+          child: FloatingActionButton.extended(
+            onPressed: _showAddAchievementDialog,
+            backgroundColor: AppTheme.primary,
+            icon: const Icon(Icons.add, color: Colors.white),
+            label: const Text('Adicionar', style: TextStyle(color: Colors.white)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showAddAchievementDialog() {
+    final titleController = TextEditingController();
+    final descriptionController = TextEditingController();
+    DateTime selectedDate = DateTime.now();
+    AchievementType selectedType = AchievementType.milestone;
+    String? selectedBelt;
+    int selectedStripes = 0;
+
+    final beltOptions = ['white', 'blue', 'purple', 'brown', 'black'];
+    final beltLabels = {
+      'white': 'Branca',
+      'blue': 'Azul',
+      'purple': 'Roxa',
+      'brown': 'Marrom',
+      'black': 'Preta',
+    };
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Adicionar Conquista'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Type selector
+                  Text('Tipo', style: AppTheme.labelMedium),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<AchievementType>(
+                    value: selectedType,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    items: [
+                      const DropdownMenuItem(
+                        value: AchievementType.graduation,
+                        child: Text('Graduação (Faixa)'),
+                      ),
+                      const DropdownMenuItem(
+                        value: AchievementType.stripe,
+                        child: Text('Grau'),
+                      ),
+                      const DropdownMenuItem(
+                        value: AchievementType.milestone,
+                        child: Text('Marco/Conquista'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      setDialogState(() => selectedType = value!);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Belt selection for graduation type
+                  if (selectedType == AchievementType.graduation) ...[
+                    Text('Faixa Recebida', style: AppTheme.labelMedium),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: selectedBelt,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        hintText: 'Selecione a faixa',
+                      ),
+                      items: beltOptions.map((belt) => DropdownMenuItem(
+                        value: belt,
+                        child: Text(beltLabels[belt]!),
+                      )).toList(),
+                      onChanged: (value) {
+                        setDialogState(() => selectedBelt = value);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Stripes for stripe type
+                  if (selectedType == AchievementType.stripe) ...[
+                    Text('Graus Recebidos', style: AppTheme.labelMedium),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<int>(
+                      value: selectedStripes,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      items: [1, 2, 3, 4].map((s) => DropdownMenuItem(
+                        value: s,
+                        child: Text('$s grau(s)'),
+                      )).toList(),
+                      onChanged: (value) {
+                        setDialogState(() => selectedStripes = value!);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Title (for milestone type)
+                  if (selectedType == AchievementType.milestone) ...[
+                    Text('Título', style: AppTheme.labelMedium),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        hintText: 'Ex: 100 Treinos, Campeão Regional...',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Description (optional)
+                  Text('Descrição (opcional)', style: AppTheme.labelMedium),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: descriptionController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      hintText: 'Detalhes adicionais...',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Date picker
+                  Text('Data', style: AppTheme.labelMedium),
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: selectedDate,
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime.now(),
+                      );
+                      if (picked != null) {
+                        setDialogState(() => selectedDate = picked);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: AppTheme.divider),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today, size: 18),
+                          const SizedBox(width: 8),
+                          Text(DateFormat('dd/MM/yyyy').format(selectedDate)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  // Validate
+                  if (selectedType == AchievementType.graduation && selectedBelt == null) {
+                    context.showError('Selecione a faixa');
+                    return;
+                  }
+                  if (selectedType == AchievementType.milestone && titleController.text.trim().isEmpty) {
+                    context.showError('Informe o título');
+                    return;
+                  }
+
+                  Navigator.pop(context);
+
+                  try {
+                    final service = AchievementService(FirebaseService.academyId);
+
+                    String title;
+                    if (selectedType == AchievementType.graduation) {
+                      title = 'Graduação para Faixa ${getBeltName(selectedBelt!)}';
+                    } else if (selectedType == AchievementType.stripe) {
+                      title = 'Recebeu $selectedStripes grau(s)';
+                    } else {
+                      title = titleController.text.trim();
+                    }
+
+                    await service.create(
+                      studentId: _student!.id,
+                      studentName: _student!.fullName,
+                      type: selectedType,
+                      title: title,
+                      description: descriptionController.text.trim().isNotEmpty
+                          ? descriptionController.text.trim()
+                          : null,
+                      date: selectedDate,
+                      toBelt: selectedType == AchievementType.graduation ? selectedBelt : null,
+                      toStripes: selectedType == AchievementType.stripe ? selectedStripes : null,
+                      createdBy: 'admin',
+                    );
+
+                    if (mounted) {
+                      context.showSuccess('Conquista adicionada!');
+                      _loadData();
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      context.showError('Erro: $e');
+                    }
+                  }
+                },
+                child: const Text('Salvar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showEditAchievementDialog(Achievement achievement) {
+    DateTime selectedDate = achievement.date;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Editar Data'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  achievement.title,
+                  style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.bold),
+                ),
+                if (achievement.description != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    achievement.description!,
+                    style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                  ),
+                ],
+                const SizedBox(height: 24),
+                Text('Data da Conquista', style: AppTheme.labelMedium),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: selectedDate,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime.now(),
+                    );
+                    if (picked != null) {
+                      setDialogState(() => selectedDate = picked);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: AppTheme.divider),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 18),
+                        const SizedBox(width: 8),
+                        Text(DateFormat('dd/MM/yyyy').format(selectedDate)),
+                        const Spacer(),
+                        const Icon(Icons.edit, size: 16, color: Colors.grey),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+
+                  try {
+                    final service = AchievementService(FirebaseService.academyId);
+                    await service.update(achievement.id, {
+                      'date': Timestamp.fromDate(selectedDate),
+                    });
+
+                    if (mounted) {
+                      context.showSuccess('Data atualizada!');
+                      _loadData();
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      context.showError('Erro: $e');
+                    }
+                  }
+                },
+                child: const Text('Salvar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showDeleteAchievementConfirmation(Achievement achievement) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Excluir Conquista'),
+        content: Text('Deseja excluir "${achievement.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(context);
+
+              try {
+                final service = AchievementService(FirebaseService.academyId);
+                await service.delete(achievement.id);
+
+                if (mounted) {
+                  context.showSuccess('Conquista excluída!');
+                  _loadData();
+                }
+              } catch (e) {
+                if (mounted) {
+                  context.showError('Erro: $e');
+                }
+              }
+            },
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHistoryTab() {
     final allHistory = <_HistoryItem>[];
 
@@ -589,16 +1020,12 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                     }
 
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Graduação realizada com sucesso!')),
-                      );
+                      context.showSuccess('Graduação realizada com sucesso!');
                       _loadData();
                     }
                   } catch (e) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Erro: $e')),
-                      );
+                      context.showError('Erro: $e');
                     }
                   }
                 },
@@ -630,22 +1057,16 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       await service.updateStatus(_student!.id, newStatus);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              newStatus == StudentStatus.active
-                  ? 'Aluno ativado!'
-                  : 'Aluno desativado!',
-            ),
-          ),
+        context.showSuccess(
+          newStatus == StudentStatus.active
+              ? 'Aluno ativado!'
+              : 'Aluno desativado!',
         );
         _loadData();
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        context.showError('Erro: $e');
       }
     }
   }
@@ -673,20 +1094,93 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 await service.delete(_student!.id);
 
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Aluno excluído!')),
-                  );
+                  context.showSuccess('Aluno excluído!');
                   Navigator.pop(context);
                 }
               } catch (e) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Erro: $e')),
-                  );
+                  context.showError('Erro: $e');
                 }
               }
             },
             child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _generateLinkCode() async {
+    try {
+      final linkCodeService = LinkCodeService(FirebaseService.academyId);
+      final linkCode = await linkCodeService.generate(
+        studentId: _student!.id,
+        studentName: _student!.fullName,
+        createdBy: 'admin',
+      );
+
+      if (mounted) {
+        _showLinkCodeDialog(linkCode);
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showError('Erro ao gerar codigo: $e');
+      }
+    }
+  }
+
+  void _showLinkCodeDialog(LinkCode linkCode) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(LucideIcons.link, color: AppTheme.primary),
+            const SizedBox(width: 8),
+            const Text('Codigo Gerado'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Compartilhe com ${linkCode.studentName}:'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.primary, width: 2),
+              ),
+              child: SelectableText(
+                linkCode.code,
+                style: const TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 8,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Valido por 24 horas',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: linkCode.code));
+              context.showSuccess('Codigo copiado!');
+            },
+            icon: const Icon(LucideIcons.copy, size: 16),
+            label: const Text('Copiar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fechar'),
           ),
         ],
       ),
@@ -867,4 +1361,177 @@ class _HistoryItem {
     required this.icon,
     required this.color,
   });
+}
+
+/// Achievement Card Widget
+class _AchievementCard extends StatelessWidget {
+  final Achievement achievement;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _AchievementCard({
+    required this.achievement,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: onEdit,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Icon
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: _getTypeColor().withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  _getTypeIcon(),
+                  color: _getTypeColor(),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Content
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      achievement.title,
+                      style: AppTheme.bodyMedium.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (achievement.description != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        achievement.description!,
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.calendar_today,
+                          size: 14,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          DateFormat('dd/MM/yyyy').format(achievement.date),
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _getTypeColor().withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            _getTypeLabel(),
+                            style: AppTheme.labelSmall.copyWith(
+                              color: _getTypeColor(),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // Actions
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, color: AppTheme.textSecondary),
+                onSelected: (value) {
+                  if (value == 'edit') onEdit();
+                  if (value == 'delete') onDelete();
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit, size: 20),
+                        SizedBox(width: 8),
+                        Text('Editar data'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete, size: 20, color: Colors.red),
+                        SizedBox(width: 8),
+                        Text('Excluir', style: TextStyle(color: Colors.red)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _getTypeIcon() {
+    switch (achievement.type) {
+      case AchievementType.graduation:
+        return Icons.military_tech;
+      case AchievementType.stripe:
+        return LucideIcons.award;
+      case AchievementType.competition:
+        return Icons.emoji_events;
+      case AchievementType.milestone:
+        return Icons.star;
+    }
+  }
+
+  Color _getTypeColor() {
+    switch (achievement.type) {
+      case AchievementType.graduation:
+        return Colors.purple;
+      case AchievementType.stripe:
+        return Colors.blue;
+      case AchievementType.competition:
+        return Colors.amber;
+      case AchievementType.milestone:
+        return Colors.green;
+    }
+  }
+
+  String _getTypeLabel() {
+    switch (achievement.type) {
+      case AchievementType.graduation:
+        return 'Graduação';
+      case AchievementType.stripe:
+        return 'Grau';
+      case AchievementType.competition:
+        return 'Competição';
+      case AchievementType.milestone:
+        return 'Marco';
+    }
+  }
 }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../services/services.dart';
 
@@ -730,26 +731,12 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(LucideIcons.check, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Text('$studentName foi graduado com sucesso!'),
-              ],
-            ),
-            backgroundColor: AppTheme.success,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        context.showSuccess('$studentName foi graduado com sucesso!');
         _loadData();
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        context.showError('Erro: $e');
       }
     }
   }

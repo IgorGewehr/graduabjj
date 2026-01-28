@@ -272,6 +272,37 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                     ],
                   ).animate().fadeIn(delay: 700.ms),
+
+                  const SizedBox(height: 16),
+
+                  // Divider
+                  Row(
+                    children: [
+                      const Expanded(child: Divider()),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Text(
+                          'ou',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      ),
+                      const Expanded(child: Divider()),
+                    ],
+                  ).animate().fadeIn(delay: 800.ms),
+
+                  const SizedBox(height: 16),
+
+                  // Link Code Button
+                  OutlinedButton.icon(
+                    onPressed: () => context.go('/link-code'),
+                    icon: const Icon(LucideIcons.key, size: 18),
+                    label: const Text('Tenho um codigo de acesso'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 48),
+                    ),
+                  ).animate().fadeIn(delay: 900.ms),
                 ],
               ),
             ),

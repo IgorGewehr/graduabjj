@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
@@ -536,9 +537,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                   child: ElevatedButton(
                     onPressed: () async {
                       if (nameController.text.isEmpty) {
-                        ScaffoldMessenger.of(sheetContext).showSnackBar(
-                          const SnackBar(content: Text('Nome e obrigatorio')),
-                        );
+                        sheetContext.showWarning('Nome e obrigatorio');
                         return;
                       }
 
@@ -558,26 +557,12 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                         );
 
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Row(
-                                children: [
-                                  Icon(LucideIcons.check, color: Colors.white, size: 18),
-                                  const SizedBox(width: 8),
-                                  const Text('Turma criada com sucesso!'),
-                                ],
-                              ),
-                              backgroundColor: AppTheme.success,
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
+                          context.showSuccess('Turma criada com sucesso!');
                           _loadClasses();
                         }
                       } catch (e) {
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Erro: $e')),
-                          );
+                          context.showError('Erro: $e');
                         }
                       }
                     },
@@ -716,9 +701,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                   child: ElevatedButton(
                     onPressed: () async {
                       if (nameController.text.isEmpty) {
-                        ScaffoldMessenger.of(sheetContext).showSnackBar(
-                          const SnackBar(content: Text('Nome e obrigatorio')),
-                        );
+                        sheetContext.showWarning('Nome e obrigatorio');
                         return;
                       }
 
@@ -737,26 +720,12 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                         });
 
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Row(
-                                children: [
-                                  Icon(LucideIcons.check, color: Colors.white, size: 18),
-                                  const SizedBox(width: 8),
-                                  const Text('Turma atualizada!'),
-                                ],
-                              ),
-                              backgroundColor: AppTheme.success,
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
+                          context.showSuccess('Turma atualizada!');
                           _loadClasses();
                         }
                       } catch (e) {
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Erro: $e')),
-                          );
+                          context.showError('Erro: $e');
                         }
                       }
                     },
@@ -1040,26 +1009,12 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                         await service.delete(cls.id);
 
                         if (mounted) {
-                          ScaffoldMessenger.of(this.context).showSnackBar(
-                            SnackBar(
-                              content: Row(
-                                children: [
-                                  Icon(LucideIcons.check, color: Colors.white, size: 18),
-                                  const SizedBox(width: 8),
-                                  const Text('Turma excluida!'),
-                                ],
-                              ),
-                              backgroundColor: AppTheme.success,
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
+                          this.context.showSuccess('Turma excluida!');
                           _loadClasses();
                         }
                       } catch (e) {
                         if (mounted) {
-                          ScaffoldMessenger.of(this.context).showSnackBar(
-                            SnackBar(content: Text('Erro: $e')),
-                          );
+                          this.context.showError('Erro: $e');
                         }
                       }
                     },

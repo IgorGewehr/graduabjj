@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../models/checkin.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
+import '../../services/checkin_service.dart';
+import '../../widgets/checkin_confirm_dialog.dart';
 
 /// Monitor Attendance Screen - For student monitors to take attendance
 class MonitorAttendanceScreen extends ConsumerStatefulWidget {
@@ -19,10 +24,14 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
   List<BJJClass> _classes = [];
   List<Student> _students = [];
   Set<String> _presentStudentIds = {};
+  List<Checkin> _pendingCheckins = [];
   BJJClass? _selectedClass;
   DateTime _selectedDate = DateTime.now();
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _isConfirmingCheckins = false;
+  bool _isRemovingCheckin = false;
+  bool _isAddingCheckin = false;
   String _searchQuery = '';
   String _filterMode = 'all'; // 'all', 'present', 'absent'
 
@@ -88,8 +97,143 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
       setState(() {
         _presentStudentIds = attendance.map((a) => a.studentId).toSet();
       });
+
+      // Load pending check-ins
+      await _loadPendingCheckins();
     } catch (e) {
       // Handle error
+    }
+  }
+
+  Future<void> _loadPendingCheckins() async {
+    if (_selectedClass == null) {
+      setState(() => _pendingCheckins = []);
+      return;
+    }
+
+    try {
+      final currentUser = ref.read(currentUserProvider).valueOrNull;
+      if (currentUser?.academyId == null) return;
+
+      final checkinService = CheckinService(currentUser!.academyId!);
+      final checkins = await checkinService.getPendingByClassAndDate(
+        _selectedClass!.id,
+        _selectedDate,
+      );
+
+      setState(() => _pendingCheckins = checkins);
+    } catch (e) {
+      // Handle error
+    }
+  }
+
+  bool get _checkinEnabled {
+    final settings = ref.read(academySettingsProvider).valueOrNull;
+    return settings?.studentCheckinEnabled ?? false;
+  }
+
+  Future<void> _showCheckinDialog() async {
+    if (_selectedClass == null) return;
+
+    await showDialog(
+      context: context,
+      builder: (context) => CheckinConfirmDialog(
+        selectedClass: _selectedClass!,
+        checkins: _pendingCheckins,
+        allStudents: _students,
+        onRemoveCheckin: _handleRemoveCheckin,
+        onAddManualCheckin: _handleAddManualCheckin,
+        onConfirmCheckins: _handleConfirmCheckins,
+        isConfirming: _isConfirmingCheckins,
+        isRemoving: _isRemovingCheckin,
+        isAdding: _isAddingCheckin,
+      ),
+    );
+  }
+
+  Future<void> _handleRemoveCheckin(String checkinId) async {
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser?.academyId == null) return;
+
+    setState(() => _isRemovingCheckin = true);
+    try {
+      final checkinService = CheckinService(currentUser!.academyId!);
+      await checkinService.removeCheckin(checkinId);
+      await _loadPendingCheckins();
+    } finally {
+      if (mounted) {
+        setState(() => _isRemovingCheckin = false);
+      }
+    }
+  }
+
+  Future<void> _handleAddManualCheckin(Student student) async {
+    if (_selectedClass == null) return;
+
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser?.academyId == null) return;
+
+    setState(() => _isAddingCheckin = true);
+    try {
+      final checkinService = CheckinService(currentUser!.academyId!);
+
+      // Get schedule for today
+      final dayOfWeek = _selectedDate.weekday % 7;
+      final schedule = _selectedClass!.schedule.firstWhere(
+        (s) => s.dayOfWeek == dayOfWeek,
+        orElse: () => _selectedClass!.schedule.first,
+      );
+
+      await checkinService.addManualCheckin(
+        studentId: student.id,
+        studentName: student.fullName,
+        classId: _selectedClass!.id,
+        className: _selectedClass!.name,
+        scheduleStartTime: schedule.startTime,
+        scheduleEndTime: schedule.endTime,
+        scheduleDayOfWeek: dayOfWeek,
+        date: _selectedDate,
+      );
+      await _loadPendingCheckins();
+    } catch (e) {
+      if (mounted) {
+        context.showError(e.toString().replaceAll('Exception: ', ''));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isAddingCheckin = false);
+      }
+    }
+  }
+
+  Future<void> _handleConfirmCheckins(List<String> checkinIds) async {
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser?.academyId == null) return;
+
+    setState(() => _isConfirmingCheckins = true);
+    try {
+      final checkinService = CheckinService(currentUser!.academyId!);
+      final monitorName = currentUser.displayName ?? 'Monitor';
+
+      final result = await checkinService.confirmCheckins(
+        checkinIds,
+        'monitor',
+        monitorName,
+      );
+
+      if (mounted) {
+        context.showSuccess('${result['success']} presenca(s) confirmada(s)!');
+      }
+
+      await _loadAttendanceForClass();
+    } catch (e) {
+      if (mounted) {
+        context.showError('Erro ao confirmar check-ins: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isConfirmingCheckins = false);
+      }
     }
   }
 
@@ -133,9 +277,7 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        context.showError('Erro: $e');
       }
     } finally {
       setState(() => _isSaving = false);
@@ -199,19 +341,11 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
       setState(() {});
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${filteredStudents.length} alunos marcados!'),
-            backgroundColor: AppTheme.success,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        context.showSuccess('${filteredStudents.length} alunos marcados!');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        context.showError('Erro: $e');
       }
     } finally {
       setState(() => _isSaving = false);
@@ -266,19 +400,11 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Presencas removidas!'),
-            backgroundColor: AppTheme.textSecondary,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        context.showInfo('Presencas removidas!');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        context.showError('Erro: $e');
       }
     } finally {
       setState(() => _isSaving = false);
@@ -357,20 +483,6 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        backgroundColor: AppTheme.surface,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: Text(
-          'Chamada',
-          style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
-        ),
-        centerTitle: true,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: AppTheme.divider),
-        ),
-      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -558,40 +670,79 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
   }
 
   Widget _buildActionButtons() {
-    return Row(
+    return Column(
       children: [
-        // Todos (green)
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: _isSaving ? null : _markAllPresent,
-            icon: const Icon(LucideIcons.checkCheck, size: 18),
-            label: const Text('Todos'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.success,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+        // Check-ins button (only show if enabled and has pending check-ins)
+        if (_checkinEnabled && _pendingCheckins.isNotEmpty) ...[
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _showCheckinDialog,
+              icon: const Icon(LucideIcons.userCheck, size: 18),
+              label: Text('Check-ins (${_pendingCheckins.length})'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.success,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),
-        ),
-        const SizedBox(width: 8),
-        // Limpar (outlined)
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _isSaving || _presentCount == 0 ? null : _unmarkAllPresent,
-            icon: const Icon(LucideIcons.x, size: 18),
-            label: const Text('Limpar'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.textSecondary,
-              side: BorderSide(color: AppTheme.divider),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          const SizedBox(height: 8),
+        ],
+
+        Row(
+          children: [
+            // Todos (green or outlined based on check-ins)
+            Expanded(
+              child: _checkinEnabled && _pendingCheckins.isNotEmpty
+                  ? OutlinedButton.icon(
+                      onPressed: _isSaving ? null : _markAllPresent,
+                      icon: const Icon(LucideIcons.checkCheck, size: 18),
+                      label: const Text('Todos'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.textPrimary,
+                        side: BorderSide(color: AppTheme.divider),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    )
+                  : ElevatedButton.icon(
+                      onPressed: _isSaving ? null : _markAllPresent,
+                      icon: const Icon(LucideIcons.checkCheck, size: 18),
+                      label: const Text('Todos'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.success,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 8),
+            // Limpar (outlined)
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _isSaving || _presentCount == 0 ? null : _unmarkAllPresent,
+                icon: const Icon(LucideIcons.x, size: 18),
+                label: const Text('Limpar'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.textSecondary,
+                  side: BorderSide(color: AppTheme.divider),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
               ),
             ),
-          ),
+          ],
         ),
       ],
     );

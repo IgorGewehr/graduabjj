@@ -159,6 +159,9 @@ class Achievement {
 
   // Helper: Get year from date
   int get year => date.year;
+
+  // Convenience getter (for backwards compatibility)
+  DateTime get awardedAt => date;
 }
 
 /// Belt Name Helper

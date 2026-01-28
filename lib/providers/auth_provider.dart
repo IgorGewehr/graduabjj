@@ -389,4 +389,61 @@ class AuthService {
 
     return await globalUserService.getUserAcademyIds(user.uid);
   }
+
+  /// Create account with link code (registers and links to student in one step)
+  Future<UserCredential> createAccountWithLinkCode(
+    String email,
+    String password,
+    String displayName,
+    String studentId,
+  ) async {
+    final academyId = FirebaseService.academyId;
+
+    // Create Firebase Auth account
+    final credential = await _auth.createUserWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+
+    // Update display name in Firebase Auth
+    await credential.user?.updateDisplayName(displayName);
+
+    // Create global user document
+    await globalUserService.createGlobalUser(
+      userId: credential.user!.uid,
+      email: email,
+      displayName: displayName,
+      accountType: AccountType.linked, // Already linked to academy
+    );
+
+    // Link user to academy
+    await globalUserService.linkUserToAcademy(
+      userId: credential.user!.uid,
+      academyId: academyId,
+      studentId: studentId,
+      role: UserRole.student,
+    );
+
+    // Create academy user document
+    await globalUserService.upsertAcademyUser(
+      academyId: academyId,
+      userId: credential.user!.uid,
+      data: {
+        'studentId': studentId,
+        'role': 'student',
+        'email': email,
+        'displayName': displayName,
+        'approvedAt': DateTime.now(),
+        'status': 'active',
+      },
+    );
+
+    // Register FCM token for push notifications
+    await pushNotificationService.onUserLogin();
+
+    // Subscribe to academy push notifications topic
+    await pushNotificationService.subscribeToTopic('academy_$academyId');
+
+    return credential;
+  }
 }

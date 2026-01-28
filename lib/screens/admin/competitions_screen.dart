@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -400,11 +401,7 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                     child: ElevatedButton(
                       onPressed: () async {
                         if (nameController.text.isEmpty || selectedDate == null) {
-                          ScaffoldMessenger.of(sheetContext).showSnackBar(
-                            const SnackBar(
-                              content: Text('Preencha nome e data'),
-                            ),
-                          );
+                          sheetContext.showWarning('Preencha nome e data');
                           return;
                         }
 
@@ -424,26 +421,12 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           );
 
                           if (mounted) {
-                            ScaffoldMessenger.of(this.context).showSnackBar(
-                              SnackBar(
-                                content: Row(
-                                  children: [
-                                    Icon(LucideIcons.check, color: Colors.white, size: 18),
-                                    const SizedBox(width: 8),
-                                    const Text('Campeonato criado!'),
-                                  ],
-                                ),
-                                backgroundColor: AppTheme.success,
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
+                            this.context.showSuccess('Campeonato criado!');
                             _loadCompetitions();
                           }
                         } catch (e) {
                           if (mounted) {
-                            ScaffoldMessenger.of(this.context).showSnackBar(
-                              SnackBar(content: Text('Erro: $e')),
-                            );
+                            this.context.showError('Erro: $e');
                           }
                         }
                       },
@@ -599,9 +582,7 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                     child: ElevatedButton(
                       onPressed: () async {
                         if (nameController.text.isEmpty) {
-                          ScaffoldMessenger.of(sheetContext).showSnackBar(
-                            const SnackBar(content: Text('Nome e obrigatorio')),
-                          );
+                          sheetContext.showWarning('Nome e obrigatorio');
                           return;
                         }
 
@@ -621,26 +602,12 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           });
 
                           if (mounted) {
-                            ScaffoldMessenger.of(this.context).showSnackBar(
-                              SnackBar(
-                                content: Row(
-                                  children: [
-                                    Icon(LucideIcons.check, color: Colors.white, size: 18),
-                                    const SizedBox(width: 8),
-                                    const Text('Campeonato atualizado!'),
-                                  ],
-                                ),
-                                backgroundColor: AppTheme.success,
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
+                            this.context.showSuccess('Campeonato atualizado!');
                             _loadCompetitions();
                           }
                         } catch (e) {
                           if (mounted) {
-                            ScaffoldMessenger.of(this.context).showSnackBar(
-                              SnackBar(content: Text('Erro: $e')),
-                            );
+                            this.context.showError('Erro: $e');
                           }
                         }
                       },
@@ -1160,9 +1127,7 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                     child: ElevatedButton(
                       onPressed: () async {
                         if (selectedStudent == null) {
-                          ScaffoldMessenger.of(sheetContext).showSnackBar(
-                            const SnackBar(content: Text('Selecione um aluno')),
-                          );
+                          sheetContext.showWarning('Selecione um aluno');
                           return;
                         }
 
@@ -1184,26 +1149,12 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           );
 
                           if (mounted) {
-                            ScaffoldMessenger.of(this.context).showSnackBar(
-                              SnackBar(
-                                content: Row(
-                                  children: [
-                                    Icon(LucideIcons.check, color: Colors.white, size: 18),
-                                    const SizedBox(width: 8),
-                                    const Text('Inscricao realizada!'),
-                                  ],
-                                ),
-                                backgroundColor: AppTheme.success,
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
+                            this.context.showSuccess('Inscricao realizada!');
                             _loadCompetitions();
                           }
                         } catch (e) {
                           if (mounted) {
-                            ScaffoldMessenger.of(this.context).showSnackBar(
-                              SnackBar(content: Text('Erro: $e')),
-                            );
+                            this.context.showError('Erro: $e');
                           }
                         }
                       },
@@ -1305,26 +1256,12 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                         await service.delete(competition.id);
 
                         if (mounted) {
-                          ScaffoldMessenger.of(this.context).showSnackBar(
-                            SnackBar(
-                              content: Row(
-                                children: [
-                                  Icon(LucideIcons.check, color: Colors.white, size: 18),
-                                  const SizedBox(width: 8),
-                                  const Text('Campeonato excluido!'),
-                                ],
-                              ),
-                              backgroundColor: AppTheme.success,
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
+                          this.context.showSuccess('Campeonato excluido!');
                           _loadCompetitions();
                         }
                       } catch (e) {
                         if (mounted) {
-                          ScaffoldMessenger.of(this.context).showSnackBar(
-                            SnackBar(content: Text('Erro: $e')),
-                          );
+                          this.context.showError('Erro: $e');
                         }
                       }
                     },

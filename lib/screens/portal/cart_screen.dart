@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
@@ -121,7 +122,7 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                'Total',
+                                'Total Estimado',
                                 style: AppTheme.titleMedium.copyWith(
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -134,6 +135,14 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                                 ),
                               ),
                             ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Precos e disponibilidade confirmados no pedido.',
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                            textAlign: TextAlign.center,
                           ),
                         ],
                       ),
@@ -231,16 +240,12 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
     final cartNotifier = ref.read(cartProvider.notifier);
 
     if (currentUser == null || currentUser.studentId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Voce precisa estar vinculado a um aluno')),
-      );
+      context.showWarning('Voce precisa estar vinculado a um aluno');
       return;
     }
 
     if (cart.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Seu carrinho esta vazio')),
-      );
+      context.showWarning('Seu carrinho esta vazio');
       return;
     }
 
@@ -248,30 +253,26 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
 
     try {
       final service = ref.read(storeServiceProvider);
+      // Server validates prices and stock
       await service.createOrder(
         studentId: currentUser.studentId!,
         studentName: currentUser.displayName,
         items: cart,
       );
 
-      // Clear cart
+      // Clear cart after successful order
       cartNotifier.clear();
 
       // Show success and navigate to orders
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Pedido criado com sucesso!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        context.showSuccess('Pedido criado com sucesso!');
         context.go('/portal/loja/pedidos');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao criar pedido: $e')),
-        );
+        // Show specific error from server validation
+        final errorMessage = e.toString().replaceFirst('Exception: ', '');
+        context.showError(errorMessage);
       }
     } finally {
       if (mounted) {

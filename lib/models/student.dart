@@ -451,6 +451,14 @@ class Student {
   bool get isAdult => category == StudentCategory.adult;
   bool get isActive => status == StudentStatus.active;
 
+  // Guardian convenience getters (for backwards compatibility)
+  String? get guardianName => guardian?.name;
+  String? get guardianPhone => guardian?.phone;
+  String? get guardianEmail => guardian?.email;
+
+  // Medical notes alias (for backwards compatibility)
+  String? get medicalNotes => healthNotes;
+
   Student copyWith({
     String? id,
     String? fullName,

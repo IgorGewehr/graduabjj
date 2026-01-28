@@ -83,11 +83,32 @@ class CardData {
 class AbacatePayService {
   final String academyId;
 
-  // Base URL for the API - should be configured per environment
-  // For production, this should point to your deployed Next.js app
-  static const String _baseUrl = 'https://your-app.vercel.app/api';
+  // Base URL for the API - configured via dart-define at build time
+  // flutter build appbundle --dart-define=API_BASE_URL=https://your-app.vercel.app/api
+  static const String _baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://marcusjj.vercel.app/api', // Update with your production URL
+  );
 
   AbacatePayService(this.academyId);
+
+  /// Get authentication headers with Firebase ID token
+  Future<Map<String, String>> _getAuthHeaders() async {
+    final user = FirebaseService.currentUser;
+    if (user == null) {
+      return {'Content-Type': 'application/json'};
+    }
+
+    try {
+      final token = await user.getIdToken();
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      };
+    } catch (_) {
+      return {'Content-Type': 'application/json'};
+    }
+  }
 
   /// Check if AbacatePay is enabled for the academy
   Future<bool> isEnabled() async {
@@ -99,8 +120,7 @@ class AbacatePayService {
 
       if (!academyDoc.exists) return false;
       return academyDoc.data()?['abacatePayEnabled'] == true;
-    } catch (e) {
-      print('Error checking AbacatePay status: $e');
+    } catch (_) {
       return false;
     }
   }
@@ -114,11 +134,10 @@ class AbacatePayService {
     String? description,
   }) async {
     try {
+      final headers = await _getAuthHeaders();
       final response = await http.post(
         Uri.parse('$_baseUrl/payments/create-pix'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: headers,
         body: jsonEncode({
           'academyId': academyId,
           'amount': (amount * 100).round(), // Convert to cents
@@ -136,10 +155,8 @@ class AbacatePayService {
         }
       }
 
-      print('Error creating PIX payment: ${response.body}');
       return null;
-    } catch (e) {
-      print('Error creating PIX payment: $e');
+    } catch (_) {
       return null;
     }
   }
@@ -153,11 +170,10 @@ class AbacatePayService {
     String? description,
   }) async {
     try {
+      final headers = await _getAuthHeaders();
       final response = await http.post(
         Uri.parse('$_baseUrl/payments/create-order-pix'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: headers,
         body: jsonEncode({
           'academyId': academyId,
           'amount': (amount * 100).round(), // Convert to cents
@@ -175,10 +191,8 @@ class AbacatePayService {
         }
       }
 
-      print('Error creating store order payment: ${response.body}');
       return null;
-    } catch (e) {
-      print('Error creating store order payment: $e');
+    } catch (_) {
       return null;
     }
   }
@@ -193,11 +207,10 @@ class AbacatePayService {
     String? description,
   }) async {
     try {
+      final headers = await _getAuthHeaders();
       final response = await http.post(
         Uri.parse('$_baseUrl/payments/create-card'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: headers,
         body: jsonEncode({
           'academyId': academyId,
           'amount': (amount * 100).round(), // Convert to cents
@@ -219,8 +232,7 @@ class AbacatePayService {
         success: false,
         message: data['error'] ?? 'Erro ao processar pagamento',
       );
-    } catch (e) {
-      print('Error creating card payment: $e');
+    } catch (_) {
       return CardPaymentResult(
         success: false,
         message: 'Erro de conexao',
@@ -238,11 +250,10 @@ class AbacatePayService {
     String? description,
   }) async {
     try {
+      final headers = await _getAuthHeaders();
       final response = await http.post(
         Uri.parse('$_baseUrl/payments/create-card'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: headers,
         body: jsonEncode({
           'academyId': academyId,
           'amount': (amount * 100).round(), // Convert to cents
@@ -264,13 +275,70 @@ class AbacatePayService {
         success: false,
         message: data['error'] ?? 'Erro ao processar pagamento',
       );
-    } catch (e) {
-      print('Error creating store order card payment: $e');
+    } catch (_) {
       return CardPaymentResult(
         success: false,
         message: 'Erro de conexao',
       );
     }
+  }
+
+  /// Request withdrawal to PIX key
+  Future<WithdrawalResult> requestWithdrawal({
+    required double amountInCents,
+    required String pixKey,
+    required String pixKeyType,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.post(
+        Uri.parse('$_baseUrl/payments/withdraw'),
+        headers: headers,
+        body: jsonEncode({
+          'academyId': academyId,
+          'amount': amountInCents.round(),
+          'pixKey': pixKey,
+          'pixKeyType': pixKeyType,
+        }),
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        return WithdrawalResult.fromJson(data);
+      }
+
+      return WithdrawalResult(
+        success: false,
+        message: data['error'] ?? 'Erro ao solicitar saque',
+      );
+    } catch (_) {
+      return WithdrawalResult(
+        success: false,
+        message: 'Erro de conexao',
+      );
+    }
+  }
+}
+
+/// Withdrawal Result
+class WithdrawalResult {
+  final bool success;
+  final String? transactionId;
+  final String? message;
+
+  WithdrawalResult({
+    required this.success,
+    this.transactionId,
+    this.message,
+  });
+
+  factory WithdrawalResult.fromJson(Map<String, dynamic> json) {
+    return WithdrawalResult(
+      success: json['success'] ?? false,
+      transactionId: json['data']?['transactionId'],
+      message: json['data']?['message'] ?? json['error'],
+    );
   }
 }
 

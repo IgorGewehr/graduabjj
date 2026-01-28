@@ -126,20 +126,6 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        backgroundColor: AppTheme.surface,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: Text(
-          'Alunos',
-          style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
-        ),
-        centerTitle: true,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: AppTheme.divider),
-        ),
-      ),
       body: RefreshIndicator(
         onRefresh: _loadStudents,
         child: CustomScrollView(

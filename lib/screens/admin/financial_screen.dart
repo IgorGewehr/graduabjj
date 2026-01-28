@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -29,15 +30,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   // State
   DateTime _selectedMonth = DateTime.now();
   late TabController _tabController;
-  bool _showPixSettings = false;
 
   // Stats carousel
   final PageController _statsPageController = PageController(viewportFraction: 0.85);
   int _currentStatsPage = 0;
-
-  // Form controllers
-  final _pixKeyController = TextEditingController();
-  PixKeyType _selectedPixKeyType = PixKeyType.cpf;
 
   @override
   void initState() {
@@ -49,7 +45,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   @override
   void dispose() {
     _tabController.dispose();
-    _pixKeyController.dispose();
     _statsPageController.dispose();
     super.dispose();
   }
@@ -76,13 +71,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         _students = results[2] as List<Student>;
         _monthlySummary = results[3] as Map<String, dynamic>;
         _settings = results[4] as AcademySettings?;
-
-        // Initialize PIX form
-        if (_settings != null) {
-          _pixKeyController.text = _settings!.pixKey ?? '';
-          _selectedPixKeyType = _settings!.pixKeyType ?? PixKeyType.cpf;
-        }
-
         _isLoading = false;
       });
     } catch (e) {
@@ -435,11 +423,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
           const SizedBox(height: 20),
 
-          // PIX Settings Card
-          _buildPixSettingsCard(),
-
-          const SizedBox(height: 16),
-
           // Plan Cards
           ..._plans.map((plan) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -481,171 +464,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
             ),
 
           const SizedBox(height: 80),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPixSettingsCard() {
-    final hasPixKey = _settings?.hasPixKey ?? false;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Column(
-        children: [
-          // Header (always visible)
-          GestureDetector(
-            onTap: () => setState(() => _showPixSettings = !_showPixSettings),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppTheme.infoLight,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      LucideIcons.creditCard,
-                      size: 20,
-                      color: AppTheme.info,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Chave PIX para Pagamentos',
-                          style: AppTheme.bodyMedium.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          hasPixKey
-                              ? _settings!.pixKey!
-                              : 'Nao configurada - clique para adicionar',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Icon(
-                    _showPixSettings
-                        ? LucideIcons.chevronUp
-                        : LucideIcons.chevronDown,
-                    size: 20,
-                    color: AppTheme.textSecondary,
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Expanded content
-          if (_showPixSettings) ...[
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // PIX Key Type
-                  Text(
-                    'Tipo de Chave',
-                    style: AppTheme.labelMedium.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: PixKeyType.values.map((type) {
-                      final isSelected = _selectedPixKeyType == type;
-                      return GestureDetector(
-                        onTap: () =>
-                            setState(() => _selectedPixKeyType = type),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? AppTheme.textPrimary
-                                : AppTheme.surfaceVariant,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            type.label,
-                            style: AppTheme.labelSmall.copyWith(
-                              color: isSelected
-                                  ? Colors.white
-                                  : AppTheme.textPrimary,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // PIX Key Input
-                  Text(
-                    'Chave PIX',
-                    style: AppTheme.labelMedium.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _pixKeyController,
-                    decoration: InputDecoration(
-                      hintText: 'Digite a chave PIX',
-                      filled: true,
-                      fillColor: AppTheme.surfaceVariant,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 14),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Save button
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _savePixSettings,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.success,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: const Text(
-                        'Salvar Chave PIX',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -816,20 +634,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                           referenceMonth: _currentMonthKey,
                         );
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                  '${payments.length} mensalidades geradas!'),
-                              backgroundColor: AppTheme.success,
-                            ),
-                          );
+                          context.showSuccess('${payments.length} mensalidades geradas!');
                           _loadData();
                         }
                       } catch (e) {
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Erro: $e')),
-                          );
+                          context.showError('Erro: $e');
                         }
                       }
                     },
@@ -975,19 +785,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                               classesPerWeek: classesPerWeek,
                             );
                             if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Plano criado!'),
-                                  backgroundColor: AppTheme.success,
-                                ),
-                              );
+                              context.showSuccess('Plano criado!');
                               _loadData();
                             }
                           } catch (e) {
                             if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Erro: $e')),
-                              );
+                              context.showError('Erro: $e');
                             }
                           }
                         },
@@ -1156,19 +959,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                               'isActive': isActive,
                             });
                             if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Plano atualizado!'),
-                                  backgroundColor: AppTheme.success,
-                                ),
-                              );
+                              context.showSuccess('Plano atualizado!');
                               _loadData();
                             }
                           } catch (e) {
                             if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Erro: $e')),
-                              );
+                              context.showError('Erro: $e');
                             }
                           }
                         },
@@ -1210,19 +1006,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 final service = PlanService(FirebaseService.academyId);
                 await service.delete(plan.id);
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Plano excluido!'),
-                      backgroundColor: AppTheme.success,
-                    ),
-                  );
+                  context.showSuccess('Plano excluido!');
                   _loadData();
                 }
               } catch (e) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Erro: $e')),
-                  );
+                  context.showError('Erro: $e');
                 }
               }
             },
@@ -1412,19 +1201,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                           await service.markAsPaid(payment.id,
                               method: selectedMethod);
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Pagamento confirmado!'),
-                                backgroundColor: AppTheme.success,
-                              ),
-                            );
+                            context.showSuccess('Pagamento confirmado!');
                             _loadData();
                           }
                         } catch (e) {
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Erro: $e')),
-                            );
+                            context.showError('Erro: $e');
                           }
                         }
                       },
@@ -1448,39 +1230,13 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     );
   }
 
-  Future<void> _savePixSettings() async {
-    try {
-      final service = SettingsService(FirebaseService.academyId);
-      await service.updatePixInfo(_pixKeyController.text, _selectedPixKeyType);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Chave PIX salva!'),
-            backgroundColor: AppTheme.success,
-          ),
-        );
-        setState(() => _showPixSettings = false);
-        _loadData();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
-      }
-    }
-  }
-
   void _sendReminder(Payment payment) async {
     try {
       final studentService = StudentService(FirebaseService.academyId);
       final student = await studentService.getById(payment.studentId);
       if (student?.phone == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('Aluno nao possui telefone cadastrado')),
-          );
+          context.showWarning('Aluno nao possui telefone cadastrado');
         }
         return;
       }
@@ -1494,15 +1250,11 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Abrir WhatsApp: $whatsappLink')),
-        );
+        context.showInfo('Abrir WhatsApp: $whatsappLink');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        context.showError('Erro: $e');
       }
     }
   }
@@ -2043,9 +1795,7 @@ class _ManageStudentsSheetState extends State<_ManageStudentsSheet> {
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        context.showError('Erro: $e');
       }
     } finally {
       if (mounted) {

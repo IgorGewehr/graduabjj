@@ -178,9 +178,8 @@ class Academy {
   final String? pixKey;
   final PixKeyType? pixKeyType;
 
-  // AbacatePay Integration
+  // AbacatePay Integration (API key is global in backend env, not per-academy)
   final bool abacatePayEnabled;
-  final String? abacatePayApiKey;
 
   // Auto-graduation Settings
   final bool autoGraduationEnabled;
@@ -191,6 +190,9 @@ class Academy {
   final bool storePublished;
   final String? storeWelcomeMessage;
   final int? storeMinOrderAmount;
+
+  // Student Check-in Settings
+  final bool studentCheckinEnabled;
 
   // Subscription
   final AcademySubscription? subscription;
@@ -220,13 +222,13 @@ class Academy {
     this.pixKey,
     this.pixKeyType,
     this.abacatePayEnabled = false,
-    this.abacatePayApiKey,
     this.autoGraduationEnabled = false,
     this.autoGraduationAttendances,
     this.storeEnabled = false,
     this.storePublished = false,
     this.storeWelcomeMessage,
     this.storeMinOrderAmount,
+    this.studentCheckinEnabled = false,
     this.subscription,
     required this.createdAt,
     required this.updatedAt,
@@ -257,13 +259,13 @@ class Academy {
           ? PixKeyTypeExtension.fromString(data['pixKeyType'])
           : null,
       abacatePayEnabled: data['abacatePayEnabled'] ?? false,
-      abacatePayApiKey: data['abacatePayApiKey'],
       autoGraduationEnabled: data['autoGraduationEnabled'] ?? false,
       autoGraduationAttendances: data['autoGraduationAttendances'],
       storeEnabled: data['storeEnabled'] ?? false,
       storePublished: data['storePublished'] ?? false,
       storeWelcomeMessage: data['storeWelcomeMessage'],
       storeMinOrderAmount: data['storeMinOrderAmount'],
+      studentCheckinEnabled: data['studentCheckinEnabled'] ?? false,
       subscription: data['subscription'] != null
           ? AcademySubscription.fromMap(data['subscription'])
           : null,
@@ -293,13 +295,13 @@ class Academy {
       'pixKey': pixKey,
       'pixKeyType': pixKeyType?.value,
       'abacatePayEnabled': abacatePayEnabled,
-      'abacatePayApiKey': abacatePayApiKey,
       'autoGraduationEnabled': autoGraduationEnabled,
       'autoGraduationAttendances': autoGraduationAttendances,
       'storeEnabled': storeEnabled,
       'storePublished': storePublished,
       'storeWelcomeMessage': storeWelcomeMessage,
       'storeMinOrderAmount': storeMinOrderAmount,
+      'studentCheckinEnabled': studentCheckinEnabled,
       'subscription': subscription?.toMap(),
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(DateTime.now()),
@@ -336,13 +338,13 @@ class Academy {
     String? pixKey,
     PixKeyType? pixKeyType,
     bool? abacatePayEnabled,
-    String? abacatePayApiKey,
     bool? autoGraduationEnabled,
     int? autoGraduationAttendances,
     bool? storeEnabled,
     bool? storePublished,
     String? storeWelcomeMessage,
     int? storeMinOrderAmount,
+    bool? studentCheckinEnabled,
     AcademySubscription? subscription,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -368,13 +370,13 @@ class Academy {
       pixKey: pixKey ?? this.pixKey,
       pixKeyType: pixKeyType ?? this.pixKeyType,
       abacatePayEnabled: abacatePayEnabled ?? this.abacatePayEnabled,
-      abacatePayApiKey: abacatePayApiKey ?? this.abacatePayApiKey,
       autoGraduationEnabled: autoGraduationEnabled ?? this.autoGraduationEnabled,
       autoGraduationAttendances: autoGraduationAttendances ?? this.autoGraduationAttendances,
       storeEnabled: storeEnabled ?? this.storeEnabled,
       storePublished: storePublished ?? this.storePublished,
       storeWelcomeMessage: storeWelcomeMessage ?? this.storeWelcomeMessage,
       storeMinOrderAmount: storeMinOrderAmount ?? this.storeMinOrderAmount,
+      studentCheckinEnabled: studentCheckinEnabled ?? this.studentCheckinEnabled,
       subscription: subscription ?? this.subscription,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

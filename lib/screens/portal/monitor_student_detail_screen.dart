@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -119,6 +121,13 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
       backgroundColor: _getBeltColor(_student!.currentBelt),
       foregroundColor: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
       actions: [
+        // Generate link code button (only if student not linked)
+        if (_student != null && _student!.linkedUserId == null)
+          IconButton(
+            icon: const Icon(LucideIcons.link),
+            tooltip: 'Gerar Codigo de Acesso',
+            onPressed: _generateLinkCode,
+          ),
         IconButton(
           icon: const Icon(LucideIcons.edit),
           onPressed: () {
@@ -637,6 +646,83 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
     };
     final baseBelt = belt.split('-').first;
     return colors[baseBelt] ?? Colors.grey;
+  }
+
+  Future<void> _generateLinkCode() async {
+    try {
+      final linkCodeService = LinkCodeService(FirebaseService.academyId);
+      final linkCode = await linkCodeService.generate(
+        studentId: _student!.id,
+        studentName: _student!.fullName,
+        createdBy: 'monitor',
+      );
+
+      if (mounted) {
+        _showLinkCodeDialog(linkCode);
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showError('Erro ao gerar codigo: $e');
+      }
+    }
+  }
+
+  void _showLinkCodeDialog(LinkCode linkCode) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(LucideIcons.link, color: AppTheme.primary),
+            const SizedBox(width: 8),
+            const Text('Codigo Gerado'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Compartilhe com ${linkCode.studentName}:'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.primary, width: 2),
+              ),
+              child: SelectableText(
+                linkCode.code,
+                style: const TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 8,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Valido por 24 horas',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: linkCode.code));
+              context.showSuccess('Codigo copiado!');
+            },
+            icon: const Icon(LucideIcons.copy, size: 16),
+            label: const Text('Copiar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fechar'),
+          ),
+        ],
+      ),
+    );
   }
 }
 

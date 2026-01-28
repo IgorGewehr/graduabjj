@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,7 +7,9 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../services/store_service.dart';
 import '../../services/abacate_pay_service.dart';
@@ -511,15 +515,11 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
         Navigator.pop(context);
         _showPixPaymentSheet(context, paymentLink);
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Erro ao gerar pagamento PIX')),
-        );
+        context.showError('Erro ao gerar pagamento PIX');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        context.showError('Erro: $e');
       }
     } finally {
       if (mounted) {
@@ -529,6 +529,8 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
   }
 
   void _showPixPaymentSheet(BuildContext context, PaymentLink paymentLink) {
+    final studentId = ref.read(currentUserProvider).valueOrNull?.studentId ?? '';
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -537,6 +539,11 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
         paymentLink: paymentLink,
         orderId: widget.order.id,
         amount: widget.order.total,
+        studentId: studentId,
+        onPaymentConfirmed: () {
+          // Refresh the orders list when payment is confirmed
+          ref.invalidate(studentOrdersProvider(studentId));
+        },
       ),
     );
   }
@@ -970,17 +977,134 @@ class _TimelineStep {
   });
 }
 
-/// PIX Payment Bottom Sheet
-class _PixPaymentBottomSheet extends StatelessWidget {
+/// PIX Payment Bottom Sheet with real-time payment listener
+class _PixPaymentBottomSheet extends StatefulWidget {
   final PaymentLink paymentLink;
   final String orderId;
   final double amount;
+  final String studentId;
+  final void Function()? onPaymentConfirmed;
 
   const _PixPaymentBottomSheet({
     required this.paymentLink,
     required this.orderId,
     required this.amount,
+    required this.studentId,
+    this.onPaymentConfirmed,
   });
+
+  @override
+  State<_PixPaymentBottomSheet> createState() => _PixPaymentBottomSheetState();
+}
+
+class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
+  bool _paymentConfirmed = false;
+  StreamSubscription<DocumentSnapshot>? _orderListener;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupOrderListener();
+  }
+
+  @override
+  void dispose() {
+    _orderListener?.cancel();
+    super.dispose();
+  }
+
+  /// Listen to order status changes in real-time
+  void _setupOrderListener() {
+    final academyId = FirebaseService.academyId;
+    if (academyId == null) return;
+
+    _orderListener = FirebaseFirestore.instance
+        .collection('academies')
+        .doc(academyId)
+        .collection('storeOrders')
+        .doc(widget.orderId)
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+
+      final data = snapshot.data();
+      if (data != null && data['status'] == 'paid' && !_paymentConfirmed) {
+        setState(() {
+          _paymentConfirmed = true;
+        });
+
+        // Show success feedback
+        _showPaymentConfirmedDialog();
+
+        // Notify parent
+        widget.onPaymentConfirmed?.call();
+      }
+    });
+  }
+
+  void _showPaymentConfirmedDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: const BoxDecoration(
+                color: AppTheme.successLight,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                LucideIcons.checkCircle,
+                size: 48,
+                color: AppTheme.success,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Pagamento Confirmado!',
+              style: AppTheme.titleLarge.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Seu pedido foi pago com sucesso.',
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context); // Close dialog
+                Navigator.pop(context); // Close bottom sheet
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.success,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text('Fechar'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1031,7 +1155,7 @@ class _PixPaymentBottomSheet extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Pedido #${orderId.substring(orderId.length - 6).toUpperCase()}',
+                        'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}',
                         style: AppTheme.bodyMedium.copyWith(
                           color: AppTheme.textSecondary,
                         ),
@@ -1063,7 +1187,7 @@ class _PixPaymentBottomSheet extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    'R\$ ${amount.toStringAsFixed(2)}',
+                    'R\$ ${widget.amount.toStringAsFixed(2)}',
                     style: AppTheme.headlineMedium.copyWith(
                       color: AppTheme.primary,
                       fontWeight: FontWeight.w700,
@@ -1088,7 +1212,7 @@ class _PixPaymentBottomSheet extends StatelessWidget {
                 ],
               ),
               child: QrImageView(
-                data: paymentLink.pixCode,
+                data: widget.paymentLink.pixCode,
                 version: QrVersions.auto,
                 size: 200,
                 backgroundColor: Colors.white,
@@ -1114,9 +1238,9 @@ class _PixPaymentBottomSheet extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      paymentLink.pixCode.length > 30
-                          ? '${paymentLink.pixCode.substring(0, 30)}...'
-                          : paymentLink.pixCode,
+                      widget.paymentLink.pixCode.length > 30
+                          ? '${widget.paymentLink.pixCode.substring(0, 30)}...'
+                          : widget.paymentLink.pixCode,
                       style: AppTheme.bodySmall.copyWith(
                         fontFamily: 'monospace',
                         color: AppTheme.textSecondary,
@@ -1128,13 +1252,8 @@ class _PixPaymentBottomSheet extends StatelessWidget {
                   const SizedBox(width: 8),
                   TextButton.icon(
                     onPressed: () {
-                      Clipboard.setData(ClipboardData(text: paymentLink.pixCode));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Codigo PIX copiado!'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
+                      Clipboard.setData(ClipboardData(text: widget.paymentLink.pixCode));
+                      context.showSuccess('Codigo PIX copiado!');
                     },
                     icon: const Icon(LucideIcons.copy, size: 16),
                     label: const Text('Copiar'),
@@ -1182,12 +1301,49 @@ class _PixPaymentBottomSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            Text(
-              'O pagamento sera confirmado automaticamente',
-              style: AppTheme.bodySmall.copyWith(
-                color: AppTheme.textSecondary,
+            // Real-time payment status indicator
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _paymentConfirmed
+                    ? AppTheme.successLight
+                    : AppTheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
               ),
-              textAlign: TextAlign.center,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (_paymentConfirmed)
+                    const Icon(
+                      LucideIcons.checkCircle,
+                      size: 18,
+                      color: AppTheme.success,
+                    )
+                  else
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          AppTheme.primary,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(width: 12),
+                  Text(
+                    _paymentConfirmed
+                        ? 'Pagamento confirmado!'
+                        : 'Aguardando pagamento...',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: _paymentConfirmed
+                          ? AppTheme.success
+                          : AppTheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
             SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
           ],
@@ -1340,12 +1496,7 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
 
       if (result.success) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result.message ?? 'Pagamento aprovado!'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          context.showSuccess(result.message ?? 'Pagamento aprovado!');
           widget.onPaymentSuccess();
         }
       } else {

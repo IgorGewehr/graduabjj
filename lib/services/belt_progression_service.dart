@@ -65,6 +65,11 @@ class BeltProgression {
   // Computed properties
   bool get isBeltChange => previousBelt != newBelt;
   bool get isStripeChange => previousStripes != newStripes;
+
+  // Convenience getters (for backwards compatibility)
+  DateTime get date => promotionDate;
+  String get belt => newBelt;
+  int get stripes => newStripes;
 }
 
 /// Eligibility Check Result

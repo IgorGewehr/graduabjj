@@ -1,9 +1,15 @@
+import 'dart:io';
+
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../services/services.dart';
 import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
 
@@ -860,6 +866,8 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
   StoreProductCategory _category = StoreProductCategory.other;
   StoreStockType _stockType = StoreStockType.inStock;
   bool _isLoading = false;
+  bool _isUploadingImage = false;
+  List<String> _imageUrls = [];
 
   @override
   void initState() {
@@ -882,7 +890,53 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
     if (widget.product != null) {
       _category = widget.product!.category;
       _stockType = widget.product!.stockType;
+      _imageUrls = List<String>.from(widget.product!.imageUrls);
     }
+  }
+
+  Future<void> _pickAndUploadImage() async {
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+
+      if (pickedFile == null) return;
+
+      setState(() => _isUploadingImage = true);
+
+      // Upload to Firebase Storage
+      final file = File(pickedFile.path);
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('academies')
+          .child(FirebaseService.academyId)
+          .child('products')
+          .child('product_$timestamp.jpg');
+
+      await storageRef.putFile(file);
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      setState(() {
+        _imageUrls.add(downloadUrl);
+        _isUploadingImage = false;
+      });
+    } catch (e) {
+      setState(() => _isUploadingImage = false);
+      if (mounted) {
+        context.showError('Erro ao fazer upload: $e');
+      }
+    }
+  }
+
+  void _removeImage(int index) {
+    setState(() {
+      _imageUrls.removeAt(index);
+    });
   }
 
   @override
@@ -922,16 +976,14 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
             : null,
         'sizes': sizes.isEmpty ? null : sizes,
         'colors': colors.isEmpty ? null : colors,
-        'imageUrls': widget.product?.imageUrls ?? <String>[],
+        'imageUrls': _imageUrls,
       };
 
       await widget.onSave(data);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao salvar: $e')),
-        );
+        context.showError('Erro ao salvar: $e');
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -991,6 +1043,127 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Images Section
+                      Text('Fotos do Produto', style: AppTheme.labelMedium),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 100,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          children: [
+                            // Existing images
+                            ..._imageUrls.asMap().entries.map((entry) {
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: Stack(
+                                  children: [
+                                    Container(
+                                      width: 100,
+                                      height: 100,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(color: AppTheme.divider),
+                                      ),
+                                      clipBehavior: Clip.antiAlias,
+                                      child: Image.network(
+                                        entry.value,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => const Icon(
+                                          LucideIcons.imageOff,
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      top: 4,
+                                      right: 4,
+                                      child: GestureDetector(
+                                        onTap: () => _removeImage(entry.key),
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.error,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            LucideIcons.x,
+                                            size: 14,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    if (entry.key == 0)
+                                      Positioned(
+                                        bottom: 4,
+                                        left: 4,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.primary,
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            'Principal',
+                                            style: AppTheme.labelSmall.copyWith(
+                                              color: Colors.white,
+                                              fontSize: 9,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              );
+                            }),
+                            // Add button
+                            GestureDetector(
+                              onTap: _isUploadingImage ? null : _pickAndUploadImage,
+                              child: Container(
+                                width: 100,
+                                height: 100,
+                                decoration: BoxDecoration(
+                                  color: AppTheme.surfaceVariant,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: AppTheme.divider,
+                                    style: BorderStyle.solid,
+                                  ),
+                                ),
+                                child: _isUploadingImage
+                                    ? const Center(
+                                        child: SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        ),
+                                      )
+                                    : Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            LucideIcons.imagePlus,
+                                            color: AppTheme.textSecondary,
+                                            size: 24,
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Adicionar',
+                                            style: AppTheme.labelSmall.copyWith(
+                                              color: AppTheme.textSecondary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
                       // Name
                       _ModernTextField(
                         controller: _nameController,
