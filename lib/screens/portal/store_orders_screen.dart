@@ -1053,29 +1053,7 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      // Card Button
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _isLoadingPayment
-                              ? null
-                              : () {
-                                  Navigator.pop(context);
-                                  _showCardPaymentSheet(context);
-                                },
-                          icon: const Icon(LucideIcons.creditCard),
-                          label: const Text('Pagar com Cartao'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            foregroundColor: AppTheme.textPrimary,
-                            side: const BorderSide(color: AppTheme.divider),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                      ),
+                      // Card payment disabled - coming soon
                     ],
                   ],
                 ),

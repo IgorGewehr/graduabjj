@@ -1024,13 +1024,12 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                   const SizedBox(height: 16),
                   _ModernSwitch(
                     title: 'Permitir Cartao de Credito',
-                    subtitle: 'Habilitar pagamento via cartao na loja',
-                    value: _storeCreditCardEnabled,
-                    onChanged: (value) {
-                      setState(() => _storeCreditCardEnabled = value);
-                    },
+                    subtitle: 'Em breve',
+                    value: false,
+                    onChanged: null,
                     icon: LucideIcons.creditCard,
-                    iconColor: AppTheme.info,
+                    iconColor: AppTheme.textSecondary,
+                    disabled: true,
                   ),
                 ],
               ],
@@ -1323,6 +1322,7 @@ class _ModernSwitch extends StatelessWidget {
   final ValueChanged<bool>? onChanged;
   final IconData icon;
   final Color iconColor;
+  final bool disabled;
 
   const _ModernSwitch({
     required this.title,
@@ -1331,57 +1331,85 @@ class _ModernSwitch extends StatelessWidget {
     required this.onChanged,
     required this.icon,
     required this.iconColor,
+    this.disabled = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: value ? iconColor.withValues(alpha: 0.05) : AppTheme.surfaceVariant,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: value ? iconColor.withValues(alpha: 0.2) : AppTheme.divider,
+    final effectiveColor = disabled ? AppTheme.textSecondary : iconColor;
+
+    return Opacity(
+      opacity: disabled ? 0.6 : 1.0,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: value && !disabled ? effectiveColor.withValues(alpha: 0.05) : AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: value && !disabled ? effectiveColor.withValues(alpha: 0.2) : AppTheme.divider,
+          ),
         ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: iconColor.withValues(alpha: value ? 0.2 : 0.1),
-              borderRadius: BorderRadius.circular(10),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: effectiveColor.withValues(alpha: value && !disabled ? 0.2 : 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: effectiveColor, size: 20),
             ),
-            child: Icon(icon, color: iconColor, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: AppTheme.bodyMedium.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        title,
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: disabled ? AppTheme.textSecondary : AppTheme.textPrimary,
+                        ),
+                      ),
+                      if (disabled) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.warning.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'Em breve',
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.warning,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                ),
-                Text(
-                  subtitle,
-                  style: AppTheme.labelSmall.copyWith(
-                    color: AppTheme.textSecondary,
+                  Text(
+                    subtitle,
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeColor: iconColor,
-          ),
-        ],
+            Switch(
+              value: value,
+              onChanged: disabled ? null : onChanged,
+              activeColor: effectiveColor,
+            ),
+          ],
+        ),
       ),
     );
   }

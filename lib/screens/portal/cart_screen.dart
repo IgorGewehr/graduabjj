@@ -167,7 +167,7 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                                   color: Colors.white,
                                 ),
                               )
-                            : const Icon(LucideIcons.creditCard),
+                            : const Icon(LucideIcons.shoppingBag),
                         label: Text(
                           _isLoading ? 'Processando...' : 'Finalizar Pedido',
                         ),
