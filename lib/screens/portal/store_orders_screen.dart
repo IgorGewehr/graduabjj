@@ -1098,7 +1098,7 @@ class _StatusTimeline extends StatelessWidget {
   Widget build(BuildContext context) {
     final steps = [
       _TimelineStep(
-        label: 'Pedido Criado',
+        label: 'Criado',
         status: StoreOrderStatus.pendingPayment,
         isCompleted: true,
         isActive: order.status == StoreOrderStatus.pendingPayment,
@@ -1161,55 +1161,59 @@ class _StatusTimeline extends StatelessWidget {
         return Expanded(
           child: Row(
             children: [
-              Column(
-                children: [
-                  Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: step.isCompleted || step.isActive
-                          ? AppTheme.primary
-                          : AppTheme.surfaceVariant,
-                      shape: BoxShape.circle,
+              Expanded(
+                child: Column(
+                  children: [
+                    Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: step.isCompleted || step.isActive
+                            ? AppTheme.primary
+                            : AppTheme.surfaceVariant,
+                        shape: BoxShape.circle,
+                      ),
+                      child: step.isCompleted
+                          ? const Icon(
+                              LucideIcons.check,
+                              size: 14,
+                              color: Colors.white,
+                            )
+                          : step.isActive
+                              ? Container(
+                                  margin: const EdgeInsets.all(6),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                  ),
+                                )
+                              : null,
                     ),
-                    child: step.isCompleted
-                        ? const Icon(
-                            LucideIcons.check,
-                            size: 14,
-                            color: Colors.white,
-                          )
-                        : step.isActive
-                            ? Container(
-                                margin: const EdgeInsets.all(6),
-                                decoration: const BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                ),
-                              )
-                            : null,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    step.label,
-                    style: AppTheme.labelSmall.copyWith(
-                      color: step.isCompleted || step.isActive
-                          ? AppTheme.textPrimary
-                          : AppTheme.textSecondary,
-                      fontWeight: step.isActive ? FontWeight.w600 : FontWeight.w500,
+                    const SizedBox(height: 4),
+                    Text(
+                      step.label,
+                      style: AppTheme.labelSmall.copyWith(
+                        color: step.isCompleted || step.isActive
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary,
+                        fontWeight: step.isActive ? FontWeight.w600 : FontWeight.w500,
+                        fontSize: 9,
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+                  ],
+                ),
               ),
               if (!isLast)
-                Expanded(
-                  child: Container(
-                    height: 2,
-                    margin: const EdgeInsets.only(bottom: 20),
-                    color: step.isCompleted
-                        ? AppTheme.primary
-                        : AppTheme.surfaceVariant,
-                  ),
+                Container(
+                  width: 16,
+                  height: 2,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  color: step.isCompleted
+                      ? AppTheme.primary
+                      : AppTheme.surfaceVariant,
                 ),
             ],
           ),
