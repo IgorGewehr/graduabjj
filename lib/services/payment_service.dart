@@ -564,10 +564,12 @@ class PaymentService {
   // ============================================
   /// Generates monthly tuitions ONLY for students enrolled in active plans.
   /// Uses the plan's monthlyValue (not the student's tuitionValue field).
+  /// If [planId] is provided, generates only for students in that specific plan.
   Future<List<Payment>> generateMonthlyTuitions({
     List<({String id, String name, double value, int dueDay})>? students,
     required String referenceMonth,
     String? createdBy,
+    String? planId, // Optional: filter to specific plan
   }) async {
     final results = <Payment>[];
     final year = int.parse(referenceMonth.split('-')[0]);
@@ -580,12 +582,21 @@ class PaymentService {
     } else {
       // Get only students enrolled in active plans with the correct plan value
       final planService = PlanService(academyId);
-      final activePlans = await planService.getActive();
+      List<Plan> plansToProcess;
+
+      if (planId != null) {
+        // Filter to specific plan
+        final plan = await planService.getById(planId);
+        plansToProcess = plan != null && plan.isActive ? [plan] : [];
+      } else {
+        // All active plans
+        plansToProcess = await planService.getActive();
+      }
 
       // Build a map of student -> plan value (only active students in active plans)
       final studentsWithPlans = <String, ({double value, int dueDay})>{};
 
-      for (final plan in activePlans) {
+      for (final plan in plansToProcess) {
         for (final studentId in plan.studentIds) {
           // Use plan's monthlyValue and defaultDueDay
           studentsWithPlans[studentId] = (
