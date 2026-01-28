@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
+import 'plan_service.dart';
 import 'student_service.dart';
 
 /// Payment Status
@@ -561,6 +562,8 @@ class PaymentService {
   // ============================================
   // Generate Monthly Tuitions
   // ============================================
+  /// Generates monthly tuitions ONLY for students enrolled in active plans.
+  /// Uses the plan's monthlyValue (not the student's tuitionValue field).
   Future<List<Payment>> generateMonthlyTuitions({
     List<({String id, String name, double value, int dueDay})>? students,
     required String referenceMonth,
@@ -570,21 +573,47 @@ class PaymentService {
     final year = int.parse(referenceMonth.split('-')[0]);
     final month = int.parse(referenceMonth.split('-')[1]);
 
-    // If students not provided, fetch active students from database
+    // If students not provided, build list from active plans
     List<({String id, String name, double value, int dueDay})> studentList;
     if (students != null) {
       studentList = students;
     } else {
+      // Get only students enrolled in active plans with the correct plan value
+      final planService = PlanService(academyId);
+      final activePlans = await planService.getActive();
+
+      // Build a map of student -> plan value (only active students in active plans)
+      final studentsWithPlans = <String, ({double value, int dueDay})>{};
+
+      for (final plan in activePlans) {
+        for (final studentId in plan.studentIds) {
+          // Use plan's monthlyValue and defaultDueDay
+          studentsWithPlans[studentId] = (
+            value: plan.monthlyValue,
+            dueDay: plan.defaultDueDay,
+          );
+        }
+      }
+
+      // Fetch student details only for students with plans
+      if (studentsWithPlans.isEmpty) {
+        return results; // No students with active plans
+      }
+
       final activeStudents = await _collections.students
           .where('status', isEqualTo: 'active')
           .get();
-      studentList = activeStudents.docs.map((doc) {
+
+      studentList = activeStudents.docs
+          .where((doc) => studentsWithPlans.containsKey(doc.id))
+          .map((doc) {
         final data = doc.data() as Map<String, dynamic>;
+        final planData = studentsWithPlans[doc.id]!;
         return (
           id: doc.id,
           name: data['fullName'] as String? ?? '',
-          value: (data['tuitionValue'] as num?)?.toDouble() ?? 0.0,
-          dueDay: data['tuitionDay'] as int? ?? 10,
+          value: planData.value, // Use plan value, not student's tuitionValue
+          dueDay: data['tuitionDay'] as int? ?? planData.dueDay,
         );
       }).where((s) => s.value > 0).toList();
     }
@@ -664,9 +693,18 @@ class PaymentService {
     int countPaid = 0;
     int countPending = 0;
     int countOverdue = 0;
+    int countCancelled = 0;
 
     for (final p in payments) {
+      // Skip cancelled payments - they don't count for collection rate
+      if (p.status == PaymentStatus.cancelled) {
+        countCancelled++;
+        continue;
+      }
+
+      // Only count active payments (pending, overdue, paid) in expected
       totalExpected += p.value;
+
       if (p.status == PaymentStatus.paid) {
         totalPaid += p.value;
         countPaid++;
@@ -685,6 +723,7 @@ class PaymentService {
       'paid': {'value': totalPaid, 'count': countPaid},
       'pending': {'value': totalPending, 'count': countPending},
       'overdue': {'value': totalOverdue, 'count': countOverdue},
+      'cancelled': countCancelled,
       'collectionRate': totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0,
     };
   }
