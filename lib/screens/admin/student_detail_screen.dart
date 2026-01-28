@@ -565,9 +565,12 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       'black': 'Preta',
     };
 
+    // Store parent context before dialog
+    final parentContext = context;
+
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
+      builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
             title: const Text('Adicionar Conquista'),
@@ -681,10 +684,11 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                   InkWell(
                     onTap: () async {
                       final picked = await showDatePicker(
-                        context: context,
+                        context: dialogContext,
                         initialDate: selectedDate,
                         firstDate: DateTime(2000),
                         lastDate: DateTime.now(),
+                        locale: const Locale('pt', 'BR'),
                       );
                       if (picked != null) {
                         setDialogState(() => selectedDate = picked);
@@ -710,22 +714,22 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () => Navigator.pop(dialogContext),
                 child: const Text('Cancelar'),
               ),
               FilledButton(
                 onPressed: () async {
                   // Validate
                   if (selectedType == AchievementType.graduation && selectedBelt == null) {
-                    context.showError('Selecione a faixa');
+                    parentContext.showError('Selecione a faixa');
                     return;
                   }
                   if (selectedType == AchievementType.milestone && titleController.text.trim().isEmpty) {
-                    context.showError('Informe o título');
+                    parentContext.showError('Informe o título');
                     return;
                   }
 
-                  Navigator.pop(context);
+                  Navigator.pop(dialogContext);
 
                   try {
                     final service = AchievementService(FirebaseService.academyId);
@@ -754,12 +758,12 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                     );
 
                     if (mounted) {
-                      context.showSuccess('Conquista adicionada!');
-                      _loadData();
+                      parentContext.showSuccess('Conquista adicionada!');
+                      await _loadData();
                     }
                   } catch (e) {
                     if (mounted) {
-                      context.showError('Erro: $e');
+                      parentContext.showError('Erro: $e');
                     }
                   }
                 },
@@ -775,9 +779,12 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
   void _showEditAchievementDialog(Achievement achievement) {
     DateTime selectedDate = achievement.date;
 
+    // Store parent context before dialog
+    final parentContext = context;
+
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
+      builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
             title: const Text('Editar Data'),
@@ -802,10 +809,11 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 InkWell(
                   onTap: () async {
                     final picked = await showDatePicker(
-                      context: context,
+                      context: dialogContext,
                       initialDate: selectedDate,
                       firstDate: DateTime(2000),
                       lastDate: DateTime.now(),
+                      locale: const Locale('pt', 'BR'),
                     );
                     if (picked != null) {
                       setDialogState(() => selectedDate = picked);
@@ -832,12 +840,12 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () => Navigator.pop(dialogContext),
                 child: const Text('Cancelar'),
               ),
               FilledButton(
                 onPressed: () async {
-                  Navigator.pop(context);
+                  Navigator.pop(dialogContext);
 
                   try {
                     final service = AchievementService(FirebaseService.academyId);
@@ -846,12 +854,12 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                     });
 
                     if (mounted) {
-                      context.showSuccess('Data atualizada!');
-                      _loadData();
+                      parentContext.showSuccess('Data atualizada!');
+                      await _loadData();
                     }
                   } catch (e) {
                     if (mounted) {
-                      context.showError('Erro: $e');
+                      parentContext.showError('Erro: $e');
                     }
                   }
                 },
@@ -865,32 +873,35 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
   }
 
   void _showDeleteAchievementConfirmation(Achievement achievement) {
+    // Store parent context before dialog
+    final parentContext = context;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Excluir Conquista'),
         content: Text('Deseja excluir "${achievement.title}"?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancelar'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
 
               try {
                 final service = AchievementService(FirebaseService.academyId);
                 await service.delete(achievement.id);
 
                 if (mounted) {
-                  context.showSuccess('Conquista excluída!');
-                  _loadData();
+                  parentContext.showSuccess('Conquista excluída!');
+                  await _loadData();
                 }
               } catch (e) {
                 if (mounted) {
-                  context.showError('Erro: $e');
+                  parentContext.showError('Erro: $e');
                 }
               }
             },
