@@ -27,10 +27,8 @@ class AppConstants {
   // ===========================================
   // Legal URLs
   // ===========================================
-  static const String privacyPolicyUrl =
-      'https://bjjeasy.netlify.app/privacidade';
-  static const String termsOfServiceUrl =
-      'https://bjjeasy.netlify.app/termos';
+  static const String privacyPolicyUrl = 'https://alugazap.com/privacy';
+  static const String termsOfServiceUrl = 'https://alugazap.com/privacy';
   static const String supportEmail = 'suporte@bjjeasy.com.br';
 
   // ===========================================
