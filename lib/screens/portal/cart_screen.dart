@@ -253,6 +253,10 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
 
     try {
       final service = ref.read(storeServiceProvider);
+      if (service == null) {
+        context.showError('Erro ao acessar a loja');
+        return;
+      }
       // Server validates prices and stock
       await service.createOrder(
         studentId: currentUser.studentId!,

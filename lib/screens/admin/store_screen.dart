@@ -286,6 +286,7 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
         product: product,
         onSave: (data) async {
           final service = ref.read(storeServiceProvider);
+          if (service == null) return;
           if (product != null) {
             await service.updateProduct(product.id, data);
           } else {
@@ -309,6 +310,7 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
 
   Future<void> _toggleProductActive(StoreProduct product) async {
     final service = ref.read(storeServiceProvider);
+    if (service == null) return;
     await service.updateProduct(product.id, {'isActive': !product.isActive});
     ref.invalidate(productsProvider);
   }
@@ -335,6 +337,7 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
 
     if (confirmed == true) {
       final service = ref.read(storeServiceProvider);
+      if (service == null) return;
       await service.deleteProduct(product.id);
       ref.invalidate(productsProvider);
     }

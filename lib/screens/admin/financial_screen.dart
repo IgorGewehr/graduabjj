@@ -2268,9 +2268,14 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                       return DropdownMenuItem(
                         value: plan.id,
                         child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(plan.name),
+                            Expanded(
+                              child: Text(
+                                plan.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(

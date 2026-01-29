@@ -292,6 +292,10 @@ class _AdminStoreOrdersScreenState
   Future<void> _updateOrderStatus(StoreOrder order, StoreOrderStatus status) async {
     try {
       final service = ref.read(storeServiceProvider);
+      if (service == null) {
+        if (mounted) context.showError('Erro ao acessar a loja');
+        return;
+      }
       if (status == StoreOrderStatus.cancelled) {
         await service.cancelOrder(order.id);
       } else {
