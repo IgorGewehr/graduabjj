@@ -595,6 +595,7 @@ class StoreService {
     }
 
     final docRef = await _ordersRef.add({
+      'academyId': academyId,
       'studentId': studentId,
       'studentName': studentName,
       'items': validatedItems,
