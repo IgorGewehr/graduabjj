@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 
 /// Belt labels for display
@@ -48,6 +50,7 @@ class _TimelineEvent {
   final String? position;
   final String? belt;
   final int? stripes;
+  final String? academyName;
 
   _TimelineEvent({
     required this.id,
@@ -58,6 +61,7 @@ class _TimelineEvent {
     this.position,
     this.belt,
     this.stripes,
+    this.academyName,
   });
 }
 
@@ -89,6 +93,7 @@ class TimelineScreen extends ConsumerWidget {
         final attendanceCountAsync = ref.watch(studentAttendanceCountProvider(student.id));
         final medalCountAsync = ref.watch(studentMedalCountProvider(student.id));
         final competitionsAsync = ref.watch(studentCompetitionResultsProvider(student.id));
+        final academyInfo = ref.watch(currentAcademyInfoProvider);
 
         return RefreshIndicator(
           onRefresh: () async {
@@ -101,6 +106,11 @@ class TimelineScreen extends ConsumerWidget {
           },
           child: CustomScrollView(
             slivers: [
+              // Academy indicator for multi-academy users
+              const SliverToBoxAdapter(
+                child: _AcademyIndicator(),
+              ),
+
               // Header
               const SliverToBoxAdapter(child: SizedBox(height: 12)),
 
@@ -127,6 +137,7 @@ class TimelineScreen extends ConsumerWidget {
                     student,
                     achievementsAsync,
                     progressionsAsync,
+                    academyInfo?.name,
                   ),
                 ),
               ),
@@ -146,6 +157,7 @@ class TimelineScreen extends ConsumerWidget {
     Student student,
     AsyncValue<List<Achievement>> achievementsAsync,
     AsyncValue<List<BeltProgression>> progressionsAsync,
+    String? academyName,
   ) {
     final achievements = achievementsAsync.valueOrNull ?? [];
     final progressions = progressionsAsync.valueOrNull ?? [];
@@ -161,6 +173,7 @@ class TimelineScreen extends ConsumerWidget {
       title: 'Inicio da Jornada',
       description: 'Primeiro treino na academia',
       belt: 'white',
+      academyName: academyName,
     ));
 
     // Add belt progressions
@@ -175,6 +188,7 @@ class TimelineScreen extends ConsumerWidget {
         description: p.notes,
         belt: p.newBelt,
         stripes: p.newStripes,
+        academyName: academyName,
       ));
     }
 
@@ -190,6 +204,7 @@ class TimelineScreen extends ConsumerWidget {
           title: a.title,
           description: a.description,
           position: a.position?.value,
+          academyName: academyName,
         ));
       }
     }
@@ -852,6 +867,27 @@ class _TimelineItem extends StatelessWidget {
                     _PositionBadge(position: event.position!),
                   ],
 
+                  // Academy badge for competitions (shows which academy they represented)
+                  if (event.type == TimelineEventType.competition && event.academyName != null) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(
+                          LucideIcons.building2,
+                          size: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Lutou por ${event.academyName}',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+
                   // Date
                   const SizedBox(height: 12),
                   Row(
@@ -1065,4 +1101,74 @@ class _EventConfig {
     required this.color,
     required this.bgColor,
   });
+}
+
+/// Academy indicator for multi-academy users
+class _AcademyIndicator extends ConsumerWidget {
+  const _AcademyIndicator();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasMultiple = ref.watch(hasMultipleAcademiesProvider);
+    final academyInfo = ref.watch(currentAcademyInfoProvider);
+
+    // Only show if user has multiple academies
+    if (!hasMultiple || academyInfo == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: AppTheme.primary.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            LucideIcons.clock,
+            size: 16,
+            color: AppTheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Jornada em',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                Text(
+                  academyInfo.name,
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: () => context.push('/portal/academias'),
+            icon: Icon(LucideIcons.arrowRightLeft, size: 14),
+            label: const Text('Trocar'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              textStyle: AppTheme.labelSmall.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

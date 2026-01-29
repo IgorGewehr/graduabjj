@@ -7,6 +7,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../widgets/common/more_menu_sheet.dart';
+import '../../widgets/academy_switcher.dart';
 
 /// Portal Shell - Main navigation structure for student portal
 class PortalShell extends ConsumerStatefulWidget {
@@ -114,116 +115,8 @@ class _PortalShellState extends ConsumerState<PortalShell> {
   }
 
   Widget _buildAppBarTitle(WidgetRef ref) {
-    final settingsAsync = ref.watch(academySettingsProvider);
-
-    return settingsAsync.when(
-      data: (settings) {
-        final name = settings?.name ?? 'GraduaBJJ';
-        final slogan = settings?.portalSlogan;
-        final logoUrl = settings?.logoUrl;
-
-        return Row(
-          children: [
-            // Logo
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: logoUrl == null ? AppTheme.primary : null,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: logoUrl != null
-                  ? Image.network(
-                      logoUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _buildDefaultLogo(name),
-                    )
-                  : _buildDefaultLogo(name),
-            ),
-            const SizedBox(width: 12),
-            // Academy name + slogan
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    name,
-                    style: AppTheme.titleMedium.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (slogan != null && slogan.isNotEmpty)
-                    Text(
-                      slogan,
-                      style: AppTheme.labelSmall.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                ],
-              ),
-            ),
-          ],
-        );
-      },
-      loading: () => Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            width: 100,
-            height: 16,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-        ],
-      ),
-      error: (_, __) => Row(
-        children: [
-          _buildDefaultLogo('GraduaBJJ'),
-          const SizedBox(width: 12),
-          Text(
-            'GraduaBJJ',
-            style: AppTheme.titleMedium.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDefaultLogo(String name) {
-    return Container(
-      width: 36,
-      height: 36,
-      decoration: BoxDecoration(
-        color: AppTheme.primary,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Center(
-        child: Text(
-          name.isNotEmpty ? name[0].toUpperCase() : 'G',
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: Colors.white,
-          ),
-        ),
-      ),
-    );
+    // Use the AcademySwitcher widget which handles single and multi-academy display
+    return const AcademySwitcher();
   }
 
   void _showMoreMenu() {

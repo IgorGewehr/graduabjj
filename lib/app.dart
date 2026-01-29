@@ -21,6 +21,9 @@ import 'screens/portal/behavior_screen.dart';
 import 'screens/portal/store_screen.dart';
 import 'screens/portal/cart_screen.dart';
 import 'screens/portal/store_orders_screen.dart';
+// Academy management screens
+import 'screens/portal/academies_screen.dart';
+import 'screens/portal/add_academy_screen.dart';
 // Monitor screens
 import 'screens/portal/monitor_attendance_screen.dart';
 import 'screens/portal/monitor_students_screen.dart';
@@ -374,6 +377,23 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const PortalStoreOrdersScreen(),
+            ),
+          ),
+          // Academy management routes
+          GoRoute(
+            path: '/portal/academias',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const AcademiesScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/academias/adicionar',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const AddAcademyScreen(),
             ),
           ),
           // Monitor routes

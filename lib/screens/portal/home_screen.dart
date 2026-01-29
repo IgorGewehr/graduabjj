@@ -6,6 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/checkin_service.dart';
 import '../../widgets/common/belt_badge.dart';
 
@@ -74,6 +75,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 userName: currentUser.valueOrNull?.displayName ?? 'Aluno',
               ),
             ),
+
+            // Academy indicator for multi-academy users
+            const _AcademyIndicator(),
 
             const SizedBox(height: 24),
 
@@ -1009,6 +1013,67 @@ class _NextCompetitionCard extends StatelessWidget {
                   size: 18,
                   color: AppTheme.textSecondary,
                 ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Academy indicator for multi-academy users - compact version for home screen
+class _AcademyIndicator extends ConsumerWidget {
+  const _AcademyIndicator();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasMultiple = ref.watch(hasMultipleAcademiesProvider);
+    final academyInfo = ref.watch(currentAcademyInfoProvider);
+
+    // Only show if user has multiple academies
+    if (!hasMultiple || academyInfo == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      child: InkWell(
+        onTap: () => context.push('/portal/academias'),
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: AppTheme.primary.withValues(alpha: 0.2),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                LucideIcons.building2,
+                size: 16,
+                color: AppTheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  academyInfo.name,
+                  style: AppTheme.bodySmall.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                LucideIcons.arrowRightLeft,
+                size: 14,
+                color: AppTheme.primary.withValues(alpha: 0.7),
+              ),
             ],
           ),
         ),

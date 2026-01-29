@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -11,6 +12,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import '../../services/abacate_pay_service.dart';
 
@@ -111,6 +113,9 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
               return ListView(
                 padding: const EdgeInsets.all(20),
                 children: [
+                  // Academy indicator for multi-academy users
+                  const _AcademyIndicator(),
+
                   // Header
                   Text(
                     'Pagamentos',
@@ -1146,6 +1151,76 @@ class _PixPaymentBottomSheetState
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Academy indicator for multi-academy users
+class _AcademyIndicator extends ConsumerWidget {
+  const _AcademyIndicator();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasMultiple = ref.watch(hasMultipleAcademiesProvider);
+    final academyInfo = ref.watch(currentAcademyInfoProvider);
+
+    // Only show if user has multiple academies
+    if (!hasMultiple || academyInfo == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: AppTheme.primary.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            LucideIcons.receipt,
+            size: 16,
+            color: AppTheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Pagamentos de',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                Text(
+                  academyInfo.name,
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: () => context.push('/portal/academias'),
+            icon: Icon(LucideIcons.arrowRightLeft, size: 14),
+            label: const Text('Trocar'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              textStyle: AppTheme.labelSmall.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

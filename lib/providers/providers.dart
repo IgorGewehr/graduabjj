@@ -4,3 +4,4 @@ export 'student_provider.dart';
 export 'portal_providers.dart';
 export 'store_provider.dart';
 export 'checkin_provider.dart';
+export 'selected_academy_provider.dart';

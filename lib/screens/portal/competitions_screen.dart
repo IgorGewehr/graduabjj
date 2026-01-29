@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 
 /// Competitions Screen - Competicoes (with Tabs)
@@ -74,6 +76,9 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
               },
               child: Column(
                 children: [
+                  // Academy indicator for multi-academy users
+                  const _AcademyIndicator(),
+
                   // Header
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
@@ -450,7 +455,7 @@ class _CompetitionsList extends ConsumerWidget {
 }
 
 /// Competition Card
-class _CompetitionCard extends StatelessWidget {
+class _CompetitionCard extends ConsumerWidget {
   final Competition competition;
   final bool isEnrolled;
   final bool isUpcoming;
@@ -462,9 +467,13 @@ class _CompetitionCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final daysUntil = competition.date.difference(DateTime.now()).inDays;
     final isSoon = daysUntil <= 7 && daysUntil >= 0;
+
+    // Get academy name for past competitions
+    final academyInfo = ref.watch(currentAcademyInfoProvider);
+    final academyName = academyInfo?.name;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -478,6 +487,36 @@ class _CompetitionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Academy badge for past competitions
+          if (!isUpcoming && academyName != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    LucideIcons.building2,
+                    size: 12,
+                    color: AppTheme.primary,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Lutou por $academyName',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+
           // Header
           Row(
             children: [
@@ -632,6 +671,76 @@ class _CompetitionCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Academy indicator for multi-academy users
+class _AcademyIndicator extends ConsumerWidget {
+  const _AcademyIndicator();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasMultiple = ref.watch(hasMultipleAcademiesProvider);
+    final academyInfo = ref.watch(currentAcademyInfoProvider);
+
+    // Only show if user has multiple academies
+    if (!hasMultiple || academyInfo == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: AppTheme.primary.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            LucideIcons.trophy,
+            size: 16,
+            color: AppTheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Competicoes de',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                Text(
+                  academyInfo.name,
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: () => context.push('/portal/academias'),
+            icon: Icon(LucideIcons.arrowRightLeft, size: 14),
+            label: const Text('Trocar'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              textStyle: AppTheme.labelSmall.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         ],
       ),
     );

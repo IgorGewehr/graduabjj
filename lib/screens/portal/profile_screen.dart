@@ -222,6 +222,11 @@ class ProfileScreen extends ConsumerWidget {
                   onChanged: (value) => _updatePrivacy(context, ref, student, value),
                 ),
 
+                const SizedBox(height: 24),
+
+                // Academies Section (for multi-academy users)
+                _AcademiesSection(),
+
                 const SizedBox(height: 80),
               ],
             ),
@@ -1293,6 +1298,224 @@ class _SheetDateField extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ============================================
+// ACADEMIES SECTION (Multi-Academy Support)
+// ============================================
+
+/// Academies Section - Shows linked academies for multi-academy users
+class _AcademiesSection extends ConsumerWidget {
+  const _AcademiesSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasMultiple = ref.watch(hasMultipleAcademiesProvider);
+    final academiesAsync = ref.watch(userAcademiesInfoProvider);
+    final selectedId = ref.watch(selectedAcademyIdProvider);
+    final mapping = ref.watch(userAcademyMappingProvider).valueOrNull;
+    final primaryId = mapping?.primaryAcademyId;
+
+    // Only show section if user has academies (show even for single academy)
+    return academiesAsync.when(
+      data: (academies) {
+        if (academies.isEmpty) return const SizedBox.shrink();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SectionHeader(
+              title: 'MINHAS ACADEMIAS',
+              onEdit: hasMultiple ? () => context.push('/portal/academias') : null,
+            ),
+            const SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.divider),
+              ),
+              child: Column(
+                children: [
+                  for (int i = 0; i < academies.length; i++) ...[
+                    _AcademyTile(
+                      academy: academies[i],
+                      isSelected: academies[i].id == selectedId,
+                      isPrimary: academies[i].id == primaryId,
+                      onTap: hasMultiple
+                          ? () => ref.read(selectedAcademyProvider.notifier).selectAcademy(academies[i].id)
+                          : null,
+                    ),
+                    if (i < academies.length - 1) const Divider(height: 1),
+                  ],
+                ],
+              ),
+            ),
+            if (hasMultiple) ...[
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () => context.push('/portal/academias'),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(LucideIcons.settings, size: 14, color: AppTheme.textSecondary),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Gerenciar academias',
+                        style: AppTheme.labelMedium.copyWith(color: AppTheme.textSecondary),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(LucideIcons.chevronRight, size: 14, color: AppTheme.textSecondary),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+/// Academy Tile for the academies list
+class _AcademyTile extends StatelessWidget {
+  final AcademyInfo academy;
+  final bool isSelected;
+  final bool isPrimary;
+  final VoidCallback? onTap;
+
+  const _AcademyTile({
+    required this.academy,
+    required this.isSelected,
+    required this.isPrimary,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            // Logo
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: academy.logoUrl == null ? AppTheme.primary : null,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: academy.logoUrl != null
+                  ? Image.network(
+                      academy.logoUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _buildDefaultLogo(),
+                    )
+                  : _buildDefaultLogo(),
+            ),
+            const SizedBox(width: 12),
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          academy.name,
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (isPrimary) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'Principal',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    academy.role.label,
+                    style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            // Selected indicator
+            if (isSelected)
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: AppTheme.success.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  LucideIcons.check,
+                  size: 14,
+                  color: AppTheme.success,
+                ),
+              )
+            else if (onTap != null)
+              const Icon(
+                LucideIcons.chevronRight,
+                size: 16,
+                color: AppTheme.textSecondary,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDefaultLogo() {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: AppTheme.primary,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Center(
+        child: Text(
+          academy.name.isNotEmpty ? academy.name[0].toUpperCase() : 'A',
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
+        ),
       ),
     );
   }

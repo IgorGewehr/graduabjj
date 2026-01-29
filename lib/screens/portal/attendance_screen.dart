@@ -41,6 +41,9 @@ class AttendanceScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Academy indicator for multi-academy users
+                    _AcademyIndicator(),
+
                     // Stats Cards
                     Row(
                       children: [
@@ -452,4 +455,193 @@ class CalendarDay {
   final bool hasAttendance;
 
   CalendarDay({required this.date, required this.hasAttendance});
+}
+
+/// Academy Indicator - Shows current academy for multi-academy users
+class _AcademyIndicator extends ConsumerWidget {
+  const _AcademyIndicator();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasMultiple = ref.watch(hasMultipleAcademiesProvider);
+    if (!hasMultiple) return const SizedBox.shrink();
+
+    final academyInfo = ref.watch(currentAcademyInfoProvider);
+    if (academyInfo == null) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppTheme.infoLight,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: academyInfo.logoUrl == null ? AppTheme.primary : null,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: academyInfo.logoUrl != null
+                  ? Image.network(
+                      academyInfo.logoUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _buildDefaultLogo(academyInfo.name),
+                    )
+                  : _buildDefaultLogo(academyInfo.name),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Presencas em ${academyInfo.name}',
+                style: AppTheme.labelMedium.copyWith(
+                  color: AppTheme.info,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            GestureDetector(
+              onTap: () => _showAcademySwitcher(context, ref),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.info.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Trocar',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.info,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(LucideIcons.chevronDown, size: 12, color: AppTheme.info),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDefaultLogo(String name) {
+    return Container(
+      width: 28,
+      height: 28,
+      color: AppTheme.primary,
+      child: Center(
+        child: Text(
+          name.isNotEmpty ? name[0].toUpperCase() : 'A',
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAcademySwitcher(BuildContext context, WidgetRef ref) {
+    final academiesAsync = ref.read(userAcademiesInfoProvider);
+    final selectedId = ref.read(selectedAcademyIdProvider);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => Container(
+        decoration: const BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.divider,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  'Ver presencas de',
+                  style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+              const Divider(height: 1),
+              academiesAsync.when(
+                data: (academies) => ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: academies.length,
+                  itemBuilder: (context, index) {
+                    final academy = academies[index];
+                    final isSelected = academy.id == selectedId;
+                    return ListTile(
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        ref.read(selectedAcademyProvider.notifier).selectAcademy(academy.id);
+                      },
+                      leading: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: academy.logoUrl == null ? AppTheme.primary : null,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: academy.logoUrl != null
+                            ? Image.network(
+                                academy.logoUrl!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => _buildDefaultLogo(academy.name),
+                              )
+                            : _buildDefaultLogo(academy.name),
+                      ),
+                      title: Text(
+                        academy.name,
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? const Icon(LucideIcons.check, color: AppTheme.success, size: 20)
+                          : null,
+                    );
+                  },
+                ),
+                loading: () => const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(),
+                ),
+                error: (_, __) => const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('Erro ao carregar academias'),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
