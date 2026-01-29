@@ -60,7 +60,7 @@ class CrossAcademyService {
       final userRef = RootCollections.user(linkedUserId);
       final userSnap = await userRef.get();
       if (userSnap.exists) {
-        final data = userSnap.data();
+        final data = userSnap.data() as Map<String, dynamic>?;
         return (data?['isProfilePublic'] as bool?) ?? false;
       }
       return false;

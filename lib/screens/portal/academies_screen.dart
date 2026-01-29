@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../models/user.dart';
 import '../../providers/providers.dart';
 import '../../services/global_user_service.dart';
 

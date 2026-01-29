@@ -4,6 +4,7 @@ import '../models/user.dart';
 import '../services/firebase_service.dart';
 import 'auth_provider.dart';
 import 'portal_providers.dart';
+import 'student_provider.dart';
 
 /// State for the selected academy
 class SelectedAcademyState {

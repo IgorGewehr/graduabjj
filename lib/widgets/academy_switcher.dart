@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../core/theme.dart';
+import '../models/user.dart';
 import '../providers/providers.dart';
 
 /// Academy Switcher Widget for AppBar

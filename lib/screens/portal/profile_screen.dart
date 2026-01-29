@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../models/user.dart';
 import '../../providers/providers.dart';
 import '../../widgets/common/belt_badge.dart';
 
