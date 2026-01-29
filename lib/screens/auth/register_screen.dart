@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 
@@ -25,6 +27,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  bool _acceptedTerms = false;
   String? _errorMessage;
 
   @override
@@ -36,8 +39,22 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     super.dispose();
   }
 
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
   Future<void> _handleRegister() async {
     if (!_formKey.currentState!.validate()) return;
+
+    if (!_acceptedTerms) {
+      setState(() {
+        _errorMessage = 'Voce precisa aceitar os Termos de Uso e Politica de Privacidade';
+      });
+      return;
+    }
 
     setState(() {
       _isLoading = true;
@@ -265,7 +282,68 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     },
                   ).animate().fadeIn(delay: 500.ms).slideX(begin: -0.1),
 
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
+
+                  // Terms checkbox
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Checkbox(
+                          value: _acceptedTerms,
+                          onChanged: (value) {
+                            setState(() {
+                              _acceptedTerms = value ?? false;
+                            });
+                          },
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Wrap(
+                          children: [
+                            Text(
+                              'Li e aceito os ',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () => _openUrl(AppConstants.termsOfServiceUrl),
+                              child: Text(
+                                'Termos de Uso',
+                                style: AppTheme.bodySmall.copyWith(
+                                  color: AppTheme.primary,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              ' e a ',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () => _openUrl(AppConstants.privacyPolicyUrl),
+                              child: Text(
+                                'Politica de Privacidade',
+                                style: AppTheme.bodySmall.copyWith(
+                                  color: AppTheme.primary,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ).animate().fadeIn(delay: 550.ms),
+
+                  const SizedBox(height: 24),
 
                   // Register button
                   SizedBox(

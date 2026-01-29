@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -227,6 +229,11 @@ class ProfileScreen extends ConsumerWidget {
 
                 // Academies Section (for multi-academy users)
                 _AcademiesSection(),
+
+                const SizedBox(height: 24),
+
+                // Account Section
+                _AccountSection(),
 
                 const SizedBox(height: 80),
               ],
@@ -1516,6 +1523,192 @@ class _AcademyTile extends StatelessWidget {
             fontWeight: FontWeight.w700,
             color: Colors.white,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Account section with delete account option
+class _AccountSection extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'CONTA',
+          style: AppTheme.labelSmall.copyWith(
+            color: AppTheme.textSecondary,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.5,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.divider),
+          ),
+          child: Column(
+            children: [
+              // Legal links
+              _AccountTile(
+                icon: LucideIcons.fileText,
+                title: 'Termos de Uso',
+                onTap: () => _openUrl(AppConstants.termsOfServiceUrl),
+              ),
+              const Divider(height: 1),
+              _AccountTile(
+                icon: LucideIcons.shield,
+                title: 'Politica de Privacidade',
+                onTap: () => _openUrl(AppConstants.privacyPolicyUrl),
+              ),
+              const Divider(height: 1),
+              // Delete account
+              _AccountTile(
+                icon: LucideIcons.trash2,
+                title: 'Excluir minha conta',
+                isDestructive: true,
+                onTap: () => _showDeleteAccountDialog(context, ref),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Future<void> _showDeleteAccountDialog(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Excluir conta'),
+        content: const Text(
+          'Tem certeza que deseja excluir sua conta? Esta acao nao pode ser desfeita.\n\n'
+          'Todos os seus dados serao removidos permanentemente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      // Show second confirmation
+      final finalConfirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Confirmacao final'),
+          content: const Text(
+            'Esta e sua ultima chance. Todos os dados serao perdidos:\n\n'
+            '- Historico de treinos\n'
+            '- Graduacoes\n'
+            '- Resultados de competicoes\n'
+            '- Dados pessoais\n\n'
+            'Deseja continuar?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.error),
+              child: const Text('Excluir permanentemente'),
+            ),
+          ],
+        ),
+      );
+
+      if (finalConfirm == true && context.mounted) {
+        await _deleteAccount(context, ref);
+      }
+    }
+  }
+
+  Future<void> _deleteAccount(BuildContext context, WidgetRef ref) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      final authService = ref.read(authServiceProvider);
+      await authService.deleteAccount();
+      // User will be automatically redirected to login by auth state change
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.pop(context); // Remove loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString().replaceAll('Exception: ', '')),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
+  }
+}
+
+class _AccountTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+  final bool isDestructive;
+
+  const _AccountTile({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+    this.isDestructive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isDestructive ? AppTheme.error : AppTheme.textPrimary;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: AppTheme.bodyMedium.copyWith(color: color),
+              ),
+            ),
+            Icon(
+              LucideIcons.chevronRight,
+              size: 16,
+              color: isDestructive ? AppTheme.error.withValues(alpha: 0.5) : AppTheme.textSecondary,
+            ),
+          ],
         ),
       ),
     );

@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 
@@ -70,6 +72,48 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return 'Muitas tentativas. Tente novamente mais tarde.';
     }
     return 'Erro ao fazer login. Tente novamente.';
+  }
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Future<void> _handleForgotPassword() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Digite seu email primeiro'),
+          backgroundColor: AppTheme.warning,
+        ),
+      );
+      return;
+    }
+
+    try {
+      final authService = ref.read(authServiceProvider);
+      await authService.resetPassword(email);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Email de recuperacao enviado para $email'),
+            backgroundColor: AppTheme.success,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Erro ao enviar email. Verifique o endereco.'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -187,9 +231,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: () {
-                        // TODO: Implement forgot password
-                      },
+                      onPressed: _handleForgotPassword,
                       child: Text(
                         'Esqueci minha senha',
                         style: AppTheme.labelMedium.copyWith(
@@ -269,6 +311,41 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       minimumSize: const Size(double.infinity, 48),
                     ),
                   ).animate().fadeIn(delay: 900.ms),
+
+                  const SizedBox(height: 32),
+
+                  // Legal links
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      GestureDetector(
+                        onTap: () => _openUrl(AppConstants.termsOfServiceUrl),
+                        child: Text(
+                          'Termos de Uso',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '  |  ',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => _openUrl(AppConstants.privacyPolicyUrl),
+                        child: Text(
+                          'Politica de Privacidade',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ).animate().fadeIn(delay: 1000.ms),
                 ],
               ),
             ),

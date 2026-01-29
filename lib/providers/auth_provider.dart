@@ -217,6 +217,56 @@ class AuthService {
     await _auth.sendPasswordResetEmail(email: email);
   }
 
+  /// Delete user account and all associated data
+  /// This is required by Google Play Store policy
+  Future<void> deleteAccount() async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('Usuario nao autenticado');
+
+    final uid = user.uid;
+
+    try {
+      // 1. Remove FCM token
+      await pushNotificationService.onUserLogout();
+
+      // 2. Get user's academy mappings to delete related data
+      final mapping = await globalUserService.getUserAcademyMapping(uid);
+
+      // 3. Delete student records from each academy
+      if (mapping != null) {
+        for (final academyId in mapping.academyIds) {
+          final academyDetail = mapping.academyDetails?[academyId];
+          if (academyDetail?.studentId != null) {
+            // Mark student as deleted (soft delete for academy records)
+            await _firestore
+                .collection('academies/$academyId/students')
+                .doc(academyDetail!.studentId)
+                .update({
+              'status': 'deleted',
+              'deletedAt': FieldValue.serverTimestamp(),
+              'deletedByUser': true,
+            });
+          }
+        }
+      }
+
+      // 4. Delete userAcademyMapping
+      await _firestore.collection('userAcademyMapping').doc(uid).delete();
+
+      // 5. Delete global user document
+      await _firestore.collection('users').doc(uid).delete();
+
+      // 6. Delete Firebase Auth user (must be last)
+      await user.delete();
+    } catch (e) {
+      // If requires recent login, throw specific error
+      if (e.toString().contains('requires-recent-login')) {
+        throw Exception('Por seguranca, faca login novamente antes de excluir sua conta');
+      }
+      rethrow;
+    }
+  }
+
   /// Get global user document
   Future<GlobalUser?> getGlobalUser(String uid) async {
     return await globalUserService.getGlobalUser(uid);

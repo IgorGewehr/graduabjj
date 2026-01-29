@@ -25,6 +25,15 @@ class AppConstants {
   );
 
   // ===========================================
+  // Legal URLs
+  // ===========================================
+  static const String privacyPolicyUrl =
+      'https://bjjeasy.netlify.app/privacidade';
+  static const String termsOfServiceUrl =
+      'https://bjjeasy.netlify.app/termos';
+  static const String supportEmail = 'suporte@bjjeasy.com.br';
+
+  // ===========================================
   // Firebase Collections
   // ===========================================
   static const String academiesCollection = 'academies';
