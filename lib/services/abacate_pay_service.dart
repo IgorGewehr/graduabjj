@@ -159,6 +159,7 @@ class AbacatePayService {
   }
 
   /// Create PIX payment for a store order
+  /// Note: amount should be in centavos (store orders store total in centavos)
   Future<PaymentLink?> createStoreOrderPayment({
     required double amount,
     required String orderId,
@@ -173,7 +174,7 @@ class AbacatePayService {
         headers: headers,
         body: jsonEncode({
           'academyId': academyId,
-          'amount': (amount * 100).round(), // Convert to cents
+          'amount': amount.round(), // Already in centavos (store orders use centavos)
           'description': description ?? 'Pedido da Loja',
           'orderId': orderId,
           'studentId': studentId,
@@ -238,6 +239,7 @@ class AbacatePayService {
   }
 
   /// Create card payment for a store order
+  /// Note: amount should be in centavos (store orders store total in centavos)
   Future<CardPaymentResult> createStoreOrderCardPayment({
     required double amount,
     required String orderId,
@@ -253,7 +255,7 @@ class AbacatePayService {
         headers: headers,
         body: jsonEncode({
           'academyId': academyId,
-          'amount': (amount * 100).round(), // Convert to cents
+          'amount': amount.round(), // Already in centavos (store orders use centavos)
           'description': description ?? 'Pedido da Loja',
           'financialId': 'order_$orderId',
           'studentId': studentId,
