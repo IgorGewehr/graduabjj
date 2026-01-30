@@ -305,12 +305,12 @@ class StoreOrder {
               .map((item) => StoreOrderItem.fromMap(item))
               .toList()
           : [],
-      total: (data['total'] ?? 0).toDouble(),
+      total: (data['total'] ?? data['totalAmount'] ?? 0).toDouble(),
       status: StoreOrderStatusExtension.fromString(data['status'] ?? 'pending_payment'),
       notes: data['notes'],
       pixCode: data['pixCode'],
       pixQrCode: data['pixQrCode'],
-      externalPaymentId: data['externalPaymentId'],
+      externalPaymentId: data['externalPaymentId'] ?? data['abacatePayTransactionId'],
       paidAt: data['paidAt'] != null
           ? (data['paidAt'] as Timestamp).toDate()
           : null,

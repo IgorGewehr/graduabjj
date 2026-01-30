@@ -61,14 +61,14 @@ class WalletTransaction {
 
   factory WalletTransaction.fromStoreOrder(
       Map<String, dynamic> map, String id) {
-    final isAbacatePay = map['externalPaymentId'] != null;
+    final isAbacatePay = map['externalPaymentId'] != null || map['abacatePayTransactionId'] != null;
 
     return WalletTransaction(
       id: id,
       type: 'store_sale',
       source: 'loja',
-      amount: (map['total'] ?? 0).toDouble(),
-      status: map['status'] == 'delivered' || map['status'] == 'completed'
+      amount: (map['total'] ?? map['totalAmount'] ?? 0).toDouble(),
+      status: map['status'] == 'paid' || map['status'] == 'delivered' || map['status'] == 'completed'
           ? 'completed'
           : 'pending',
       description: 'Venda na loja',
