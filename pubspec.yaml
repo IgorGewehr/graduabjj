@@ -2,7 +2,7 @@ name: graduabjj
 description: "BJJEasy - Sistema Whitelabel para Academias de Jiu-Jitsu"
 publish_to: 'none'
 
-version: 1.2.2+5
+version: 1.2.2+15
 
 environment:
   sdk: ^3.10.7
@@ -58,6 +58,14 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   riverpod_generator: ^2.6.3
   build_runner: ^2.4.14
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/bjjeasy_logo.png"
+  adaptive_icon_background: "#F8F8F8"
+  adaptive_icon_foreground: "assets/images/bjjeasy_logo.png"
 
 flutter:
   uses-material-design: true
