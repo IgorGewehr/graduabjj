@@ -9,6 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../providers/providers.dart';
 import '../../services/services.dart';
 
 /// Admin Student Detail Screen - View and manage student
@@ -1143,6 +1144,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                   Navigator.pop(dialogContext);
 
                   try {
+                    final currentUser = ref.read(currentUserProvider).valueOrNull;
                     final service = AssessmentService(FirebaseService.academyId);
                     await service.create(
                       studentId: _student!.id,
@@ -1150,8 +1152,8 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                       scores: scores.entries.map((e) =>
                         AssessmentScore(category: e.key, score: e.value),
                       ).toList(),
-                      assessedBy: 'admin',
-                      assessedByName: 'Professor',
+                      assessedBy: currentUser?.id ?? 'admin',
+                      assessedByName: currentUser?.displayName ?? 'Professor',
                       date: selectedDate,
                       notes: notesController.text.trim().isNotEmpty
                           ? notesController.text.trim()
@@ -1316,11 +1318,13 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
 
                   try {
                     final service = AssessmentService(FirebaseService.academyId);
+                    final scoresMap = <String, int>{};
+                    for (final e in scores.entries) {
+                      scoresMap[e.key.value] = e.value;
+                    }
                     await service.update(assessment.id, {
                       'date': Timestamp.fromDate(selectedDate),
-                      'scores': scores.entries.map((e) =>
-                        AssessmentScore(category: e.key, score: e.value).toMap(),
-                      ).toList(),
+                      'scores': scoresMap,
                       'notes': notesController.text.trim().isNotEmpty
                           ? notesController.text.trim()
                           : null,
@@ -1386,15 +1390,17 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
 
   Color _getScoreColor(double score) {
     if (score >= 4.5) return Colors.green;
-    if (score >= 3.5) return Colors.blue;
-    if (score >= 2.5) return Colors.orange;
+    if (score >= 4.0) return Colors.lightGreen;
+    if (score >= 3.0) return Colors.orange;
+    if (score >= 2.0) return Colors.deepOrange;
     return Colors.red;
   }
 
   String _getScoreLabel(double score) {
     if (score >= 4.5) return 'Excelente';
-    if (score >= 3.5) return 'Bom';
-    if (score >= 2.5) return 'Regular';
+    if (score >= 4.0) return 'Muito Bom';
+    if (score >= 3.0) return 'Bom';
+    if (score >= 2.0) return 'Regular';
     return 'Precisa Melhorar';
   }
 
@@ -2125,15 +2131,17 @@ class _AssessmentCard extends StatelessWidget {
 
   Color _getScoreColor(double score) {
     if (score >= 4.5) return Colors.green;
-    if (score >= 3.5) return Colors.blue;
-    if (score >= 2.5) return Colors.orange;
+    if (score >= 4.0) return Colors.lightGreen;
+    if (score >= 3.0) return Colors.orange;
+    if (score >= 2.0) return Colors.deepOrange;
     return Colors.red;
   }
 
   String _getScoreLabel(double score) {
     if (score >= 4.5) return 'Excelente';
-    if (score >= 3.5) return 'Bom';
-    if (score >= 2.5) return 'Regular';
+    if (score >= 4.0) return 'Muito Bom';
+    if (score >= 3.0) return 'Bom';
+    if (score >= 2.0) return 'Regular';
     return 'Precisa Melhorar';
   }
 

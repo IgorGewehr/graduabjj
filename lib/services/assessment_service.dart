@@ -118,10 +118,26 @@ class Assessment {
   factory Assessment.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
 
-    final scoresList = (data['scores'] as List?)
-            ?.map((s) => AssessmentScore.fromMap(s as Map<String, dynamic>))
-            .toList() ??
-        [];
+    // Parse scores from both formats:
+    // Object format (web): {respeito: 4, disciplina: 3, ...}
+    // Array format (legacy Flutter): [{category: 'respeito', score: 4}, ...]
+    List<AssessmentScore> scoresList;
+    final rawScores = data['scores'];
+    if (rawScores is List) {
+      scoresList = rawScores
+          .map((s) => AssessmentScore.fromMap(s as Map<String, dynamic>))
+          .toList();
+    } else if (rawScores is Map) {
+      scoresList = AssessmentCategory.values.map((cat) {
+        final value = rawScores[cat.value];
+        return AssessmentScore(
+          category: cat,
+          score: (value is num) ? value.toInt() : 3,
+        );
+      }).toList();
+    } else {
+      scoresList = [];
+    }
 
     return Assessment(
       id: doc.id,
@@ -130,8 +146,8 @@ class Assessment {
       date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
       scores: scoresList,
       notes: data['notes'],
-      assessedBy: data['assessedBy'] ?? '',
-      assessedByName: data['assessedByName'] ?? '',
+      assessedBy: data['evaluatedBy'] ?? data['assessedBy'] ?? '',
+      assessedByName: data['evaluatedByName'] ?? data['assessedByName'] ?? '',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
@@ -354,14 +370,20 @@ class AssessmentService {
     DateTime? date,
     String? notes,
   }) async {
+    // Store scores as object format for cross-app compatibility
+    final scoresMap = <String, int>{};
+    for (final s in scores) {
+      scoresMap[s.category.value] = s.score;
+    }
+
     final docRef = await _assessmentsRef.add({
       'studentId': studentId,
       'studentName': studentName,
       'date': Timestamp.fromDate(date ?? DateTime.now()),
-      'scores': scores.map((s) => s.toMap()).toList(),
+      'scores': scoresMap,
       'notes': notes,
-      'assessedBy': assessedBy,
-      'assessedByName': assessedByName,
+      'evaluatedBy': assessedBy,
+      'evaluatedByName': assessedByName,
       'createdAt': FieldValue.serverTimestamp(),
     });
 

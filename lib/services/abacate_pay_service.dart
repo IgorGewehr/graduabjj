@@ -1,5 +1,9 @@
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
+import '../core/constants.dart';
 
 /// Payment Link Response
 class PaymentLink {
@@ -276,28 +280,62 @@ class AbacatePayService {
   }
 
   /// Request withdrawal to PIX key
+  /// Calls the Next.js API route directly via HTTP
   Future<WithdrawalResult> requestWithdrawal({
     required double amountInCents,
     required String pixKey,
     required String pixKeyType,
   }) async {
     try {
-      final callable = _functions.httpsCallable('requestWithdrawal');
-      final result = await callable.call({
-        'academyId': academyId,
-        'amount': amountInCents.round(),
-        'pixKey': pixKey,
-        'pixKeyType': pixKeyType,
-      });
+      // Get Firebase Auth token for authentication
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        return WithdrawalResult(
+          success: false,
+          message: 'Usuario nao autenticado',
+        );
+      }
 
-      final data = Map<String, dynamic>.from(result.data);
-      return WithdrawalResult.fromMap(data);
-    } on FirebaseFunctionsException catch (e) {
-      return WithdrawalResult(
-        success: false,
-        message: e.message ?? 'Erro ao solicitar saque',
+      final token = await user.getIdToken();
+      if (token == null) {
+        return WithdrawalResult(
+          success: false,
+          message: 'Erro de autenticacao',
+        );
+      }
+
+      final url = Uri.parse('${AppConstants.apiBaseUrl}/payments/withdraw');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'academyId': academyId,
+          'amount': amountInCents.round(),
+          'pixKey': pixKey,
+          'pixKeyType': pixKeyType,
+        }),
       );
-    } catch (_) {
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+
+      if (response.statusCode == 200) {
+        return WithdrawalResult(
+          success: true,
+          transactionId: data['transactionId'],
+          message: data['message'] ?? 'Saque solicitado com sucesso',
+        );
+      } else {
+        return WithdrawalResult(
+          success: false,
+          message: data['error'] ?? 'Erro ao solicitar saque',
+        );
+      }
+    } catch (e) {
+      print('[AbacatePay] requestWithdrawal exception: $e');
       return WithdrawalResult(
         success: false,
         message: 'Erro de conexao',

@@ -141,8 +141,9 @@ class BehaviorScreen extends ConsumerWidget {
 
   _PerformanceLevel _getPerformanceLevel(double score) {
     if (score >= 4.5) return _PerformanceLevel(label: 'Excelente', color: AppTheme.success);
-    if (score >= 3.5) return _PerformanceLevel(label: 'Bom', color: AppTheme.info);
-    if (score >= 2.5) return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
+    if (score >= 4.0) return _PerformanceLevel(label: 'Muito Bom', color: AppTheme.success);
+    if (score >= 3.0) return _PerformanceLevel(label: 'Bom', color: AppTheme.warning);
+    if (score >= 2.0) return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
     return _PerformanceLevel(label: 'Precisa Melhorar', color: AppTheme.error);
   }
 
@@ -272,8 +273,9 @@ class _LatestAssessmentCard extends StatelessWidget {
 
   _PerformanceLevel _getPerformanceLevel(double score) {
     if (score >= 4.5) return _PerformanceLevel(label: 'Excelente', color: AppTheme.success);
-    if (score >= 3.5) return _PerformanceLevel(label: 'Bom', color: AppTheme.info);
-    if (score >= 2.5) return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
+    if (score >= 4.0) return _PerformanceLevel(label: 'Muito Bom', color: AppTheme.success);
+    if (score >= 3.0) return _PerformanceLevel(label: 'Bom', color: AppTheme.warning);
+    if (score >= 2.0) return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
     return _PerformanceLevel(label: 'Precisa Melhorar', color: AppTheme.error);
   }
 
@@ -476,8 +478,9 @@ class _AssessmentHistoryCard extends StatelessWidget {
 
   _PerformanceLevel _getPerformanceLevel(double score) {
     if (score >= 4.5) return _PerformanceLevel(label: 'Excelente', color: AppTheme.success);
-    if (score >= 3.5) return _PerformanceLevel(label: 'Bom', color: AppTheme.info);
-    if (score >= 2.5) return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
+    if (score >= 4.0) return _PerformanceLevel(label: 'Muito Bom', color: AppTheme.success);
+    if (score >= 3.0) return _PerformanceLevel(label: 'Bom', color: AppTheme.warning);
+    if (score >= 2.0) return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
     return _PerformanceLevel(label: 'Precisa Melhorar', color: AppTheme.error);
   }
 

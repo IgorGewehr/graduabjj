@@ -200,7 +200,10 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
           completedAt: data['completedAt']?.toDate(),
           isAbacatePay: true,
         );
-      }).toList();
+      })
+      // Hide pending student payments/orders, but keep withdrawals (any status)
+      .where((t) => t.status != 'pending' || t.type == 'withdrawal')
+      .toList();
 
       // Use wallet/balance document for balances (correctly includes fee deductions)
       double availableBalance = 0;
