@@ -8,7 +8,7 @@ class AppConstants {
   // App Info
   // ===========================================
   static const String appName = 'BJJEasy';
-  static const String appVersion = '1.0.0';
+  static const String appVersion = '1.3.0';
 
   // ===========================================
   // URLs - configured via dart-define at build time
@@ -27,8 +27,8 @@ class AppConstants {
   // ===========================================
   // Legal URLs
   // ===========================================
-  static const String privacyPolicyUrl = 'https://alugazap.com/privacy';
-  static const String termsOfServiceUrl = 'https://alugazap.com/privacy';
+  static const String privacyPolicyUrl = 'https://bjjeasy.netlify.app/privacy';
+  static const String termsOfServiceUrl = 'https://bjjeasy.netlify.app/termsofservice';
   static const String supportEmail = 'suporte@bjjeasy.com.br';
 
   // ===========================================

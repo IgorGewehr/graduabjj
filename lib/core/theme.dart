@@ -13,7 +13,7 @@ class AppTheme {
   static const Color primaryLight = Color(0xFF333333);
   static const Color primaryDark = Color(0xFF000000);
 
-  static const Color background = Color(0xFFFAFAFA);
+  static const Color background = Color(0xFFFFFFFF);
   static const Color surface = Color(0xFFFFFFFF);
   static const Color surfaceVariant = Color(0xFFF5F5F5);
 

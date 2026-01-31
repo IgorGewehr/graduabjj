@@ -1,4 +1,4 @@
-package com.graduabjj.graduabjj
+package com.tensorroot.graduabjj
 
 import io.flutter.embedding.android.FlutterActivity
 

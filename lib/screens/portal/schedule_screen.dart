@@ -479,28 +479,26 @@ class _ScheduleCard extends StatelessWidget {
     }
 
     if (schedule.inWindow) {
-      return SizedBox(
-        height: 36,
-        child: ElevatedButton.icon(
-          onPressed: isCreating ? null : onCheckin,
-          icon: isCreating
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Icon(Icons.how_to_reg, size: 18),
-          label: Text(isCreating ? 'Aguarde...' : 'Marcar Presenca'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.success,
-            foregroundColor: Colors.white,
-            textStyle: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
+      return ElevatedButton.icon(
+        onPressed: isCreating ? null : onCheckin,
+        icon: isCreating
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Icon(Icons.how_to_reg, size: 18),
+        label: Text(isCreating ? 'Aguarde...' : 'Marcar Presenca'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppTheme.success,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
           ),
         ),
       );

@@ -27,14 +27,16 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
   Student? _student;
   List<Attendance> _attendances = [];
   List<Payment> _payments = [];
+  List<StoreOrder> _storeOrders = [];
   List<BeltProgression> _progressions = [];
   List<Achievement> _achievements = [];
+  List<Assessment> _assessments = [];
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     _loadData();
   }
 
@@ -55,18 +57,25 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       final beltService = BeltProgressionService(academyId);
       final achievementService = AchievementService(academyId);
 
+      final storeService = StoreService(academyId);
+      final assessmentService = AssessmentService(academyId);
+
       final student = await studentService.getById(widget.studentId);
       final attendances = await attendanceService.getByStudent(widget.studentId);
       final payments = await paymentService.getByStudent(widget.studentId);
+      final storeOrders = await storeService.getOrdersByStudent(widget.studentId);
       final progressions = await beltService.getByStudent(widget.studentId);
       final achievements = await achievementService.getForStudent(widget.studentId);
+      final assessments = await assessmentService.getByStudent(widget.studentId);
 
       setState(() {
         _student = student;
         _attendances = attendances;
         _payments = payments;
+        _storeOrders = storeOrders;
         _progressions = progressions;
         _achievements = achievements;
+        _assessments = assessments;
         _isLoading = false;
       });
     } catch (e) {
@@ -95,6 +104,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                           Tab(text: 'Info'),
                           Tab(text: 'Presenças'),
                           Tab(text: 'Financeiro'),
+                          Tab(text: 'Comportamento'),
                           Tab(text: 'Conquistas'),
                           Tab(text: 'Histórico'),
                         ],
@@ -106,6 +116,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                             _buildInfoTab(),
                             _buildAttendanceTab(),
                             _buildFinancialTab(),
+                            _buildBehaviorTab(),
                             _buildAchievementsTab(),
                             _buildHistoryTab(),
                           ],
@@ -124,8 +135,11 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       actions: [
         IconButton(
           icon: const Icon(Icons.edit),
-          onPressed: () {
-            context.push('/admin/alunos/${widget.studentId}/editar');
+          onPressed: () async {
+            final result = await context.push('/admin/alunos/${widget.studentId}/editar');
+            if (result == true && mounted) {
+              _loadData();
+            }
           },
         ),
         PopupMenuButton<String>(
@@ -477,17 +491,41 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
   }
 
   Widget _buildFinancialTab() {
-    if (_payments.isEmpty) {
+    if (_payments.isEmpty && _storeOrders.isEmpty) {
       return const Center(child: Text('Nenhum pagamento registrado'));
     }
 
-    return ListView.builder(
+    return ListView(
       padding: const EdgeInsets.all(16),
-      itemCount: _payments.length,
-      itemBuilder: (context, index) {
-        final payment = _payments[index];
-        return _PaymentCard(payment: payment);
-      },
+      children: [
+        // Tuition payments
+        if (_payments.isNotEmpty) ...[
+          Text(
+            'MENSALIDADES',
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ..._payments.map((payment) => _PaymentCard(payment: payment)),
+        ],
+        // Store orders
+        if (_storeOrders.isNotEmpty) ...[
+          if (_payments.isNotEmpty) const SizedBox(height: 16),
+          Text(
+            'PEDIDOS DA LOJA',
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ..._storeOrders.map((order) => _StoreOrderCard(order: order)),
+        ],
+      ],
     );
   }
 
@@ -910,6 +948,454 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
         ],
       ),
     );
+  }
+
+  // ============================================
+  // BEHAVIOR TAB
+  // ============================================
+  Widget _buildBehaviorTab() {
+    return Stack(
+      children: [
+        _assessments.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(LucideIcons.star, size: 64, color: AppTheme.textDisabled),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Nenhuma avaliação registrada',
+                      style: AppTheme.bodyLarge.copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Adicione avaliações comportamentais\npara que os pais possam acompanhar',
+                      style: AppTheme.bodySmall.copyWith(color: AppTheme.textDisabled),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+                itemCount: _assessments.length,
+                itemBuilder: (context, index) {
+                  final assessment = _assessments[index];
+                  return _AssessmentCard(
+                    assessment: assessment,
+                    onEdit: () => _showEditAssessmentDialog(assessment),
+                    onDelete: () => _showDeleteAssessmentConfirmation(assessment),
+                  );
+                },
+              ),
+        Positioned(
+          bottom: 16,
+          right: 16,
+          child: FloatingActionButton.extended(
+            onPressed: _showAddAssessmentDialog,
+            backgroundColor: AppTheme.primary,
+            icon: const Icon(Icons.add, color: Colors.white),
+            label: const Text('Avaliar', style: TextStyle(color: Colors.white)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showAddAssessmentDialog() {
+    final scores = <AssessmentCategory, int>{
+      AssessmentCategory.respeito: 3,
+      AssessmentCategory.disciplina: 3,
+      AssessmentCategory.pontualidade: 3,
+      AssessmentCategory.tecnica: 3,
+      AssessmentCategory.esforco: 3,
+    };
+    final notesController = TextEditingController();
+    DateTime selectedDate = DateTime.now();
+    final parentContext = context;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          double average = scores.values.fold<int>(0, (acc, v) => acc + v) / scores.length;
+
+          return AlertDialog(
+            title: const Text('Nova Avaliação'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Date
+                  Text('Data', style: AppTheme.labelMedium),
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: dialogContext,
+                        initialDate: selectedDate,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime.now(),
+                        locale: const Locale('pt', 'BR'),
+                      );
+                      if (picked != null) {
+                        setDialogState(() => selectedDate = picked);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: AppTheme.divider),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today, size: 16),
+                          const SizedBox(width: 8),
+                          Text(DateFormat('dd/MM/yyyy').format(selectedDate)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Average display
+                  Center(
+                    child: Column(
+                      children: [
+                        Text(
+                          average.toStringAsFixed(1),
+                          style: TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                            color: _getScoreColor(average),
+                          ),
+                        ),
+                        Text(
+                          _getScoreLabel(average),
+                          style: TextStyle(
+                            color: _getScoreColor(average),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Score sliders
+                  ...AssessmentCategory.values.map((category) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(category.label, style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500)),
+                              Text(
+                                '${scores[category]}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: _getScoreColor(scores[category]!.toDouble()),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Slider(
+                            value: scores[category]!.toDouble(),
+                            min: 1,
+                            max: 5,
+                            divisions: 4,
+                            activeColor: _getScoreColor(scores[category]!.toDouble()),
+                            onChanged: (value) {
+                              setDialogState(() => scores[category] = value.round());
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+
+                  // Notes
+                  Text('Observações (opcional)', style: AppTheme.labelMedium),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      hintText: 'Feedback para os pais...',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  Navigator.pop(dialogContext);
+
+                  try {
+                    final service = AssessmentService(FirebaseService.academyId);
+                    await service.create(
+                      studentId: _student!.id,
+                      studentName: _student!.fullName,
+                      scores: scores.entries.map((e) =>
+                        AssessmentScore(category: e.key, score: e.value),
+                      ).toList(),
+                      assessedBy: 'admin',
+                      assessedByName: 'Professor',
+                      date: selectedDate,
+                      notes: notesController.text.trim().isNotEmpty
+                          ? notesController.text.trim()
+                          : null,
+                    );
+
+                    if (mounted) {
+                      parentContext.showSuccess('Avaliação adicionada!');
+                      await _loadData();
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      parentContext.showError('Erro: $e');
+                    }
+                  }
+                },
+                child: const Text('Salvar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showEditAssessmentDialog(Assessment assessment) {
+    final scores = <AssessmentCategory, int>{};
+    for (final category in AssessmentCategory.values) {
+      scores[category] = assessment.getScoreForCategory(category) ?? 3;
+    }
+    final notesController = TextEditingController(text: assessment.notes);
+    DateTime selectedDate = assessment.date;
+    final parentContext = context;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          double average = scores.values.fold<int>(0, (acc, v) => acc + v) / scores.length;
+
+          return AlertDialog(
+            title: const Text('Editar Avaliação'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Date
+                  Text('Data', style: AppTheme.labelMedium),
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: dialogContext,
+                        initialDate: selectedDate,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime.now(),
+                        locale: const Locale('pt', 'BR'),
+                      );
+                      if (picked != null) {
+                        setDialogState(() => selectedDate = picked);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: AppTheme.divider),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today, size: 16),
+                          const SizedBox(width: 8),
+                          Text(DateFormat('dd/MM/yyyy').format(selectedDate)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Average
+                  Center(
+                    child: Column(
+                      children: [
+                        Text(
+                          average.toStringAsFixed(1),
+                          style: TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                            color: _getScoreColor(average),
+                          ),
+                        ),
+                        Text(
+                          _getScoreLabel(average),
+                          style: TextStyle(
+                            color: _getScoreColor(average),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Scores
+                  ...AssessmentCategory.values.map((category) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(category.label, style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500)),
+                              Text(
+                                '${scores[category]}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: _getScoreColor(scores[category]!.toDouble()),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Slider(
+                            value: scores[category]!.toDouble(),
+                            min: 1,
+                            max: 5,
+                            divisions: 4,
+                            activeColor: _getScoreColor(scores[category]!.toDouble()),
+                            onChanged: (value) {
+                              setDialogState(() => scores[category] = value.round());
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+
+                  // Notes
+                  Text('Observações (opcional)', style: AppTheme.labelMedium),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      hintText: 'Feedback para os pais...',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  Navigator.pop(dialogContext);
+
+                  try {
+                    final service = AssessmentService(FirebaseService.academyId);
+                    await service.update(assessment.id, {
+                      'date': Timestamp.fromDate(selectedDate),
+                      'scores': scores.entries.map((e) =>
+                        AssessmentScore(category: e.key, score: e.value).toMap(),
+                      ).toList(),
+                      'notes': notesController.text.trim().isNotEmpty
+                          ? notesController.text.trim()
+                          : null,
+                    });
+
+                    if (mounted) {
+                      parentContext.showSuccess('Avaliação atualizada!');
+                      await _loadData();
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      parentContext.showError('Erro: $e');
+                    }
+                  }
+                },
+                child: const Text('Salvar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showDeleteAssessmentConfirmation(Assessment assessment) {
+    final parentContext = context;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Excluir Avaliação'),
+        content: Text('Deseja excluir a avaliação de ${DateFormat('dd/MM/yyyy').format(assessment.date)}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+
+              try {
+                final service = AssessmentService(FirebaseService.academyId);
+                await service.delete(assessment.id);
+
+                if (mounted) {
+                  parentContext.showSuccess('Avaliação excluída!');
+                  await _loadData();
+                }
+              } catch (e) {
+                if (mounted) {
+                  parentContext.showError('Erro: $e');
+                }
+              }
+            },
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getScoreColor(double score) {
+    if (score >= 4.5) return Colors.green;
+    if (score >= 3.5) return Colors.blue;
+    if (score >= 2.5) return Colors.orange;
+    return Colors.red;
+  }
+
+  String _getScoreLabel(double score) {
+    if (score >= 4.5) return 'Excelente';
+    if (score >= 3.5) return 'Bom';
+    if (score >= 2.5) return 'Regular';
+    return 'Precisa Melhorar';
   }
 
   Widget _buildHistoryTab() {
@@ -1544,5 +2030,239 @@ class _AchievementCard extends StatelessWidget {
       case AchievementType.milestone:
         return 'Marco';
     }
+  }
+}
+
+/// Store Order Card Widget
+class _StoreOrderCard extends StatelessWidget {
+  final StoreOrder order;
+
+  const _StoreOrderCard({required this.order});
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColors = {
+      StoreOrderStatus.pendingPayment: Colors.orange,
+      StoreOrderStatus.paid: Colors.green,
+      StoreOrderStatus.preparing: Colors.blue,
+      StoreOrderStatus.ready: Colors.purple,
+      StoreOrderStatus.delivered: Colors.teal,
+      StoreOrderStatus.cancelled: Colors.grey,
+    };
+
+    final itemNames = order.items.map((i) => i.productName).join(', ');
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: statusColors[order.status]?.withValues(alpha: 0.2),
+          child: Icon(
+            LucideIcons.shoppingBag,
+            color: statusColors[order.status],
+            size: 20,
+          ),
+        ),
+        title: Text(
+          itemNames.isNotEmpty ? itemNames : 'Pedido',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(DateFormat('dd/MM/yyyy').format(order.createdAt)),
+            if (order.paidAt != null)
+              Text(
+                'Pago em: ${DateFormat('dd/MM/yyyy').format(order.paidAt!)}',
+                style: const TextStyle(color: Colors.green),
+              ),
+          ],
+        ),
+        trailing: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              'R\$ ${order.total.toStringAsFixed(2)}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            const SizedBox(height: 2),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: statusColors[order.status]?.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                order.status.label,
+                style: TextStyle(
+                  fontSize: 9,
+                  color: statusColors[order.status],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Assessment Card Widget for admin behavior tab
+class _AssessmentCard extends StatelessWidget {
+  final Assessment assessment;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _AssessmentCard({
+    required this.assessment,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  Color _getScoreColor(double score) {
+    if (score >= 4.5) return Colors.green;
+    if (score >= 3.5) return Colors.blue;
+    if (score >= 2.5) return Colors.orange;
+    return Colors.red;
+  }
+
+  String _getScoreLabel(double score) {
+    if (score >= 4.5) return 'Excelente';
+    if (score >= 3.5) return 'Bom';
+    if (score >= 2.5) return 'Regular';
+    return 'Precisa Melhorar';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final average = assessment.averageScore;
+    final scoreColor = _getScoreColor(average);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: onEdit,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.calendar_today, size: 14, color: AppTheme.textSecondary),
+                      const SizedBox(width: 6),
+                      Text(
+                        DateFormat('dd/MM/yyyy').format(assessment.date),
+                        style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: scoreColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '${average.toStringAsFixed(1)} - ${_getScoreLabel(average)}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      PopupMenuButton<String>(
+                        icon: Icon(Icons.more_vert, color: AppTheme.textSecondary, size: 20),
+                        onSelected: (value) {
+                          if (value == 'edit') onEdit();
+                          if (value == 'delete') onDelete();
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: 'edit',
+                            child: Row(
+                              children: [
+                                Icon(Icons.edit, size: 20),
+                                SizedBox(width: 8),
+                                Text('Editar'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(Icons.delete, size: 20, color: Colors.red),
+                                SizedBox(width: 8),
+                                Text('Excluir', style: TextStyle(color: Colors.red)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Scores grid
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                children: AssessmentCategory.values.map((category) {
+                  final score = assessment.getScoreForCategory(category) ?? 0;
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(LucideIcons.star, size: 12, color: _getScoreColor(score.toDouble())),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${category.label}: $score',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  );
+                }).toList(),
+              ),
+
+              // Notes
+              if (assessment.notes != null && assessment.notes!.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '"${assessment.notes}"',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

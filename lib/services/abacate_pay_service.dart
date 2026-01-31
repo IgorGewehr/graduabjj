@@ -1,29 +1,28 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
-
-import '../core/constants.dart';
-import 'firebase_service.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 /// Payment Link Response
 class PaymentLink {
   final String pixCode;
   final String? qrCodeUrl;
   final DateTime expiresAt;
+  final String? abacatePayId;
 
   PaymentLink({
     required this.pixCode,
     this.qrCodeUrl,
     required this.expiresAt,
+    this.abacatePayId,
   });
 
-  factory PaymentLink.fromJson(Map<String, dynamic> json) {
+  factory PaymentLink.fromMap(Map<String, dynamic> map) {
     return PaymentLink(
-      pixCode: json['pixCode'] ?? '',
-      qrCodeUrl: json['qrCodeUrl'],
-      expiresAt: json['expiresAt'] != null
-          ? DateTime.parse(json['expiresAt'])
+      pixCode: map['pixCode'] ?? '',
+      qrCodeUrl: map['qrCodeUrl'],
+      expiresAt: map['expiresAt'] != null
+          ? DateTime.parse(map['expiresAt'])
           : DateTime.now().add(const Duration(hours: 24)),
+      abacatePayId: map['abacatePayId'],
     );
   }
 }
@@ -40,11 +39,11 @@ class CardPaymentResult {
     this.message,
   });
 
-  factory CardPaymentResult.fromJson(Map<String, dynamic> json) {
+  factory CardPaymentResult.fromMap(Map<String, dynamic> map) {
     return CardPaymentResult(
-      success: json['success'] ?? false,
-      transactionId: json['data']?['transactionId'],
-      message: json['data']?['message'] ?? json['error'],
+      success: map['success'] ?? false,
+      transactionId: map['transactionId'],
+      message: map['message'],
     );
   }
 }
@@ -79,33 +78,34 @@ class CardData {
   }
 }
 
+/// Withdrawal Result
+class WithdrawalResult {
+  final bool success;
+  final String? transactionId;
+  final String? message;
+
+  WithdrawalResult({
+    required this.success,
+    this.transactionId,
+    this.message,
+  });
+
+  factory WithdrawalResult.fromMap(Map<String, dynamic> map) {
+    return WithdrawalResult(
+      success: map['success'] ?? false,
+      transactionId: map['transactionId'],
+      message: map['message'],
+    );
+  }
+}
+
 /// AbacatePay Service
-/// Handles payment operations via the web API
+/// Handles payment operations via Firebase Cloud Functions
 class AbacatePayService {
   final String academyId;
-
-  // Base URL for the API - uses AppConstants which is configured via dart-define
-  static String get _baseUrl => AppConstants.apiBaseUrl;
+  final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
   AbacatePayService(this.academyId);
-
-  /// Get authentication headers with Firebase ID token
-  Future<Map<String, String>> _getAuthHeaders() async {
-    final user = FirebaseService.currentUser;
-    if (user == null) {
-      return {'Content-Type': 'application/json'};
-    }
-
-    try {
-      final token = await user.getIdToken();
-      return {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      };
-    } catch (_) {
-      return {'Content-Type': 'application/json'};
-    }
-  }
 
   /// Check if AbacatePay is enabled for the academy
   Future<bool> isEnabled() async {
@@ -131,29 +131,23 @@ class AbacatePayService {
     String? description,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$_baseUrl/payments/create-pix'),
-        headers: headers,
-        body: jsonEncode({
-          'academyId': academyId,
-          'amount': (amount * 100).round(), // Convert to cents
-          'description': description ?? 'Mensalidade',
-          'financialId': financialId,
-          'studentId': studentId,
-          'studentName': studentName,
-        }),
-      );
+      final callable = _functions.httpsCallable('createPixPayment');
+      final result = await callable.call({
+        'academyId': academyId,
+        'amount': (amount * 100).round(), // Convert to cents
+        'description': description ?? 'Mensalidade',
+        'financialId': financialId,
+        'studentId': studentId,
+        'studentName': studentName,
+      });
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == true && data['data'] != null) {
-          return PaymentLink.fromJson(data['data']);
-        }
-      }
-
+      final data = Map<String, dynamic>.from(result.data);
+      return PaymentLink.fromMap(data);
+    } on FirebaseFunctionsException catch (e) {
+      print('[AbacatePay] createPixPayment error: ${e.code} - ${e.message}');
       return null;
-    } catch (_) {
+    } catch (e) {
+      print('[AbacatePay] createPixPayment exception: $e');
       return null;
     }
   }
@@ -168,29 +162,23 @@ class AbacatePayService {
     String? description,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$_baseUrl/payments/create-order-pix'),
-        headers: headers,
-        body: jsonEncode({
-          'academyId': academyId,
-          'amount': amount.round(), // Already in centavos (store orders use centavos)
-          'description': description ?? 'Pedido da Loja',
-          'orderId': orderId,
-          'studentId': studentId,
-          'studentName': studentName,
-        }),
-      );
+      final callable = _functions.httpsCallable('createOrderPixPayment');
+      final result = await callable.call({
+        'academyId': academyId,
+        'amount': amount.round(), // Already in centavos
+        'description': description ?? 'Pedido da Loja',
+        'orderId': orderId,
+        'studentId': studentId,
+        'studentName': studentName,
+      });
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == true && data['data'] != null) {
-          return PaymentLink.fromJson(data['data']);
-        }
-      }
-
+      final data = Map<String, dynamic>.from(result.data);
+      return PaymentLink.fromMap(data);
+    } on FirebaseFunctionsException catch (e) {
+      print('[AbacatePay] createStoreOrderPayment error: ${e.code} - ${e.message}');
       return null;
-    } catch (_) {
+    } catch (e) {
+      print('[AbacatePay] createStoreOrderPayment exception: $e');
       return null;
     }
   }
@@ -205,30 +193,23 @@ class AbacatePayService {
     String? description,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$_baseUrl/payments/create-card'),
-        headers: headers,
-        body: jsonEncode({
-          'academyId': academyId,
-          'amount': (amount * 100).round(), // Convert to cents
-          'description': description ?? 'Pagamento',
-          'financialId': financialId,
-          'studentId': studentId,
-          'studentName': studentName,
-          ...cardData.toJson(),
-        }),
-      );
+      final callable = _functions.httpsCallable('createCardPayment');
+      final result = await callable.call({
+        'academyId': academyId,
+        'amount': (amount * 100).round(), // Convert to cents
+        'description': description ?? 'Pagamento',
+        'financialId': financialId,
+        'studentId': studentId,
+        'studentName': studentName,
+        ...cardData.toJson(),
+      });
 
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode == 200 && data['success'] == true) {
-        return CardPaymentResult.fromJson(data);
-      }
-
+      final data = Map<String, dynamic>.from(result.data);
+      return CardPaymentResult.fromMap(data);
+    } on FirebaseFunctionsException catch (e) {
       return CardPaymentResult(
         success: false,
-        message: data['error'] ?? 'Erro ao processar pagamento',
+        message: e.message ?? 'Erro ao processar pagamento',
       );
     } catch (_) {
       return CardPaymentResult(
@@ -249,36 +230,48 @@ class AbacatePayService {
     String? description,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$_baseUrl/payments/create-card'),
-        headers: headers,
-        body: jsonEncode({
-          'academyId': academyId,
-          'amount': amount.round(), // Already in centavos (store orders use centavos)
-          'description': description ?? 'Pedido da Loja',
-          'financialId': 'order_$orderId',
-          'studentId': studentId,
-          'studentName': studentName,
-          ...cardData.toJson(),
-        }),
-      );
+      final callable = _functions.httpsCallable('createCardPayment');
+      final result = await callable.call({
+        'academyId': academyId,
+        'amount': amount.round(), // Already in centavos
+        'description': description ?? 'Pedido da Loja',
+        'financialId': 'order_$orderId',
+        'studentId': studentId,
+        'studentName': studentName,
+        ...cardData.toJson(),
+      });
 
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode == 200 && data['success'] == true) {
-        return CardPaymentResult.fromJson(data);
-      }
-
+      final data = Map<String, dynamic>.from(result.data);
+      return CardPaymentResult.fromMap(data);
+    } on FirebaseFunctionsException catch (e) {
       return CardPaymentResult(
         success: false,
-        message: data['error'] ?? 'Erro ao processar pagamento',
+        message: e.message ?? 'Erro ao processar pagamento',
       );
     } catch (_) {
       return CardPaymentResult(
         success: false,
         message: 'Erro de conexao',
       );
+    }
+  }
+
+  /// Check PIX payment status via polling
+  Future<String> checkPaymentStatus(String abacatePayId) async {
+    try {
+      final callable = _functions.httpsCallable('checkPixStatus');
+      final result = await callable.call({
+        'abacatePayId': abacatePayId,
+      });
+
+      final data = Map<String, dynamic>.from(result.data);
+      return data['status'] as String? ?? 'PENDING';
+    } on FirebaseFunctionsException catch (e) {
+      print('[AbacatePay] checkPaymentStatus error: ${e.code} - ${e.message}');
+      return 'PENDING';
+    } catch (e) {
+      print('[AbacatePay] checkPaymentStatus exception: $e');
+      return 'PENDING';
     }
   }
 
@@ -289,27 +282,20 @@ class AbacatePayService {
     required String pixKeyType,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$_baseUrl/payments/withdraw'),
-        headers: headers,
-        body: jsonEncode({
-          'academyId': academyId,
-          'amount': amountInCents.round(),
-          'pixKey': pixKey,
-          'pixKeyType': pixKeyType,
-        }),
-      );
+      final callable = _functions.httpsCallable('requestWithdrawal');
+      final result = await callable.call({
+        'academyId': academyId,
+        'amount': amountInCents.round(),
+        'pixKey': pixKey,
+        'pixKeyType': pixKeyType,
+      });
 
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode == 200 && data['success'] == true) {
-        return WithdrawalResult.fromJson(data);
-      }
-
+      final data = Map<String, dynamic>.from(result.data);
+      return WithdrawalResult.fromMap(data);
+    } on FirebaseFunctionsException catch (e) {
       return WithdrawalResult(
         success: false,
-        message: data['error'] ?? 'Erro ao solicitar saque',
+        message: e.message ?? 'Erro ao solicitar saque',
       );
     } catch (_) {
       return WithdrawalResult(
@@ -317,27 +303,6 @@ class AbacatePayService {
         message: 'Erro de conexao',
       );
     }
-  }
-}
-
-/// Withdrawal Result
-class WithdrawalResult {
-  final bool success;
-  final String? transactionId;
-  final String? message;
-
-  WithdrawalResult({
-    required this.success,
-    this.transactionId,
-    this.message,
-  });
-
-  factory WithdrawalResult.fromJson(Map<String, dynamic> json) {
-    return WithdrawalResult(
-      success: json['success'] ?? false,
-      transactionId: json['data']?['transactionId'],
-      message: json['data']?['message'] ?? json['error'],
-    );
   }
 }
 

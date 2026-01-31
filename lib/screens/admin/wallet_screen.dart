@@ -172,50 +172,61 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
       final firestore = FirebaseService.firestore;
       final academyRef = firestore.collection('academies').doc(academyId);
 
-      // Load payments (financials)
-      final paymentsSnapshot = await academyRef.collection('financials').get();
-      final payments = paymentsSnapshot.docs
-          .map((doc) => WalletTransaction.fromPayment(doc.data(), doc.id))
-          .toList();
+      // Load wallet balance document (maintained by webhook with fee deduction)
+      final walletSnap = await academyRef.collection('wallet').doc('balance').get();
 
-      // Load store orders
-      final ordersSnapshot = await academyRef.collection('storeOrders').get();
-      final orders = ordersSnapshot.docs
-          .map((doc) => WalletTransaction.fromStoreOrder(doc.data(), doc.id))
-          .toList();
+      // Load wallet transactions (the authoritative source)
+      final txSnapshot = await academyRef
+          .collection('walletTransactions')
+          .orderBy('createdAt', descending: true)
+          .limit(50)
+          .get();
 
-      // Combine and sort all transactions
-      final allTransactions = [...payments, ...orders];
+      final transactions = txSnapshot.docs.map((doc) {
+        final data = doc.data();
+        final type = data['type'] as String? ?? 'payment';
+        final source = type == 'withdrawal' ? 'saque' :
+            (data['financialId']?.toString().startsWith('order_') == true ? 'loja' : 'mensalidade');
 
-      // Filter for only AbacatePay transactions
-      final abacatePayTransactions =
-          allTransactions.where((tx) => tx.isAbacatePay).toList();
+        return WalletTransaction(
+          id: doc.id,
+          type: type,
+          source: source,
+          amount: (data['amount'] ?? 0).toDouble(),
+          status: data['status'] ?? 'pending',
+          description: data['description'],
+          studentName: data['studentName'],
+          createdAt: data['createdAt']?.toDate() ?? DateTime.now(),
+          completedAt: data['completedAt']?.toDate(),
+          isAbacatePay: true,
+        );
+      }).toList();
 
-      abacatePayTransactions.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-      // Calculate wallet balances based on filtered transactions
-      double totalReceived = 0;
+      // Use wallet/balance document for balances (correctly includes fee deductions)
+      double availableBalance = 0;
       double pendingBalance = 0;
+      double totalReceived = 0;
+      double totalWithdrawn = 0;
+      int transactionCount = transactions.length;
 
-      for (final tx in abacatePayTransactions) {
-        if (tx.isCredit) {
-          if (tx.status == 'completed') {
-            totalReceived += tx.amount;
-          } else if (tx.status == 'pending') {
-            pendingBalance += tx.amount;
-          }
-        }
+      if (walletSnap.exists) {
+        final walletData = walletSnap.data()!;
+        availableBalance = (walletData['availableBalance'] ?? 0).toDouble();
+        pendingBalance = (walletData['pendingBalance'] ?? 0).toDouble();
+        totalReceived = (walletData['totalReceived'] ?? 0).toDouble();
+        totalWithdrawn = (walletData['totalWithdrawn'] ?? 0).toDouble();
+        transactionCount = (walletData['transactionCount'] ?? transactions.length);
       }
 
       setState(() {
         _wallet = AcademyWallet(
-          availableBalance: totalReceived,
+          availableBalance: availableBalance,
           pendingBalance: pendingBalance,
           totalReceived: totalReceived,
-          totalWithdrawn: 0,
-          transactionCount: abacatePayTransactions.length,
+          totalWithdrawn: totalWithdrawn,
+          transactionCount: transactionCount,
         );
-        _transactions = abacatePayTransactions;
+        _transactions = transactions;
         _isLoading = false;
         _isRefreshing = false;
       });

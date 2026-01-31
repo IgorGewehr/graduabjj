@@ -42,6 +42,7 @@ class BehaviorScreen extends ConsumerWidget {
           },
           child: assessmentsAsync.when(
             data: (assessments) {
+              print('[BEHAVIOR] Loaded ${assessments.length} assessments for student ${student.id}');
               final averages = averagesAsync.valueOrNull ?? {};
               final latest = latestAsync.valueOrNull;
 
@@ -123,12 +124,18 @@ class BehaviorScreen extends ConsumerWidget {
               );
             },
             loading: () => _buildLoadingState(),
-            error: (_, __) => _buildErrorState(),
+            error: (error, stack) {
+              print('[BEHAVIOR] Error loading assessments: $error');
+              return _buildErrorState();
+            },
           ),
         );
       },
       loading: () => _buildLoadingState(),
-      error: (_, __) => _buildErrorState(),
+      error: (error, stack) {
+        print('[BEHAVIOR] Error loading student: $error');
+        return _buildErrorState();
+      },
     );
   }
 
