@@ -320,18 +320,19 @@ class AbacatePayService {
         }),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && body['success'] == true) {
+        final data = body['data'] as Map<String, dynamic>?;
         return WithdrawalResult(
           success: true,
-          transactionId: data['transactionId'],
-          message: data['message'] ?? 'Saque solicitado com sucesso',
+          transactionId: data?['transactionId'],
+          message: data?['message'] ?? 'Saque solicitado com sucesso',
         );
       } else {
         return WithdrawalResult(
           success: false,
-          message: data['error'] ?? 'Erro ao solicitar saque',
+          message: body['error'] ?? 'Erro ao solicitar saque',
         );
       }
     } catch (e) {
