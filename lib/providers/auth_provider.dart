@@ -440,6 +440,83 @@ class AuthService {
     return await globalUserService.getUserAcademyIds(user.uid);
   }
 
+  /// Create academy account (registers professor and creates academy)
+  Future<UserCredential> createAcademyAccount({
+    required String email,
+    required String password,
+    required String displayName,
+    required String academyName,
+    required String academySlug,
+  }) async {
+    // Step 1: Create Firebase Auth user
+    final credential = await _auth.createUserWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+
+    // Step 2: Update display name in Firebase Auth
+    await credential.user?.updateDisplayName(displayName);
+
+    // Step 3: Create global user document with accountType: linked
+    await globalUserService.createGlobalUser(
+      userId: credential.user!.uid,
+      email: email,
+      displayName: displayName,
+      accountType: AccountType.linked,
+    );
+
+    // Step 4: Create academy document
+    await _firestore.collection('academies').doc(academySlug).set({
+      'name': academyName,
+      'slug': academySlug,
+      'ownerId': credential.user!.uid,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      'settings': {
+        'allowStudentRegistration': true,
+        'requireApproval': false,
+      },
+      'subscription': {
+        'plan': 'free',
+        'status': 'active',
+        'trialEndsAt': DateTime.now().add(const Duration(days: 30)),
+      },
+      'storeEnabled': false,
+      'storePublished': false,
+      'abacatePayEnabled': false,
+      'autoGraduationEnabled': false,
+      'studentCheckinEnabled': true,
+    });
+
+    // Step 5: Create academy user document (role: admin)
+    await globalUserService.upsertAcademyUser(
+      academyId: academySlug,
+      userId: credential.user!.uid,
+      data: {
+        'email': email,
+        'displayName': displayName,
+        'role': 'admin',
+        'isActive': true,
+        'status': 'active',
+      },
+    );
+
+    // Step 6: Link user to academy via globalUserService
+    await globalUserService.linkUserToAcademy(
+      userId: credential.user!.uid,
+      academyId: academySlug,
+      role: UserRole.admin,
+    );
+
+    // Step 7: Register FCM token for push notifications
+    await pushNotificationService.onUserLogin();
+
+    // Step 8: Subscribe to academy push notifications topic
+    await pushNotificationService.subscribeToTopic('academy_$academySlug');
+
+    return credential;
+  }
+
   /// Create account with link code (registers and links to student in one step)
   Future<UserCredential> createAccountWithLinkCode(
     String email,

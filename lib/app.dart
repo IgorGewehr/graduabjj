@@ -9,6 +9,7 @@ import 'providers/auth_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/auth/link_code_screen.dart';
+import 'screens/auth/create_academy_screen.dart';
 import 'screens/portal/portal_shell.dart';
 import 'screens/portal/home_screen.dart';
 import 'screens/portal/profile_screen.dart';
@@ -214,6 +215,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isLoggingIn = state.matchedLocation == '/login';
       final isRegistering = state.matchedLocation == '/register';
       final isLinkCode = state.matchedLocation == '/link-code';
+      final isCreatingAcademy = state.matchedLocation == '/criar-academia';
       final isSplash = state.matchedLocation == '/';
 
       print('[ROUTER] matchedLocation: ${state.matchedLocation}, isLoggedIn: $isLoggedIn, authLoading: ${authState.isLoading}, userLoading: ${currentUser.isLoading}');
@@ -225,7 +227,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // If not logged in, redirect to login
       if (!isLoggedIn) {
-        if (isLoggingIn || isRegistering || isLinkCode) {
+        if (isLoggingIn || isRegistering || isLinkCode || isCreatingAcademy) {
           return null;
         }
         return '/login';
@@ -241,7 +243,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       print('[ROUTER] User loaded: ${user?.displayName}, role: ${user?.role}, isAdmin: ${user?.isAdmin}, isInstructor: ${user?.isInstructor}');
 
       // If logged in and on auth pages, redirect based on role
-      if (isLoggingIn || isRegistering || isLinkCode || isSplash) {
+      if (isLoggingIn || isRegistering || isLinkCode || isCreatingAcademy || isSplash) {
         if (user != null && (user.isAdmin || user.isInstructor)) {
           print('[ROUTER] Redirecting admin/instructor to /admin');
           return '/admin';
@@ -282,6 +284,14 @@ final routerProvider = Provider<GoRouter>((ref) {
           context: context,
           state: state,
           child: const LinkCodeScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/criar-academia',
+        pageBuilder: (context, state) => _buildPageWithPushTransition(
+          context: context,
+          state: state,
+          child: const CreateAcademyScreen(),
         ),
       ),
 

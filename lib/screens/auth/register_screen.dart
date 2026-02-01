@@ -382,6 +382,82 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       ),
                     ],
                   ).animate().fadeIn(delay: 700.ms),
+
+                  const SizedBox(height: 16),
+
+                  // Divider
+                  Row(
+                    children: [
+                      const Expanded(child: Divider()),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Text(
+                          'ou',
+                          style: AppTheme.bodySmall.copyWith(color: AppTheme.textDisabled),
+                        ),
+                      ),
+                      const Expanded(child: Divider()),
+                    ],
+                  ).animate().fadeIn(delay: 750.ms),
+
+                  const SizedBox(height: 16),
+
+                  // "Sou Professor" card
+                  GestureDetector(
+                    onTap: () => context.go('/criar-academia'),
+                    child: Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: AppTheme.divider,
+                          style: BorderStyle.solid,
+                          width: 1.5,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: AppTheme.surfaceVariant,
+                            ),
+                            child: const Icon(
+                              LucideIcons.graduationCap,
+                              size: 22,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Sou Professor / Dono de Academia',
+                            style: AppTheme.titleMedium,
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Cadastre sua academia e gerencie alunos, graduacoes e muito mais.',
+                            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Criar minha academia',
+                                style: AppTheme.labelLarge.copyWith(color: AppTheme.primary),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(LucideIcons.arrowRight, size: 16, color: AppTheme.primary),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ).animate().fadeIn(delay: 800.ms).slideY(begin: 0.1),
                 ],
               ),
             ),
