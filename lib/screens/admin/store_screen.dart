@@ -972,8 +972,8 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
             ? null
             : _descriptionController.text,
         'price': double.parse(_priceController.text.replaceAll(',', '.')),
-        'category': _category,
-        'stockType': _stockType,
+        'category': _category.value,
+        'stockType': _stockType.value,
         'stockQuantity': _stockType == StoreStockType.inStock
             ? int.tryParse(_stockController.text) ?? 0
             : null,

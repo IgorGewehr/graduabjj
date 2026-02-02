@@ -111,14 +111,14 @@ class CartNotifier extends StateNotifier<List<StoreOrderItem>> {
     state = [];
   }
 
-  /// Total in centavos
+  /// Total in Reais
   double get total => state.fold(0, (sum, item) => sum + item.subtotal);
 
-  /// Total in Reais (divide by 100 since stored in centavos)
-  double get totalInReais => total / 100;
+  /// Total in Reais
+  double get totalInReais => total;
 
   /// Formatted total in Reais
-  String get formattedTotal => 'R\$ ${totalInReais.toStringAsFixed(2)}';
+  String get formattedTotal => 'R\$ ${total.toStringAsFixed(2)}';
 
   int get itemCount => state.fold(0, (sum, item) => sum + item.quantity);
 }
