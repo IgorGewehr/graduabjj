@@ -22,18 +22,25 @@ class NotificationsScreen extends ConsumerWidget {
 
   IconData _getIconForType(NotificationType type) {
     switch (type) {
-      case NotificationType.financial:
+      case NotificationType.paymentReceived:
+      case NotificationType.paymentPending:
+      case NotificationType.paymentOverdue:
+      case NotificationType.paymentDueSoon:
         return LucideIcons.dollarSign;
-      case NotificationType.graduation:
+      case NotificationType.orderPaid:
+        return LucideIcons.shoppingBag;
+      case NotificationType.withdrawalCompleted:
+      case NotificationType.withdrawalFailed:
+        return LucideIcons.wallet;
+      case NotificationType.graduationEligible:
+      case NotificationType.graduationNear:
         return LucideIcons.award;
-      case NotificationType.competition:
+      case NotificationType.competitionReminder:
         return LucideIcons.trophy;
-      case NotificationType.achievement:
+      case NotificationType.newStudentLinked:
+        return LucideIcons.userPlus;
+      case NotificationType.studentMilestone:
         return LucideIcons.star;
-      case NotificationType.attendance:
-        return LucideIcons.clipboardCheck;
-      case NotificationType.announcement:
-        return LucideIcons.megaphone;
       case NotificationType.system:
         return LucideIcons.bell;
     }

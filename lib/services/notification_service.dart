@@ -2,15 +2,21 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_service.dart';
 
-/// Notification Type
+/// Notification Type - matches types stored in Firestore by webhook/Cloud Functions
 enum NotificationType {
   system,
-  financial,
-  graduation,
-  competition,
-  achievement,
-  attendance,
-  announcement,
+  paymentReceived,
+  paymentPending,
+  paymentOverdue,
+  paymentDueSoon,
+  orderPaid,
+  withdrawalCompleted,
+  withdrawalFailed,
+  graduationEligible,
+  graduationNear,
+  newStudentLinked,
+  studentMilestone,
+  competitionReminder,
 }
 
 extension NotificationTypeExtension on NotificationType {
@@ -18,35 +24,59 @@ extension NotificationTypeExtension on NotificationType {
     switch (this) {
       case NotificationType.system:
         return 'system';
-      case NotificationType.financial:
-        return 'financial';
-      case NotificationType.graduation:
-        return 'graduation';
-      case NotificationType.competition:
-        return 'competition';
-      case NotificationType.achievement:
-        return 'achievement';
-      case NotificationType.attendance:
-        return 'attendance';
-      case NotificationType.announcement:
-        return 'announcement';
+      case NotificationType.paymentReceived:
+        return 'payment_received';
+      case NotificationType.paymentPending:
+        return 'payment_pending';
+      case NotificationType.paymentOverdue:
+        return 'payment_overdue';
+      case NotificationType.paymentDueSoon:
+        return 'payment_due_soon';
+      case NotificationType.orderPaid:
+        return 'order_paid';
+      case NotificationType.withdrawalCompleted:
+        return 'withdrawal_completed';
+      case NotificationType.withdrawalFailed:
+        return 'withdrawal_failed';
+      case NotificationType.graduationEligible:
+        return 'graduation_eligible';
+      case NotificationType.graduationNear:
+        return 'graduation_near';
+      case NotificationType.newStudentLinked:
+        return 'new_student_linked';
+      case NotificationType.studentMilestone:
+        return 'student_milestone';
+      case NotificationType.competitionReminder:
+        return 'competition_reminder';
     }
   }
 
   static NotificationType fromString(String value) {
     switch (value) {
-      case 'financial':
-        return NotificationType.financial;
-      case 'graduation':
-        return NotificationType.graduation;
-      case 'competition':
-        return NotificationType.competition;
-      case 'achievement':
-        return NotificationType.achievement;
-      case 'attendance':
-        return NotificationType.attendance;
-      case 'announcement':
-        return NotificationType.announcement;
+      case 'payment_received':
+        return NotificationType.paymentReceived;
+      case 'payment_pending':
+        return NotificationType.paymentPending;
+      case 'payment_overdue':
+        return NotificationType.paymentOverdue;
+      case 'payment_due_soon':
+        return NotificationType.paymentDueSoon;
+      case 'order_paid':
+        return NotificationType.orderPaid;
+      case 'withdrawal_completed':
+        return NotificationType.withdrawalCompleted;
+      case 'withdrawal_failed':
+        return NotificationType.withdrawalFailed;
+      case 'graduation_eligible':
+        return NotificationType.graduationEligible;
+      case 'graduation_near':
+        return NotificationType.graduationNear;
+      case 'new_student_linked':
+        return NotificationType.newStudentLinked;
+      case 'student_milestone':
+        return NotificationType.studentMilestone;
+      case 'competition_reminder':
+        return NotificationType.competitionReminder;
       default:
         return NotificationType.system;
     }

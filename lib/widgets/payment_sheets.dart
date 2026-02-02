@@ -133,7 +133,7 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
         setState(() => _paymentConfirmed = true);
         HapticFeedback.heavyImpact();
         _showSuccessDialog();
-        widget.onPaymentConfirmed?.call();
+        if (mounted) widget.onPaymentConfirmed?.call();
       }
     });
   }
@@ -181,7 +181,9 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
       pageBuilder: (_, __, ___) => _SuccessDialog(
         onClose: () {
           Navigator.pop(context); // Close dialog
-          Navigator.pop(context); // Close sheet
+          if (mounted) {
+            Navigator.pop(context); // Close sheet
+          }
           widget.onClose?.call();
         },
       ),

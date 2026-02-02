@@ -39,7 +39,7 @@ class NotificationDispatcher {
   }) async {
     return _notificationService.create(
       userId: userId,
-      type: NotificationType.financial,
+      type: NotificationType.paymentPending,
       priority: NotificationPriority.normal,
       title: 'Nova Mensalidade',
       message: 'Sua mensalidade de ${_formatCurrency(amount)} vence em ${_formatDate(dueDate)}.',
@@ -60,7 +60,7 @@ class NotificationDispatcher {
   }) async {
     return _notificationService.create(
       userId: userId,
-      type: NotificationType.financial,
+      type: NotificationType.paymentOverdue,
       priority: NotificationPriority.high,
       title: 'Pagamento Atrasado',
       message: 'Sua mensalidade de ${_formatCurrency(amount)} está atrasada há $daysOverdue dias.',
@@ -81,7 +81,7 @@ class NotificationDispatcher {
   }) async {
     return _notificationService.create(
       userId: userId,
-      type: NotificationType.competition,
+      type: NotificationType.competitionReminder,
       priority: NotificationPriority.normal,
       title: 'Novo Campeonato!',
       message: '$competitionName será realizado em ${_formatDate(date)}. Inscreva-se!',
@@ -101,7 +101,7 @@ class NotificationDispatcher {
   }) async {
     return _notificationService.create(
       userId: userId,
-      type: NotificationType.achievement,
+      type: NotificationType.studentMilestone,
       priority: NotificationPriority.normal,
       title: 'Conquista Desbloqueada!',
       message: 'Parabéns! Você conquistou: $achievementTitle',
@@ -121,7 +121,7 @@ class NotificationDispatcher {
     final timeFormat = DateFormat('HH:mm').format(startTime);
     return _notificationService.create(
       userId: userId,
-      type: NotificationType.attendance,
+      type: NotificationType.system,
       priority: NotificationPriority.normal,
       title: 'Aula Disponível',
       message: 'O check-in para $className está aberto! Aula às $timeFormat.',
@@ -140,7 +140,7 @@ class NotificationDispatcher {
   }) async {
     return _notificationService.create(
       userId: userId,
-      type: NotificationType.graduation,
+      type: NotificationType.graduationEligible,
       priority: NotificationPriority.high,
       title: 'Pronto para Graduação!',
       message: 'Você atingiu $attendanceCount presenças e está elegível para graduação!',
@@ -164,7 +164,7 @@ class NotificationDispatcher {
   }) async {
     return _notificationService.create(
       userId: adminUserId,
-      type: NotificationType.system,
+      type: NotificationType.orderPaid,
       priority: NotificationPriority.normal,
       title: 'Novo Pedido',
       message: '$studentName fez um pedido de ${_formatCurrency(total)} na loja.',
@@ -184,7 +184,7 @@ class NotificationDispatcher {
   }) async {
     return _notificationService.create(
       userId: adminUserId,
-      type: NotificationType.financial,
+      type: NotificationType.paymentReceived,
       priority: NotificationPriority.normal,
       title: 'Pagamento Recebido',
       message: '$studentName pagou ${_formatCurrency(amount)}.',
@@ -205,7 +205,7 @@ class NotificationDispatcher {
   }) async {
     return _notificationService.create(
       userId: adminUserId,
-      type: NotificationType.system,
+      type: NotificationType.newStudentLinked,
       priority: NotificationPriority.normal,
       title: 'Nova Conta Vinculada',
       message: '$userEmail vinculou sua conta ao aluno $studentName.',

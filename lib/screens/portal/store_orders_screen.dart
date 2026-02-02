@@ -1281,10 +1281,11 @@ class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
   }
 
   void _showPaymentConfirmedDialog() {
+    final sheetContext = context;
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1325,8 +1326,8 @@ class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
             width: double.infinity,
             child: ElevatedButton(
               onPressed: () {
-                Navigator.pop(context); // Close dialog
-                Navigator.pop(context); // Close bottom sheet
+                Navigator.pop(dialogContext); // Close dialog
+                if (mounted) Navigator.pop(sheetContext); // Close bottom sheet
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.success,

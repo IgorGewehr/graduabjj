@@ -433,6 +433,7 @@ class PaymentService {
     bool sendNotification = true,
   }) async {
     final docRef = await _paymentsRef.add({
+      'academyId': academyId,
       'studentId': studentId,
       'studentName': studentName,
       'amount': value,

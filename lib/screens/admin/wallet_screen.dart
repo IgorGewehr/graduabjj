@@ -4,11 +4,14 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
+import 'package:flutter/services.dart';
+
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../core/validators.dart';
 import '../../services/firebase_service.dart';
 import '../../services/abacate_pay_service.dart';
+import '../../services/totp_service.dart';
 import '../../providers/providers.dart';
 
 /// Wallet Transaction model
@@ -157,6 +160,8 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   List<WalletTransaction> _transactions = [];
   bool _isLoading = true;
   bool _isRefreshing = false;
+  bool _isTotpEnabled = false;
+  bool _isTotpLoading = true;
 
   @override
   void initState() {
@@ -221,6 +226,12 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
         transactionCount = (walletData['transactionCount'] ?? transactions.length);
       }
 
+      // Load TOTP status
+      bool totpEnabled = false;
+      try {
+        totpEnabled = await TotpService().isTotpEnabled();
+      } catch (_) {}
+
       setState(() {
         _wallet = AcademyWallet(
           availableBalance: availableBalance,
@@ -230,12 +241,15 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
           transactionCount: transactionCount,
         );
         _transactions = transactions;
+        _isTotpEnabled = totpEnabled;
+        _isTotpLoading = false;
         _isLoading = false;
         _isRefreshing = false;
       });
     } catch (e) {
       setState(() {
         _isLoading = false;
+        _isTotpLoading = false;
         _isRefreshing = false;
       });
     }
@@ -250,6 +264,20 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
     final academyId = FirebaseService.academyId;
     if (academyId == null) return;
 
+    // If TOTP is enabled, require validation before showing withdrawal sheet
+    if (_isTotpEnabled) {
+      _showTotpCodeBottomSheet(
+        title: 'Autenticacao 2FA',
+        subtitle: 'Digite o codigo do seu autenticador para continuar',
+        onValidated: () => _openWithdrawalSheet(academyId),
+      );
+      return;
+    }
+
+    _openWithdrawalSheet(academyId);
+  }
+
+  void _openWithdrawalSheet(String academyId) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -273,6 +301,64 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
             context.showError(result.message ?? 'Erro ao solicitar saque');
           }
           _handleRefresh();
+        },
+      ),
+    );
+  }
+
+  void _navigateToTotpSetup() async {
+    await context.push('/admin/carteira/2fa-setup');
+    // Refresh TOTP status on return
+    _handleRefresh();
+  }
+
+  void _showDisableTotpSheet() {
+    _showTotpCodeBottomSheet(
+      title: 'Desativar 2FA',
+      subtitle: 'Digite o codigo do seu autenticador para desativar',
+      onValidated: () async {
+        // Code already validated via the sheet's onSubmit
+      },
+      isDisable: true,
+    );
+  }
+
+  void _showTotpCodeBottomSheet({
+    required String title,
+    required String subtitle,
+    required VoidCallback onValidated,
+    bool isDisable = false,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => _TotpCodeBottomSheet(
+        title: title,
+        subtitle: subtitle,
+        onSubmit: (code) async {
+          final service = TotpService();
+
+          if (isDisable) {
+            final result = await service.disableTotp(code);
+            if (!mounted) return result.success;
+            Navigator.pop(sheetContext);
+            if (result.success) {
+              context.showSuccess('2FA desativado com sucesso');
+              _handleRefresh();
+            } else {
+              context.showError(result.message ?? 'Codigo invalido');
+            }
+            return result.success;
+          } else {
+            final result = await service.validateCode(code);
+            if (!mounted) return result.success;
+            if (result.success) {
+              Navigator.pop(sheetContext);
+              onValidated();
+            }
+            return result.success;
+          }
         },
       ),
     );
@@ -425,7 +511,85 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
               ),
             ),
 
+            // 2FA Security Section
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppTheme.divider),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: _isTotpEnabled
+                              ? const Color(0xFF16A34A).withValues(alpha: 0.1)
+                              : Colors.orange.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          _isTotpEnabled
+                              ? LucideIcons.shieldCheck
+                              : LucideIcons.shield,
+                          size: 22,
+                          color: _isTotpEnabled
+                              ? const Color(0xFF16A34A)
+                              : Colors.orange,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Autenticacao 2FA',
+                              style: AppTheme.bodyMedium.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _isTotpLoading
+                                  ? 'Carregando...'
+                                  : _isTotpEnabled
+                                      ? 'Protecao ativa'
+                                      : 'Proteja seus saques',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (!_isTotpLoading)
+                        _isTotpEnabled
+                            ? TextButton(
+                                onPressed: _showDisableTotpSheet,
+                                style: TextButton.styleFrom(
+                                  foregroundColor: AppTheme.error,
+                                ),
+                                child: const Text('Desativar'),
+                              )
+                            : TextButton(
+                                onPressed: _navigateToTotpSetup,
+                                style: TextButton.styleFrom(
+                                  foregroundColor: AppTheme.primary,
+                                ),
+                                child: const Text('Ativar'),
+                              ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
 
+            const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
             // Transactions Section
             SliverToBoxAdapter(
@@ -1075,6 +1239,218 @@ class _WithdrawalBottomSheetState extends State<_WithdrawalBottomSheet> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// TOTP Code Bottom Sheet - reusable 6-digit code input
+class _TotpCodeBottomSheet extends StatefulWidget {
+  final String title;
+  final String subtitle;
+  final Future<bool> Function(String code) onSubmit;
+
+  const _TotpCodeBottomSheet({
+    required this.title,
+    required this.subtitle,
+    required this.onSubmit,
+  });
+
+  @override
+  State<_TotpCodeBottomSheet> createState() => _TotpCodeBottomSheetState();
+}
+
+class _TotpCodeBottomSheetState extends State<_TotpCodeBottomSheet> {
+  final _codeController = TextEditingController();
+  bool _isLoading = false;
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _codeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleSubmit() async {
+    final code = _codeController.text.trim();
+    if (code.length != 6) {
+      setState(() => _errorMessage = 'Digite o codigo de 6 digitos');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final success = await widget.onSubmit(code);
+      if (!success && mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Codigo invalido';
+          _codeController.clear();
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Erro de conexao';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        top: 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Handle
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.divider,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Header
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    LucideIcons.shieldCheck,
+                    color: AppTheme.primary,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.title,
+                        style: AppTheme.titleLarge.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        widget.subtitle,
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(LucideIcons.x),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+
+            // Error
+            if (_errorMessage != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.errorLight,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(LucideIcons.alertCircle,
+                        color: AppTheme.error, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _errorMessage!,
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.error,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Code input
+            TextFormField(
+              controller: _codeController,
+              decoration: const InputDecoration(
+                labelText: 'Codigo de verificacao',
+                hintText: '000000',
+                prefixIcon: Icon(LucideIcons.keyRound),
+              ),
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              textAlign: TextAlign.center,
+              style: AppTheme.headlineSmall.copyWith(
+                letterSpacing: 8,
+                fontWeight: FontWeight.w700,
+              ),
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              onFieldSubmitted: (_) => _handleSubmit(),
+            ),
+            const SizedBox(height: 24),
+
+            // Submit button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _isLoading ? null : _handleSubmit,
+                icon: _isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(LucideIcons.shieldCheck),
+                label: Text(_isLoading ? 'Verificando...' : 'Verificar'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
