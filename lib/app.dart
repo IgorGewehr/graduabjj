@@ -18,6 +18,7 @@ import 'screens/portal/competitions_screen.dart';
 import 'screens/portal/schedule_screen.dart';
 import 'screens/portal/timeline_screen.dart';
 import 'screens/portal/financial_screen.dart';
+import 'screens/portal/notifications_screen.dart';
 import 'screens/portal/behavior_screen.dart';
 import 'screens/portal/store_screen.dart';
 import 'screens/portal/cart_screen.dart';
@@ -454,6 +455,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
 
+      // Portal Notifications (outside shell for full-screen overlay)
+      GoRoute(
+        path: '/portal/notificacoes',
+        pageBuilder: (context, state) => _buildPageWithPushTransition(
+          context: context,
+          state: state,
+          child: const NotificationsScreen(),
+        ),
+      ),
+
       // Admin Routes
       ShellRoute(
         builder: (context, state, child) => AdminShell(child: child),
@@ -579,6 +590,14 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           // Sub-pages
           GoRoute(
+            path: '/admin/carteira/2fa-setup',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const TotpSetupScreen(),
+            ),
+          ),
+          GoRoute(
             path: '/admin/loja/pedidos',
             pageBuilder: (context, state) => _buildPageWithPushTransition(
               context: context,
@@ -587,6 +606,16 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
         ],
+      ),
+
+      // Admin Notifications (outside shell for full-screen overlay)
+      GoRoute(
+        path: '/admin/notificacoes',
+        pageBuilder: (context, state) => _buildPageWithPushTransition(
+          context: context,
+          state: state,
+          child: const NotificationsScreen(),
+        ),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(
