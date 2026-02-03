@@ -1013,7 +1013,7 @@ class _WithdrawalBottomSheetState extends State<_WithdrawalBottomSheet> {
 
     final amountText = _amountController.text.replaceAll(RegExp(r'[^\d,]'), '');
     final amount = double.tryParse(amountText.replaceAll(',', '.')) ?? 0;
-    final amountInCents = amount * 100;
+    final amountInCents = (amount * 100).round().toDouble();
 
     if (amountInCents < 100) {
       setState(() => _errorMessage = 'Valor minimo: R\$ 1,00');
