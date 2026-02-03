@@ -118,6 +118,7 @@ class Payment {
   final String? externalId; // For AbacatePay integration
   final String? pixCode;
   final String? pixQrCode;
+  final String? planId;
   final DateTime createdAt;
 
   Payment({
@@ -134,6 +135,7 @@ class Payment {
     this.externalId,
     this.pixCode,
     this.pixQrCode,
+    this.planId,
     required this.createdAt,
   });
 
@@ -161,6 +163,7 @@ class Payment {
       externalId: data['externalId'],
       pixCode: data['pixCode'],
       pixQrCode: data['pixQrCode'],
+      planId: data['planId'],
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
@@ -429,6 +432,7 @@ class PaymentService {
     String? description,
     String? referenceMonth,
     String? createdBy,
+    String? planId,
     String type = 'monthly_tuition',
     bool sendNotification = true,
   }) async {
@@ -442,6 +446,7 @@ class PaymentService {
       'status': PaymentStatus.pending.value,
       'description': description ?? 'Mensalidade',
       'referenceMonth': referenceMonth,
+      'planId': planId,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
       'createdBy': createdBy,
@@ -565,9 +570,10 @@ class PaymentService {
   // ============================================
   /// Generates monthly tuitions ONLY for students enrolled in active plans.
   /// Uses the plan's monthlyValue (not the student's tuitionValue field).
+  /// One tuition is generated per student per plan.
   /// If [planId] is provided, generates only for students in that specific plan.
   Future<List<Payment>> generateMonthlyTuitions({
-    List<({String id, String name, double value, int dueDay})>? students,
+    List<({String id, String name, double value, int dueDay, String? planId})>? students,
     required String referenceMonth,
     String? createdBy,
     String? planId, // Optional: filter to specific plan
@@ -577,7 +583,7 @@ class PaymentService {
     final month = int.parse(referenceMonth.split('-')[1]);
 
     // If students not provided, build list from active plans
-    List<({String id, String name, double value, int dueDay})> studentList;
+    List<({String id, String name, double value, int dueDay, String? planId})> studentList;
     if (students != null) {
       studentList = students;
     } else {
@@ -594,46 +600,63 @@ class PaymentService {
         plansToProcess = await planService.getActive();
       }
 
-      // Build a map of student -> plan value (only active students in active plans)
-      final studentsWithPlans = <String, ({double value, int dueDay})>{};
+      // Build a list of (studentId, planId, value, dueDay) entries.
+      // A student can appear multiple times — once per plan.
+      final entries = <({String studentId, String planId, double value, int dueDay})>[];
 
       for (final plan in plansToProcess) {
         for (final studentId in plan.studentIds) {
-          // Use plan's monthlyValue and defaultDueDay
-          studentsWithPlans[studentId] = (
+          entries.add((
+            studentId: studentId,
+            planId: plan.id,
             value: plan.monthlyValue,
             dueDay: plan.defaultDueDay,
-          );
+          ));
         }
       }
 
       // Fetch student details only for students with plans
-      if (studentsWithPlans.isEmpty) {
+      if (entries.isEmpty) {
         return results; // No students with active plans
       }
+
+      final studentIds = entries.map((e) => e.studentId).toSet();
 
       final activeStudents = await _collections.students
           .where('status', isEqualTo: 'active')
           .get();
 
-      studentList = activeStudents.docs
-          .where((doc) => studentsWithPlans.containsKey(doc.id))
-          .map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        final planData = studentsWithPlans[doc.id]!;
+      final activeStudentMap = <String, Map<String, dynamic>>{};
+      for (final doc in activeStudents.docs) {
+        if (studentIds.contains(doc.id)) {
+          activeStudentMap[doc.id] = doc.data() as Map<String, dynamic>;
+        }
+      }
+
+      studentList = entries
+          .where((e) => activeStudentMap.containsKey(e.studentId))
+          .map((e) {
+        final data = activeStudentMap[e.studentId]!;
         return (
-          id: doc.id,
+          id: e.studentId,
           name: data['fullName'] as String? ?? '',
-          value: planData.value, // Use plan value, not student's tuitionValue
-          dueDay: data['tuitionDay'] as int? ?? planData.dueDay,
+          value: e.value,
+          dueDay: data['tuitionDay'] as int? ?? e.dueDay,
+          planId: e.planId as String?,
         );
       }).where((s) => s.value > 0).toList();
     }
 
     for (final student in studentList) {
-      // Check if payment already exists for this month
+      // Check if payment already exists for this student+plan+month
       final existing = await getByMonth(referenceMonth, studentId: student.id);
-      if (existing.isNotEmpty) continue;
+      if (student.planId != null) {
+        // Skip if a payment with this planId already exists
+        if (existing.any((p) => p.planId == student.planId)) continue;
+      } else {
+        // Fallback for legacy entries without planId: skip if any payment exists
+        if (existing.any((p) => p.planId == null)) continue;
+      }
 
       final dueDate = DateTime(year, month, student.dueDay);
 
@@ -645,6 +668,7 @@ class PaymentService {
         description: 'Mensalidade',
         referenceMonth: referenceMonth,
         createdBy: createdBy,
+        planId: student.planId,
       );
 
       results.add(payment);

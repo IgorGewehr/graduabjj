@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
@@ -261,10 +262,39 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
       if (pickedFile == null) return;
 
+      // Crop to 1:1 aspect ratio
+      final croppedFile = await ImageCropper().cropImage(
+        sourcePath: pickedFile.path,
+        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+        compressQuality: 85,
+        maxWidth: 512,
+        maxHeight: 512,
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Recortar Logo',
+            toolbarColor: AppTheme.textPrimary,
+            toolbarWidgetColor: Colors.white,
+            statusBarColor: AppTheme.textPrimary,
+            backgroundColor: AppTheme.background,
+            initAspectRatio: CropAspectRatioPreset.square,
+            lockAspectRatio: true,
+            hideBottomControls: true,
+          ),
+          IOSUiSettings(
+            title: 'Recortar Logo',
+            aspectRatioLockEnabled: true,
+            resetAspectRatioEnabled: false,
+            aspectRatioPickerButtonHidden: true,
+          ),
+        ],
+      );
+
+      if (croppedFile == null) return;
+
       setState(() => _isSaving = true);
 
       // Upload to Firebase Storage
-      final file = File(pickedFile.path);
+      final file = File(croppedFile.path);
       final storageRef = FirebaseStorage.instance
           .ref()
           .child('academies')

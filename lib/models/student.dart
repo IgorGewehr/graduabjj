@@ -411,7 +411,7 @@ class Student {
       'attendanceCount': attendanceCount,
       'status': status.value,
       'statusNote': statusNote,
-      'planId': planId,
+      // planId is no longer written — plans are determined by plan.studentIds
       'tuitionValue': tuitionValue,
       'tuitionDay': tuitionDay,
       'medicalCertificateUrl': medicalCertificateUrl,

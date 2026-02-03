@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
@@ -909,10 +910,39 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
 
       if (pickedFile == null) return;
 
+      // Crop to 1:1 aspect ratio
+      final croppedFile = await ImageCropper().cropImage(
+        sourcePath: pickedFile.path,
+        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+        compressQuality: 85,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Recortar Imagem',
+            toolbarColor: AppTheme.textPrimary,
+            toolbarWidgetColor: Colors.white,
+            statusBarColor: AppTheme.textPrimary,
+            backgroundColor: AppTheme.background,
+            initAspectRatio: CropAspectRatioPreset.square,
+            lockAspectRatio: true,
+            hideBottomControls: true,
+          ),
+          IOSUiSettings(
+            title: 'Recortar Imagem',
+            aspectRatioLockEnabled: true,
+            resetAspectRatioEnabled: false,
+            aspectRatioPickerButtonHidden: true,
+          ),
+        ],
+      );
+
+      if (croppedFile == null) return;
+
       setState(() => _isUploadingImage = true);
 
       // Upload to Firebase Storage
-      final file = File(pickedFile.path);
+      final file = File(croppedFile.path);
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final storageRef = FirebaseStorage.instance
           .ref()

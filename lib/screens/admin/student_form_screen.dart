@@ -48,7 +48,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   String _belt = 'white';
   int _stripes = 0;
   StudentStatus _status = StudentStatus.active;
-  Plan? _selectedPlan;
+  List<Plan> _selectedPlans = [];
   List<Plan> _availablePlans = [];
 
   // Error tracking per tab
@@ -78,7 +78,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     if (_emailController.text.isNotEmpty) filled++;
     if (_birthDate != null) filled++;
     if (_emergencyContactNameController.text.isNotEmpty) filled++;
-    if (_selectedPlan != null) filled++;
+    if (_selectedPlans.isNotEmpty) filled++;
     if (_nicknameController.text.isNotEmpty) filled++;
 
     return (filled / total) * 100;
@@ -180,9 +180,9 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     _stripes = student.currentStripes;
     _status = student.status;
 
-    if (student.planId != null) {
-      _selectedPlan = _availablePlans.where((p) => p.id == student.planId).firstOrNull;
-    }
+    _selectedPlans = _availablePlans
+        .where((p) => p.studentIds.contains(student.id))
+        .toList();
   }
 
   @override
@@ -842,66 +842,58 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   }
 
   Widget _buildPlanDropdown() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: DropdownButtonFormField<Plan?>(
-        value: _selectedPlan,
-        isExpanded: true,
-        icon: Icon(LucideIcons.chevronDown, color: AppTheme.textSecondary, size: 20),
-        decoration: InputDecoration(
-          labelText: 'Plano',
-          prefixIcon: Icon(LucideIcons.package, size: 20, color: AppTheme.textSecondary),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+    final selectedIds = _selectedPlans.map((p) => p.id).toSet();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(LucideIcons.package, size: 20, color: AppTheme.textSecondary),
+            const SizedBox(width: 8),
+            Text('Planos', style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary)),
+          ],
         ),
-        items: [
-          DropdownMenuItem<Plan?>(
-            value: null,
-            child: Text('Sem plano', style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary)),
-          ),
-          ..._availablePlans.map((plan) {
-            return DropdownMenuItem(
-              value: plan,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(plan.name, style: AppTheme.bodyMedium),
-                  Text(
-                    'R\$ ${plan.monthlyValue.toStringAsFixed(2).replaceAll('.', ',')}',
-                    style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-                  ),
-                ],
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _availablePlans.map((plan) {
+            final isSelected = selectedIds.contains(plan.id);
+            return FilterChip(
+              label: Text(
+                '${plan.name} - R\$ ${plan.monthlyValue.toStringAsFixed(2).replaceAll('.', ',')}',
+              ),
+              selected: isSelected,
+              onSelected: (selected) {
+                setState(() {
+                  if (selected) {
+                    _selectedPlans.add(plan);
+                  } else {
+                    _selectedPlans.removeWhere((p) => p.id == plan.id);
+                  }
+                });
+              },
+              selectedColor: AppTheme.primary.withValues(alpha: 0.15),
+              checkmarkColor: AppTheme.primary,
+              backgroundColor: AppTheme.surface,
+              side: BorderSide(
+                color: isSelected ? AppTheme.primary : AppTheme.divider,
+              ),
+              labelStyle: AppTheme.bodyMedium.copyWith(
+                color: isSelected ? AppTheme.primary : AppTheme.textPrimary,
               ),
             );
-          }),
-        ],
-        onChanged: (value) {
-          setState(() {
-            _selectedPlan = value;
-            if (value != null) {
-              _tuitionValueController.text = value.monthlyValue.toStringAsFixed(2).replaceAll('.', ',');
-            }
-          });
-        },
-        dropdownColor: AppTheme.surface,
-        selectedItemBuilder: (context) {
-          return [
-            Text('Sem plano', style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary)),
-            ..._availablePlans.map((plan) {
-              return Text(
-                '${plan.name} - R\$ ${plan.monthlyValue.toStringAsFixed(2).replaceAll('.', ',')}',
-                style: AppTheme.bodyMedium,
-                overflow: TextOverflow.ellipsis,
-              );
-            }),
-          ];
-        },
-      ),
+          }).toList(),
+        ),
+        if (_selectedPlans.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Nenhum plano selecionado (Projeto Social)',
+              style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+            ),
+          ),
+      ],
     );
   }
 
@@ -942,7 +934,6 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         'currentBelt': _belt,
         'currentStripes': _stripes,
         'status': _status.value,
-        'planId': _selectedPlan?.id,
         'tuitionValue': double.parse(_tuitionValueController.text.replaceAll(',', '.')),
         'tuitionDay': int.parse(_tuitionDayController.text),
         'healthNotes': _healthNotesController.text.trim().isEmpty ? null : _healthNotesController.text.trim(),
@@ -965,13 +956,33 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         };
       }
 
+      String studentId;
       if (isEditing) {
         await studentService.update(widget.studentId!, data);
+        studentId = widget.studentId!;
       } else {
         data['isProfilePublic'] = false;
         data['attendanceCount'] = 0;
         data['initialAttendanceCount'] = 0;
-        await studentService.createFromMap(data);
+        final created = await studentService.createFromMap(data);
+        studentId = created.id;
+      }
+
+      // Sync plans: add/remove student from plans as needed
+      final planService = PlanService(academyId);
+      final selectedPlanIds = _selectedPlans.map((p) => p.id).toSet();
+      final currentPlanIds = _availablePlans
+          .where((p) => p.studentIds.contains(studentId))
+          .map((p) => p.id)
+          .toSet();
+
+      // Add to newly selected plans
+      for (final planId in selectedPlanIds.difference(currentPlanIds)) {
+        await planService.addStudent(planId, studentId);
+      }
+      // Remove from deselected plans
+      for (final planId in currentPlanIds.difference(selectedPlanIds)) {
+        await planService.removeStudent(planId, studentId);
       }
 
       if (mounted) {

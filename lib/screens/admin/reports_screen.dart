@@ -42,6 +42,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   bool _isLoading = true;
   late TabController _tabController;
 
+  // Month selection
+  late DateTime _selectedMonth;
+
   // Attendance data
   Map<String, int> _attendanceByDay = {};
   int _totalAttendanceThisMonth = 0;
@@ -50,7 +53,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   int _peakDay = 0;
   String _peakDayName = '';
 
-  // Financial data
+  // Financial data (tuitions)
   double _totalRevenue = 0;
   double _totalPending = 0;
   double _totalOverdue = 0;
@@ -59,6 +62,12 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   int _overduePayments = 0;
   double _lastMonthRevenue = 0;
   double _averageTicket = 0;
+
+  // Store data
+  double _storeRevenue = 0;
+  int _storeOrderCount = 0;
+  double _storePending = 0;
+  int _storePendingCount = 0;
 
   // Student data
   int _totalStudents = 0;
@@ -74,6 +83,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   @override
   void initState() {
     super.initState();
+    _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
     _tabController = TabController(length: 3, vsync: this);
     _loadAllData();
   }
@@ -91,6 +101,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
       await Future.wait([
         _loadAttendanceData(),
         _loadFinancialData(),
+        _loadStoreData(),
         _loadStudentData(),
       ]);
     } catch (e) {
@@ -100,6 +111,119 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     setState(() => _isLoading = false);
   }
 
+  void _changeMonth(int delta) {
+    setState(() {
+      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + delta);
+    });
+    _loadAllData();
+  }
+
+  void _showMonthPicker() {
+    final now = DateTime.now();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        int tempYear = _selectedMonth.year;
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 8),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTheme.divider,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Year selector
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        onPressed: () => setSheetState(() => tempYear--),
+                        icon: const Icon(LucideIcons.chevronLeft, size: 20),
+                      ),
+                      Text(
+                        '$tempYear',
+                        style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      IconButton(
+                        onPressed: tempYear < now.year ? () => setSheetState(() => tempYear++) : null,
+                        icon: const Icon(LucideIcons.chevronRight, size: 20),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Month grid
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: GridView.count(
+                      shrinkWrap: true,
+                      crossAxisCount: 4,
+                      childAspectRatio: 2,
+                      mainAxisSpacing: 8,
+                      crossAxisSpacing: 8,
+                      children: List.generate(12, (index) {
+                        final month = index + 1;
+                        final isSelected = tempYear == _selectedMonth.year && month == _selectedMonth.month;
+                        final isFuture = DateTime(tempYear, month).isAfter(DateTime(now.year, now.month));
+                        final monthNames = [
+                          'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                          'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
+                        ];
+                        return GestureDetector(
+                          onTap: isFuture ? null : () {
+                            Navigator.pop(context);
+                            setState(() {
+                              _selectedMonth = DateTime(tempYear, month);
+                            });
+                            _loadAllData();
+                          },
+                          child: Container(
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? AppTheme.textPrimary
+                                  : isFuture
+                                      ? AppTheme.surfaceVariant.withValues(alpha: 0.5)
+                                      : AppTheme.surfaceVariant,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              monthNames[index],
+                              style: AppTheme.bodySmall.copyWith(
+                                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                color: isSelected
+                                    ? Colors.white
+                                    : isFuture
+                                        ? AppTheme.textSecondary.withValues(alpha: 0.4)
+                                        : AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _loadAttendanceData() async {
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     if (currentUser?.academyId == null) return;
@@ -107,11 +231,10 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     final academyId = currentUser!.academyId!;
     final attendanceService = AttendanceService(academyId);
 
-    final now = DateTime.now();
-    final startOfMonth = DateTime(now.year, now.month, 1);
-    final endOfMonth = DateTime(now.year, now.month + 1, 0);
-    final startOfLastMonth = DateTime(now.year, now.month - 1, 1);
-    final endOfLastMonth = DateTime(now.year, now.month, 0);
+    final startOfMonth = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
+    final endOfMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0);
+    final startOfLastMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1, 1);
+    final endOfLastMonth = DateTime(_selectedMonth.year, _selectedMonth.month, 0);
 
     final attendances = await attendanceService.getByDateRange(startOfMonth, endOfMonth);
     final lastMonthAttendances = await attendanceService.getByDateRange(startOfLastMonth, endOfLastMonth);
@@ -153,35 +276,81 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     final academyId = currentUser!.academyId!;
     final paymentService = PaymentService(academyId);
 
-    final now = DateTime.now();
-    final currentMonth = DateFormat('yyyy-MM').format(now);
-    final lastMonth = DateFormat('yyyy-MM').format(DateTime(now.year, now.month - 1));
+    final currentMonth = DateFormat('yyyy-MM').format(_selectedMonth);
+    final lastMonth = DateFormat('yyyy-MM').format(
+      DateTime(_selectedMonth.year, _selectedMonth.month - 1),
+    );
 
     final summary = await paymentService.getMonthlySummary(currentMonth);
     final lastMonthSummary = await paymentService.getMonthlySummary(lastMonth);
-    final pending = await paymentService.getPending();
-    final overdue = await paymentService.getOverdue();
-    final paid = await paymentService.getPaidThisMonth();
+
+    // Get payments for the selected month
+    final monthPayments = await paymentService.getByMonth(currentMonth);
+    final paidInMonth = monthPayments.where((p) => p.status.value == 'paid').toList();
+    final pendingInMonth = monthPayments.where((p) => p.status.value == 'pending').toList();
+    final overdueInMonth = monthPayments.where((p) => p.status.value == 'overdue').toList();
 
     // Calculate average ticket
-    final avgTicket = paid.isNotEmpty
-        ? paid.map((p) => p.value).reduce((a, b) => a + b) / paid.length
+    final avgTicket = paidInMonth.isNotEmpty
+        ? paidInMonth.map((p) => p.value).reduce((a, b) => a + b) / paidInMonth.length
         : 0.0;
 
     // Calculate overdue total
-    final overdueTotal = overdue.isNotEmpty
-        ? overdue.map((p) => p.value).reduce((a, b) => a + b)
+    final overdueTotal = overdueInMonth.isNotEmpty
+        ? overdueInMonth.map((p) => p.value).reduce((a, b) => a + b)
         : 0.0;
 
     setState(() {
       _totalRevenue = (summary['totalPaid'] ?? 0.0) as double;
       _totalPending = (summary['totalPending'] ?? 0.0) as double;
       _totalOverdue = overdueTotal;
-      _paidPayments = paid.length;
-      _pendingPayments = pending.length;
-      _overduePayments = overdue.length;
+      _paidPayments = paidInMonth.length;
+      _pendingPayments = pendingInMonth.length;
+      _overduePayments = overdueInMonth.length;
       _lastMonthRevenue = (lastMonthSummary['totalPaid'] ?? 0.0) as double;
       _averageTicket = avgTicket;
+    });
+  }
+
+  Future<void> _loadStoreData() async {
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser?.academyId == null) return;
+
+    final academyId = currentUser!.academyId!;
+    final storeService = StoreService(academyId);
+
+    final orders = await storeService.getOrders();
+
+    // Filter orders by selected month
+    final startOfMonth = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
+    final endOfMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0, 23, 59, 59);
+
+    final monthOrders = orders.where((o) {
+      final date = o.paidAt ?? o.createdAt;
+      return date.isAfter(startOfMonth.subtract(const Duration(seconds: 1))) &&
+             date.isBefore(endOfMonth.add(const Duration(seconds: 1)));
+    }).toList();
+
+    double revenue = 0;
+    int paidCount = 0;
+    double pending = 0;
+    int pendingCount = 0;
+
+    for (final order in monthOrders) {
+      if (order.isPaid) {
+        revenue += order.total;
+        paidCount++;
+      } else if (order.status == StoreOrderStatus.pendingPayment) {
+        pending += order.total;
+        pendingCount++;
+      }
+    }
+
+    setState(() {
+      _storeRevenue = revenue;
+      _storeOrderCount = paidCount;
+      _storePending = pending;
+      _storePendingCount = pendingCount;
     });
   }
 
@@ -270,29 +439,72 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   }
 
   Widget _buildHeader() {
+    final isCurrentMonth = _selectedMonth.year == DateTime.now().year &&
+        _selectedMonth.month == DateTime.now().month;
+
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(20),
+          // Previous month
+          GestureDetector(
+            onTap: () => _changeMonth(-1),
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(LucideIcons.chevronLeft, size: 16, color: AppTheme.textSecondary),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(LucideIcons.calendar, size: 14, color: AppTheme.textSecondary),
-                const SizedBox(width: 6),
-                Text(
-                  DateFormat("MMMM 'de' yyyy", 'pt_BR').format(DateTime.now()),
-                  style: AppTheme.labelMedium.copyWith(
-                    color: AppTheme.textSecondary,
-                    fontWeight: FontWeight.w500,
+          ),
+          const SizedBox(width: 8),
+          // Month/year chip - tappable
+          GestureDetector(
+            onTap: _showMonthPicker,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(LucideIcons.calendar, size: 14, color: AppTheme.textSecondary),
+                  const SizedBox(width: 6),
+                  Text(
+                    DateFormat("MMMM 'de' yyyy", 'pt_BR').format(_selectedMonth),
+                    style: AppTheme.labelMedium.copyWith(
+                      color: AppTheme.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 4),
+                  const Icon(LucideIcons.chevronDown, size: 12, color: AppTheme.textSecondary),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Next month
+          GestureDetector(
+            onTap: isCurrentMonth ? null : () => _changeMonth(1),
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                LucideIcons.chevronRight,
+                size: 16,
+                color: isCurrentMonth
+                    ? AppTheme.textSecondary.withValues(alpha: 0.3)
+                    : AppTheme.textSecondary,
+              ),
             ),
           ),
           const Spacer(),
@@ -468,22 +680,26 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   }
 
   Widget _buildFinancialTab() {
-    final total = _totalRevenue + _totalPending + _totalOverdue;
-    final revenueRate = total > 0 ? _totalRevenue / total : 0.0;
+    final tuitionTotal = _totalRevenue + _totalPending + _totalOverdue;
+    final combinedRevenue = _totalRevenue + _storeRevenue;
+    final combinedPending = _totalPending + _storePending;
+    final grandTotal = tuitionTotal + _storeRevenue + _storePending;
+    final revenueRate = grandTotal > 0 ? combinedRevenue / grandTotal : 0.0;
     final revenueChange = _lastMonthRevenue > 0
         ? ((_totalRevenue - _lastMonthRevenue) / _lastMonthRevenue * 100)
         : 0.0;
+    final hasStore = _storeRevenue > 0 || _storeOrderCount > 0 || _storePendingCount > 0;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Main stat card
+          // Main stat card - combined revenue
           _buildMainStatCard(
-            title: 'Receita do Mes',
-            value: 'R\$ ${_formatCurrency(_totalRevenue)}',
-            subtitle: '$_paidPayments pagamentos',
+            title: 'Receita Total',
+            value: 'R\$ ${_formatCurrency(combinedRevenue)}',
+            subtitle: '${_paidPayments + _storeOrderCount} pagamentos',
             icon: LucideIcons.dollarSign,
             color: AppTheme.success,
             change: revenueChange,
@@ -498,8 +714,8 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                 child: _MiniStatCard(
                   icon: LucideIcons.clock,
                   label: 'Pendente',
-                  value: 'R\$ ${_formatCurrency(_totalPending)}',
-                  subtitle: '$_pendingPayments pagtos',
+                  value: 'R\$ ${_formatCurrency(combinedPending)}',
+                  subtitle: '${_pendingPayments + _storePendingCount} pagtos',
                   color: AppTheme.warning,
                 ),
               ),
@@ -543,57 +759,161 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
           ),
           const SizedBox(height: 24),
 
-          // Revenue breakdown
+          // Tuition breakdown
           _ReportCard(
-            title: 'Resumo Financeiro',
-            icon: LucideIcons.pieChart,
+            title: 'Mensalidades',
+            icon: LucideIcons.creditCard,
+            badge: '$_paidPayments recebidos',
             child: Column(
               children: [
                 _ProgressRow(
                   label: 'Recebido',
                   value: 'R\$ ${_formatCurrency(_totalRevenue)}',
-                  percentage: total > 0 ? _totalRevenue / total : 0,
+                  percentage: tuitionTotal > 0 ? _totalRevenue / tuitionTotal : 0,
                   color: AppTheme.success,
                 ),
                 const SizedBox(height: 16),
                 _ProgressRow(
                   label: 'Pendente',
                   value: 'R\$ ${_formatCurrency(_totalPending)}',
-                  percentage: total > 0 ? _totalPending / total : 0,
+                  percentage: tuitionTotal > 0 ? _totalPending / tuitionTotal : 0,
                   color: AppTheme.warning,
                 ),
                 const SizedBox(height: 16),
                 _ProgressRow(
                   label: 'Atrasado',
                   value: 'R\$ ${_formatCurrency(_totalOverdue)}',
-                  percentage: total > 0 ? _totalOverdue / total : 0,
+                  percentage: tuitionTotal > 0 ? _totalOverdue / tuitionTotal : 0,
                   color: AppTheme.error,
                 ),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(8),
+              ],
+            ),
+          ),
+
+          // Store revenue section
+          if (hasStore) ...[
+            const SizedBox(height: 16),
+            _ReportCard(
+              title: 'Loja',
+              icon: LucideIcons.shoppingBag,
+              badge: '$_storeOrderCount pedidos',
+              child: Column(
+                children: [
+                  _ProgressRow(
+                    label: 'Recebido',
+                    value: 'R\$ ${_formatCurrency(_storeRevenue)}',
+                    percentage: (_storeRevenue + _storePending) > 0
+                        ? _storeRevenue / (_storeRevenue + _storePending)
+                        : 0,
+                    color: AppTheme.success,
                   ),
-                  child: Row(
+                  if (_storePendingCount > 0) ...[
+                    const SizedBox(height: 16),
+                    _ProgressRow(
+                      label: 'Aguardando Pagto',
+                      value: 'R\$ ${_formatCurrency(_storePending)}',
+                      percentage: (_storeRevenue + _storePending) > 0
+                          ? _storePending / (_storeRevenue + _storePending)
+                          : 0,
+                      color: AppTheme.warning,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 16),
+
+          // Grand total
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.textPrimary,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Total Recebido',
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: Colors.white70,
+                      ),
+                    ),
+                    Text(
+                      'R\$ ${_formatCurrency(combinedRevenue)}',
+                      style: AppTheme.titleMedium.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+                if (hasStore) ...[
+                  const SizedBox(height: 8),
+                  Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Total Esperado',
-                        style: AppTheme.bodyMedium.copyWith(
-                          fontWeight: FontWeight.w500,
-                        ),
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: AppTheme.success,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Mensalidades',
+                            style: AppTheme.labelSmall.copyWith(color: Colors.white54),
+                          ),
+                        ],
                       ),
                       Text(
-                        'R\$ ${_formatCurrency(total)}',
-                        style: AppTheme.titleMedium.copyWith(
-                          fontWeight: FontWeight.w700,
+                        'R\$ ${_formatCurrency(_totalRevenue)}',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: AppTheme.primary,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Loja',
+                            style: AppTheme.labelSmall.copyWith(color: Colors.white54),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        'R\$ ${_formatCurrency(_storeRevenue)}',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),

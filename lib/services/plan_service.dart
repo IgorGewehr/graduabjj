@@ -90,11 +90,17 @@ class PlanService {
   }
 
   // ============================================
-  // Get Plan for Student
+  // Get Plans for Student (multiple plans)
   // ============================================
-  Future<Plan?> getPlanForStudent(String studentId) async {
+  Future<List<Plan>> getPlansForStudent(String studentId) async {
     final plans = await list();
-    return plans.where((p) => p.studentIds.contains(studentId)).firstOrNull;
+    return plans.where((p) => p.studentIds.contains(studentId)).toList();
+  }
+
+  /// Legacy wrapper — returns the first plan for a student (or null).
+  Future<Plan?> getPlanForStudent(String studentId) async {
+    final plans = await getPlansForStudent(studentId);
+    return plans.firstOrNull;
   }
 
   // ============================================
@@ -148,31 +154,7 @@ class PlanService {
   // ============================================
   Future<Plan> update(String id, Map<String, dynamic> data) async {
     data['updatedAt'] = FieldValue.serverTimestamp();
-
-    // Check if value or due day changed to sync students
-    final oldPlan = await getById(id);
-    final valueChanged = data.containsKey('monthlyValue') &&
-        data['monthlyValue'] != oldPlan?.monthlyValue;
-    final dueDayChanged = data.containsKey('defaultDueDay') &&
-        data['defaultDueDay'] != oldPlan?.defaultDueDay;
-
     await _collections.plan(id).update(data);
-
-    // Sync students if value or due day changed
-    if ((valueChanged || dueDayChanged) && oldPlan != null) {
-      for (final studentId in oldPlan.studentIds) {
-        final studentData = <String, dynamic>{
-          'updatedAt': FieldValue.serverTimestamp(),
-        };
-        if (valueChanged && data.containsKey('monthlyValue')) {
-          studentData['tuitionValue'] = data['monthlyValue'];
-        }
-        if (dueDayChanged && data.containsKey('defaultDueDay')) {
-          studentData['tuitionDay'] = data['defaultDueDay'];
-        }
-        await _collections.student(studentId).update(studentData);
-      }
-    }
 
     final updated = await getById(id);
     return updated!;
@@ -189,28 +171,10 @@ class PlanService {
   // Add Student to Plan
   // ============================================
   Future<Plan> addStudent(String planId, String studentId) async {
-    // First remove from any other plan
-    final currentPlan = await getPlanForStudent(studentId);
-    if (currentPlan != null && currentPlan.id != planId) {
-      await removeStudent(currentPlan.id, studentId);
-    }
-
-    // Add to new plan
     await _collections.plan(planId).update({
       'studentIds': FieldValue.arrayUnion([studentId]),
       'updatedAt': FieldValue.serverTimestamp(),
     });
-
-    // Update student with plan values
-    final plan = await getById(planId);
-    if (plan != null) {
-      await _collections.student(studentId).update({
-        'tuitionValue': plan.monthlyValue,
-        'tuitionDay': plan.defaultDueDay,
-        'planId': planId,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
 
     final updated = await getById(planId);
     return updated!;
@@ -222,12 +186,6 @@ class PlanService {
   Future<Plan> removeStudent(String planId, String studentId) async {
     await _collections.plan(planId).update({
       'studentIds': FieldValue.arrayRemove([studentId]),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    // Remove plan reference from student
-    await _collections.student(studentId).update({
-      'planId': FieldValue.delete(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
 

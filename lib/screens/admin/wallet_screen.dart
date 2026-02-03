@@ -527,19 +527,13 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: _isTotpEnabled
-                              ? const Color(0xFF16A34A).withValues(alpha: 0.1)
-                              : Colors.orange.withValues(alpha: 0.1),
+                          color: AppTheme.textSecondary.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Icon(
-                          _isTotpEnabled
-                              ? LucideIcons.shieldCheck
-                              : LucideIcons.shield,
+                          LucideIcons.shield,
                           size: 22,
-                          color: _isTotpEnabled
-                              ? const Color(0xFF16A34A)
-                              : Colors.orange,
+                          color: AppTheme.textSecondary,
                         ),
                       ),
                       const SizedBox(width: 14),
@@ -555,11 +549,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              _isTotpLoading
-                                  ? 'Carregando...'
-                                  : _isTotpEnabled
-                                      ? 'Protecao ativa'
-                                      : 'Proteja seus saques',
+                              'Proteja seus saques com autenticacao em dois fatores',
                               style: AppTheme.bodySmall.copyWith(
                                 color: AppTheme.textSecondary,
                               ),
@@ -567,22 +557,20 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                           ],
                         ),
                       ),
-                      if (!_isTotpLoading)
-                        _isTotpEnabled
-                            ? TextButton(
-                                onPressed: _showDisableTotpSheet,
-                                style: TextButton.styleFrom(
-                                  foregroundColor: AppTheme.error,
-                                ),
-                                child: const Text('Desativar'),
-                              )
-                            : TextButton(
-                                onPressed: _navigateToTotpSetup,
-                                style: TextButton.styleFrom(
-                                  foregroundColor: AppTheme.primary,
-                                ),
-                                child: const Text('Ativar'),
-                              ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppTheme.textSecondary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Em breve',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),

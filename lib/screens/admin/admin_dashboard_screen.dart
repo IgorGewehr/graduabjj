@@ -309,7 +309,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
               child: Text(
-                'Financeiro do Mes',
+                'Mensalidades',
                 style: AppTheme.titleMedium.copyWith(
                   fontWeight: FontWeight.w600,
                 ),

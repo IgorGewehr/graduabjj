@@ -49,9 +49,7 @@ class ProfileScreen extends ConsumerWidget {
         }
 
         final attendanceCountAsync = ref.watch(studentAttendanceCountProvider(student.id));
-        final planAsync = student.planId != null
-            ? ref.watch(planByIdProvider(student.planId!))
-            : const AsyncValue<dynamic>.data(null);
+        final plansAsync = ref.watch(studentPlansProvider(student.id));
 
         return RefreshIndicator(
           onRefresh: () async {
@@ -103,10 +101,10 @@ class ProfileScreen extends ConsumerWidget {
                       value: student.status.label,
                       valueColor: AppTheme.getStatusColor(student.status.value),
                     ),
-                    if (planAsync.valueOrNull != null)
+                    if ((plansAsync.valueOrNull ?? []).isNotEmpty)
                       _InfoRow(
-                        label: 'Plano',
-                        value: planAsync.valueOrNull?.name ?? '',
+                        label: 'Plano${(plansAsync.valueOrNull ?? []).length > 1 ? 's' : ''}',
+                        value: (plansAsync.valueOrNull ?? []).map((p) => p.name).join(', '),
                       ),
                   ],
                 ),

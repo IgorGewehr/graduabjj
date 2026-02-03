@@ -1426,7 +1426,7 @@ class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
                     ),
                   ),
                   Text(
-                    'R\$ ${(widget.amount / 100).toStringAsFixed(2)}',
+                    'R\$ ${widget.amount.toStringAsFixed(2)}',
                     style: AppTheme.headlineMedium.copyWith(
                       color: AppTheme.primary,
                       fontWeight: FontWeight.w700,
@@ -1813,7 +1813,7 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
                           ),
                         ),
                         Text(
-                          'R\$ ${(widget.amount / 100).toStringAsFixed(2)}',
+                          'R\$ ${widget.amount.toStringAsFixed(2)}',
                           style: AppTheme.titleMedium.copyWith(
                             color: AppTheme.primary,
                             fontWeight: FontWeight.w600,

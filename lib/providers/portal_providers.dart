@@ -184,13 +184,22 @@ final activePlansProvider = FutureProvider<List<Plan>>((ref) async {
   return await service.getActive();
 });
 
-/// Student plan provider
+/// Student plan provider (legacy — returns first plan)
 final studentPlanProvider = FutureProvider.family<Plan?, String>((ref, studentId) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return null;
 
   final service = PlanService(currentUser!.academyId!);
   return await service.getPlanForStudent(studentId);
+});
+
+/// Student plans provider (returns all plans for a student)
+final studentPlansProvider = FutureProvider.family<List<Plan>, String>((ref, studentId) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+  if (currentUser?.academyId == null) return [];
+
+  final service = PlanService(currentUser!.academyId!);
+  return await service.getPlansForStudent(studentId);
 });
 
 /// Plan by ID provider
