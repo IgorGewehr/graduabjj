@@ -157,7 +157,7 @@ class AbacatePayService {
   }
 
   /// Create PIX payment for a store order
-  /// Note: amount is in Reais, converted to centavos before sending
+  /// Note: amount is in Reais (must match Firestore order total); Cloud Function converts to cents
   Future<PaymentLink?> createStoreOrderPayment({
     required double amount,
     required String orderId,
@@ -169,7 +169,7 @@ class AbacatePayService {
       final callable = _functions.httpsCallable('createOrderPixPayment');
       final result = await callable.call({
         'academyId': academyId,
-        'amount': (amount * 100).round(), // Convert to cents
+        'amount': amount.round(), // In Reais - CF validates against order total and converts to cents
         'description': description ?? 'Pedido da Loja',
         'orderId': orderId,
         'studentId': studentId,
@@ -224,7 +224,7 @@ class AbacatePayService {
   }
 
   /// Create card payment for a store order
-  /// Note: amount is in Reais, converted to centavos before sending
+  /// Note: amount is in Reais (must match Firestore order total); Cloud Function converts to cents
   Future<CardPaymentResult> createStoreOrderCardPayment({
     required double amount,
     required String orderId,
@@ -237,7 +237,7 @@ class AbacatePayService {
       final callable = _functions.httpsCallable('createCardPayment');
       final result = await callable.call({
         'academyId': academyId,
-        'amount': (amount * 100).round(), // Convert to cents
+        'amount': amount.round(), // In Reais - CF validates against order total and converts to cents
         'description': description ?? 'Pedido da Loja',
         'financialId': 'order_$orderId',
         'studentId': studentId,
