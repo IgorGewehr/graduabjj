@@ -573,6 +573,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         students: _students,
         payments: _allPayments,
         onGenerate: (planId) async {
+          final messenger = ScaffoldMessenger.of(context);
           Navigator.pop(context);
           try {
             final service = PaymentService(FirebaseService.academyId);
@@ -581,12 +582,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
               planId: planId,
             );
             if (mounted) {
-              context.showSuccess('${payments.length} mensalidade${payments.length != 1 ? 's' : ''} gerada${payments.length != 1 ? 's' : ''}!');
+              messenger.showSnackBar(SnackBar(content: Text('${payments.length} mensalidade${payments.length != 1 ? 's' : ''} gerada${payments.length != 1 ? 's' : ''}!')));
               _loadData();
             }
           } catch (e) {
             if (mounted) {
-              context.showError('Erro: $e');
+              messenger.showSnackBar(SnackBar(content: Text('Erro: $e')));
             }
           }
         },
@@ -704,6 +705,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                               valueController.text.isEmpty) {
                             return;
                           }
+                          final messenger = ScaffoldMessenger.of(context);
                           Navigator.pop(context);
                           try {
                             final service =
@@ -717,12 +719,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                               classesPerWeek: classesPerWeek,
                             );
                             if (mounted) {
-                              context.showSuccess('Plano criado!');
+                              messenger.showSnackBar(const SnackBar(content: Text('Plano criado!')));
                               _loadData();
                             }
                           } catch (e) {
                             if (mounted) {
-                              context.showError('Erro: $e');
+                              messenger.showSnackBar(SnackBar(content: Text('Erro: $e')));
                             }
                           }
                         },
@@ -877,6 +879,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                     Expanded(
                       child: ElevatedButton(
                         onPressed: () async {
+                          final messenger = ScaffoldMessenger.of(context);
                           Navigator.pop(context);
                           try {
                             final service =
@@ -891,12 +894,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                               'isActive': isActive,
                             });
                             if (mounted) {
-                              context.showSuccess('Plano atualizado!');
+                              messenger.showSnackBar(const SnackBar(content: Text('Plano atualizado!')));
                               _loadData();
                             }
                           } catch (e) {
                             if (mounted) {
-                              context.showError('Erro: $e');
+                              messenger.showSnackBar(SnackBar(content: Text('Erro: $e')));
                             }
                           }
                         },
@@ -933,17 +936,18 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
           ),
           TextButton(
             onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
               Navigator.pop(context);
               try {
                 final service = PlanService(FirebaseService.academyId);
                 await service.delete(plan.id);
                 if (mounted) {
-                  context.showSuccess('Plano excluido!');
+                  messenger.showSnackBar(const SnackBar(content: Text('Plano excluido!')));
                   _loadData();
                 }
               } catch (e) {
                 if (mounted) {
-                  context.showError('Erro: $e');
+                  messenger.showSnackBar(SnackBar(content: Text('Erro: $e')));
                 }
               }
             },
@@ -1126,6 +1130,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   Expanded(
                     child: ElevatedButton(
                       onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
                         Navigator.pop(context);
                         try {
                           final service =
@@ -1133,12 +1138,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                           await service.markAsPaid(payment.id,
                               method: selectedMethod);
                           if (mounted) {
-                            context.showSuccess('Pagamento confirmado!');
+                            messenger.showSnackBar(const SnackBar(content: Text('Pagamento confirmado!')));
                             _loadData();
                           }
                         } catch (e) {
                           if (mounted) {
-                            context.showError('Erro: $e');
+                            messenger.showSnackBar(SnackBar(content: Text('Erro: $e')));
                           }
                         }
                       },
