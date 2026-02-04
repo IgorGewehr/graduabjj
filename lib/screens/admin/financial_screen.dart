@@ -103,7 +103,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   double get _expectedRevenue {
     double total = 0;
     for (final plan in _plans.where((p) => p.isActive)) {
-      total += plan.monthlyValue * plan.studentCount;
+      total += plan.studentIds.fold(0.0, (sum, sid) => sum + plan.getStudentValue(sid));
     }
     return total;
   }
@@ -512,11 +512,17 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
           child: _PaymentCard(
             payment: payment,
             formatCurrency: _formatCurrency,
-            onMarkPaid: payment.status != PaymentStatus.paid
+            onMarkPaid: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
                 ? () => _showMarkPaidDialog(payment)
                 : null,
-            onSendReminder: payment.status != PaymentStatus.paid
+            onSendReminder: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
                 ? () => _sendReminder(payment)
+                : null,
+            onCancel: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
+                ? () => _cancelPayment(payment)
+                : null,
+            onReactivate: payment.status == PaymentStatus.cancelled
+                ? () => _reactivatePayment(payment)
                 : null,
           ),
         );
@@ -1195,6 +1201,36 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
       }
     }
   }
+
+  Future<void> _cancelPayment(Payment payment) async {
+    try {
+      final paymentService = PaymentService(FirebaseService.academyId);
+      await paymentService.cancel(payment.id);
+      if (mounted) {
+        context.showSuccess('Pagamento cancelado');
+        _loadData(); // Reload data
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showError('Erro ao cancelar: $e');
+      }
+    }
+  }
+
+  Future<void> _reactivatePayment(Payment payment) async {
+    try {
+      final paymentService = PaymentService(FirebaseService.academyId);
+      await paymentService.reactivate(payment.id);
+      if (mounted) {
+        context.showSuccess('Pagamento reativado');
+        _loadData(); // Reload data
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showError('Erro ao reativar: $e');
+      }
+    }
+  }
 }
 
 // ============================================
@@ -1218,7 +1254,7 @@ class _PlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final expectedRevenue = plan.monthlyValue * plan.studentCount;
+    final expectedRevenue = plan.studentIds.fold(0.0, (sum, sid) => sum + plan.getStudentValue(sid));
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1292,6 +1328,11 @@ class _PlanCard extends StatelessWidget {
                 icon: LucideIcons.users,
                 label: '${plan.studentCount} aluno${plan.studentCount != 1 ? 's' : ''}',
               ),
+              if (plan.customValues.isNotEmpty)
+                _InfoChip(
+                  icon: LucideIcons.tag,
+                  label: '${plan.customValues.length} c/ valor personalizado',
+                ),
             ],
           ),
           const SizedBox(height: 16),
@@ -1372,36 +1413,47 @@ class _PaymentCard extends StatelessWidget {
   final String Function(double) formatCurrency;
   final VoidCallback? onMarkPaid;
   final VoidCallback? onSendReminder;
+  final VoidCallback? onCancel;
+  final VoidCallback? onReactivate;
 
   const _PaymentCard({
     required this.payment,
     required this.formatCurrency,
     this.onMarkPaid,
     this.onSendReminder,
+    this.onCancel,
+    this.onReactivate,
   });
 
   @override
   Widget build(BuildContext context) {
     final isOverdue = payment.status == PaymentStatus.overdue;
     final isPaid = payment.status == PaymentStatus.paid;
+    final isCancelled = payment.status == PaymentStatus.cancelled;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isOverdue
-            ? AppTheme.error.withValues(alpha: 0.05)
-            : isPaid
-                ? AppTheme.success.withValues(alpha: 0.05)
-                : AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
+    return Opacity(
+      opacity: isCancelled ? 0.6 : 1.0,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
           color: isOverdue
-              ? AppTheme.error.withValues(alpha: 0.2)
+              ? AppTheme.error.withValues(alpha: 0.05)
               : isPaid
-                  ? AppTheme.success.withValues(alpha: 0.2)
-                  : AppTheme.divider,
+                  ? AppTheme.success.withValues(alpha: 0.05)
+                  : isCancelled
+                      ? AppTheme.surfaceVariant
+                      : AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isOverdue
+                ? AppTheme.error.withValues(alpha: 0.2)
+                : isPaid
+                    ? AppTheme.success.withValues(alpha: 0.2)
+                    : isCancelled
+                        ? AppTheme.divider
+                        : AppTheme.divider,
+          ),
         ),
-      ),
       child: Column(
         children: [
           Row(
@@ -1503,7 +1555,82 @@ class _PaymentCard extends StatelessWidget {
                         ),
                       ),
                     ),
+                  if (isCancelled)
+                    Container(
+                      margin: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppTheme.textDisabled.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Cancelado',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textDisabled,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                 ],
+              ),
+              // Menu de ações
+              PopupMenuButton<String>(
+                icon: const Icon(LucideIcons.moreVertical, size: 20),
+                itemBuilder: (context) => [
+                  if (!isPaid && !isCancelled)
+                    const PopupMenuItem(
+                      value: 'mark_paid',
+                      child: Row(
+                        children: [
+                          Icon(LucideIcons.check, size: 16),
+                          SizedBox(width: 8),
+                          Text('Dar Baixa'),
+                        ],
+                      ),
+                    ),
+                  if (!isPaid && !isCancelled)
+                    PopupMenuItem(
+                      value: 'cancel',
+                      child: Row(
+                        children: [
+                          Icon(LucideIcons.x, size: 16, color: AppTheme.error),
+                          const SizedBox(width: 8),
+                          Text('Cancelar', style: TextStyle(color: AppTheme.error)),
+                        ],
+                      ),
+                    ),
+                  if (isCancelled)
+                    PopupMenuItem(
+                      value: 'reactivate',
+                      child: Row(
+                        children: [
+                          Icon(LucideIcons.rotateCcw, size: 16, color: AppTheme.success),
+                          const SizedBox(width: 8),
+                          Text('Reativar', style: TextStyle(color: AppTheme.success)),
+                        ],
+                      ),
+                    ),
+                  if (isPaid)
+                    const PopupMenuItem(
+                      value: 'none',
+                      enabled: false,
+                      child: Text('Sem ações disponíveis', style: TextStyle(color: AppTheme.textDisabled)),
+                    ),
+                ],
+                onSelected: (value) {
+                  switch (value) {
+                    case 'mark_paid':
+                      onMarkPaid?.call();
+                      break;
+                    case 'cancel':
+                      onCancel?.call();
+                      break;
+                    case 'reactivate':
+                      onReactivate?.call();
+                      break;
+                  }
+                },
               ),
             ],
           ),
@@ -1543,6 +1670,7 @@ class _PaymentCard extends StatelessWidget {
             ),
           ],
         ],
+      ),
       ),
     );
   }

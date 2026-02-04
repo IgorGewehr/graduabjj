@@ -512,6 +512,29 @@ class PaymentService {
   }
 
   // ============================================
+  // Reactivate Cancelled Payment
+  // ============================================
+  Future<Payment> reactivate(String id) async {
+    final payment = await getById(id);
+    if (payment == null) {
+      throw Exception('Payment not found');
+    }
+
+    // Determine new status based on due date
+    final today = DateTime.now();
+    final todayStart = DateTime(today.year, today.month, today.day);
+    final dueDate = DateTime(payment.dueDate.year, payment.dueDate.month, payment.dueDate.day);
+
+    final newStatus = dueDate.isBefore(todayStart)
+        ? PaymentStatus.overdue
+        : PaymentStatus.pending;
+
+    return update(id, {
+      'status': newStatus.value,
+    });
+  }
+
+  // ============================================
   // Delete Payment
   // ============================================
   Future<void> delete(String id) async {
@@ -609,7 +632,7 @@ class PaymentService {
           entries.add((
             studentId: studentId,
             planId: plan.id,
-            value: plan.monthlyValue,
+            value: plan.getStudentValue(studentId),
             dueDay: plan.defaultDueDay,
           ));
         }
@@ -649,13 +672,18 @@ class PaymentService {
 
     for (final student in studentList) {
       // Check if payment already exists for this student+plan+month
+      // IMPORTANT: Filter out cancelled payments - they don't count as "existing"
       final existing = await getByMonth(referenceMonth, studentId: student.id);
+
+      // Exclude cancelled payments from the check
+      final activeExisting = existing.where((p) => p.status != PaymentStatus.cancelled).toList();
+
       if (student.planId != null) {
-        // Skip if a payment with this planId already exists
-        if (existing.any((p) => p.planId == student.planId)) continue;
+        // Skip if an ACTIVE payment with this planId already exists
+        if (activeExisting.any((p) => p.planId == student.planId)) continue;
       } else {
-        // Fallback for legacy entries without planId: skip if any payment exists
-        if (existing.any((p) => p.planId == null)) continue;
+        // Fallback for legacy entries without planId: skip if any ACTIVE payment exists
+        if (activeExisting.any((p) => p.planId == null)) continue;
       }
 
       final dueDate = DateTime(year, month, student.dueDay);
