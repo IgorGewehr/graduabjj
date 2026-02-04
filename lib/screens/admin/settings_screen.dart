@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,7 +7,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -38,12 +43,14 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _cityController = TextEditingController();
   final _stateController = TextEditingController();
   final _zipCodeController = TextEditingController();
+  final _birthDateController = TextEditingController();
   final _pixKeyController = TextEditingController();
   final _storeWelcomeController = TextEditingController();
   final _storeMinAmountController = TextEditingController();
 
   PixKeyType? _pixKeyType;
   bool _abacatePayEnabled = false;
+  bool _asaasEnabled = false;
   bool _storeEnabled = false;
   bool _storePublished = false;
   bool _storeCreditCardEnabled = false;
@@ -53,6 +60,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   List<String> _monitorIds = [];
   List<Map<String, dynamic>> _linkedStudents = [];
   bool _isLoadingMonitors = false;
+
+  // KYC
+  String _kycStatus = 'not_checked';
+  String? _kycOnboardingUrl;
+  bool _isCheckingKyc = false;
 
   final _tabs = ['Academia', 'Financeiro', 'Monitores', 'Funcionalidades'];
 
@@ -73,6 +85,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     _cityController.dispose();
     _stateController.dispose();
     _zipCodeController.dispose();
+    _birthDateController.dispose();
     _pixKeyController.dispose();
     _storeWelcomeController.dispose();
     _storeMinAmountController.dispose();
@@ -98,12 +111,14 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _cityController.text = settings.city ?? '';
           _stateController.text = settings.state ?? '';
           _zipCodeController.text = settings.zipCode ?? '';
+          _birthDateController.text = settings.responsibleBirthDate ?? '';
           _pixKeyController.text = settings.pixKey ?? '';
           _storeWelcomeController.text = settings.storeWelcomeMessage ?? '';
           _storeMinAmountController.text =
               settings.storeMinOrderAmount?.toStringAsFixed(2) ?? '';
           _pixKeyType = settings.pixKeyType;
           _abacatePayEnabled = settings.abacatePayEnabled;
+          _asaasEnabled = settings.asaasEnabled;
           _storeEnabled = settings.storeEnabled;
           _storePublished = settings.storePublished;
           _storeCreditCardEnabled = settings.storeCreditCardEnabled;
@@ -114,6 +129,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
       // Load linked students for monitors selection
       await _loadLinkedStudents();
+
+      // Auto-check KYC status if Asaas is enabled
+      if (_asaasEnabled) {
+        _checkKycStatus();
+      }
 
       setState(() => _isLoading = false);
     } catch (e) {
@@ -202,6 +222,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         city: _cityController.text.isEmpty ? null : _cityController.text,
         state: _stateController.text.isEmpty ? null : _stateController.text,
         zipCode: _zipCodeController.text.isEmpty ? null : _zipCodeController.text,
+        responsibleBirthDate: _birthDateController.text.isEmpty ? null : _birthDateController.text,
       );
 
       // Save PIX info
@@ -227,8 +248,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             : null,
       );
 
-      // Save AbacatePay settings
+      // Save payment provider settings
       await service.toggleAbacatePay(_abacatePayEnabled);
+      await service.toggleAsaas(_asaasEnabled);
 
       // Save student check-in settings
       await service.toggleStudentCheckin(_studentCheckinEnabled);
@@ -247,6 +269,61 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       }
     } finally {
       setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _pickBirthDate() async {
+    final now = DateTime.now();
+    final initial = _birthDateController.text.isNotEmpty
+        ? DateTime.tryParse(_birthDateController.text) ?? DateTime(1990)
+        : DateTime(1990);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(1920),
+      lastDate: now,
+      helpText: 'Data de Nascimento do Responsavel',
+    );
+    if (picked != null) {
+      setState(() {
+        _birthDateController.text =
+            '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+      });
+    }
+  }
+
+  Future<void> _checkKycStatus() async {
+    setState(() => _isCheckingKyc = true);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final token = await user.getIdToken();
+
+      final url = Uri.parse(
+          '${AppConstants.apiBaseUrl}/payments/onboard/documents?academyId=${FirebaseService.academyId}');
+      final response = await http.get(url, headers: {
+        'Authorization': 'Bearer $token',
+      });
+
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final data = body['data'] as Map<String, dynamic>;
+        setState(() {
+          _kycStatus = data['status'] as String? ?? 'not_checked';
+          _kycOnboardingUrl = data['onboardingUrl'] as String?;
+        });
+      } else {
+        if (mounted) {
+          context.showError(body['error'] as String? ?? 'Erro ao verificar documentos');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showError('Erro ao verificar documentos');
+      }
+    } finally {
+      setState(() => _isCheckingKyc = false);
     }
   }
 
@@ -584,8 +661,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 const SizedBox(height: 16),
                 _ModernTextField(
                   controller: _cnpjController,
-                  label: 'CNPJ',
-                  hint: '00.000.000/0000-00',
+                  label: 'CPF/CNPJ',
+                  hint: 'CPF do responsavel ou CNPJ da academia',
                   icon: LucideIcons.fileText,
                   keyboardType: TextInputType.number,
                 ),
@@ -631,12 +708,29 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                _ModernTextField(
-                  controller: _zipCodeController,
-                  label: 'CEP',
-                  hint: '00000-000',
-                  icon: LucideIcons.mailbox,
-                  keyboardType: TextInputType.number,
+                Row(
+                  children: [
+                    Expanded(
+                      child: _ModernTextField(
+                        controller: _zipCodeController,
+                        label: 'CEP',
+                        hint: '00000-000',
+                        icon: LucideIcons.mailbox,
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _ModernTextField(
+                        controller: _birthDateController,
+                        label: 'Nascimento do Responsavel',
+                        hint: 'Selecione a data',
+                        icon: LucideIcons.calendarDays,
+                        readOnly: true,
+                        onTap: _pickBirthDate,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -694,7 +788,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             child: Column(
               children: [
                 _ModernSwitch(
-                  title: 'AbacatePay',
+                  title: 'AbacatePay (Legado)',
                   subtitle: 'Cobranca automatica via PIX',
                   value: _abacatePayEnabled,
                   onChanged: (value) {
@@ -703,9 +797,210 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                   icon: LucideIcons.zap,
                   iconColor: Colors.green,
                 ),
+                const SizedBox(height: 12),
+                _ModernSwitch(
+                  title: 'Asaas',
+                  subtitle: 'Pagamentos via PIX e cartao (subconta)',
+                  value: _asaasEnabled,
+                  onChanged: (value) {
+                    setState(() => _asaasEnabled = value);
+                  },
+                  icon: LucideIcons.creditCard,
+                  iconColor: Colors.blue,
+                ),
               ],
             ),
           ),
+
+          // KYC Section - only when Asaas is enabled
+          if (_asaasEnabled) ...[
+            const SizedBox(height: 16),
+            _buildKycSection(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKycSection() {
+    return _SettingsCard(
+      title: 'Verificacao de Documentos (KYC)',
+      icon: LucideIcons.fileCheck,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Envie documentos para verificacao e aprovacao da subconta',
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 16),
+          _buildKycContent(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKycContent() {
+    // Not checked
+    if (_kycStatus == 'not_checked') {
+      return ElevatedButton.icon(
+        onPressed: _isCheckingKyc ? null : _checkKycStatus,
+        icon: _isCheckingKyc
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              )
+            : const Icon(LucideIcons.fileSearch, size: 18),
+        label: Text(_isCheckingKyc ? 'Verificando...' : 'Verificar Documentos'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppTheme.textPrimary,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
+    }
+
+    // Approved
+    if (_kycStatus == 'approved') {
+      return _buildKycInfoBox(
+        color: AppTheme.success,
+        icon: LucideIcons.checkCircle,
+        title: 'Documentos Aprovados!',
+        message: 'Sua conta esta totalmente verificada.',
+      );
+    }
+
+    // Pending review
+    if (_kycStatus == 'pending_review') {
+      return Column(
+        children: [
+          _buildKycInfoBox(
+            color: AppTheme.info,
+            icon: LucideIcons.clock,
+            title: 'Documentos em Analise',
+            message: 'Seus documentos estao sendo verificados. A aprovacao pode levar ate 48 horas.',
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _isCheckingKyc ? null : _checkKycStatus,
+            icon: _isCheckingKyc
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(LucideIcons.refreshCw, size: 16),
+            label: Text(_isCheckingKyc ? 'Atualizando...' : 'Atualizar Status'),
+            style: OutlinedButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Rejected or pending upload — single verification button
+    final isRejected = _kycStatus == 'rejected';
+
+    return Column(
+      children: [
+        _buildKycInfoBox(
+          color: isRejected ? AppTheme.error : AppTheme.warning,
+          icon: LucideIcons.alertTriangle,
+          title: isRejected ? 'Documentos Rejeitados' : 'Documentos Pendentes',
+          message: isRejected
+              ? 'Envie novamente os documentos solicitados.'
+              : 'Complete a verificacao para ativar sua conta.',
+        ),
+        const SizedBox(height: 16),
+        if (_kycOnboardingUrl != null)
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                final uri = Uri.parse(_kycOnboardingUrl!);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
+              icon: const Icon(LucideIcons.externalLink, size: 18),
+              label: Text(isRejected ? 'Reenviar Documentos' : 'Iniciar Verificacao'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.textPrimary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          )
+        else
+          _buildKycInfoBox(
+            color: AppTheme.info,
+            icon: LucideIcons.info,
+            title: 'Link nao disponivel',
+            message: 'Clique em "Atualizar Status" para tentar novamente.',
+          ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _isCheckingKyc ? null : _checkKycStatus,
+          icon: _isCheckingKyc
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(LucideIcons.refreshCw, size: 16),
+          label: Text(_isCheckingKyc ? 'Atualizando...' : 'Atualizar Status'),
+          style: OutlinedButton.styleFrom(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildKycInfoBox({
+    required Color color,
+    required IconData icon,
+    required String title,
+    required String message,
+    Widget? action,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: AppTheme.bodySmall.copyWith(color: color),
+          ),
+          if (action != null) ...[
+            const SizedBox(height: 12),
+            action,
+          ],
         ],
       ),
     );
@@ -1243,6 +1538,8 @@ class _ModernTextField extends StatelessWidget {
   final IconData icon;
   final TextInputType? keyboardType;
   final int maxLines;
+  final bool readOnly;
+  final VoidCallback? onTap;
 
   const _ModernTextField({
     required this.controller,
@@ -1251,6 +1548,8 @@ class _ModernTextField extends StatelessWidget {
     required this.icon,
     this.keyboardType,
     this.maxLines = 1,
+    this.readOnly = false,
+    this.onTap,
   });
 
   @override
@@ -1276,6 +1575,8 @@ class _ModernTextField extends StatelessWidget {
             controller: controller,
             keyboardType: keyboardType,
             maxLines: maxLines,
+            readOnly: readOnly,
+            onTap: onTap,
             decoration: InputDecoration(
               hintText: hint,
               hintStyle: AppTheme.bodyMedium.copyWith(
@@ -1444,3 +1745,4 @@ class _ModernSwitch extends StatelessWidget {
     );
   }
 }
+
