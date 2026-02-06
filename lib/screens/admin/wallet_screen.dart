@@ -548,23 +548,9 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                         Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Informação sobre Taxas',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                  color: Colors.blue.shade900,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Uma taxa de R\$ 0,80 é cobrada pelo gateway de pagamento (AbacatePay) em cada transação. Esta taxa é automaticamente deduzida do valor total.',
-                                style: TextStyle(fontSize: 13, color: Colors.blue.shade800),
-                              ),
-                            ],
+                          child: Text(
+                            'Taxa de R\$ 0,80 por transação (pagamentos e saques), deduzida automaticamente.',
+                            style: TextStyle(fontSize: 13, color: Colors.blue.shade800),
                           ),
                         ),
                       ],
@@ -573,74 +559,6 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                 ),
               ),
             ),
-
-            // 2FA Security Section
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.divider),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppTheme.textSecondary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          LucideIcons.shield,
-                          size: 22,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Autenticacao 2FA',
-                              style: AppTheme.bodyMedium.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Proteja seus saques com autenticacao em dois fatores',
-                              style: AppTheme.bodySmall.copyWith(
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppTheme.textSecondary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          'Em breve',
-                          style: AppTheme.labelSmall.copyWith(
-                            color: AppTheme.textSecondary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
             // Transactions Section
             SliverToBoxAdapter(
