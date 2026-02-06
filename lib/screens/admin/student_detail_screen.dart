@@ -236,10 +236,10 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                               backgroundColor: Colors.white.withValues(alpha: 0.3),
                               child: Text(
                                 _student!.fullName.substring(0, 1).toUpperCase(),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 32,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.white,
+                                  color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
                                 ),
                               ),
                             ),
@@ -250,10 +250,10 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                           children: [
                             Text(
                               _student!.fullName,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.white,
+                                color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
                               ),
                             ),
                             const SizedBox(height: 4),
@@ -298,13 +298,18 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
         children: [
           Text(
             beltNames[_student!.currentBelt] ?? _student!.currentBelt,
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+            style: TextStyle(
+              color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
+              fontWeight: FontWeight.w500,
+            ),
           ),
           if (_student!.currentStripes > 0) ...[
             const SizedBox(width: 4),
             Text(
               '${_student!.currentStripes} grau(s)',
-              style: const TextStyle(color: Colors.white70),
+              style: TextStyle(
+                color: _student!.currentBelt == 'white' ? Colors.black.withValues(alpha: 0.7) : Colors.white70,
+              ),
             ),
           ],
         ],
@@ -328,7 +333,10 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       ),
       child: Text(
         _student!.status.label,
-        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+        style: TextStyle(
+          color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
+          fontWeight: FontWeight.w500,
+        ),
       ),
     );
   }

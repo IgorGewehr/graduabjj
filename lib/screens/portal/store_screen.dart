@@ -498,12 +498,28 @@ class _ProductCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      product.formattedPrice,
-                      style: AppTheme.titleMedium.copyWith(
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          product.formattedPrice,
+                          style: AppTheme.titleMedium.copyWith(
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (product.stockType == StoreStockType.inStock && !isOutOfStock)
+                          Text(
+                            '${product.stockQuantity} disp.',
+                            style: AppTheme.labelSmall.copyWith(
+                              color: (product.stockQuantity ?? 0) <= 3
+                                  ? AppTheme.warning
+                                  : AppTheme.textSecondary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),
@@ -673,6 +689,84 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
+                          // Stock info
+                          if (product.stockType == StoreStockType.inStock) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: (product.stockQuantity ?? 0) <= 3
+                                    ? AppTheme.warningLight
+                                    : AppTheme.successLight,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: (product.stockQuantity ?? 0) <= 3
+                                      ? AppTheme.warning
+                                      : AppTheme.success,
+                                  width: 1,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    LucideIcons.package,
+                                    size: 14,
+                                    color: (product.stockQuantity ?? 0) <= 3
+                                        ? AppTheme.warning
+                                        : AppTheme.success,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${product.stockQuantity} ${(product.stockQuantity ?? 0) == 1 ? 'unidade disponível' : 'unidades disponíveis'}',
+                                    style: AppTheme.labelSmall.copyWith(
+                                      color: (product.stockQuantity ?? 0) <= 3
+                                          ? AppTheme.warning
+                                          : AppTheme.success,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ] else ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.infoLight,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: AppTheme.info,
+                                  width: 1,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    LucideIcons.clock,
+                                    size: 14,
+                                    color: AppTheme.info,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Feito sob encomenda',
+                                    style: AppTheme.labelSmall.copyWith(
+                                      color: AppTheme.info,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                           if (product.description != null &&
                               product.description!.isNotEmpty) ...[
                             const SizedBox(height: 16),

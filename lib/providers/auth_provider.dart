@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -534,6 +535,7 @@ class AuthService {
     String displayName,
     String studentId,
     String academyId, // Must be passed from validated link code
+    String? cpf, // Optional CPF to save with student
   ) async {
     // Create Firebase Auth account
     final credential = await _auth.createUserWithEmailAndPassword(
@@ -579,6 +581,42 @@ class AuthService {
 
     // Subscribe to academy push notifications topic
     await pushNotificationService.subscribeToTopic('academy_$academyId');
+
+    // Update student document with linkedUserId and CPF (with retry logic)
+    // This MUST complete before returning to avoid race conditions on first login
+    bool studentUpdated = false;
+    for (int attempt = 0; attempt < 3 && !studentUpdated; attempt++) {
+      try {
+        final updateData = <String, dynamic>{
+          'linkedUserId': credential.user!.uid,
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+
+        // Only add CPF if provided
+        if (cpf != null && cpf.isNotEmpty) {
+          updateData['cpf'] = cpf;
+        }
+
+        await _firestore
+            .collection('academies')
+            .doc(academyId)
+            .collection('students')
+            .doc(studentId)
+            .update(updateData);
+
+        studentUpdated = true;
+      } catch (e) {
+        debugPrint('Student update attempt ${attempt + 1} failed: $e');
+        if (attempt < 2) {
+          await Future.delayed(Duration(milliseconds: 500));
+        } else {
+          // On final attempt failure, log error but continue
+          // User can still login, but profile linking might fail
+          debugPrint('CRITICAL: Failed to update student after 3 attempts');
+          throw Exception('Falha ao vincular perfil do aluno. Tente novamente.');
+        }
+      }
+    }
 
     return credential;
   }

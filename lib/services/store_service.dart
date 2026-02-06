@@ -628,6 +628,38 @@ class StoreService {
 
   /// Update order status
   Future<StoreOrder> updateOrderStatus(String id, StoreOrderStatus status) async {
+    final order = await getOrderById(id);
+    if (order == null) throw Exception('Pedido nao encontrado');
+
+    // If changing to "paid" status, validate and decrement stock
+    if (status == StoreOrderStatus.paid && order.status == StoreOrderStatus.pendingPayment) {
+      // SECURITY: Validate stock before payment (prevent race conditions)
+      for (final item in order.items) {
+        final product = await getProductById(item.productId);
+        if (product == null) {
+          throw Exception('Produto nao encontrado: ${item.productName}');
+        }
+
+        if (product.stockType == StoreStockType.inStock) {
+          final availableStock = product.stockQuantity ?? 0;
+          if (availableStock < item.quantity) {
+            throw Exception(
+              'Estoque insuficiente para "${product.name}".\n'
+              'Disponivel: $availableStock, Solicitado: ${item.quantity}'
+            );
+          }
+        }
+      }
+
+      // Decrement stock for in-stock items (only after validation)
+      for (final item in order.items) {
+        final product = await getProductById(item.productId);
+        if (product != null && product.stockType == StoreStockType.inStock) {
+          await decrementStock(item.productId, item.quantity);
+        }
+      }
+    }
+
     final data = <String, dynamic>{
       'status': status.value,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -667,7 +699,28 @@ class StoreService {
     final order = await getOrderById(id);
     if (order == null) throw Exception('Pedido nao encontrado');
 
-    // Decrement stock for in-stock items
+    // SECURITY: Validate stock again before payment (prevent race conditions)
+    // This prevents two customers from buying the same last item
+    for (final item in order.items) {
+      final product = await getProductById(item.productId);
+      if (product == null) {
+        throw Exception('Produto nao encontrado: ${item.productName}');
+      }
+
+      if (product.stockType == StoreStockType.inStock) {
+        final availableStock = product.stockQuantity ?? 0;
+        if (availableStock < item.quantity) {
+          throw Exception(
+            'Estoque insuficiente para "${product.name}".\n'
+            'O produto foi vendido enquanto seu pedido estava pendente.\n'
+            'Disponivel: $availableStock, Solicitado: ${item.quantity}\n\n'
+            'Por favor, ajuste a quantidade ou remova o item do pedido.'
+          );
+        }
+      }
+    }
+
+    // Decrement stock for in-stock items (only after validation)
     for (final item in order.items) {
       final product = await getProductById(item.productId);
       if (product != null && product.stockType == StoreStockType.inStock) {

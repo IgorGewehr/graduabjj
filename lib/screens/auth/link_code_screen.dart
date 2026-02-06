@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -10,7 +9,6 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/link_code_service.dart';
-import '../../services/firebase_service.dart';
 
 /// Link Code Screen - Create account using access code
 class LinkCodeScreen extends ConsumerStatefulWidget {
@@ -145,12 +143,14 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
       final cpfDigits = _cpfController.text.replaceAll(RegExp(r'\D'), '');
 
       // Create Firebase account with the student name from the link code
+      // This will also update the student document with linkedUserId and CPF
       final userCredential = await authService.createAccountWithLinkCode(
         _emailController.text.trim(),
         _passwordController.text,
         _validatedLinkCode!.studentName,
         _validatedLinkCode!.studentId,
         academyId, // Pass the correct academyId
+        cpfDigits.isNotEmpty ? cpfDigits : null, // Pass CPF to be saved
       );
 
       // Mark the code as used
@@ -158,33 +158,6 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         _validatedLinkCode!.code,
         userCredential.user!.uid,
       );
-
-      // Save CPF to student record with retry
-      bool cpfSaved = false;
-      for (int attempt = 0; attempt < 3 && !cpfSaved; attempt++) {
-        try {
-          await FirebaseFirestore.instance
-              .collection('academies')
-              .doc(academyId)
-              .collection('students')
-              .doc(_validatedLinkCode!.studentId)
-              .update({
-            'cpf': cpfDigits,
-            'linkedUserId': userCredential.user!.uid,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-          cpfSaved = true;
-        } catch (e) {
-          debugPrint('CPF save attempt ${attempt + 1} failed: $e');
-          if (attempt < 2) {
-            await Future.delayed(const Duration(milliseconds: 500));
-          }
-        }
-      }
-
-      if (!cpfSaved) {
-        debugPrint('WARNING: CPF not saved after 3 attempts. User can update later.');
-      }
 
       setState(() {
         _currentStep = _Step.success;
