@@ -67,6 +67,9 @@ class AcademySettings {
   final String? state;
   final String? zipCode;
 
+  // Responsible Person (for Asaas onboarding)
+  final String? responsibleBirthDate;
+
   // Branding
   final String? logoUrl;
   final String? portalSlogan;
@@ -81,6 +84,14 @@ class AcademySettings {
 
   // AbacatePay Integration (API key is global in backend env, not per-academy)
   final bool abacatePayEnabled;
+
+  // Asaas Integration (per-academy sub-account)
+  final bool asaasEnabled;
+  final String? asaasOnboardingStatus; // 'pending', 'approved', 'rejected'
+
+  // Asaas KYC Document Verification
+  final String? asaasKycStatus; // 'not_checked', 'pending_upload', 'pending_review', 'approved', 'rejected', 'onboarding_url'
+  final String? asaasKycOnboardingUrl;
 
   // Auto-graduation Settings
   final bool autoGraduationEnabled;
@@ -111,6 +122,7 @@ class AcademySettings {
     this.city,
     this.state,
     this.zipCode,
+    this.responsibleBirthDate,
     this.logoUrl,
     this.portalSlogan,
     this.sidebarLogoUrl,
@@ -120,6 +132,10 @@ class AcademySettings {
     this.pixKey,
     this.pixKeyType,
     this.abacatePayEnabled = false,
+    this.asaasEnabled = false,
+    this.asaasOnboardingStatus,
+    this.asaasKycStatus,
+    this.asaasKycOnboardingUrl,
     this.autoGraduationEnabled = false,
     this.autoGraduationAttendances,
     this.storeEnabled = false,
@@ -144,6 +160,7 @@ class AcademySettings {
       city: data['city'],
       state: data['state'],
       zipCode: data['zipCode'],
+      responsibleBirthDate: data['responsibleBirthDate'],
       logoUrl: data['logoUrl'],
       portalSlogan: data['portalSlogan'],
       sidebarLogoUrl: data['sidebarLogoUrl'],
@@ -155,6 +172,10 @@ class AcademySettings {
           ? PixKeyTypeExtension.fromString(data['pixKeyType'])
           : null,
       abacatePayEnabled: data['abacatePayEnabled'] ?? false,
+      asaasEnabled: data['asaasEnabled'] ?? false,
+      asaasOnboardingStatus: data['asaasOnboardingStatus'],
+      asaasKycStatus: data['asaasKycStatus'],
+      asaasKycOnboardingUrl: data['asaasKycOnboardingUrl'],
       autoGraduationEnabled: data['autoGraduationEnabled'] ?? false,
       autoGraduationAttendances: data['autoGraduationAttendances'],
       storeEnabled: data['storeEnabled'] ?? false,
@@ -179,6 +200,9 @@ class AcademySettings {
   }
 
   bool get hasPixKey => pixKey != null && pixKey!.isNotEmpty;
+
+  /// Whether any payment provider is enabled (AbacatePay or Asaas)
+  bool get isPaymentEnabled => abacatePayEnabled || asaasEnabled;
 }
 
 /// Settings Service - Multi-tenant settings management
@@ -312,6 +336,24 @@ class SettingsService {
   }
 
   // ============================================
+  // Check if Asaas is Enabled
+  // ============================================
+  Future<bool> isAsaasEnabled() async {
+    final settings = await getAcademySettings();
+    return settings?.asaasEnabled ?? false;
+  }
+
+  // ============================================
+  // Toggle Asaas
+  // ============================================
+  Future<void> toggleAsaas(bool enabled) async {
+    await _academyRef.update({
+      'asaasEnabled': enabled,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ============================================
   // Update Auto-graduation Settings
   // ============================================
   Future<void> updateAutoGraduation(bool enabled, {int? attendances}) async {
@@ -380,6 +422,7 @@ class SettingsService {
     String? city,
     String? state,
     String? zipCode,
+    String? responsibleBirthDate,
   }) async {
     final data = <String, dynamic>{
       'updatedAt': FieldValue.serverTimestamp(),
@@ -392,6 +435,7 @@ class SettingsService {
     if (city != null) data['city'] = city;
     if (state != null) data['state'] = state;
     if (zipCode != null) data['zipCode'] = zipCode;
+    if (responsibleBirthDate != null) data['responsibleBirthDate'] = responsibleBirthDate;
 
     await _academyRef.update(data);
   }

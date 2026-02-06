@@ -15,14 +15,19 @@ import '../../providers/providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import '../../services/abacate_pay_service.dart';
+import '../../services/asaas_payment_service.dart';
 
-/// AbacatePay enabled provider
+/// Payment enabled provider (either AbacatePay or Asaas)
 final abacatePayEnabledProvider = FutureProvider<bool>((ref) async {
   final academyId = FirebaseService.academyId;
   if (academyId == null) return false;
 
   final service = AbacatePayService(academyId);
-  return service.isEnabled();
+  final abacateEnabled = await service.isEnabled();
+  if (abacateEnabled) return true;
+
+  final settingsService = SettingsService(academyId);
+  return settingsService.isAsaasEnabled();
 });
 
 /// Financial Screen - Pagamentos (Simplified)
@@ -947,15 +952,31 @@ class _PixPaymentBottomSheetState
     }
 
     try {
-      final service = AbacatePayService(academyId);
-      final link = await service.createPixPayment(
-        amount: widget.payment.value,
-        financialId: widget.payment.id,
-        studentId: widget.payment.studentId,
-        studentName: widget.studentName,
-        description:
-            widget.payment.description ?? 'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
-      );
+      // Check which provider is active
+      final asaasService = AsaasPaymentService(academyId);
+      final isAsaas = await asaasService.isEnabled();
+
+      PaymentLink? link;
+      if (isAsaas) {
+        link = await asaasService.createPixPayment(
+          amount: widget.payment.value,
+          financialId: widget.payment.id,
+          studentId: widget.payment.studentId,
+          studentName: widget.studentName,
+          description:
+              widget.payment.description ?? 'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
+        );
+      } else {
+        final service = AbacatePayService(academyId);
+        link = await service.createPixPayment(
+          amount: widget.payment.value,
+          financialId: widget.payment.id,
+          studentId: widget.payment.studentId,
+          studentName: widget.studentName,
+          description:
+              widget.payment.description ?? 'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
+        );
+      }
 
       setState(() {
         _paymentLink = link;

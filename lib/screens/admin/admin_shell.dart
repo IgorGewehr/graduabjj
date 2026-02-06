@@ -456,7 +456,7 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     // Get academy settings to check if store/abacatepay is enabled
     final settings = ref.read(academySettingsProvider).valueOrNull;
     final isStoreEnabled = settings?.storeEnabled ?? false;
-    final isAbacatePayEnabled = settings?.abacatePayEnabled ?? false;
+    final isPaymentEnabled = (settings?.abacatePayEnabled ?? false) || (settings?.asaasEnabled ?? false);
 
     // Get current user to check role
     final currentUser = ref.read(currentUserProvider).valueOrNull;
@@ -468,9 +468,9 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       if (item.path == '/admin/loja') {
         return isStoreEnabled;
       }
-      // Carteira only shows if AbacatePay is enabled
+      // Carteira only shows if a payment provider is enabled
       if (item.path == '/admin/carteira') {
-        return isAbacatePayEnabled;
+        return isPaymentEnabled;
       }
       return true;
     }).toList();

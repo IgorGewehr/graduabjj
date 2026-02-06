@@ -12,6 +12,7 @@ class Plan {
   final int? classesPerWeek;
   final List<String> studentIds;
   final bool isActive;
+  final Map<String, double> customValues;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -24,9 +25,43 @@ class Plan {
     this.classesPerWeek,
     this.studentIds = const [],
     this.isActive = true,
+    this.customValues = const {},
     required this.createdAt,
     required this.updatedAt,
   });
+
+  /// Returns the value a specific student pays in this plan.
+  /// If the student has a custom value, returns it; otherwise returns monthlyValue.
+  double getStudentValue(String studentId) =>
+      customValues[studentId] ?? monthlyValue;
+
+  Plan copyWith({
+    String? id,
+    String? name,
+    String? description,
+    double? monthlyValue,
+    int? defaultDueDay,
+    int? classesPerWeek,
+    List<String>? studentIds,
+    bool? isActive,
+    Map<String, double>? customValues,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return Plan(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      description: description ?? this.description,
+      monthlyValue: monthlyValue ?? this.monthlyValue,
+      defaultDueDay: defaultDueDay ?? this.defaultDueDay,
+      classesPerWeek: classesPerWeek ?? this.classesPerWeek,
+      studentIds: studentIds ?? this.studentIds,
+      isActive: isActive ?? this.isActive,
+      customValues: customValues ?? this.customValues,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
 
   factory Plan.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -41,6 +76,13 @@ class Plan {
           ? List<String>.from(data['studentIds'])
           : [],
       isActive: data['isActive'] ?? true,
+      customValues: data['customValues'] != null
+          ? Map<String, double>.from(
+              (data['customValues'] as Map).map(
+                (key, value) => MapEntry(key.toString(), (value as num).toDouble()),
+              ),
+            )
+          : {},
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -186,6 +228,7 @@ class PlanService {
   Future<Plan> removeStudent(String planId, String studentId) async {
     await _collections.plan(planId).update({
       'studentIds': FieldValue.arrayRemove([studentId]),
+      'customValues.$studentId': FieldValue.delete(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
@@ -205,6 +248,28 @@ class PlanService {
     } else {
       return addStudent(planId, studentId);
     }
+  }
+
+  // ============================================
+  // Set Custom Value for Student
+  // ============================================
+  Future<Plan> setCustomValue(String planId, String studentId, double value) async {
+    await _plansRef.doc(planId).update({
+      'customValues.$studentId': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return (await getById(planId))!;
+  }
+
+  // ============================================
+  // Remove Custom Value (restore plan default)
+  // ============================================
+  Future<Plan> removeCustomValue(String planId, String studentId) async {
+    await _plansRef.doc(planId).update({
+      'customValues.$studentId': FieldValue.delete(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return (await getById(planId))!;
   }
 }
 

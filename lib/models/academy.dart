@@ -174,12 +174,19 @@ class Academy {
   final String? state;
   final String? zipCode;
 
+  // Responsible Person (for Asaas onboarding)
+  final String? responsibleBirthDate; // YYYY-MM-DD
+
   // Financial Settings
   final String? pixKey;
   final PixKeyType? pixKeyType;
 
   // AbacatePay Integration (API key is global in backend env, not per-academy)
   final bool abacatePayEnabled;
+
+  // Asaas Integration (per-academy sub-account with own API key)
+  final bool asaasEnabled;
+  final String? asaasOnboardingStatus; // 'pending', 'approved', 'rejected'
 
   // Auto-graduation Settings
   final bool autoGraduationEnabled;
@@ -219,9 +226,12 @@ class Academy {
     this.city,
     this.state,
     this.zipCode,
+    this.responsibleBirthDate,
     this.pixKey,
     this.pixKeyType,
     this.abacatePayEnabled = false,
+    this.asaasEnabled = false,
+    this.asaasOnboardingStatus,
     this.autoGraduationEnabled = false,
     this.autoGraduationAttendances,
     this.storeEnabled = false,
@@ -254,11 +264,14 @@ class Academy {
       city: data['city'],
       state: data['state'],
       zipCode: data['zipCode'],
+      responsibleBirthDate: data['responsibleBirthDate'],
       pixKey: data['pixKey'],
       pixKeyType: data['pixKeyType'] != null
           ? PixKeyTypeExtension.fromString(data['pixKeyType'])
           : null,
       abacatePayEnabled: data['abacatePayEnabled'] ?? false,
+      asaasEnabled: data['asaasEnabled'] ?? false,
+      asaasOnboardingStatus: data['asaasOnboardingStatus'],
       autoGraduationEnabled: data['autoGraduationEnabled'] ?? false,
       autoGraduationAttendances: data['autoGraduationAttendances'],
       storeEnabled: data['storeEnabled'] ?? false,
@@ -292,9 +305,12 @@ class Academy {
       'city': city,
       'state': state,
       'zipCode': zipCode,
+      'responsibleBirthDate': responsibleBirthDate,
       'pixKey': pixKey,
       'pixKeyType': pixKeyType?.value,
       'abacatePayEnabled': abacatePayEnabled,
+      'asaasEnabled': asaasEnabled,
+      'asaasOnboardingStatus': asaasOnboardingStatus,
       'autoGraduationEnabled': autoGraduationEnabled,
       'autoGraduationAttendances': autoGraduationAttendances,
       'storeEnabled': storeEnabled,
@@ -335,9 +351,12 @@ class Academy {
     String? city,
     String? state,
     String? zipCode,
+    String? responsibleBirthDate,
     String? pixKey,
     PixKeyType? pixKeyType,
     bool? abacatePayEnabled,
+    bool? asaasEnabled,
+    String? asaasOnboardingStatus,
     bool? autoGraduationEnabled,
     int? autoGraduationAttendances,
     bool? storeEnabled,
@@ -367,9 +386,12 @@ class Academy {
       city: city ?? this.city,
       state: state ?? this.state,
       zipCode: zipCode ?? this.zipCode,
+      responsibleBirthDate: responsibleBirthDate ?? this.responsibleBirthDate,
       pixKey: pixKey ?? this.pixKey,
       pixKeyType: pixKeyType ?? this.pixKeyType,
       abacatePayEnabled: abacatePayEnabled ?? this.abacatePayEnabled,
+      asaasEnabled: asaasEnabled ?? this.asaasEnabled,
+      asaasOnboardingStatus: asaasOnboardingStatus ?? this.asaasOnboardingStatus,
       autoGraduationEnabled: autoGraduationEnabled ?? this.autoGraduationEnabled,
       autoGraduationAttendances: autoGraduationAttendances ?? this.autoGraduationAttendances,
       storeEnabled: storeEnabled ?? this.storeEnabled,

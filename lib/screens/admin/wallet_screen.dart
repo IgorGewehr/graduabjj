@@ -11,6 +11,7 @@ import '../../core/theme.dart';
 import '../../core/validators.dart';
 import '../../services/firebase_service.dart';
 import '../../services/abacate_pay_service.dart';
+import '../../services/asaas_payment_service.dart';
 import '../../services/totp_service.dart';
 import '../../providers/providers.dart';
 
@@ -20,6 +21,7 @@ class WalletTransaction {
   final String type; // 'payment', 'withdrawal', 'store_sale', 'refund'
   final String source; // 'mensalidade', 'loja', 'competicao', 'manual', 'saque'
   final double amount;
+  final double? fee; // Fee charged (in reais)
   final String status; // 'pending', 'completed', 'failed', 'cancelled'
   final String? description;
   final String? studentName;
@@ -34,6 +36,7 @@ class WalletTransaction {
     required this.type,
     required this.source,
     required this.amount,
+    this.fee,
     required this.status,
     this.description,
     this.studentName,
@@ -44,13 +47,14 @@ class WalletTransaction {
   });
 
   factory WalletTransaction.fromPayment(Map<String, dynamic> map, String id) {
-    final isAbacatePay = map['externalId'] != null;
+    final isAbacatePay = map['externalId'] != null || map['asaasPaymentId'] != null;
 
     return WalletTransaction(
       id: id,
       type: 'payment',
       source: map['type'] ?? 'mensalidade',
       amount: (map['amount'] ?? map['value'] ?? 0).toDouble(),
+      fee: map['fee'] != null ? (map['fee'] as num).toDouble() / 100 : null,
       status: map['paymentDate'] != null
           ? 'completed'
           : (map['status'] ?? 'pending'),
@@ -64,13 +68,14 @@ class WalletTransaction {
 
   factory WalletTransaction.fromStoreOrder(
       Map<String, dynamic> map, String id) {
-    final isAbacatePay = map['externalPaymentId'] != null || map['abacatePayTransactionId'] != null;
+    final isAbacatePay = map['externalPaymentId'] != null || map['abacatePayTransactionId'] != null || map['asaasPaymentId'] != null;
 
     return WalletTransaction(
       id: id,
       type: 'store_sale',
       source: 'loja',
       amount: (map['total'] ?? map['totalAmount'] ?? 0).toDouble(),
+      fee: map['fee'] != null ? (map['fee'] as num).toDouble() / 100 : null,
       status: map['status'] == 'paid' || map['status'] == 'delivered' || map['status'] == 'completed'
           ? 'completed'
           : 'pending',
@@ -162,6 +167,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   bool _isRefreshing = false;
   bool _isTotpEnabled = false;
   bool _isTotpLoading = true;
+  String _transactionFilter = 'all'; // 'all', 'mensalidade', 'saque', 'loja'
 
   @override
   void initState() {
@@ -278,6 +284,9 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   }
 
   void _openWithdrawalSheet(String academyId) {
+    final settings = ref.read(academySettingsProvider).valueOrNull;
+    final useAsaas = false; // Sempre use AbacatePay
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -285,12 +294,22 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
       builder: (context) => _WithdrawalBottomSheet(
         maxAmount: _wallet?.availableBalance ?? 0,
         onWithdraw: (amount, pixKey, pixKeyType) async {
-          final service = AbacatePayService(academyId);
-          final result = await service.requestWithdrawal(
-            amountInCents: amount,
-            pixKey: pixKey,
-            pixKeyType: pixKeyType,
-          );
+          final WithdrawalResult result;
+          if (useAsaas) {
+            final service = AsaasPaymentService(academyId);
+            result = await service.requestWithdrawal(
+              amountInCents: amount,
+              pixKey: pixKey,
+              pixKeyType: pixKeyType,
+            );
+          } else {
+            final service = AbacatePayService(academyId);
+            result = await service.requestWithdrawal(
+              amountInCents: amount,
+              pixKey: pixKey,
+              pixKeyType: pixKeyType,
+            );
+          }
 
           if (!mounted) return;
           Navigator.pop(context);
@@ -367,11 +386,11 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(academySettingsProvider).valueOrNull;
-    final isAbacatePayEnabled = settings?.abacatePayEnabled ?? false;
+    final isPaymentEnabled = settings?.abacatePayEnabled ?? false; // Apenas AbacatePay
     final currencyFormat =
         NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
 
-    if (!isAbacatePayEnabled) {
+    if (!isPaymentEnabled) {
       return Scaffold(
         backgroundColor: AppTheme.background,
         body: Center(
@@ -511,6 +530,50 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
               ),
             ),
 
+            // Fee Information Card
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                child: Card(
+                  color: Colors.blue.shade50,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Colors.blue.shade200),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Informação sobre Taxas',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                  color: Colors.blue.shade900,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Uma taxa de R\$ 0,80 é cobrada pelo gateway de pagamento (AbacatePay) em cada transação. Esta taxa é automaticamente deduzida do valor total.',
+                                style: TextStyle(fontSize: 13, color: Colors.blue.shade800),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
             // 2FA Security Section
             SliverToBoxAdapter(
               child: Padding(
@@ -583,32 +646,128 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.all(20),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Transacoes Recentes',
-                      style: AppTheme.titleMedium.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (!_isLoading && _transactions.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.surfaceVariant,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '${_transactions.length}',
-                          style: AppTheme.labelSmall.copyWith(
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Transacoes Recentes',
+                          style: AppTheme.titleMedium.copyWith(
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                      ),
+                        if (!_isLoading && _transactions.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.surfaceVariant,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              '${_transactions.where((t) {
+                                if (_transactionFilter == 'mensalidade') return t.source == 'mensalidade';
+                                if (_transactionFilter == 'saque') return t.source == 'saque';
+                                if (_transactionFilter == 'loja') return t.source == 'loja';
+                                return true;
+                              }).length}',
+                              style: AppTheme.labelSmall.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    // Filter Chips
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        FilterChip(
+                          label: const Text('Todas'),
+                          selected: _transactionFilter == 'all',
+                          onSelected: (_) => setState(() => _transactionFilter = 'all'),
+                          backgroundColor: AppTheme.surface,
+                          selectedColor: AppTheme.primary.withValues(alpha: 0.15),
+                          checkmarkColor: AppTheme.primary,
+                          labelStyle: TextStyle(
+                            color: _transactionFilter == 'all' ? AppTheme.primary : AppTheme.textPrimary,
+                            fontWeight: _transactionFilter == 'all' ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                          side: BorderSide(
+                            color: _transactionFilter == 'all' ? AppTheme.primary : AppTheme.divider,
+                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        FilterChip(
+                          label: const Text('Mensalidades'),
+                          selected: _transactionFilter == 'mensalidade',
+                          onSelected: (_) => setState(() => _transactionFilter = 'mensalidade'),
+                          avatar: Icon(
+                            LucideIcons.creditCard,
+                            size: 16,
+                            color: _transactionFilter == 'mensalidade' ? AppTheme.primary : AppTheme.textSecondary,
+                          ),
+                          backgroundColor: AppTheme.surface,
+                          selectedColor: AppTheme.primary.withValues(alpha: 0.15),
+                          checkmarkColor: AppTheme.primary,
+                          labelStyle: TextStyle(
+                            color: _transactionFilter == 'mensalidade' ? AppTheme.primary : AppTheme.textPrimary,
+                            fontWeight: _transactionFilter == 'mensalidade' ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                          side: BorderSide(
+                            color: _transactionFilter == 'mensalidade' ? AppTheme.primary : AppTheme.divider,
+                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        FilterChip(
+                          label: const Text('Saques'),
+                          selected: _transactionFilter == 'saque',
+                          onSelected: (_) => setState(() => _transactionFilter = 'saque'),
+                          avatar: Icon(
+                            LucideIcons.banknote,
+                            size: 16,
+                            color: _transactionFilter == 'saque' ? AppTheme.primary : AppTheme.textSecondary,
+                          ),
+                          backgroundColor: AppTheme.surface,
+                          selectedColor: AppTheme.primary.withValues(alpha: 0.15),
+                          checkmarkColor: AppTheme.primary,
+                          labelStyle: TextStyle(
+                            color: _transactionFilter == 'saque' ? AppTheme.primary : AppTheme.textPrimary,
+                            fontWeight: _transactionFilter == 'saque' ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                          side: BorderSide(
+                            color: _transactionFilter == 'saque' ? AppTheme.primary : AppTheme.divider,
+                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        FilterChip(
+                          label: const Text('Loja'),
+                          selected: _transactionFilter == 'loja',
+                          onSelected: (_) => setState(() => _transactionFilter = 'loja'),
+                          avatar: Icon(
+                            LucideIcons.shoppingBag,
+                            size: 16,
+                            color: _transactionFilter == 'loja' ? AppTheme.primary : AppTheme.textSecondary,
+                          ),
+                          backgroundColor: AppTheme.surface,
+                          selectedColor: AppTheme.primary.withValues(alpha: 0.15),
+                          checkmarkColor: AppTheme.primary,
+                          labelStyle: TextStyle(
+                            color: _transactionFilter == 'loja' ? AppTheme.primary : AppTheme.textPrimary,
+                            fontWeight: _transactionFilter == 'loja' ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                          side: BorderSide(
+                            color: _transactionFilter == 'loja' ? AppTheme.primary : AppTheme.divider,
+                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -682,12 +841,72 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
-                    (context, index) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child:
-                          _TransactionCard(transaction: _transactions[index]),
-                    ),
-                    childCount: _transactions.length,
+                    (context, index) {
+                      // Filter transactions based on selected filter
+                      final filteredTransactions = _transactions.where((t) {
+                        if (_transactionFilter == 'mensalidade') return t.source == 'mensalidade';
+                        if (_transactionFilter == 'saque') return t.source == 'saque';
+                        if (_transactionFilter == 'loja') return t.source == 'loja';
+                        return true;
+                      }).toList();
+
+                      if (filteredTransactions.isEmpty) {
+                        return Container(
+                          margin: const EdgeInsets.only(top: 20),
+                          padding: const EdgeInsets.all(32),
+                          decoration: BoxDecoration(
+                            color: AppTheme.surface,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppTheme.divider),
+                          ),
+                          child: Column(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.surfaceVariant,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  LucideIcons.inbox,
+                                  size: 32,
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Nenhuma transacao encontrada',
+                                style: AppTheme.titleMedium.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Nao ha transacoes deste tipo',
+                                style: AppTheme.bodySmall.copyWith(
+                                  color: AppTheme.textSecondary,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _TransactionCard(transaction: filteredTransactions[index]),
+                      );
+                    },
+                    childCount: () {
+                      final filteredTransactions = _transactions.where((t) {
+                        if (_transactionFilter == 'mensalidade') return t.source == 'mensalidade';
+                        if (_transactionFilter == 'saque') return t.source == 'saque';
+                        if (_transactionFilter == 'loja') return t.source == 'loja';
+                        return true;
+                      }).toList();
+                      return filteredTransactions.isEmpty ? 1 : filteredTransactions.length;
+                    }(),
                   ),
                 ),
               ),
@@ -940,6 +1159,14 @@ class _TransactionCard extends StatelessWidget {
                       : AppTheme.error,
                 ),
               ),
+              if (transaction.fee != null && transaction.fee! > 0)
+                Text(
+                  'Taxa: ${currencyFormat.format(transaction.fee!)}',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: Colors.grey[600],
+                    fontSize: 11,
+                  ),
+                ),
             ],
           ),
         ],

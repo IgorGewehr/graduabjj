@@ -927,12 +927,14 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
             initAspectRatio: CropAspectRatioPreset.square,
             lockAspectRatio: true,
             hideBottomControls: true,
+            showCropGrid: true,
           ),
           IOSUiSettings(
             title: 'Recortar Imagem',
             aspectRatioLockEnabled: true,
             resetAspectRatioEnabled: false,
             aspectRatioPickerButtonHidden: true,
+            minimumAspectRatio: 1.0,
           ),
         ],
       );
@@ -1011,6 +1013,7 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
         'colors': colors.isEmpty ? null : colors,
         'images': _imageUrls,
       };
+
 
       await widget.onSave(data);
       if (mounted) Navigator.pop(context);

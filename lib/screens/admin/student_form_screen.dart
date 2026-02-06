@@ -37,7 +37,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   final _guardianNameController = TextEditingController();
   final _guardianPhoneController = TextEditingController();
   final _tuitionValueController = TextEditingController();
-  final _tuitionDayController = TextEditingController(text: '10');
+  final _tuitionDayController = TextEditingController();
   final _healthNotesController = TextEditingController();
   final _allergiesController = TextEditingController();
 
@@ -56,7 +56,6 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     'personal': false,
     'contact': false,
     'academy': false,
-    'financial': false,
   };
 
   bool get isEditing => widget.studentId != null;
@@ -64,22 +63,21 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   // Calculate form progress
   double get _formProgress {
     int filled = 0;
-    int total = 8; // Required fields
+    int total = 1; // Only full name is required
 
     if (_fullNameController.text.isNotEmpty) filled++;
-    if (_category != null) filled++;
-    if (_belt.isNotEmpty) filled++;
-    if (_tuitionValueController.text.isNotEmpty) filled++;
-    if (_tuitionDayController.text.isNotEmpty) filled++;
 
-    // Optional but valuable
-    total += 6;
+    // Optional but valuable fields
+    total += 9;
+    if (_belt.isNotEmpty) filled++;
     if (_phoneController.text.isNotEmpty) filled++;
     if (_emailController.text.isNotEmpty) filled++;
     if (_birthDate != null) filled++;
     if (_emergencyContactNameController.text.isNotEmpty) filled++;
     if (_selectedPlans.isNotEmpty) filled++;
     if (_nicknameController.text.isNotEmpty) filled++;
+    if (_tuitionValueController.text.isNotEmpty) filled++;
+    if (_tuitionDayController.text.isNotEmpty) filled++;
 
     return (filled / total) * 100;
   }
@@ -102,12 +100,6 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
       label: 'Academia',
       icon: LucideIcons.award,
       hasErrors: _tabErrors['academy'] ?? false,
-    ),
-    FormTab(
-      key: 'financial',
-      label: 'Financeiro',
-      icon: LucideIcons.wallet,
-      hasErrors: _tabErrors['financial'] ?? false,
     ),
   ];
 
@@ -224,13 +216,6 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
                         child: _buildAcademyTab(),
                       ),
 
-                      // Financial Tab
-                      FormTabPanel(
-                        tabKey: 'financial',
-                        activeTab: _activeTab,
-                        child: _buildFinancialTab(),
-                      ),
-
                       const SizedBox(height: 100),
                     ],
                   ),
@@ -304,7 +289,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
           // Next / Save button
           Expanded(
             flex: _activeTab == 'personal' ? 1 : 1,
-            child: _activeTab == 'financial'
+            child: _activeTab == 'academy'
                 ? ElevatedButton.icon(
                     onPressed: _isSaving ? null : _saveStudent,
                     icon: _isSaving
@@ -553,8 +538,6 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
           title: 'Informações da Academia',
           subtitle: 'Dados de matrícula e graduação',
           icon: LucideIcons.award,
-          badge: 'Obrigatório',
-          badgeVariant: BadgeVariant.warning,
           child: Column(
             children: [
               FormRow(
@@ -587,6 +570,47 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
                 children: [
                   _buildBeltSelector(),
                   _buildStripesSelector(),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // Financial Section (Optional)
+        FormSection(
+          title: 'Financeiro (Opcional)',
+          subtitle: 'Planos e mensalidade',
+          icon: LucideIcons.wallet,
+          collapsible: true,
+          defaultCollapsed: true,
+          child: Column(
+            children: [
+              _buildPlanDropdown(),
+              const SizedBox(height: 16),
+              FormRow(
+                children: [
+                  CurrencyInput(
+                    controller: _tuitionValueController,
+                    label: 'Valor da Mensalidade (Opcional)',
+                  ),
+                  InputField(
+                    controller: _tuitionDayController,
+                    label: 'Dia de Vencimento',
+                    hintText: '1-28 (Opcional)',
+                    prefixIcon: LucideIcons.calendar,
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value?.isNotEmpty == true) {
+                        final day = int.tryParse(value!);
+                        if (day == null || day < 1 || day > 28) {
+                          return 'Dia inválido (1-28)';
+                        }
+                      }
+                      return null;
+                    },
+                  ),
                 ],
               ),
             ],
@@ -785,61 +809,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     );
   }
 
-  // ============================================
-  // FINANCIAL TAB
-  // ============================================
-  Widget _buildFinancialTab() {
-    return Column(
-      children: [
-        FormSection(
-          title: 'Plano e Mensalidade',
-          subtitle: 'Configurações financeiras do aluno',
-          icon: LucideIcons.wallet,
-          badge: 'Obrigatório',
-          badgeVariant: BadgeVariant.warning,
-          child: Column(
-            children: [
-              _buildPlanDropdown(),
-              const SizedBox(height: 16),
 
-              FormRow(
-                children: [
-                  CurrencyInput(
-                    controller: _tuitionValueController,
-                    label: 'Valor da Mensalidade',
-                    validator: (value) {
-                      if (value?.isEmpty == true) return 'Valor obrigatório';
-                      final parsed = double.tryParse(
-                        value!.replaceAll(',', '.'),
-                      );
-                      if (parsed == null) return 'Valor inválido';
-                      return null;
-                    },
-                  ),
-                  InputField(
-                    controller: _tuitionDayController,
-                    label: 'Dia de Vencimento',
-                    hintText: '1-28',
-                    prefixIcon: LucideIcons.calendar,
-                    keyboardType: TextInputType.number,
-                    validator: (value) {
-                      if (value?.isEmpty == true) return 'Obrigatório';
-                      final day = int.tryParse(value!);
-                      if (day == null || day < 1 || day > 28) {
-                        return 'Dia inválido (1-28)';
-                      }
-                      return null;
-                    },
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-
-      ],
-    );
-  }
 
   Widget _buildPlanDropdown() {
     final selectedIds = _selectedPlans.map((p) => p.id).toSet();
@@ -934,8 +904,12 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         'currentBelt': _belt,
         'currentStripes': _stripes,
         'status': _status.value,
-        'tuitionValue': double.parse(_tuitionValueController.text.replaceAll(',', '.')),
-        'tuitionDay': int.parse(_tuitionDayController.text),
+        'tuitionValue': _tuitionValueController.text.trim().isEmpty 
+            ? 0.0 
+            : double.tryParse(_tuitionValueController.text.replaceAll(',', '.')) ?? 0.0,
+        'tuitionDay': _tuitionDayController.text.trim().isEmpty 
+            ? 10 
+            : int.tryParse(_tuitionDayController.text) ?? 10,
         'healthNotes': _healthNotesController.text.trim().isEmpty ? null : _healthNotesController.text.trim(),
       };
 
@@ -1002,8 +976,6 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     // Check each tab for validation errors
     _tabErrors['personal'] = _fullNameController.text.isEmpty ||
         (_category == StudentCategory.kids && _guardianNameController.text.isEmpty);
-    _tabErrors['financial'] = _tuitionValueController.text.isEmpty ||
-        _tuitionDayController.text.isEmpty;
     // Add more checks as needed
   }
 }

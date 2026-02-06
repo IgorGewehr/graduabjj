@@ -9,6 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../core/theme.dart';
 import '../services/firebase_service.dart';
 import '../services/abacate_pay_service.dart';
+import '../services/asaas_payment_service.dart';
 
 // ============================================
 // Modern PIX Payment Bottom Sheet
@@ -841,27 +842,54 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
         cpf: _cpfController.text,
       );
 
-      final service = AbacatePayService(academyId);
+      // Check which provider is active
+      final asaasService = AsaasPaymentService(academyId);
+      final isAsaas = await asaasService.isEnabled();
+
       CardPaymentResult result;
 
       if (widget.orderId != null) {
-        result = await service.createStoreOrderCardPayment(
-          amount: widget.amount,
-          orderId: widget.orderId!,
-          studentId: widget.studentId,
-          studentName: widget.studentName,
-          cardData: cardData,
-          description: widget.description,
-        );
+        if (isAsaas) {
+          result = await asaasService.createStoreOrderCardPayment(
+            amount: widget.amount,
+            orderId: widget.orderId!,
+            studentId: widget.studentId,
+            studentName: widget.studentName,
+            cardData: cardData,
+            description: widget.description,
+          );
+        } else {
+          final service = AbacatePayService(academyId);
+          result = await service.createStoreOrderCardPayment(
+            amount: widget.amount,
+            orderId: widget.orderId!,
+            studentId: widget.studentId,
+            studentName: widget.studentName,
+            cardData: cardData,
+            description: widget.description,
+          );
+        }
       } else if (widget.financialId != null) {
-        result = await service.createCardPayment(
-          amount: widget.amount,
-          financialId: widget.financialId!,
-          studentId: widget.studentId,
-          studentName: widget.studentName,
-          cardData: cardData,
-          description: widget.description,
-        );
+        if (isAsaas) {
+          result = await asaasService.createCardPayment(
+            amount: widget.amount,
+            financialId: widget.financialId!,
+            studentId: widget.studentId,
+            studentName: widget.studentName,
+            cardData: cardData,
+            description: widget.description,
+          );
+        } else {
+          final service = AbacatePayService(academyId);
+          result = await service.createCardPayment(
+            amount: widget.amount,
+            financialId: widget.financialId!,
+            studentId: widget.studentId,
+            studentName: widget.studentName,
+            cardData: cardData,
+            description: widget.description,
+          );
+        }
       } else {
         throw Exception('Order ID or Financial ID is required');
       }

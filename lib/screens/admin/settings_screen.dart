@@ -788,7 +788,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             child: Column(
               children: [
                 _ModernSwitch(
-                  title: 'AbacatePay (Legado)',
+                  title: 'AbacatePay',
                   subtitle: 'Cobranca automatica via PIX',
                   value: _abacatePayEnabled,
                   onChanged: (value) {
@@ -801,12 +801,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 _ModernSwitch(
                   title: 'Asaas',
                   subtitle: 'Pagamentos via PIX e cartao (subconta)',
-                  value: _asaasEnabled,
-                  onChanged: (value) {
-                    setState(() => _asaasEnabled = value);
-                  },
+                  value: false,
+                  onChanged: null,
                   icon: LucideIcons.creditCard,
-                  iconColor: Colors.blue,
+                  iconColor: Colors.grey,
+                  disabled: true,
                 ),
               ],
             ),

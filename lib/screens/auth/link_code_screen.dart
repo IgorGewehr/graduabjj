@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
@@ -23,6 +26,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
   final _codeFormKey = GlobalKey<FormState>();
   final _registerFormKey = GlobalKey<FormState>();
   final _codeController = TextEditingController();
+  final _cpfController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
@@ -37,10 +41,45 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
   @override
   void dispose() {
     _codeController.dispose();
+    _cpfController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
+  }
+
+  /// Format CPF string: 000.000.000-00
+  String _formatCpf(String value) {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 6) return '${digits.substring(0, 3)}.${digits.substring(3)}';
+    if (digits.length <= 9) return '${digits.substring(0, 3)}.${digits.substring(3, 6)}.${digits.substring(6)}';
+    return '${digits.substring(0, 3)}.${digits.substring(3, 6)}.${digits.substring(6, 9)}-${digits.substring(9, digits.length.clamp(0, 11))}';
+  }
+
+  /// Validate CPF check digits
+  bool _validateCpf(String cpf) {
+    final digits = cpf.replaceAll(RegExp(r'\D'), '');
+    if (digits.length != 11) return false;
+    if (RegExp(r'^(\d)\1{10}$').hasMatch(digits)) return false;
+
+    int sum = 0;
+    for (int i = 0; i < 9; i++) {
+      sum += int.parse(digits[i]) * (10 - i);
+    }
+    int rest = (sum * 10) % 11;
+    if (rest == 10) rest = 0;
+    if (rest != int.parse(digits[9])) return false;
+
+    sum = 0;
+    for (int i = 0; i < 10; i++) {
+      sum += int.parse(digits[i]) * (11 - i);
+    }
+    rest = (sum * 10) % 11;
+    if (rest == 10) rest = 0;
+    if (rest != int.parse(digits[10])) return false;
+
+    return true;
   }
 
   Future<void> _validateCode() async {
@@ -52,8 +91,9 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     });
 
     try {
-      final linkCodeService = LinkCodeService(FirebaseService.academyId);
-      final validation = await linkCodeService.validate(_codeController.text.trim().toUpperCase());
+      // Use global validation (collectionGroup) to search across ALL academies
+      // This is critical for multi-tenant support during registration
+      final validation = await validateCodeGlobally(_codeController.text.trim().toUpperCase());
 
       if (!validation.valid) {
         setState(() {
@@ -78,6 +118,18 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
   Future<void> _createAccount() async {
     if (!_registerFormKey.currentState!.validate()) return;
+    if (_validatedLinkCode == null) return;
+
+    // Re-validate code expiration before creating account
+    // (code could have expired while user was filling the form)
+    if (_validatedLinkCode!.expiresAt.isBefore(DateTime.now())) {
+      setState(() {
+        _errorMessage = 'Este codigo expirou. Solicite um novo codigo.';
+        _currentStep = _Step.code;
+        _validatedLinkCode = null;
+      });
+      return;
+    }
 
     setState(() {
       _isLoading = true;
@@ -86,7 +138,11 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
     try {
       final authService = ref.read(authServiceProvider);
-      final linkCodeService = LinkCodeService(FirebaseService.academyId);
+      // CRITICAL: Use academyId from the validated link code, NOT from FirebaseService
+      // This ensures multi-tenant correctness during registration
+      final academyId = _validatedLinkCode!.academyId;
+      final linkCodeService = LinkCodeService(academyId);
+      final cpfDigits = _cpfController.text.replaceAll(RegExp(r'\D'), '');
 
       // Create Firebase account with the student name from the link code
       final userCredential = await authService.createAccountWithLinkCode(
@@ -94,6 +150,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         _passwordController.text,
         _validatedLinkCode!.studentName,
         _validatedLinkCode!.studentId,
+        academyId, // Pass the correct academyId
       );
 
       // Mark the code as used
@@ -101,6 +158,33 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         _validatedLinkCode!.code,
         userCredential.user!.uid,
       );
+
+      // Save CPF to student record with retry
+      bool cpfSaved = false;
+      for (int attempt = 0; attempt < 3 && !cpfSaved; attempt++) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('academies')
+              .doc(academyId)
+              .collection('students')
+              .doc(_validatedLinkCode!.studentId)
+              .update({
+            'cpf': cpfDigits,
+            'linkedUserId': userCredential.user!.uid,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          cpfSaved = true;
+        } catch (e) {
+          debugPrint('CPF save attempt ${attempt + 1} failed: $e');
+          if (attempt < 2) {
+            await Future.delayed(const Duration(milliseconds: 500));
+          }
+        }
+      }
+
+      if (!cpfSaved) {
+        debugPrint('WARNING: CPF not saved after 3 attempts. User can update later.');
+      }
 
       setState(() {
         _currentStep = _Step.success;
@@ -115,13 +199,40 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
   }
 
   String _getErrorMessage(dynamic error) {
-    if (error.toString().contains('email-already-in-use')) {
-      return 'Este email ja esta em uso';
-    } else if (error.toString().contains('invalid-email')) {
-      return 'Email invalido';
-    } else if (error.toString().contains('weak-password')) {
-      return 'Senha muito fraca. Use pelo menos 6 caracteres.';
+    // Handle Firebase Auth errors with proper error codes
+    if (error is FirebaseAuthException) {
+      switch (error.code) {
+        case 'email-already-in-use':
+          return 'Este email ja esta em uso';
+        case 'invalid-email':
+          return 'Email invalido';
+        case 'weak-password':
+          return 'Senha muito fraca. Use pelo menos 6 caracteres.';
+        case 'operation-not-allowed':
+          return 'Operacao nao permitida. Contate o suporte.';
+        case 'network-request-failed':
+          return 'Erro de conexao. Verifique sua internet.';
+        default:
+          debugPrint('Unhandled Firebase error: ${error.code} - ${error.message}');
+          return 'Erro ao criar conta. Tente novamente.';
+      }
     }
+
+    // Handle FirebaseException (Firestore errors)
+    if (error is FirebaseException) {
+      if (error.code == 'permission-denied') {
+        return 'Erro de permissao. O codigo pode ter expirado.';
+      }
+      debugPrint('Firebase error: ${error.code} - ${error.message}');
+      return 'Erro ao criar conta. Tente novamente.';
+    }
+
+    // Handle network errors
+    final errorStr = error.toString().toLowerCase();
+    if (errorStr.contains('network') || errorStr.contains('socket')) {
+      return 'Erro de conexao. Verifique sua internet.';
+    }
+
     return 'Erro ao criar conta. Tente novamente.';
   }
 
@@ -428,6 +539,46 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
               fillColor: AppTheme.surface,
             ),
           ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.1),
+
+          const SizedBox(height: 16),
+
+          // CPF field
+          TextFormField(
+            controller: _cpfController,
+            keyboardType: TextInputType.number,
+            textInputAction: TextInputAction.next,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[\d.\-]')),
+              LengthLimitingTextInputFormatter(14), // 000.000.000-00
+            ],
+            onChanged: (value) {
+              final formatted = _formatCpf(value);
+              if (formatted != _cpfController.text) {
+                _cpfController.value = TextEditingValue(
+                  text: formatted,
+                  selection: TextSelection.collapsed(offset: formatted.length),
+                );
+              }
+            },
+            decoration: const InputDecoration(
+              labelText: 'CPF',
+              hintText: '000.000.000-00',
+              prefixIcon: Icon(LucideIcons.fileText, size: 20),
+            ),
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return 'Informe seu CPF';
+              }
+              final digits = value.replaceAll(RegExp(r'\D'), '');
+              if (digits.length != 11) {
+                return 'CPF deve ter 11 digitos';
+              }
+              if (!_validateCpf(value)) {
+                return 'CPF invalido';
+              }
+              return null;
+            },
+          ).animate().fadeIn(delay: 350.ms).slideX(begin: -0.1),
 
           const SizedBox(height: 16),
 

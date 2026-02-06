@@ -447,6 +447,8 @@ class AuthService {
     required String displayName,
     required String academyName,
     required String academySlug,
+    String? documentType,
+    String? documentNumber,
   }) async {
     // Step 1: Create Firebase Auth user
     final credential = await _auth.createUserWithEmailAndPassword(
@@ -466,7 +468,7 @@ class AuthService {
     );
 
     // Step 4: Create academy document
-    await _firestore.collection('academies').doc(academySlug).set({
+    final academyData = <String, dynamic>{
       'name': academyName,
       'slug': academySlug,
       'ownerId': credential.user!.uid,
@@ -486,7 +488,13 @@ class AuthService {
       'abacatePayEnabled': false,
       'autoGraduationEnabled': false,
       'studentCheckinEnabled': true,
-    });
+    };
+    
+    // Add document info if provided
+    if (documentType != null) academyData['ownerDocumentType'] = documentType;
+    if (documentNumber != null) academyData['ownerDocumentNumber'] = documentNumber;
+    
+    await _firestore.collection('academies').doc(academySlug).set(academyData);
 
     // Step 5: Create academy user document (role: admin)
     await globalUserService.upsertAcademyUser(
@@ -518,14 +526,15 @@ class AuthService {
   }
 
   /// Create account with link code (registers and links to student in one step)
+  /// CRITICAL: academyId must be passed explicitly (from link code validation)
+  /// to ensure multi-tenant correctness during registration
   Future<UserCredential> createAccountWithLinkCode(
     String email,
     String password,
     String displayName,
     String studentId,
+    String academyId, // Must be passed from validated link code
   ) async {
-    final academyId = FirebaseService.academyId;
-
     // Create Firebase Auth account
     final credential = await _auth.createUserWithEmailAndPassword(
       email: email,

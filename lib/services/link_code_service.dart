@@ -15,6 +15,7 @@ class LinkCode {
   final String code;
   final String studentId;
   final String studentName;
+  final String academyId; // Multi-tenant: which academy this code belongs to
   final String createdBy;
   final DateTime createdAt;
   final DateTime expiresAt;
@@ -26,6 +27,7 @@ class LinkCode {
     required this.code,
     required this.studentId,
     required this.studentName,
+    required this.academyId,
     required this.createdBy,
     required this.createdAt,
     required this.expiresAt,
@@ -33,13 +35,25 @@ class LinkCode {
     this.usedBy,
   });
 
-  factory LinkCode.fromFirestore(DocumentSnapshot doc) {
+  factory LinkCode.fromFirestore(DocumentSnapshot doc, {String? academyId}) {
     final data = doc.data() as Map<String, dynamic>;
+
+    // Extract academyId from document path if not provided
+    // Path format: academies/{academyId}/linkCodes/{docId}
+    String resolvedAcademyId = academyId ?? '';
+    if (resolvedAcademyId.isEmpty && doc.reference.path.contains('academies/')) {
+      final pathSegments = doc.reference.path.split('/');
+      if (pathSegments.length >= 2 && pathSegments[0] == 'academies') {
+        resolvedAcademyId = pathSegments[1];
+      }
+    }
+
     return LinkCode(
       id: doc.id,
       code: data['code'] ?? '',
       studentId: data['studentId'] ?? '',
       studentName: data['studentName'] ?? '',
+      academyId: resolvedAcademyId,
       createdBy: data['createdBy'] ?? '',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       expiresAt: (data['expiresAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
@@ -328,3 +342,67 @@ LinkCodeService createLinkCodeService(String academyId) {
 // Default Instance (uses current academy)
 // ============================================
 LinkCodeService get linkCodeService => LinkCodeService(FirebaseService.academyId);
+
+// ============================================
+// GLOBAL VALIDATION (Multi-tenant)
+// Used during registration when user doesn't have an academy yet
+// ============================================
+
+/// Validate code across ALL academies using collectionGroup
+/// Returns the LinkCode with academyId extracted from the document path
+Future<LinkCodeValidation> validateCodeGlobally(String code) async {
+  final firestore = FirebaseFirestore.instance;
+
+  try {
+    // Search across ALL academies' linkCodes subcollections
+    final query = await firestore
+        .collectionGroup('linkCodes')
+        .where('code', isEqualTo: code.toUpperCase())
+        .limit(1)
+        .get();
+
+    if (query.docs.isEmpty) {
+      return LinkCodeValidation(
+        valid: false,
+        error: 'Código não encontrado',
+      );
+    }
+
+    final doc = query.docs.first;
+    final linkCode = LinkCode.fromFirestore(doc);
+
+    // Validate academyId was extracted
+    if (linkCode.academyId.isEmpty) {
+      return LinkCodeValidation(
+        valid: false,
+        error: 'Erro ao identificar academia do código',
+      );
+    }
+
+    // Check if already used
+    if (linkCode.isUsed) {
+      return LinkCodeValidation(
+        valid: false,
+        error: 'Este código já foi utilizado',
+      );
+    }
+
+    // Check if expired
+    if (linkCode.isExpired) {
+      return LinkCodeValidation(
+        valid: false,
+        error: 'Este código expirou',
+      );
+    }
+
+    return LinkCodeValidation(
+      valid: true,
+      linkCode: linkCode,
+    );
+  } catch (e) {
+    return LinkCodeValidation(
+      valid: false,
+      error: 'Erro ao validar código: $e',
+    );
+  }
+}

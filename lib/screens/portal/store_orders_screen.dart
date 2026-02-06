@@ -13,6 +13,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../services/store_service.dart';
 import '../../services/abacate_pay_service.dart';
+import '../../services/asaas_payment_service.dart';
 import '../../services/firebase_service.dart';
 import '../../providers/store_provider.dart';
 import '../../providers/auth_provider.dart';
@@ -83,7 +84,13 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                 child: Row(
                   children: [
                     IconButton(
-                      onPressed: () => context.pop(),
+                      onPressed: () {
+                        if (Navigator.canPop(context)) {
+                          context.pop();
+                        } else {
+                          context.go('/portal/loja');
+                        }
+                      },
                       icon: const Icon(LucideIcons.arrowLeft),
                       style: IconButton.styleFrom(
                         backgroundColor: AppTheme.surfaceVariant,
@@ -588,14 +595,29 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
     setState(() => _isLoadingPayment = true);
 
     try {
-      final service = AbacatePayService(academyId);
-      final paymentLink = await service.createStoreOrderPayment(
-        amount: widget.order.total,
-        orderId: widget.order.id,
-        studentId: currentUser.studentId ?? '',
-        studentName: currentUser.displayName,
-        description: 'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}',
-      );
+      // Check which provider is active
+      final asaasService = AsaasPaymentService(academyId);
+      final isAsaas = await asaasService.isEnabled();
+
+      PaymentLink? paymentLink;
+      if (isAsaas) {
+        paymentLink = await asaasService.createStoreOrderPayment(
+          amount: widget.order.total,
+          orderId: widget.order.id,
+          studentId: currentUser.studentId ?? '',
+          studentName: currentUser.displayName,
+          description: 'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}',
+        );
+      } else {
+        final service = AbacatePayService(academyId);
+        paymentLink = await service.createStoreOrderPayment(
+          amount: widget.order.total,
+          orderId: widget.order.id,
+          studentId: currentUser.studentId ?? '',
+          studentName: currentUser.displayName,
+          description: 'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}',
+        );
+      }
 
       if (paymentLink != null && mounted) {
         Navigator.pop(context);
@@ -1723,15 +1745,31 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
         cpf: _cpfController.text,
       );
 
-      final service = AbacatePayService(academyId);
-      final result = await service.createStoreOrderCardPayment(
-        amount: widget.amount,
-        orderId: widget.orderId,
-        studentId: widget.studentId,
-        studentName: widget.studentName,
-        cardData: cardData,
-        description: 'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}',
-      );
+      // Check which provider is active
+      final asaasService = AsaasPaymentService(academyId);
+      final isAsaas = await asaasService.isEnabled();
+
+      CardPaymentResult result;
+      if (isAsaas) {
+        result = await asaasService.createStoreOrderCardPayment(
+          amount: widget.amount,
+          orderId: widget.orderId,
+          studentId: widget.studentId,
+          studentName: widget.studentName,
+          cardData: cardData,
+          description: 'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}',
+        );
+      } else {
+        final service = AbacatePayService(academyId);
+        result = await service.createStoreOrderCardPayment(
+          amount: widget.amount,
+          orderId: widget.orderId,
+          studentId: widget.studentId,
+          studentName: widget.studentName,
+          cardData: cardData,
+          description: 'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}',
+        );
+      }
 
       if (result.success) {
         if (mounted) {

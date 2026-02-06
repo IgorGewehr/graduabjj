@@ -2,8 +2,10 @@ import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:go_router/go_router.dart';
 
 import 'firebase_service.dart';
+import '../app.dart'; // Import for navigatorKey
 
 /// Background message handler - must be top-level function
 @pragma('vm:entry-point')
@@ -229,40 +231,89 @@ class PushNotificationService {
   /// Handle notification tap when app in background
   void _handleNotificationTap(RemoteMessage message) {
     print('Notification tapped: ${message.data}');
-    // TODO: Navigate to appropriate screen based on notification type
-    _processNotificationData(message.data);
+    _navigateFromNotification(message.data);
   }
 
   /// Handle local notification tap
   void _onNotificationTap(NotificationResponse response) {
     print('Local notification tapped: ${response.payload}');
-    // TODO: Navigate to appropriate screen based on payload
+    // Payload is stored as string, would need to parse if used
+    // For now, RemoteMessage data is more reliable
   }
 
-  /// Process notification data for navigation
-  void _processNotificationData(Map<String, dynamic> data) {
+  /// Navigate based on notification data
+  void _navigateFromNotification(Map<String, dynamic> data) {
+    final context = navigatorKey.currentContext;
+    if (context == null) {
+      print('Navigator context not available, cannot navigate');
+      return;
+    }
+
     final type = data['type'] as String?;
     final id = data['id'] as String?;
+    final academyId = data['academyId'] as String?;
 
-    switch (type) {
-      case 'financial':
-        // Navigate to financial screen
-        print('Navigate to financial: $id');
-        break;
-      case 'competition':
-        // Navigate to competition details
-        print('Navigate to competition: $id');
-        break;
-      case 'achievement':
-        // Navigate to achievements
-        print('Navigate to achievements: $id');
-        break;
-      case 'store_order':
-        // Navigate to order details (admin)
-        print('Navigate to store order: $id');
-        break;
-      default:
-        print('Unknown notification type: $type');
+    print('Navigating from notification - type: $type, id: $id, academyId: $academyId');
+
+    try {
+      switch (type) {
+        case 'financial':
+        case 'payment_received':
+        case 'payment_pending':
+        case 'payment_overdue':
+        case 'payment_due_soon':
+          // Navigate to financial screen
+          context.push('/portal/financeiro');
+          break;
+
+        case 'competition':
+        case 'competition_reminder':
+          // Navigate to competitions screen
+          context.push('/portal/competicoes');
+          break;
+
+        case 'achievement':
+        case 'graduation':
+        case 'belt_promotion':
+        case 'student_milestone':
+          // Navigate to timeline/achievements screen
+          context.push('/portal/linha-do-tempo');
+          break;
+
+        case 'store_order':
+        case 'order_paid':
+          // Navigate to store orders (admin)
+          if (id != null) {
+            context.push('/loja/pedidos/$id');
+          } else {
+            context.push('/loja/pedidos');
+          }
+          break;
+
+        case 'withdrawal_completed':
+        case 'withdrawal_failed':
+          // Navigate to wallet (admin)
+          context.push('/admin/carteira');
+          break;
+
+        case 'new_student_linked':
+          // Navigate to home/portal
+          context.push('/portal');
+          break;
+
+        default:
+          // Unknown type or no type, go to home
+          print('Unknown notification type: $type, navigating to home');
+          context.push('/portal');
+      }
+    } catch (e) {
+      print('Error navigating from notification: $e');
+      // Fallback to home if navigation fails
+      try {
+        context.push('/portal');
+      } catch (e2) {
+        print('Failed to navigate to fallback route: $e2');
+      }
     }
   }
 

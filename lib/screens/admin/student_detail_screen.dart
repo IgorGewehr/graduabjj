@@ -32,6 +32,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
   List<BeltProgression> _progressions = [];
   List<Achievement> _achievements = [];
   List<Assessment> _assessments = [];
+  List<Plan> _studentPlans = [];
   bool _isLoading = true;
 
   @override
@@ -60,6 +61,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
 
       final storeService = StoreService(academyId);
       final assessmentService = AssessmentService(academyId);
+      final planService = PlanService(academyId);
 
       final student = await studentService.getById(widget.studentId);
       final attendances = await attendanceService.getByStudent(widget.studentId);
@@ -68,6 +70,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       final progressions = await beltService.getByStudent(widget.studentId);
       final achievements = await achievementService.getForStudent(widget.studentId);
       final assessments = await assessmentService.getByStudent(widget.studentId);
+      final studentPlans = await planService.getPlansForStudent(widget.studentId);
 
       setState(() {
         _student = student;
@@ -77,6 +80,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
         _progressions = progressions;
         _achievements = achievements;
         _assessments = assessments;
+        _studentPlans = studentPlans;
         _isLoading = false;
       });
     } catch (e) {
@@ -492,13 +496,99 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
   }
 
   Widget _buildFinancialTab() {
-    if (_payments.isEmpty && _storeOrders.isEmpty) {
+    if (_payments.isEmpty && _storeOrders.isEmpty && _studentPlans.isEmpty) {
       return const Center(child: Text('Nenhum pagamento registrado'));
     }
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // Plan and value section
+        if (_studentPlans.isNotEmpty) ...[
+          Text(
+            'PLANO E VALOR',
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ..._studentPlans.map((plan) {
+            final studentValue = plan.getStudentValue(widget.studentId);
+            final hasCustomValue = plan.customValues.containsKey(widget.studentId);
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.divider),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          plan.name,
+                          style: AppTheme.titleSmall.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => _showCustomValueDialog(plan),
+                        child: const Icon(LucideIcons.pencil, size: 18, color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Text(
+                        'Valor padrão: R\$ ${plan.monthlyValue.toStringAsFixed(2)}',
+                        style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Text(
+                        'Valor do aluno: R\$ ${studentValue.toStringAsFixed(2)}',
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: hasCustomValue ? AppTheme.success : AppTheme.textPrimary,
+                        ),
+                      ),
+                      if (hasCustomValue) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.successLight,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'Valor personalizado',
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.success,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }),
+          const SizedBox(height: 16),
+        ],
         // Tuition payments
         if (_payments.isNotEmpty) ...[
           Text(
@@ -527,6 +617,76 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
           ..._storeOrders.map((order) => _StoreOrderCard(order: order)),
         ],
       ],
+    );
+  }
+
+  void _showCustomValueDialog(Plan plan) {
+    final studentValue = plan.getStudentValue(widget.studentId);
+    final controller = TextEditingController(text: studentValue.toStringAsFixed(2));
+    final hasCustomValue = plan.customValues.containsKey(widget.studentId);
+    final parentContext = context;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Valor - ${plan.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Valor padrão do plano: R\$ ${plan.monthlyValue.toStringAsFixed(2)}',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Valor do aluno',
+                prefixText: 'R\$ ',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            if (hasCustomValue) ...[
+              const SizedBox(height: 12),
+              TextButton.icon(
+                onPressed: () async {
+                  Navigator.of(dialogContext).pop();
+                  final planService = PlanService(FirebaseService.academyId);
+                  await planService.removeCustomValue(plan.id, widget.studentId);
+                  if (mounted) parentContext.showSuccess('Valor restaurado ao padrão do plano');
+                  _loadData();
+                },
+                icon: const Icon(LucideIcons.rotateCcw, size: 16),
+                label: const Text('Restaurar valor do plano'),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final value = double.tryParse(controller.text.replaceAll(',', '.'));
+              if (value == null || value <= 0) return;
+              Navigator.of(dialogContext).pop();
+              final planService = PlanService(FirebaseService.academyId);
+              if (value == plan.monthlyValue) {
+                await planService.removeCustomValue(plan.id, widget.studentId);
+              } else {
+                await planService.setCustomValue(plan.id, widget.studentId, value);
+              }
+              if (mounted) parentContext.showSuccess('Valor atualizado');
+              _loadData();
+            },
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
     );
   }
 

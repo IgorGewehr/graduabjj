@@ -270,7 +270,7 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
       // Show success and navigate to orders
       if (mounted) {
         context.showSuccess('Pedido criado com sucesso!');
-        context.go('/portal/loja/pedidos');
+        context.push('/portal/loja/pedidos');
       }
     } catch (e) {
       if (mounted) {

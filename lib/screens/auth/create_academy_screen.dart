@@ -1,15 +1,20 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
+
+/// Document type for registration
+enum _DocumentType { cpf, cnpj }
 
 /// Create Academy Screen - Multi-step form for professors/owners
 class CreateAcademyScreen extends ConsumerStatefulWidget {
@@ -35,17 +40,21 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   // Academy form
   final _academyFormKey = GlobalKey<FormState>();
   final _academyNameController = TextEditingController();
-  final _slugController = TextEditingController();
-  bool _slugManuallyEdited = false;
-
-  // Slug availability
-  bool? _slugAvailable;
-  bool _checkingSlug = false;
-  Timer? _slugDebounceTimer;
+  final _documentController = TextEditingController();
+  _DocumentType _documentType = _DocumentType.cpf;
 
   // General state
   bool _isLoading = false;
   String? _errorMessage;
+  bool _acceptedTerms = false;
+
+  // Open terms URL
+  Future<void> _openTermsUrl() async {
+    final uri = Uri.parse('https://bjjeasy.netlify.app/termsofservice');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
 
   @override
   void dispose() {
@@ -55,13 +64,141 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     _academyNameController.dispose();
-    _slugController.dispose();
-    _slugDebounceTimer?.cancel();
+    _documentController.dispose();
     super.dispose();
   }
 
   // ============================================
-  // Slug Generation
+  // Document Formatting & Validation
+  // ============================================
+  
+  /// Format CPF: 000.000.000-00
+  String _formatCpf(String value) {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 6) return '${digits.substring(0, 3)}.${digits.substring(3)}';
+    if (digits.length <= 9) return '${digits.substring(0, 3)}.${digits.substring(3, 6)}.${digits.substring(6)}';
+    return '${digits.substring(0, 3)}.${digits.substring(3, 6)}.${digits.substring(6, 9)}-${digits.substring(9, digits.length.clamp(0, 11))}';
+  }
+
+  /// Format CNPJ: 00.000.000/0000-00
+  String _formatCnpj(String value) {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 5) return '${digits.substring(0, 2)}.${digits.substring(2)}';
+    if (digits.length <= 8) return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5)}';
+    if (digits.length <= 12) return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8)}';
+    return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8, 12)}-${digits.substring(12, digits.length.clamp(0, 14))}';
+  }
+
+  /// Validate CPF check digits
+  bool _validateCpf(String cpf) {
+    final digits = cpf.replaceAll(RegExp(r'\D'), '');
+    if (digits.length != 11) return false;
+    if (RegExp(r'^(\d)\1{10}$').hasMatch(digits)) return false;
+
+    int sum = 0;
+    for (int i = 0; i < 9; i++) {
+      sum += int.parse(digits[i]) * (10 - i);
+    }
+    int rest = (sum * 10) % 11;
+    if (rest == 10) rest = 0;
+    if (rest != int.parse(digits[9])) return false;
+
+    sum = 0;
+    for (int i = 0; i < 10; i++) {
+      sum += int.parse(digits[i]) * (11 - i);
+    }
+    rest = (sum * 10) % 11;
+    if (rest == 10) rest = 0;
+    if (rest != int.parse(digits[10])) return false;
+
+    return true;
+  }
+
+  /// Validate CNPJ check digits
+  bool _validateCnpj(String cnpj) {
+    final digits = cnpj.replaceAll(RegExp(r'\D'), '');
+    if (digits.length != 14) return false;
+    if (RegExp(r'^(\d)\1{13}$').hasMatch(digits)) return false;
+
+    // First check digit
+    const weights1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    int sum = 0;
+    for (int i = 0; i < 12; i++) {
+      sum += int.parse(digits[i]) * weights1[i];
+    }
+    int rest = sum % 11;
+    int digit1 = rest < 2 ? 0 : 11 - rest;
+    if (digit1 != int.parse(digits[12])) return false;
+
+    // Second check digit
+    const weights2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    sum = 0;
+    for (int i = 0; i < 13; i++) {
+      sum += int.parse(digits[i]) * weights2[i];
+    }
+    rest = sum % 11;
+    int digit2 = rest < 2 ? 0 : 11 - rest;
+    if (digit2 != int.parse(digits[13])) return false;
+
+    return true;
+  }
+
+  void _onDocumentChanged(String value) {
+    final formatted = _documentType == _DocumentType.cpf
+        ? _formatCpf(value)
+        : _formatCnpj(value);
+    if (formatted != _documentController.text) {
+      _documentController.value = TextEditingValue(
+        text: formatted,
+        selection: TextSelection.collapsed(offset: formatted.length),
+      );
+    }
+  }
+
+  String? _validateDocument(String? value) {
+    if (value == null || value.isEmpty) {
+      return _documentType == _DocumentType.cpf
+          ? 'Informe o CPF do responsável'
+          : 'Informe o CNPJ da academia';
+    }
+    
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    
+    if (_documentType == _DocumentType.cpf) {
+      if (digits.length != 11) return 'CPF deve ter 11 dígitos';
+      if (!_validateCpf(value)) return 'CPF inválido';
+    } else {
+      if (digits.length != 14) return 'CNPJ deve ter 14 dígitos';
+      if (!_validateCnpj(value)) return 'CNPJ inválido';
+    }
+    
+    return null;
+  }
+
+  // ============================================
+  // Check if Academy Name Already Exists
+  // ============================================
+  Future<bool> _checkAcademyNameExists(String name) async {
+    final normalizedName = name.trim().toLowerCase();
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('academies')
+        .get();
+
+    for (final doc in snapshot.docs) {
+      final academyName = doc.data()['name'] as String?;
+      if (academyName != null && academyName.toLowerCase().trim() == normalizedName) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // ============================================
+  // Slug Generation (automatic from name)
   // ============================================
   String _generateSlug(String name) {
     // Remove accents
@@ -73,66 +210,15 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
       slug = slug.replaceAll(accents[i], noAccents[i]);
     }
 
-    return slug
+    slug = slug
         .replaceAll(RegExp(r'[^a-z0-9\s-]'), '')
         .replaceAll(RegExp(r'\s+'), '-')
         .replaceAll(RegExp(r'-+'), '-')
         .replaceAll(RegExp(r'^-|-$'), '');
-  }
-
-  void _onAcademyNameChanged(String value) {
-    if (!_slugManuallyEdited) {
-      final slug = _generateSlug(value);
-      _slugController.text = slug;
-      _checkSlugAvailability(slug);
-    }
-  }
-
-  void _onSlugChanged(String value) {
-    _slugManuallyEdited = true;
-    final slug = _generateSlug(value);
-    if (slug != value) {
-      _slugController.text = slug;
-      _slugController.selection = TextSelection.fromPosition(
-        TextPosition(offset: slug.length),
-      );
-    }
-    _checkSlugAvailability(slug);
-  }
-
-  void _checkSlugAvailability(String slug) {
-    _slugDebounceTimer?.cancel();
-    setState(() {
-      _slugAvailable = null;
-      _checkingSlug = false;
-    });
-
-    if (slug.length < 3) return;
-
-    setState(() => _checkingSlug = true);
-
-    _slugDebounceTimer = Timer(const Duration(milliseconds: 500), () async {
-      try {
-        final doc = await FirebaseFirestore.instance
-            .collection('academies')
-            .doc(slug)
-            .get();
-
-        if (mounted) {
-          setState(() {
-            _slugAvailable = !doc.exists;
-            _checkingSlug = false;
-          });
-        }
-      } catch (_) {
-        if (mounted) {
-          setState(() {
-            _slugAvailable = null;
-            _checkingSlug = false;
-          });
-        }
-      }
-    });
+    
+    // Add timestamp for uniqueness
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString().substring(6);
+    return '${slug.substring(0, slug.length.clamp(0, 30))}-$timestamp';
   }
 
   // ============================================
@@ -158,15 +244,9 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
     } else if (_currentStep == 1) {
       if (!(_academyFormKey.currentState?.validate() ?? false)) return;
 
-      if (_slugAvailable == false) {
+      if (!_acceptedTerms) {
         setState(() {
-          _errorMessage = 'Este identificador ja esta em uso. Escolha outro.';
-        });
-        return;
-      }
-      if (_slugAvailable == null && _slugController.text.length >= 3) {
-        setState(() {
-          _errorMessage = 'Aguarde a verificacao do identificador.';
+          _errorMessage = 'Você precisa aceitar os Termos de Serviço para continuar.';
         });
         return;
       }
@@ -185,22 +265,18 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
     });
 
     try {
-      final slug = _slugController.text.trim();
-
-      // Double-check slug availability
-      final slugDoc = await FirebaseFirestore.instance
-          .collection('academies')
-          .doc(slug)
-          .get();
-
-      if (slugDoc.exists) {
+      // Check if academy name already exists
+      final nameExists = await _checkAcademyNameExists(_academyNameController.text.trim());
+      if (nameExists) {
         setState(() {
-          _errorMessage = 'Este identificador ja esta em uso. Escolha outro.';
-          _slugAvailable = false;
+          _errorMessage = 'Já existe uma academia com este nome. Escolha outro nome.';
           _isLoading = false;
         });
         return;
       }
+
+      final slug = _generateSlug(_academyNameController.text.trim());
+      final documentDigits = _documentController.text.replaceAll(RegExp(r'\D'), '');
 
       final authService = ref.read(authServiceProvider);
       await authService.createAcademyAccount(
@@ -209,6 +285,8 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         displayName: _nameController.text.trim(),
         academyName: _academyNameController.text.trim(),
         academySlug: slug,
+        documentType: _documentType == _DocumentType.cpf ? 'cpf' : 'cnpj',
+        documentNumber: documentDigits,
       );
 
       // Success - go to step 3
@@ -227,15 +305,15 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   String _getErrorMessage(dynamic error) {
     final msg = error.toString().toLowerCase();
     if (msg.contains('email-already-in-use')) {
-      return 'Este email ja esta em uso. Faca login ou use outro email.';
+      return 'Este email já está em uso. Faça login ou use outro email.';
     } else if (msg.contains('invalid-email')) {
-      return 'Email invalido';
+      return 'Email inválido';
     } else if (msg.contains('weak-password')) {
       return 'Senha muito fraca. Use pelo menos 6 caracteres.';
     } else if (msg.contains('permission-denied') || msg.contains('permission denied')) {
-      return 'Erro de permissao. Entre em contato com o suporte.';
+      return 'Erro de permissão. Entre em contato com o suporte.';
     } else if (msg.contains('network')) {
-      return 'Erro de conexao. Verifique sua internet.';
+      return 'Erro de conexão. Verifique sua internet.';
     }
     return 'Erro ao criar academia. Tente novamente.';
   }
@@ -360,27 +438,12 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Icon
+            // Logo instead of icon
             Center(
-              child: Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF667EEA), Color(0xFF764BA2)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF667EEA).withOpacity(0.3),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: const Icon(LucideIcons.user, size: 32, color: Colors.white),
+              child: Image.asset(
+                'assets/images/logo.png',
+                width: 80,
+                height: 80,
               ),
             ).animate().scale(begin: const Offset(0.8, 0.8), duration: 400.ms, curve: Curves.easeOut),
 
@@ -439,7 +502,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               ),
               validator: (value) {
                 if (value == null || value.isEmpty) return 'Informe seu email';
-                if (!value.contains('@')) return 'Email invalido';
+                if (!value.contains('@')) return 'Email inválido';
                 return null;
               },
             ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.1),
@@ -453,7 +516,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               textInputAction: TextInputAction.next,
               decoration: InputDecoration(
                 labelText: 'Senha',
-                hintText: 'Minimo 6 caracteres',
+                hintText: 'Mínimo 6 caracteres',
                 prefixIcon: const Icon(LucideIcons.lock, size: 20),
                 suffixIcon: IconButton(
                   icon: Icon(
@@ -492,7 +555,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               ),
               validator: (value) {
                 if (value == null || value.isEmpty) return 'Confirme sua senha';
-                if (value != _passwordController.text) return 'As senhas nao coincidem';
+                if (value != _passwordController.text) return 'As senhas não coincidem';
                 return null;
               },
             ).animate().fadeIn(delay: 500.ms).slideX(begin: -0.1),
@@ -522,7 +585,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  'Ja tem uma conta? ',
+                  'Já tem uma conta? ',
                   style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
                 ),
                 TextButton(
@@ -548,27 +611,12 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Icon
+            // Logo instead of icon
             Center(
-              child: Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFF093FB), Color(0xFFF5576C)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFF5576C).withOpacity(0.3),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: const Icon(LucideIcons.building2, size: 32, color: Colors.white),
+              child: Image.asset(
+                'assets/images/logo.png',
+                width: 80,
+                height: 80,
               ),
             ).animate().scale(begin: const Offset(0.8, 0.8), duration: 400.ms, curve: Curves.easeOut),
 
@@ -606,7 +654,6 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                 hintText: 'Ex: Team Alpha Jiu-Jitsu',
                 prefixIcon: Icon(LucideIcons.graduationCap, size: 20),
               ),
-              onChanged: _onAcademyNameChanged,
               validator: (value) {
                 if (value == null || value.isEmpty) return 'Informe o nome da academia';
                 if (value.trim().length < 3) return 'Nome deve ter pelo menos 3 caracteres';
@@ -614,77 +661,89 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               },
             ).animate().fadeIn(delay: 200.ms).slideX(begin: -0.1),
 
+            const SizedBox(height: 24),
+
+            // Document type toggle
+            Text(
+              'Documento do responsável',
+              style: AppTheme.labelLarge.copyWith(color: AppTheme.textSecondary),
+            ).animate().fadeIn(delay: 250.ms),
+            
+            const SizedBox(height: 8),
+
+            SegmentedButton<_DocumentType>(
+              segments: const [
+                ButtonSegment(
+                  value: _DocumentType.cpf,
+                  label: Text('CPF (Pessoa Física)'),
+                  icon: Icon(LucideIcons.user, size: 16),
+                ),
+                ButtonSegment(
+                  value: _DocumentType.cnpj,
+                  label: Text('CNPJ (Empresa)'),
+                  icon: Icon(LucideIcons.building2, size: 16),
+                ),
+              ],
+              selected: {_documentType},
+              onSelectionChanged: (Set<_DocumentType> selection) {
+                setState(() {
+                  _documentType = selection.first;
+                  _documentController.clear();
+                });
+              },
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+              ),
+            ).animate().fadeIn(delay: 300.ms),
+
             const SizedBox(height: 16),
 
-            // Slug field with availability indicator
+            // Document field
             TextFormField(
-              controller: _slugController,
-              keyboardType: TextInputType.url,
+              controller: _documentController,
+              keyboardType: TextInputType.number,
               textInputAction: TextInputAction.done,
-              onFieldSubmitted: (_) => _handleNext(),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[\d.\-/]')),
+                LengthLimitingTextInputFormatter(_documentType == _DocumentType.cpf ? 14 : 18),
+              ],
+              onChanged: _onDocumentChanged,
               decoration: InputDecoration(
-                labelText: 'Identificador (URL)',
-                hintText: 'team-alpha',
-                prefixIcon: Padding(
-                  padding: const EdgeInsets.only(left: 12, right: 4),
-                  child: Text('/', style: AppTheme.bodyLarge.copyWith(color: AppTheme.textSecondary)),
-                ),
-                prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
-                suffixIcon: _buildSlugSuffix(),
-                helperText: _getSlugHelperText(),
-                helperStyle: TextStyle(
-                  color: _slugAvailable == true
-                      ? AppTheme.success
-                      : _slugAvailable == false
-                          ? AppTheme.error
-                          : AppTheme.textSecondary,
-                ),
-                errorText: _slugAvailable == false ? 'Identificador ja em uso' : null,
+                labelText: _documentType == _DocumentType.cpf ? 'CPF' : 'CNPJ',
+                hintText: _documentType == _DocumentType.cpf ? '000.000.000-00' : '00.000.000/0000-00',
+                prefixIcon: const Icon(LucideIcons.fileText, size: 20),
               ),
-              onChanged: _onSlugChanged,
-              validator: (value) {
-                if (value == null || value.isEmpty) return 'Informe o identificador';
-                if (value.length < 3) return 'Minimo 3 caracteres';
-                return null;
-              },
-            ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.1),
+              validator: _validateDocument,
+            ).animate().fadeIn(delay: 350.ms).slideX(begin: -0.1),
 
             const SizedBox(height: 24),
 
-            // Feature chips
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.divider),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(LucideIcons.sparkles, size: 16, color: Color(0xFFF59E0B)),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Incluso no plano gratuito (30 dias):',
-                        style: AppTheme.titleSmall,
+            // Terms checkbox
+            CheckboxListTile(
+              value: _acceptedTerms,
+              onChanged: (value) {
+                setState(() {
+                  _acceptedTerms = value ?? false;
+                });
+              },
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: RichText(
+                text: TextSpan(
+                  style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                  children: [
+                    const TextSpan(text: 'Aceito os '),
+                    TextSpan(
+                      text: 'Termos e Condições de Serviço',
+                      style: TextStyle(
+                        color: Theme.of(context).primaryColor,
+                        decoration: TextDecoration.underline,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: const [
-                      _FeatureChip(icon: LucideIcons.users, label: 'Ate 30 alunos'),
-                      _FeatureChip(icon: LucideIcons.calendar, label: 'Controle de presenca'),
-                      _FeatureChip(icon: LucideIcons.graduationCap, label: 'Graduacao'),
-                      _FeatureChip(icon: LucideIcons.barChart3, label: 'Relatorios'),
-                      _FeatureChip(icon: LucideIcons.shield, label: 'Painel admin'),
-                    ],
-                  ),
-                ],
+                      recognizer: TapGestureRecognizer()..onTap = _openTermsUrl,
+                    ),
+                  ],
+                ),
               ),
             ).animate().fadeIn(delay: 400.ms),
 
@@ -713,42 +772,6 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
     );
   }
 
-  Widget? _buildSlugSuffix() {
-    if (_slugController.text.length < 3) return null;
-    if (_checkingSlug) {
-      return const Padding(
-        padding: EdgeInsets.all(12),
-        child: SizedBox(
-          width: 20,
-          height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      );
-    }
-    if (_slugAvailable == true) {
-      return const Padding(
-        padding: EdgeInsets.all(12),
-        child: Icon(LucideIcons.checkCircle, size: 20, color: AppTheme.success),
-      );
-    }
-    if (_slugAvailable == false) {
-      return const Padding(
-        padding: EdgeInsets.all(12),
-        child: Icon(LucideIcons.xCircle, size: 20, color: AppTheme.error),
-      );
-    }
-    return null;
-  }
-
-  String _getSlugHelperText() {
-    final slug = _slugController.text;
-    if (slug.length < 3) return 'Identificador unico (minimo 3 caracteres)';
-    if (_checkingSlug) return 'Verificando disponibilidade...';
-    if (_slugAvailable == true) return 'Disponivel! URL: bjjeasy.com.br/$slug';
-    if (_slugAvailable == false) return 'Ja em uso. Escolha outro.';
-    return 'URL: bjjeasy.com.br/$slug';
-  }
-
   // ============================================
   // Step 3 - Success
   // ============================================
@@ -772,7 +795,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF43E97B).withOpacity(0.3),
+                  color: const Color(0xFF43E97B).withValues(alpha: 0.3),
                   blurRadius: 20,
                   offset: const Offset(0, 8),
                 ),
@@ -804,43 +827,25 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                   text: _academyNameController.text,
                   style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textPrimary),
                 ),
-                const TextSpan(text: ' esta pronta para uso.'),
+                const TextSpan(text: ' está pronta para uso.'),
               ],
             ),
           ).animate().fadeIn(delay: 400.ms),
 
           const SizedBox(height: 28),
 
-          // URL chip
+          // Info box
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: AppTheme.successLight,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.success.withOpacity(0.2)),
+              border: Border.all(color: AppTheme.success.withValues(alpha: 0.2)),
             ),
-            child: Column(
-              children: [
-                Text(
-                  'Seu painel de administracao:',
-                  style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    'bjjeasy.com.br/${_slugController.text}',
-                    style: AppTheme.labelLarge.copyWith(
-                      color: Colors.white,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
-              ],
+            child: Text(
+              'Você já pode acessar o painel e começar a cadastrar seus alunos.',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              textAlign: TextAlign.center,
             ),
           ).animate().fadeIn(delay: 500.ms).slideY(begin: 0.1),
 
@@ -851,13 +856,13 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             height: 52,
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () => context.go('/admin'),
+              onPressed: () => context.go('/login'),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(LucideIcons.sparkles, size: 18),
+                  const Icon(LucideIcons.logIn, size: 18),
                   const SizedBox(width: 8),
-                  const Text('Acessar Meu Painel'),
+                  const Text('Fazer Login Agora'),
                 ],
               ),
             ),
@@ -866,7 +871,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
           const SizedBox(height: 12),
 
           Text(
-            'Voce sera redirecionado para o dashboard',
+            'Use suas credenciais para acessar',
             style: AppTheme.bodySmall.copyWith(color: AppTheme.textDisabled),
             textAlign: TextAlign.center,
           ).animate().fadeIn(delay: 700.ms),
@@ -884,7 +889,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
       decoration: BoxDecoration(
         color: AppTheme.errorLight,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.error.withOpacity(0.3)),
+        border: Border.all(color: AppTheme.error.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -896,34 +901,6 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               style: AppTheme.bodyMedium.copyWith(color: AppTheme.error),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Feature chip widget
-class _FeatureChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-
-  const _FeatureChip({required this.icon, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: AppTheme.textSecondary),
-          const SizedBox(width: 4),
-          Text(label, style: AppTheme.bodySmall),
         ],
       ),
     );

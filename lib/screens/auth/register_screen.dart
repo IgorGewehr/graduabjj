@@ -1,97 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/constants.dart';
 import '../../core/theme.dart';
-import '../../providers/auth_provider.dart';
 
-/// Register Screen
-class RegisterScreen extends ConsumerStatefulWidget {
+/// Register Screen - Flow selection (Link Code vs Academy Owner)
+class RegisterScreen extends StatelessWidget {
   const RegisterScreen({super.key});
-
-  @override
-  ConsumerState<RegisterScreen> createState() => _RegisterScreenState();
-}
-
-class _RegisterScreenState extends ConsumerState<RegisterScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-
-  bool _isLoading = false;
-  bool _obscurePassword = true;
-  bool _obscureConfirmPassword = true;
-  bool _acceptedTerms = false;
-  String? _errorMessage;
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _openUrl(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-  }
-
-  Future<void> _handleRegister() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    if (!_acceptedTerms) {
-      setState(() {
-        _errorMessage = 'Voce precisa aceitar os Termos de Uso e Politica de Privacidade';
-      });
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final authService = ref.read(authServiceProvider);
-      await authService.createAccount(
-        _emailController.text.trim(),
-        _passwordController.text,
-        _nameController.text.trim(),
-      );
-      // Navigation is handled by router redirect
-    } catch (e) {
-      setState(() {
-        _errorMessage = _getErrorMessage(e);
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  String _getErrorMessage(dynamic error) {
-    if (error.toString().contains('email-already-in-use')) {
-      return 'Este email ja esta em uso';
-    } else if (error.toString().contains('invalid-email')) {
-      return 'Email invalido';
-    } else if (error.toString().contains('weak-password')) {
-      return 'Senha muito fraca. Use pelo menos 6 caracteres.';
-    }
-    return 'Erro ao criar conta. Tente novamente.';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -108,360 +24,191 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Title
-                  Text(
-                    'Criar conta',
-                    style: AppTheme.displaySmall,
-                    textAlign: TextAlign.center,
-                  ).animate().fadeIn(duration: 300.ms),
-
-                  const SizedBox(height: 8),
-
-                  Text(
-                    'Preencha seus dados para comecar',
-                    style: AppTheme.bodyMedium.copyWith(
-                      color: AppTheme.textSecondary,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Logo
+                Center(
+                  child: Image.asset(
+                    'assets/images/logo.png',
+                    width: 100,
+                    height: 100,
+                  ),
+                ).animate().fadeIn(duration: 300.ms).scale(
+                      begin: const Offset(0.8, 0.8),
                     ),
-                    textAlign: TextAlign.center,
-                  ).animate().fadeIn(delay: 100.ms),
 
-                  const SizedBox(height: 40),
+                const SizedBox(height: 32),
 
-                  // Error message
-                  if (_errorMessage != null)
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppTheme.errorLight,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppTheme.error.withOpacity(0.3)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            LucideIcons.alertCircle,
-                            color: AppTheme.error,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              _errorMessage!,
-                              style: AppTheme.bodyMedium.copyWith(
-                                color: AppTheme.error,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ).animate().fadeIn().shake(),
+                // Title
+                Text(
+                  'Criar conta',
+                  style: AppTheme.displaySmall,
+                  textAlign: TextAlign.center,
+                ).animate().fadeIn(delay: 100.ms),
 
-                  if (_errorMessage != null) const SizedBox(height: 24),
+                const SizedBox(height: 8),
 
-                  // Name field
-                  TextFormField(
-                    controller: _nameController,
-                    keyboardType: TextInputType.name,
-                    textInputAction: TextInputAction.next,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      labelText: 'Nome completo',
-                      hintText: 'Seu nome',
-                      prefixIcon: Icon(LucideIcons.user, size: 20),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Informe seu nome';
-                      }
-                      if (value.trim().split(' ').length < 2) {
-                        return 'Informe nome e sobrenome';
-                      }
-                      return null;
-                    },
-                  ).animate().fadeIn(delay: 200.ms).slideX(begin: -0.1),
+                Text(
+                  'Escolha como deseja se cadastrar',
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                  textAlign: TextAlign.center,
+                ).animate().fadeIn(delay: 200.ms),
 
-                  const SizedBox(height: 16),
+                const SizedBox(height: 48),
 
-                  // Email field
-                  TextFormField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      hintText: 'seu@email.com',
-                      prefixIcon: Icon(LucideIcons.mail, size: 20),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Informe seu email';
-                      }
-                      if (!value.contains('@')) {
-                        return 'Email invalido';
-                      }
-                      return null;
-                    },
-                  ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.1),
+                // Option 1: Link Code (Student)
+                _FlowOptionCard(
+                  icon: LucideIcons.key,
+                  iconColor: AppTheme.primary,
+                  title: 'Tenho código de acesso',
+                  subtitle: 'Cadastre-se como aluno usando o código fornecido pela sua academia.',
+                  buttonText: 'Usar código de acesso',
+                  onTap: () => context.go('/link-code'),
+                ).animate().fadeIn(delay: 300.ms).slideY(begin: 0.1),
 
-                  const SizedBox(height: 16),
+                const SizedBox(height: 16),
 
-                  // Password field
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: _obscurePassword,
-                    textInputAction: TextInputAction.next,
-                    decoration: InputDecoration(
-                      labelText: 'Senha',
-                      hintText: 'Minimo 6 caracteres',
-                      prefixIcon: const Icon(LucideIcons.lock, size: 20),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? LucideIcons.eyeOff
-                              : LucideIcons.eye,
-                          size: 20,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _obscurePassword = !_obscurePassword;
-                          });
-                        },
+                // Divider
+                Row(
+                  children: [
+                    const Expanded(child: Divider()),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        'ou',
+                        style: AppTheme.bodySmall.copyWith(color: AppTheme.textDisabled),
                       ),
                     ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Informe uma senha';
-                      }
-                      if (value.length < 6) {
-                        return 'A senha deve ter pelo menos 6 caracteres';
-                      }
-                      return null;
-                    },
-                  ).animate().fadeIn(delay: 400.ms).slideX(begin: -0.1),
+                    const Expanded(child: Divider()),
+                  ],
+                ).animate().fadeIn(delay: 400.ms),
 
-                  const SizedBox(height: 16),
+                const SizedBox(height: 16),
 
-                  // Confirm password field
-                  TextFormField(
-                    controller: _confirmPasswordController,
-                    obscureText: _obscureConfirmPassword,
-                    textInputAction: TextInputAction.done,
-                    onFieldSubmitted: (_) => _handleRegister(),
-                    decoration: InputDecoration(
-                      labelText: 'Confirmar senha',
-                      hintText: 'Repita a senha',
-                      prefixIcon: const Icon(LucideIcons.lock, size: 20),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscureConfirmPassword
-                              ? LucideIcons.eyeOff
-                              : LucideIcons.eye,
-                          size: 20,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _obscureConfirmPassword = !_obscureConfirmPassword;
-                          });
-                        },
+                // Option 2: Academy Owner
+                _FlowOptionCard(
+                  icon: LucideIcons.graduationCap,
+                  iconColor: const Color(0xFF667EEA),
+                  title: 'Sou dono de academia',
+                  subtitle: 'Cadastre sua academia e gerencie alunos, graduações e muito mais.',
+                  buttonText: 'Criar minha academia',
+                  onTap: () => context.go('/criar-academia'),
+                ).animate().fadeIn(delay: 500.ms).slideY(begin: 0.1),
+
+                const SizedBox(height: 32),
+
+                // Login link
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Já tem uma conta? ',
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.textSecondary,
                       ),
                     ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Confirme sua senha';
-                      }
-                      if (value != _passwordController.text) {
-                        return 'As senhas nao coincidem';
-                      }
-                      return null;
-                    },
-                  ).animate().fadeIn(delay: 500.ms).slideX(begin: -0.1),
-
-                  const SizedBox(height: 24),
-
-                  // Terms checkbox
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: Checkbox(
-                          value: _acceptedTerms,
-                          onChanged: (value) {
-                            setState(() {
-                              _acceptedTerms = value ?? false;
-                            });
-                          },
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Wrap(
-                          children: [
-                            Text(
-                              'Li e aceito os ',
-                              style: AppTheme.bodySmall.copyWith(
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () => _openUrl(AppConstants.termsOfServiceUrl),
-                              child: Text(
-                                'Termos de Uso',
-                                style: AppTheme.bodySmall.copyWith(
-                                  color: AppTheme.primary,
-                                  decoration: TextDecoration.underline,
-                                ),
-                              ),
-                            ),
-                            Text(
-                              ' e a ',
-                              style: AppTheme.bodySmall.copyWith(
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () => _openUrl(AppConstants.privacyPolicyUrl),
-                              child: Text(
-                                'Politica de Privacidade',
-                                style: AppTheme.bodySmall.copyWith(
-                                  color: AppTheme.primary,
-                                  decoration: TextDecoration.underline,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ).animate().fadeIn(delay: 550.ms),
-
-                  const SizedBox(height: 24),
-
-                  // Register button
-                  SizedBox(
-                    height: 52,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _handleRegister,
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(Colors.white),
-                              ),
-                            )
-                          : const Text('Criar conta'),
+                    TextButton(
+                      onPressed: () => context.go('/login'),
+                      child: const Text('Entrar'),
                     ),
-                  ).animate().fadeIn(delay: 600.ms).slideY(begin: 0.1),
-
-                  const SizedBox(height: 24),
-
-                  // Login link
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Ja tem uma conta? ',
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () => context.go('/login'),
-                        child: const Text('Entrar'),
-                      ),
-                    ],
-                  ).animate().fadeIn(delay: 700.ms),
-
-                  const SizedBox(height: 16),
-
-                  // Divider
-                  Row(
-                    children: [
-                      const Expanded(child: Divider()),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Text(
-                          'ou',
-                          style: AppTheme.bodySmall.copyWith(color: AppTheme.textDisabled),
-                        ),
-                      ),
-                      const Expanded(child: Divider()),
-                    ],
-                  ).animate().fadeIn(delay: 750.ms),
-
-                  const SizedBox(height: 16),
-
-                  // "Sou Professor" card
-                  GestureDetector(
-                    onTap: () => context.go('/criar-academia'),
-                    child: Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: AppTheme.divider,
-                          style: BorderStyle.solid,
-                          width: 1.5,
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: AppTheme.surfaceVariant,
-                            ),
-                            child: const Icon(
-                              LucideIcons.graduationCap,
-                              size: 22,
-                              color: AppTheme.textPrimary,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Sou Professor / Dono de Academia',
-                            style: AppTheme.titleMedium,
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Cadastre sua academia e gerencie alunos, graduacoes e muito mais.',
-                            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                'Criar minha academia',
-                                style: AppTheme.labelLarge.copyWith(color: AppTheme.primary),
-                              ),
-                              const SizedBox(width: 4),
-                              const Icon(LucideIcons.arrowRight, size: 16, color: AppTheme.primary),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ).animate().fadeIn(delay: 800.ms).slideY(begin: 0.1),
-                ],
-              ),
+                  ],
+                ).animate().fadeIn(delay: 600.ms),
+              ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Flow Option Card Widget
+class _FlowOptionCard extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final String buttonText;
+  final VoidCallback onTap;
+
+  const _FlowOptionCard({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.buttonText,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          border: Border.all(
+            color: AppTheme.divider,
+            width: 1.5,
+          ),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: [
+            // Icon
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: iconColor.withValues(alpha: 0.1),
+              ),
+              child: Icon(
+                icon,
+                size: 28,
+                color: iconColor,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Title
+            Text(
+              title,
+              style: AppTheme.titleMedium.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+
+            // Subtitle
+            Text(
+              subtitle,
+              style: AppTheme.bodySmall.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+
+            // Button
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  buttonText,
+                  style: AppTheme.labelLarge.copyWith(color: AppTheme.primary),
+                ),
+                const SizedBox(width: 4),
+                Icon(LucideIcons.arrowRight, size: 16, color: AppTheme.primary),
+              ],
+            ),
+          ],
         ),
       ),
     );
