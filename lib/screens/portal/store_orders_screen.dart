@@ -520,7 +520,6 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
 
   Future<void> _updateStatus(StoreOrderStatus newStatus) async {
     final academyId = FirebaseService.academyId;
-    if (academyId == null) return;
 
     setState(() => _isUpdatingStatus = true);
 
@@ -587,7 +586,6 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
 
   Future<void> _handlePixPayment() async {
     final academyId = FirebaseService.academyId;
-    if (academyId == null) return;
 
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     if (currentUser == null) return;
@@ -651,29 +649,6 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
         onPaymentConfirmed: () {
           // Refresh the orders list when payment is confirmed
           ref.invalidate(studentOrdersProvider(studentId));
-        },
-      ),
-    );
-  }
-
-  void _showCardPaymentSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _CardPaymentBottomSheet(
-        orderId: widget.order.id,
-        amount: widget.order.total,
-        studentId: ref.read(currentUserProvider).valueOrNull?.studentId ?? '',
-        studentName: ref.read(currentUserProvider).valueOrNull?.displayName ?? '',
-        onPaymentSuccess: () {
-          Navigator.pop(context); // Close card sheet
-          Navigator.pop(context); // Close order details
-          // Refresh orders
-          final currentUser = ref.read(currentUserProvider).valueOrNull;
-          if (currentUser?.studentId != null) {
-            ref.invalidate(studentOrdersProvider(currentUser!.studentId!));
-          }
         },
       ),
     );
@@ -1276,7 +1251,6 @@ class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
   /// Listen to order status changes in real-time
   void _setupOrderListener() {
     final academyId = FirebaseService.academyId;
-    if (academyId == null) return;
 
     _orderListener = FirebaseFirestore.instance
         .collection('academies')
@@ -1726,13 +1700,6 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
     });
 
     final academyId = FirebaseService.academyId;
-    if (academyId == null) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Academia nao encontrada';
-      });
-      return;
-    }
 
     try {
       final expParts = _expirationController.text.split('/');

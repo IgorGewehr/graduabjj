@@ -23,7 +23,6 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
   bool _isSaving = false;
-  Student? _existingStudent;
 
   // Form controllers
   final _fullNameController = TextEditingController();
@@ -81,7 +80,6 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
       final student = await studentService.getById(widget.studentId!);
 
       if (student != null) {
-        _existingStudent = student;
         _populateForm(student);
       }
     } catch (e) {
@@ -172,7 +170,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
         studentData['totalAttendanceCount'] = 0;
         studentData['monthlyAttendanceCount'] = 0;
 
-        final newStudent = await studentService.createFromMap(studentData);
+        await studentService.createFromMap(studentData);
         if (mounted) {
           context.showSuccess('Aluno cadastrado com sucesso!');
           context.pop();

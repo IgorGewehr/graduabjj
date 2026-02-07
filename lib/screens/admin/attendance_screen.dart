@@ -7,7 +7,6 @@ import '../../core/theme.dart';
 import '../../models/checkin.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
-import '../../providers/checkin_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../services/checkin_service.dart';

@@ -101,7 +101,6 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
 
   void _setupPaymentListener() {
     final academyId = FirebaseService.academyId;
-    if (academyId == null) return;
 
     String collection;
     String docId;
@@ -221,7 +220,7 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 20,
             offset: const Offset(0, -5),
           ),
@@ -293,13 +292,13 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
               end: Alignment.bottomRight,
               colors: [
                 AppTheme.primary,
-                AppTheme.primary.withOpacity(0.7),
+                AppTheme.primary.withValues(alpha: 0.7),
               ],
             ),
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: AppTheme.primary.withOpacity(0.3),
+                color: AppTheme.primary.withValues(alpha: 0.3),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
@@ -359,12 +358,12 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            AppTheme.primary.withOpacity(0.08),
-            AppTheme.primary.withOpacity(0.03),
+            AppTheme.primary.withValues(alpha: 0.08),
+            AppTheme.primary.withValues(alpha: 0.03),
           ],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.primary.withOpacity(0.1)),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.1)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -393,7 +392,7 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: _timeRemaining.inMinutes < 30
-                  ? AppTheme.error.withOpacity(0.1)
+                  ? AppTheme.error.withValues(alpha: 0.1)
                   : AppTheme.surfaceVariant,
               borderRadius: BorderRadius.circular(20),
             ),
@@ -433,13 +432,13 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primary.withOpacity(0.1),
+            color: AppTheme.primary.withValues(alpha: 0.1),
             blurRadius: 30,
             spreadRadius: 0,
             offset: const Offset(0, 10),
           ),
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -453,11 +452,11 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
             size: 200,
             backgroundColor: Colors.white,
             eyeStyle: const QrEyeStyle(
-              eyeShape: QrEyeShape.roundedRect,
+              eyeShape: QrEyeShape.square,
               color: Color(0xFF111111),
             ),
             dataModuleStyle: const QrDataModuleStyle(
-              dataModuleShape: QrDataModuleShape.roundedRect,
+              dataModuleShape: QrDataModuleShape.square,
               color: Color(0xFF111111),
             ),
           ),
@@ -535,14 +534,14 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: _paymentConfirmed
-              ? [AppTheme.success.withOpacity(0.15), AppTheme.success.withOpacity(0.05)]
-              : [AppTheme.primary.withOpacity(0.1), AppTheme.primary.withOpacity(0.05)],
+              ? [AppTheme.success.withValues(alpha: 0.15), AppTheme.success.withValues(alpha: 0.05)]
+              : [AppTheme.primary.withValues(alpha: 0.1), AppTheme.primary.withValues(alpha: 0.05)],
         ),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: _paymentConfirmed
-              ? AppTheme.success.withOpacity(0.2)
-              : AppTheme.primary.withOpacity(0.1),
+              ? AppTheme.success.withValues(alpha: 0.2)
+              : AppTheme.primary.withValues(alpha: 0.1),
         ),
       ),
       child: Row(
@@ -590,7 +589,7 @@ class _InstructionStep extends StatelessWidget {
           width: 28,
           height: 28,
           decoration: BoxDecoration(
-            color: AppTheme.primary.withOpacity(0.1),
+            color: AppTheme.primary.withValues(alpha: 0.1),
             shape: BoxShape.circle,
           ),
           child: Center(
@@ -636,7 +635,7 @@ class _SuccessDialog extends StatelessWidget {
           borderRadius: BorderRadius.circular(28),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.15),
+              color: Colors.black.withValues(alpha: 0.15),
               blurRadius: 30,
               offset: const Offset(0, 10),
             ),
@@ -663,13 +662,13 @@ class _SuccessDialog extends StatelessWidget {
                     end: Alignment.bottomRight,
                     colors: [
                       AppTheme.success,
-                      AppTheme.success.withOpacity(0.7),
+                      AppTheme.success.withValues(alpha: 0.7),
                     ],
                   ),
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: AppTheme.success.withOpacity(0.4),
+                      color: AppTheme.success.withValues(alpha: 0.4),
                       blurRadius: 20,
                       offset: const Offset(0, 8),
                     ),
@@ -823,13 +822,6 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
     });
 
     final academyId = FirebaseService.academyId;
-    if (academyId == null) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Academia nao encontrada';
-      });
-      return;
-    }
 
     try {
       final expParts = _expirationController.text.split('/');
@@ -938,7 +930,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 20,
             offset: const Offset(0, -5),
           ),
@@ -983,13 +975,13 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                           end: Alignment.bottomRight,
                           colors: [
                             AppTheme.primary,
-                            AppTheme.primary.withOpacity(0.7),
+                            AppTheme.primary.withValues(alpha: 0.7),
                           ],
                         ),
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.primary.withOpacity(0.3),
+                            color: AppTheme.primary.withValues(alpha: 0.3),
                             blurRadius: 12,
                             offset: const Offset(0, 4),
                           ),
@@ -1044,9 +1036,9 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: AppTheme.error.withOpacity(0.1),
+                      color: AppTheme.error.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppTheme.error.withOpacity(0.2)),
+                      border: Border.all(color: AppTheme.error.withValues(alpha: 0.2)),
                     ),
                     child: Row(
                       children: [
@@ -1197,7 +1189,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                         borderRadius: BorderRadius.circular(14),
                       ),
                       elevation: 0,
-                      disabledBackgroundColor: AppTheme.primary.withOpacity(0.5),
+                      disabledBackgroundColor: AppTheme.primary.withValues(alpha: 0.5),
                     ),
                     child: _isLoading
                         ? const SizedBox(
@@ -1265,7 +1257,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.3),
+            color: Colors.black.withValues(alpha: 0.3),
             blurRadius: 20,
             offset: const Offset(0, 10),
           ),
@@ -1308,7 +1300,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                   Text(
                     'TITULAR',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.5),
+                      color: Colors.white.withValues(alpha: 0.5),
                       fontSize: 10,
                     ),
                   ),
@@ -1329,7 +1321,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                   Text(
                     'VALIDADE',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.5),
+                      color: Colors.white.withValues(alpha: 0.5),
                       fontSize: 10,
                     ),
                   ),

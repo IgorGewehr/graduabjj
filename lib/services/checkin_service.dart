@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/checkin.dart';
 import 'attendance_service.dart';
 import 'firebase_service.dart';
-import 'student_service.dart';
 
 /// Helper: Check if current time is within check-in window
 /// Window: 30 min before class START until 1 hour after class END

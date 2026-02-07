@@ -121,8 +121,6 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     });
   }
 
-  int get _activeCount => _students.where((s) => s.status == StudentStatus.active).length;
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(

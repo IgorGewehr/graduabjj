@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
@@ -106,6 +107,10 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   @override
   void initState() {
     super.initState();
+    // Listen to name changes to update save button visibility
+    _fullNameController.addListener(() {
+      setState(() {}); // Rebuild to show/hide save button
+    });
     _loadData();
   }
 
@@ -254,6 +259,10 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   }
 
   Widget _buildBottomBar() {
+    // Check if required field (name) is filled to enable save button
+    final canSave = _fullNameController.text.trim().isNotEmpty;
+    final isLastTab = _activeTab == 'academy';
+
     return Container(
       padding: EdgeInsets.only(
         left: 16,
@@ -267,7 +276,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
       ),
       child: Row(
         children: [
-          // Navigation buttons
+          // Back button (show on all tabs except first)
           if (_activeTab != 'personal')
             Expanded(
               child: OutlinedButton.icon(
@@ -286,46 +295,71 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
             ),
           if (_activeTab != 'personal') const SizedBox(width: 12),
 
-          // Next / Save button
-          Expanded(
-            flex: _activeTab == 'personal' ? 1 : 1,
-            child: _activeTab == 'academy'
-                ? ElevatedButton.icon(
-                    onPressed: _isSaving ? null : _saveStudent,
-                    icon: _isSaving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(LucideIcons.check, size: 18),
-                    label: Text(_isSaving ? 'Salvando...' : 'Salvar Aluno'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.success,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  )
-                : ElevatedButton.icon(
-                    onPressed: _goToNextTab,
-                    icon: const Icon(LucideIcons.chevronRight, size: 18),
-                    label: const Text('Próximo'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
+          // Next button (show on all tabs except last, IF name is filled)
+          if (!isLastTab && canSave)
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _goToNextTab,
+                icon: const Icon(LucideIcons.chevronRight, size: 18),
+                label: const Text('Próximo'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
                   ),
-          ),
+                ),
+              ),
+            ),
+
+          // Next button alone when name not filled (only navigation, no save option)
+          if (!isLastTab && !canSave)
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _goToNextTab,
+                icon: const Icon(LucideIcons.chevronRight, size: 18),
+                label: const Text('Próximo'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+
+          // Spacing between buttons when both are shown
+          if (canSave && !isLastTab) const SizedBox(width: 12),
+
+          // Save button (show when name is filled)
+          if (canSave)
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _isSaving ? null : _saveStudent,
+                icon: _isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(LucideIcons.check, size: 18),
+                label: Text(_isSaving ? 'Salvando...' : 'Salvar'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.success,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -943,32 +977,39 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
       }
 
       // Sync plans: add/remove student from plans as needed
-      final planService = PlanService(academyId);
-      final selectedPlanIds = _selectedPlans.map((p) => p.id).toSet();
-      final currentPlanIds = _availablePlans
-          .where((p) => p.studentIds.contains(studentId))
-          .map((p) => p.id)
-          .toSet();
+      try {
+        final planService = PlanService(academyId);
+        final selectedPlanIds = _selectedPlans.map((p) => p.id).toSet();
+        final currentPlanIds = _availablePlans
+            .where((p) => p.studentIds.contains(studentId))
+            .map((p) => p.id)
+            .toSet();
 
-      // Add to newly selected plans
-      for (final planId in selectedPlanIds.difference(currentPlanIds)) {
-        await planService.addStudent(planId, studentId);
-      }
-      // Remove from deselected plans
-      for (final planId in currentPlanIds.difference(selectedPlanIds)) {
-        await planService.removeStudent(planId, studentId);
+        // Add to newly selected plans
+        for (final planId in selectedPlanIds.difference(currentPlanIds)) {
+          await planService.addStudent(planId, studentId);
+        }
+        // Remove from deselected plans
+        for (final planId in currentPlanIds.difference(selectedPlanIds)) {
+          await planService.removeStudent(planId, studentId);
+        }
+      } catch (planError) {
+        debugPrint('Warning: Failed to sync plans: $planError');
+        // Continue execution - student was created successfully
       }
 
       if (mounted) {
         context.showSuccess(isEditing ? 'Aluno atualizado!' : 'Aluno cadastrado!');
-        Navigator.pop(context, true);
+        context.go('/admin/alunos');
       }
     } catch (e) {
       if (mounted) {
         context.showError('Erro: $e');
       }
     } finally {
-      setState(() => _isSaving = false);
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
   }
 

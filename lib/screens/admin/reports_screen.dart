@@ -78,7 +78,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   int _adultsCount = 0;
   Map<String, int> _kidsBeltDistribution = {};
   Map<String, int> _adultBeltDistribution = {};
-  List<Student> _students = [];
 
   @override
   void initState() {
@@ -388,7 +387,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     }
 
     setState(() {
-      _students = students;
       _totalStudents = students.length;
       _activeStudents = students.where((s) => s.status == StudentStatus.active).length;
       _inactiveStudents = students.where((s) => s.status == StudentStatus.inactive).length;

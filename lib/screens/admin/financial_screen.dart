@@ -7,7 +7,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
-import '../../widgets/stats_carousel.dart';
+import 'paying_students_screen.dart';
 
 /// Admin Financial Screen - Matching webapp design
 class AdminFinancialScreen extends ConsumerStatefulWidget {
@@ -25,7 +25,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   List<Plan> _plans = [];
   List<Student> _students = [];
   Map<String, dynamic>? _monthlySummary;
-  AcademySettings? _settings;
   bool _isLoading = true;
 
   // State
@@ -63,7 +62,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         PlanService(academyId).list(),
         StudentService(academyId).getActive(),
         PaymentService(academyId).getMonthlySummary(_currentMonthKey),
-        SettingsService(academyId).getAcademySettings(),
       ]);
 
       setState(() {
@@ -71,7 +69,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         _plans = results[1] as List<Plan>;
         _students = results[2] as List<Student>;
         _monthlySummary = results[3] as Map<String, dynamic>;
-        _settings = results[4] as AcademySettings?;
         _isLoading = false;
       });
     } catch (e) {
@@ -159,6 +156,29 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
             style: IconButton.styleFrom(
               backgroundColor: AppTheme.surface,
               foregroundColor: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Paying students button
+          ElevatedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => PayingStudentsScreen(
+                  students: _students,
+                  plans: _plans,
+                ),
+              ),
+            ),
+            icon: const Icon(LucideIcons.users, size: 18),
+            label: const Text('Pagantes'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.surface,
+              foregroundColor: AppTheme.textPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
           ),
           const Spacer(),

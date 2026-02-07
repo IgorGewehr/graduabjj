@@ -11,7 +11,6 @@ import '../../core/theme.dart';
 import '../../core/validators.dart';
 import '../../services/firebase_service.dart';
 import '../../services/abacate_pay_service.dart';
-import '../../services/asaas_payment_service.dart';
 import '../../services/totp_service.dart';
 import '../../providers/providers.dart';
 
@@ -164,9 +163,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   AcademyWallet? _wallet;
   List<WalletTransaction> _transactions = [];
   bool _isLoading = true;
-  bool _isRefreshing = false;
   bool _isTotpEnabled = false;
-  bool _isTotpLoading = true;
   String _transactionFilter = 'all'; // 'all', 'mensalidade', 'saque', 'loja'
 
   @override
@@ -248,27 +245,21 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
         );
         _transactions = transactions;
         _isTotpEnabled = totpEnabled;
-        _isTotpLoading = false;
         _isLoading = false;
-        _isRefreshing = false;
       });
     } catch (e) {
       setState(() {
         _isLoading = false;
-        _isTotpLoading = false;
-        _isRefreshing = false;
       });
     }
   }
 
   Future<void> _handleRefresh() async {
-    setState(() => _isRefreshing = true);
     await _loadWalletData();
   }
 
   void _showWithdrawalSheet() {
     final academyId = FirebaseService.academyId;
-    if (academyId == null) return;
 
     // If TOTP is enabled, require validation before showing withdrawal sheet
     if (_isTotpEnabled) {
@@ -284,9 +275,6 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   }
 
   void _openWithdrawalSheet(String academyId) {
-    final settings = ref.read(academySettingsProvider).valueOrNull;
-    final useAsaas = false; // Sempre use AbacatePay
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -294,22 +282,12 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
       builder: (context) => _WithdrawalBottomSheet(
         maxAmount: _wallet?.availableBalance ?? 0,
         onWithdraw: (amount, pixKey, pixKeyType) async {
-          final WithdrawalResult result;
-          if (useAsaas) {
-            final service = AsaasPaymentService(academyId);
-            result = await service.requestWithdrawal(
-              amountInCents: amount,
-              pixKey: pixKey,
-              pixKeyType: pixKeyType,
-            );
-          } else {
-            final service = AbacatePayService(academyId);
-            result = await service.requestWithdrawal(
-              amountInCents: amount,
-              pixKey: pixKey,
-              pixKeyType: pixKeyType,
-            );
-          }
+          final service = AbacatePayService(academyId);
+          final result = await service.requestWithdrawal(
+            amountInCents: amount,
+            pixKey: pixKey,
+            pixKeyType: pixKeyType,
+          );
 
           if (!mounted) return;
           Navigator.pop(context);
@@ -322,23 +300,6 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
           _handleRefresh();
         },
       ),
-    );
-  }
-
-  void _navigateToTotpSetup() async {
-    await context.push('/admin/carteira/2fa-setup');
-    // Refresh TOTP status on return
-    _handleRefresh();
-  }
-
-  void _showDisableTotpSheet() {
-    _showTotpCodeBottomSheet(
-      title: 'Desativar 2FA',
-      subtitle: 'Digite o codigo do seu autenticador para desativar',
-      onValidated: () async {
-        // Code already validated via the sheet's onSubmit
-      },
-      isDisable: true,
     );
   }
 
@@ -835,82 +796,6 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// Stat Card Widget
-class _StatCard extends StatelessWidget {
-  final String title;
-  final double? value;
-  final String? valueText;
-  final IconData icon;
-  final Color color;
-  final bool isLoading;
-
-  const _StatCard({
-    required this.title,
-    this.value,
-    this.valueText,
-    required this.icon,
-    required this.color,
-    this.isLoading = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final currencyFormat =
-        NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, size: 16, color: color),
-              ),
-              const Spacer(),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (isLoading)
-            Container(
-              height: 24,
-              width: 80,
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            )
-          else
-            Text(
-              valueText ?? currencyFormat.format((value ?? 0) / 100),
-              style: AppTheme.titleMedium.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            style: AppTheme.bodySmall.copyWith(
-              color: AppTheme.textSecondary,
-            ),
-          ),
-        ],
       ),
     );
   }

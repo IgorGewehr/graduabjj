@@ -24,6 +24,13 @@ final authStateProvider = StreamProvider<User?>((ref) {
   return auth.authStateChanges();
 });
 
+/// Flag to prevent router redirects during account creation
+/// When true, the router will not redirect away from auth pages
+final isCreatingAccountProvider = StateProvider<bool>((ref) => false);
+
+/// Student name displayed in the account creation overlay
+final creatingAccountStudentNameProvider = StateProvider<String>((ref) => '');
+
 /// Global user provider - fetches from ROOT /users collection
 final globalUserProvider = FutureProvider<GlobalUser?>((ref) async {
   final authState = ref.watch(authStateProvider);
@@ -535,8 +542,9 @@ class AuthService {
     String displayName,
     String studentId,
     String academyId, // Must be passed from validated link code
-    String? cpf, // Optional CPF to save with student
-  ) async {
+    String? cpf, { // Optional CPF to save with student
+    String? phone, // Optional WhatsApp phone to save with student
+  }) async {
     // Create Firebase Auth account
     final credential = await _auth.createUserWithEmailAndPassword(
       email: email,
@@ -595,6 +603,11 @@ class AuthService {
         // Only add CPF if provided
         if (cpf != null && cpf.isNotEmpty) {
           updateData['cpf'] = cpf;
+        }
+
+        // Only add phone if provided
+        if (phone != null && phone.isNotEmpty) {
+          updateData['phone'] = phone;
         }
 
         await _firestore

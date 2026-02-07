@@ -186,7 +186,7 @@ class StoreProduct {
       stockQuantity: data['stockQuantity'],
       sizes: data['sizes'] != null ? List<String>.from(data['sizes']) : null,
       colors: data['colors'] != null ? List<String>.from(data['colors']) : null,
-      isActive: data['isActive'] ?? true,
+      isActive: data['active'] ?? data['isActive'] ?? true,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -407,7 +407,7 @@ class StoreService {
       'stockQuantity': stockQuantity,
       'sizes': sizes,
       'colors': colors,
-      'isActive': true,
+      'active': true,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -424,12 +424,9 @@ class StoreService {
     return StoreProduct.fromFirestore(doc);
   }
 
-  /// Delete product (soft delete)
+  /// Delete product (hard delete, consistent with web app)
   Future<void> deleteProduct(String id) async {
-    await _productsRef.doc(id).update({
-      'isActive': false,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await _productsRef.doc(id).delete();
   }
 
   /// Update stock quantity

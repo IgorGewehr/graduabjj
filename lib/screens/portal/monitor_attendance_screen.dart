@@ -213,7 +213,7 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
     setState(() => _isConfirmingCheckins = true);
     try {
       final checkinService = CheckinService(currentUser!.academyId!);
-      final monitorName = currentUser.displayName ?? 'Monitor';
+      final monitorName = currentUser.displayName;
 
       final result = await checkinService.confirmCheckins(
         checkinIds,
@@ -250,7 +250,7 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
       final wasPresent = _presentStudentIds.contains(student.id);
 
       // Get monitor name
-      final monitorName = currentUser.displayName ?? 'Monitor';
+      final monitorName = currentUser.displayName;
 
       if (wasPresent) {
         await attendanceService.unmarkPresent(
@@ -321,7 +321,7 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
       if (currentUser?.academyId == null) return;
 
       final attendanceService = AttendanceService(currentUser!.academyId!);
-      final monitorName = currentUser.displayName ?? 'Monitor';
+      final monitorName = currentUser.displayName;
 
       for (final student in filteredStudents) {
         if (!_presentStudentIds.contains(student.id)) {

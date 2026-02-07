@@ -13,6 +13,7 @@ class Plan {
   final List<String> studentIds;
   final bool isActive;
   final Map<String, double> customValues;
+  final Map<String, int> customDueDays;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -26,6 +27,7 @@ class Plan {
     this.studentIds = const [],
     this.isActive = true,
     this.customValues = const {},
+    this.customDueDays = const {},
     required this.createdAt,
     required this.updatedAt,
   });
@@ -34,6 +36,9 @@ class Plan {
   /// If the student has a custom value, returns it; otherwise returns monthlyValue.
   double getStudentValue(String studentId) =>
       customValues[studentId] ?? monthlyValue;
+
+  int getStudentDueDay(String studentId) =>
+      customDueDays[studentId] ?? defaultDueDay;
 
   Plan copyWith({
     String? id,
@@ -45,6 +50,7 @@ class Plan {
     List<String>? studentIds,
     bool? isActive,
     Map<String, double>? customValues,
+    Map<String, int>? customDueDays,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -58,6 +64,7 @@ class Plan {
       studentIds: studentIds ?? this.studentIds,
       isActive: isActive ?? this.isActive,
       customValues: customValues ?? this.customValues,
+      customDueDays: customDueDays ?? this.customDueDays,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -80,6 +87,13 @@ class Plan {
           ? Map<String, double>.from(
               (data['customValues'] as Map).map(
                 (key, value) => MapEntry(key.toString(), (value as num).toDouble()),
+              ),
+            )
+          : {},
+      customDueDays: data['customDueDays'] != null
+          ? Map<String, int>.from(
+              (data['customDueDays'] as Map).map(
+                (key, value) => MapEntry(key.toString(), (value as num).toInt()),
               ),
             )
           : {},
@@ -229,6 +243,7 @@ class PlanService {
     await _collections.plan(planId).update({
       'studentIds': FieldValue.arrayRemove([studentId]),
       'customValues.$studentId': FieldValue.delete(),
+      'customDueDays.$studentId': FieldValue.delete(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
@@ -267,6 +282,28 @@ class PlanService {
   Future<Plan> removeCustomValue(String planId, String studentId) async {
     await _plansRef.doc(planId).update({
       'customValues.$studentId': FieldValue.delete(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return (await getById(planId))!;
+  }
+
+  // ============================================
+  // Set Custom Due Day for Student
+  // ============================================
+  Future<Plan> setCustomDueDay(String planId, String studentId, int day) async {
+    await _plansRef.doc(planId).update({
+      'customDueDays.$studentId': day,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return (await getById(planId))!;
+  }
+
+  // ============================================
+  // Remove Custom Due Day (restore plan default)
+  // ============================================
+  Future<Plan> removeCustomDueDay(String planId, String studentId) async {
+    await _plansRef.doc(planId).update({
+      'customDueDays.$studentId': FieldValue.delete(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
     return (await getById(planId))!;

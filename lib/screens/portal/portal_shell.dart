@@ -7,6 +7,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../widgets/common/more_menu_sheet.dart';
+import '../../widgets/common/back_button_handler.dart';
 import '../../widgets/academy_switcher.dart';
 
 /// Portal Shell - Main navigation structure for student portal
@@ -129,9 +130,9 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     final student = ref.read(currentStudentProvider).valueOrNull;
     final isKids = student?.category == StudentCategory.kids;
 
-    // Get academy settings to check if store is enabled and monitors
+    // Get academy settings to check if store is published and monitors
     final settings = ref.read(academySettingsProvider).valueOrNull;
-    final isStoreEnabled = settings?.storeEnabled ?? false;
+    final isStorePublished = settings?.storePublished ?? false;
 
     // Check if user is a monitor
     final currentUser = ref.read(currentUserProvider).valueOrNull;
@@ -167,8 +168,8 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       if (item.path == '/portal/comportamento' && !isKids) {
         continue;
       }
-      // Loja only shows if store is enabled
-      if (item.path == '/portal/loja' && !isStoreEnabled) {
+      // Loja only shows if store is published
+      if (item.path == '/portal/loja' && !isStorePublished) {
         continue;
       }
       // Financeiro only shows if student has a plan
@@ -213,7 +214,13 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     final location = GoRouterState.of(context).matchedLocation;
     final selectedIndex = _getSelectedIndex(location);
 
-    return Scaffold(
+    // Check if this is the root route (/portal)
+    final isRootRoute = location == '/portal';
+
+    return BackButtonHandler(
+      isRootRoute: isRootRoute,
+      exitMessage: 'Pressione voltar novamente para sair',
+      child: Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         backgroundColor: AppTheme.surface,
@@ -232,24 +239,25 @@ class _PortalShellState extends ConsumerState<PortalShell> {
           ),
         ),
       ),
-      body: widget.child,
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.surface.withValues(alpha: 0.95),
-          border: const Border(
-            top: BorderSide(color: AppTheme.divider, width: 1),
+        body: widget.child,
+        bottomNavigationBar: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.surface.withValues(alpha: 0.95),
+            border: const Border(
+              top: BorderSide(color: AppTheme.divider, width: 1),
+            ),
           ),
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            child: Row(
-              children: List.generate(
-                _bottomNavItems.length,
-                (index) => _BottomNavItem(
-                  item: _bottomNavItems[index],
-                  isSelected: selectedIndex == index,
-                  onTap: () => _onItemTapped(index),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Row(
+                children: List.generate(
+                  _bottomNavItems.length,
+                  (index) => _BottomNavItem(
+                    item: _bottomNavItems[index],
+                    isSelected: selectedIndex == index,
+                    onTap: () => _onItemTapped(index),
+                  ),
                 ),
               ),
             ),

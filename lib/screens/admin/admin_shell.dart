@@ -7,6 +7,7 @@ import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../widgets/common/more_menu_sheet.dart';
+import '../../widgets/common/back_button_handler.dart';
 
 /// Admin Navigation Shell - Main navigation for admin screens
 class AdminShell extends ConsumerWidget {
@@ -17,12 +18,17 @@ class AdminShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final location = GoRouterState.of(context).uri.path;
-    final currentUser = ref.watch(currentUserProvider);
-    final user = currentUser.valueOrNull;
+    ref.watch(currentUserProvider);
     final settingsAsync = ref.watch(academySettingsProvider);
     final settings = settingsAsync.valueOrNull;
 
-    return Scaffold(
+    // Check if this is the root route (/admin)
+    final isRootRoute = location == '/admin';
+
+    return BackButtonHandler(
+      isRootRoute: isRootRoute,
+      exitMessage: 'Pressione voltar novamente para sair',
+      child: Scaffold(
       backgroundColor: AppTheme.background,
       appBar: MediaQuery.of(context).size.width < 768
           ? AppBar(
@@ -97,18 +103,19 @@ class AdminShell extends ConsumerWidget {
               ),
             )
           : null,
-      body: Row(
-        children: [
-          // Sidebar for larger screens
-          if (MediaQuery.of(context).size.width >= 768)
-            AdminSidebar(currentPath: location),
-          // Main content
-          Expanded(child: child),
-        ],
+        body: Row(
+          children: [
+            // Sidebar for larger screens
+            if (MediaQuery.of(context).size.width >= 768)
+              AdminSidebar(currentPath: location),
+            // Main content
+            Expanded(child: child),
+          ],
+        ),
+        bottomNavigationBar: MediaQuery.of(context).size.width < 768
+            ? AdminBottomNav(currentPath: location)
+            : null,
       ),
-      bottomNavigationBar: MediaQuery.of(context).size.width < 768
-          ? AdminBottomNav(currentPath: location)
-          : null,
     );
   }
 }
@@ -457,10 +464,6 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     final settings = ref.read(academySettingsProvider).valueOrNull;
     final isStoreEnabled = settings?.storeEnabled ?? false;
     final isPaymentEnabled = (settings?.abacatePayEnabled ?? false) || (settings?.asaasEnabled ?? false);
-
-    // Get current user to check role
-    final currentUser = ref.read(currentUserProvider).valueOrNull;
-    final isAdmin = currentUser?.isAdmin ?? false;
 
     // Filter menu items based on conditions
     final filteredItems = _moreMenuItems.where((item) {

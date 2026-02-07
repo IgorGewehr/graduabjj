@@ -18,13 +18,14 @@ class LinkCodeScreen extends ConsumerStatefulWidget {
   ConsumerState<LinkCodeScreen> createState() => _LinkCodeScreenState();
 }
 
-enum _Step { code, register, success }
+enum _Step { code, register, creating, success }
 
 class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
   final _codeFormKey = GlobalKey<FormState>();
   final _registerFormKey = GlobalKey<FormState>();
   final _codeController = TextEditingController();
   final _cpfController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
@@ -40,6 +41,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
   void dispose() {
     _codeController.dispose();
     _cpfController.dispose();
+    _phoneController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
@@ -129,45 +131,76 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    // Capture everything we need BEFORE any async operation.
+    // The widget may be disposed during async work (GoRouter rebuilds on auth state change),
+    // so we use the ProviderContainer directly instead of ref.
+    final container = ProviderScope.containerOf(context);
+    final authService = ref.read(authServiceProvider);
+    final academyId = _validatedLinkCode!.academyId;
+    final linkCodeService = LinkCodeService(academyId);
+    final cpfDigits = _cpfController.text.replaceAll(RegExp(r'\D'), '');
+    final phone = _phoneController.text.replaceAll(RegExp(r'\D'), '');
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final studentName = _validatedLinkCode!.studentName;
+    final studentId = _validatedLinkCode!.studentId;
+    final code = _validatedLinkCode!.code;
+
+    // Show full-screen overlay (survives GoRouter rebuilds since it's in app.dart builder)
+    container.read(creatingAccountStudentNameProvider.notifier).state = studentName;
+    container.read(isCreatingAccountProvider.notifier).state = true;
 
     try {
-      final authService = ref.read(authServiceProvider);
-      // CRITICAL: Use academyId from the validated link code, NOT from FirebaseService
-      // This ensures multi-tenant correctness during registration
-      final academyId = _validatedLinkCode!.academyId;
-      final linkCodeService = LinkCodeService(academyId);
-      final cpfDigits = _cpfController.text.replaceAll(RegExp(r'\D'), '');
-
       // Create Firebase account with the student name from the link code
       // This will also update the student document with linkedUserId and CPF
       final userCredential = await authService.createAccountWithLinkCode(
-        _emailController.text.trim(),
-        _passwordController.text,
-        _validatedLinkCode!.studentName,
-        _validatedLinkCode!.studentId,
-        academyId, // Pass the correct academyId
-        cpfDigits.isNotEmpty ? cpfDigits : null, // Pass CPF to be saved
+        email,
+        password,
+        studentName,
+        studentId,
+        academyId,
+        cpfDigits.isNotEmpty ? cpfDigits : null,
+        phone: phone.isNotEmpty ? phone : null,
       );
 
       // Mark the code as used
-      await linkCodeService.markAsUsed(
-        _validatedLinkCode!.code,
-        userCredential.user!.uid,
-      );
+      await linkCodeService.markAsUsed(code, userCredential.user!.uid);
 
-      setState(() {
-        _currentStep = _Step.success;
-        _isLoading = false;
-      });
+      // All Firestore documents are created. Force Riverpod to reload user data.
+      container.invalidate(currentUserProvider);
+
+      // Poll until currentUserProvider returns valid data with academy context (max 10 seconds)
+      for (int i = 0; i < 20; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        final userAsync = container.read(currentUserProvider);
+        if (userAsync.hasValue && userAsync.value != null) {
+          final user = userAsync.value!;
+          // Make sure the user has academy context (not just a "free user" from the race condition)
+          if (user.academyId != null) {
+            break;
+          }
+          // Still showing as free user - invalidate and retry
+          container.invalidate(currentUserProvider);
+        }
+        if (userAsync.hasError) {
+          container.invalidate(currentUserProvider);
+        }
+      }
+
+      // Dismiss overlay - the router will naturally redirect to the dashboard
+      // since the user is authenticated and currentUserProvider has data
+      container.read(isCreatingAccountProvider.notifier).state = false;
     } catch (e) {
-      setState(() {
-        _errorMessage = _getErrorMessage(e);
-        _isLoading = false;
-      });
+      // Dismiss overlay on error
+      container.read(isCreatingAccountProvider.notifier).state = false;
+
+      if (mounted) {
+        setState(() {
+          _errorMessage = _getErrorMessage(e);
+          _currentStep = _Step.register;
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -246,6 +279,8 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         return _buildCodeStep();
       case _Step.register:
         return _buildRegisterStep();
+      case _Step.creating:
+        return _buildCreatingStep();
       case _Step.success:
         return _buildSuccessStep();
     }
@@ -555,6 +590,34 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
           const SizedBox(height: 16),
 
+          // WhatsApp field
+          TextFormField(
+            controller: _phoneController,
+            keyboardType: TextInputType.phone,
+            textInputAction: TextInputAction.next,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(11),
+            ],
+            decoration: const InputDecoration(
+              labelText: 'WhatsApp',
+              hintText: '11999999999',
+              prefixIcon: Icon(LucideIcons.phone, size: 20),
+            ),
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return 'Informe seu WhatsApp';
+              }
+              final digits = value.replaceAll(RegExp(r'\D'), '');
+              if (digits.length < 10) {
+                return 'WhatsApp deve ter pelo menos 10 digitos';
+              }
+              return null;
+            },
+          ).animate().fadeIn(delay: 375.ms).slideX(begin: -0.1),
+
+          const SizedBox(height: 16),
+
           // Email field
           TextFormField(
             controller: _emailController,
@@ -669,6 +732,13 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     );
   }
 
+  /// Shown briefly before the app-level overlay takes over
+  Widget _buildCreatingStep() {
+    return const Center(
+      child: CircularProgressIndicator(),
+    );
+  }
+
   Widget _buildSuccessStep() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -697,7 +767,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
         // Title
         Text(
-          'Conta criada!',
+          'Conta criada com sucesso!',
           style: AppTheme.displaySmall,
           textAlign: TextAlign.center,
         ).animate().fadeIn(delay: 100.ms),
@@ -712,14 +782,25 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
           textAlign: TextAlign.center,
         ).animate().fadeIn(delay: 200.ms),
 
+        const SizedBox(height: 16),
+
+        Text(
+          'Agora faca login para acessar o app',
+          style: AppTheme.bodyMedium.copyWith(
+            color: AppTheme.primary,
+            fontWeight: FontWeight.w600,
+          ),
+          textAlign: TextAlign.center,
+        ).animate().fadeIn(delay: 250.ms),
+
         const SizedBox(height: 40),
 
         // Continue button
         SizedBox(
           height: 52,
           child: ElevatedButton(
-            onPressed: () => context.go('/portal'),
-            child: const Text('Acessar o app'),
+            onPressed: () => context.go('/login'),
+            child: const Text('Ir para Login'),
           ),
         ).animate().fadeIn(delay: 300.ms).slideY(begin: 0.1),
       ],

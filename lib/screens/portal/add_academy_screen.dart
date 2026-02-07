@@ -32,7 +32,6 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
   String? _academyId;
   String? _academyName;
   String? _academyLogoUrl;
-  String? _studentId;
   String? _studentName;
 
   @override
@@ -469,7 +468,6 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
         _academyId = foundAcademyId;
         _academyName = academyData?['name'] ?? 'Academia';
         _academyLogoUrl = academyData?['logoUrl'];
-        _studentId = foundStudentId;
         _studentName = studentName;
       });
     } catch (e) {
@@ -486,7 +484,6 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
       _academyId = null;
       _academyName = null;
       _academyLogoUrl = null;
-      _studentId = null;
       _studentName = null;
       _errorMessage = null;
     });

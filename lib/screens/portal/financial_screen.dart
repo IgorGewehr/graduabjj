@@ -20,7 +20,6 @@ import '../../services/asaas_payment_service.dart';
 /// Payment enabled provider (either AbacatePay or Asaas)
 final abacatePayEnabledProvider = FutureProvider<bool>((ref) async {
   final academyId = FirebaseService.academyId;
-  if (academyId == null) return false;
 
   final service = AbacatePayService(academyId);
   final abacateEnabled = await service.isEnabled();
@@ -165,7 +164,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                             showPayButton: abacatePayEnabled,
                             onPayPix: () => _showPixPaymentDialog(
                               payment,
-                              student.fullName ?? student.nickname ?? 'Aluno',
+                              student.fullName,
                             ),
                           ),
                         )),
@@ -852,7 +851,6 @@ class _PixPaymentBottomSheetState
 
   void _setupPaymentListener() {
     final academyId = FirebaseService.academyId;
-    if (academyId == null) return;
 
     _paymentListener = FirebaseFirestore.instance
         .collection('academies')
@@ -943,13 +941,6 @@ class _PixPaymentBottomSheetState
 
   Future<void> _generatePixPayment() async {
     final academyId = FirebaseService.academyId;
-    if (academyId == null) {
-      setState(() {
-        _error = 'Academia nao encontrada';
-        _isLoading = false;
-      });
-      return;
-    }
 
     try {
       // Check which provider is active

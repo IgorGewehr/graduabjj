@@ -101,18 +101,77 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                   ],
                   body: Column(
                     children: [
-                      TabBar(
-                        controller: _tabController,
-                        isScrollable: true,
-                        tabAlignment: TabAlignment.start,
-                        tabs: const [
-                          Tab(text: 'Info'),
-                          Tab(text: 'Presenças'),
-                          Tab(text: 'Financeiro'),
-                          Tab(text: 'Comportamento'),
-                          Tab(text: 'Conquistas'),
-                          Tab(text: 'Histórico'),
-                        ],
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppTheme.surface,
+                          border: Border(
+                            bottom: BorderSide(
+                              color: AppTheme.divider,
+                              width: 1,
+                            ),
+                          ),
+                        ),
+                        child: TabBar(
+                          controller: _tabController,
+                          isScrollable: true,
+                          tabAlignment: TabAlignment.start,
+                          indicatorSize: TabBarIndicatorSize.label,
+                          indicator: BoxDecoration(
+                            border: Border(
+                              bottom: BorderSide(
+                                color: AppTheme.primary,
+                                width: 3,
+                              ),
+                            ),
+                          ),
+                          tabs: [
+                            Tab(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(LucideIcons.info, size: 16),
+                                  const SizedBox(width: 6),
+                                  const Text('Info'),
+                                ],
+                              ),
+                            ),
+                            Tab(
+                              child: _TabWithBadge(
+                                icon: LucideIcons.clipboardCheck,
+                                label: 'Presenças',
+                                count: _attendances.length,
+                              ),
+                            ),
+                            Tab(
+                              child: _TabWithBadge(
+                                icon: LucideIcons.dollarSign,
+                                label: 'Financeiro',
+                                count: _payments.length + _storeOrders.length,
+                              ),
+                            ),
+                            Tab(
+                              child: _TabWithBadge(
+                                icon: LucideIcons.star,
+                                label: 'Comportamento',
+                                count: _assessments.length,
+                              ),
+                            ),
+                            Tab(
+                              child: _TabWithBadge(
+                                icon: LucideIcons.trophy,
+                                label: 'Conquistas',
+                                count: _achievements.length,
+                              ),
+                            ),
+                            Tab(
+                              child: _TabWithBadge(
+                                icon: LucideIcons.history,
+                                label: 'Histórico',
+                                count: _progressions.length + _achievements.length,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                       Expanded(
                         child: TabBarView(
@@ -225,25 +284,41 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 children: [
                   Row(
                     children: [
-                      // Avatar
-                      (_student!.photoUrl ?? '').isNotEmpty
-                          ? CircleAvatar(
-                              radius: 40,
-                              backgroundImage: NetworkImage(_student!.photoUrl!),
-                            )
-                          : CircleAvatar(
-                              radius: 40,
-                              backgroundColor: Colors.white.withValues(alpha: 0.3),
-                              child: Text(
-                                _student!.fullName.substring(0, 1).toUpperCase(),
-                                style: TextStyle(
-                                  fontSize: 32,
-                                  fontWeight: FontWeight.bold,
-                                  color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
+                      // Avatar com borda colorida
+                      Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.5),
+                            width: 3,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.2),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: (_student!.photoUrl ?? '').isNotEmpty
+                            ? CircleAvatar(
+                                radius: 48,
+                                backgroundImage: NetworkImage(_student!.photoUrl!),
+                              )
+                            : CircleAvatar(
+                                radius: 48,
+                                backgroundColor: Colors.white.withValues(alpha: 0.3),
+                                child: Text(
+                                  _student!.fullName.substring(0, 1).toUpperCase(),
+                                  style: TextStyle(
+                                    fontSize: 36,
+                                    fontWeight: FontWeight.bold,
+                                    color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
+                                  ),
                                 ),
                               ),
-                            ),
-                      const SizedBox(width: 16),
+                      ),
+                      const SizedBox(width: 20),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -288,27 +363,50 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
     };
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.3),
-        borderRadius: BorderRadius.circular(12),
+        color: Colors.white.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          Icon(
+            LucideIcons.award,
+            size: 16,
+            color: _getBeltColor(_student!.currentBelt),
+          ),
+          const SizedBox(width: 6),
           Text(
             beltNames[_student!.currentBelt] ?? _student!.currentBelt,
             style: TextStyle(
-              color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
-              fontWeight: FontWeight.w500,
+              color: Colors.black87,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
             ),
           ),
           if (_student!.currentStripes > 0) ...[
-            const SizedBox(width: 4),
-            Text(
-              '${_student!.currentStripes} grau(s)',
-              style: TextStyle(
-                color: _student!.currentBelt == 'white' ? Colors.black.withValues(alpha: 0.7) : Colors.white70,
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: _getBeltColor(_student!.currentBelt).withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${_student!.currentStripes} grau${_student!.currentStripes > 1 ? "s" : ""}',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 11,
+                ),
               ),
             ),
           ],
@@ -318,25 +416,48 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
   }
 
   Widget _buildStatusBadge() {
-    final statusColors = {
-      StudentStatus.active: Colors.green,
-      StudentStatus.inactive: Colors.grey,
-      StudentStatus.suspended: Colors.orange,
-      StudentStatus.injured: Colors.blue,
+    final statusConfig = {
+      StudentStatus.active: {'color': Colors.green, 'icon': LucideIcons.checkCircle2},
+      StudentStatus.inactive: {'color': Colors.grey, 'icon': LucideIcons.pauseCircle},
+      StudentStatus.suspended: {'color': Colors.orange, 'icon': LucideIcons.alertCircle},
+      StudentStatus.injured: {'color': Colors.blue, 'icon': LucideIcons.heartPulse},
     };
 
+    final config = statusConfig[_student!.status] ?? {'color': Colors.grey, 'icon': LucideIcons.circle};
+    final statusColor = config['color'] as Color;
+    final statusIcon = config['icon'] as IconData;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: statusColors[_student!.status]?.withValues(alpha: 0.3) ?? Colors.grey.withValues(alpha: 0.3),
-        borderRadius: BorderRadius.circular(12),
+        color: Colors.white.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: Text(
-        _student!.status.label,
-        style: TextStyle(
-          color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
-          fontWeight: FontWeight.w500,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            statusIcon,
+            size: 14,
+            color: statusColor,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            _student!.status.label,
+            style: TextStyle(
+              color: Colors.black87,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -394,8 +515,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 label: 'Nascimento',
                 value: DateFormat('dd/MM/yyyy').format(_student!.birthDate!),
               ),
-            if (_student!.category != null)
-              _InfoRow(label: 'Categoria', value: _student!.category!.label),
+            _InfoRow(label: 'Categoria', value: _student!.category.label),
           ]),
           const SizedBox(height: 16),
 
@@ -423,16 +543,37 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
 
   Widget _buildSection(String title, List<Widget> children) {
     return Card(
+      elevation: 1,
+      shadowColor: Colors.black.withValues(alpha: 0.05),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.bold),
+            Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  title,
+                  style: AppTheme.titleMedium.copyWith(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             ...children,
           ],
         ),
@@ -442,7 +583,44 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
 
   Widget _buildAttendanceTab() {
     if (_attendances.isEmpty) {
-      return const Center(child: Text('Nenhuma presença registrada'));
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  LucideIcons.clipboardX,
+                  size: 64,
+                  color: AppTheme.primary.withValues(alpha: 0.5),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Nenhuma presença registrada',
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'As presenças do aluno aparecerão aqui\nassim que forem registradas',
+                style: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     // Group by month
@@ -525,6 +703,8 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
           ..._studentPlans.map((plan) {
             final studentValue = plan.getStudentValue(widget.studentId);
             final hasCustomValue = plan.customValues.containsKey(widget.studentId);
+            final studentDueDay = plan.getStudentDueDay(widget.studentId);
+            final hasCustomDueDay = plan.customDueDays.containsKey(widget.studentId);
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(16),
@@ -591,6 +771,36 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                       ],
                     ],
                   ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Text(
+                        'Vencimento: dia $studentDueDay',
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: hasCustomDueDay ? AppTheme.success : AppTheme.textPrimary,
+                        ),
+                      ),
+                      if (hasCustomDueDay) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.successLight,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'Personalizado',
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.success,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ],
               ),
             );
@@ -632,12 +842,15 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
     final studentValue = plan.getStudentValue(widget.studentId);
     final controller = TextEditingController(text: studentValue.toStringAsFixed(2));
     final hasCustomValue = plan.customValues.containsKey(widget.studentId);
+    final studentDueDay = plan.getStudentDueDay(widget.studentId);
+    final dueDayController = TextEditingController(text: studentDueDay.toString());
+    final hasCustomDueDay = plan.customDueDays.containsKey(widget.studentId);
     final parentContext = context;
 
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('Valor - ${plan.name}'),
+        title: Text('Valor e Vencimento - ${plan.name}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -670,6 +883,35 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 label: const Text('Restaurar valor do plano'),
               ),
             ],
+            const SizedBox(height: 16),
+            Text(
+              'Vencimento padrão do plano: dia ${plan.defaultDueDay}',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: dueDayController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Dia de vencimento',
+                hintText: '1-31',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            if (hasCustomDueDay) ...[
+              const SizedBox(height: 12),
+              TextButton.icon(
+                onPressed: () async {
+                  Navigator.of(dialogContext).pop();
+                  final planService = PlanService(FirebaseService.academyId);
+                  await planService.removeCustomDueDay(plan.id, widget.studentId);
+                  if (mounted) parentContext.showSuccess('Vencimento restaurado ao padrão do plano');
+                  _loadData();
+                },
+                icon: const Icon(LucideIcons.rotateCcw, size: 16),
+                label: const Text('Restaurar vencimento do plano'),
+              ),
+            ],
           ],
         ),
         actions: [
@@ -681,14 +923,23 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
             onPressed: () async {
               final value = double.tryParse(controller.text.replaceAll(',', '.'));
               if (value == null || value <= 0) return;
+              final dueDay = int.tryParse(dueDayController.text);
+              if (dueDay == null || dueDay < 1 || dueDay > 31) return;
               Navigator.of(dialogContext).pop();
               final planService = PlanService(FirebaseService.academyId);
+              // Save value
               if (value == plan.monthlyValue) {
                 await planService.removeCustomValue(plan.id, widget.studentId);
               } else {
                 await planService.setCustomValue(plan.id, widget.studentId, value);
               }
-              if (mounted) parentContext.showSuccess('Valor atualizado');
+              // Save due day
+              if (dueDay == plan.defaultDueDay) {
+                await planService.removeCustomDueDay(plan.id, widget.studentId);
+              } else {
+                await planService.setCustomDueDay(plan.id, widget.studentId, dueDay);
+              }
+              if (mounted) parentContext.showSuccess('Valor e vencimento atualizados');
               _loadData();
             },
             child: const Text('Salvar'),
@@ -703,29 +954,49 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       children: [
         _achievements.isEmpty
             ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.emoji_events_outlined,
-                      size: 64,
-                      color: AppTheme.textDisabled,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Nenhuma conquista registrada',
-                      style: AppTheme.bodyLarge.copyWith(
-                        color: AppTheme.textSecondary,
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF59E0B).withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          LucideIcons.trophy,
+                          size: 64,
+                          color: const Color(0xFFF59E0B).withValues(alpha: 0.5),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Adicione conquistas do aluno',
-                      style: AppTheme.bodySmall.copyWith(
-                        color: AppTheme.textDisabled,
+                      const SizedBox(height: 24),
+                      Text(
+                        'Nenhuma conquista ainda',
+                        style: AppTheme.titleMedium.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 8),
+                      Text(
+                        'Registre as conquistas e marcos\nimportantes do aluno',
+                        style: AppTheme.bodyMedium.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        'Toque em + para adicionar',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textDisabled,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               )
             : ListView.builder(
@@ -1882,34 +2153,53 @@ class _StatCard extends StatelessWidget {
     required this.icon,
   });
 
+  Color _getIconColor() {
+    if (icon == Icons.check_circle) return const Color(0xFF22C55E); // Green
+    if (icon == Icons.calendar_today) return const Color(0xFF3B82F6); // Blue
+    if (icon == Icons.emoji_events) return const Color(0xFFF59E0B); // Amber
+    return AppTheme.primary;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final iconColor = _getIconColor();
+
     return Card(
+      elevation: 2,
+      shadowColor: Colors.black.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        child: Row(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: AppTheme.primary, size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    value,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    label,
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.textSecondary,
-                      fontSize: 10,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: iconColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
               ),
+              child: Icon(icon, color: iconColor, size: 24),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                height: 1.2,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: AppTheme.bodySmall.copyWith(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -1918,29 +2208,83 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-/// Info Row Widget
+/// Info Row Widget with icons
 class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoRow({required this.label, required this.value});
+  const _InfoRow({
+    required this.label,
+    required this.value,
+  });
+
+  IconData _getDefaultIcon() {
+    if (label.contains('Nome')) return LucideIcons.user;
+    if (label.contains('Apelido')) return LucideIcons.userCircle;
+    if (label.contains('E-mail')) return LucideIcons.mail;
+    if (label.contains('Telefone')) return LucideIcons.phone;
+    if (label.contains('Nascimento')) return LucideIcons.cake;
+    if (label.contains('Categoria')) return LucideIcons.tag;
+    if (label.contains('Data de início')) return LucideIcons.calendar;
+    if (label.contains('Plano')) return LucideIcons.creditCard;
+    if (label.contains('Mensalidade')) return LucideIcons.dollarSign;
+    if (label.contains('vencimento')) return LucideIcons.clock;
+    return LucideIcons.info;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+    final displayIcon = _getDefaultIcon();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.surface.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppTheme.divider.withValues(alpha: 0.5),
+          width: 1,
+        ),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              label,
-              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              displayIcon,
+              size: 16,
+              color: AppTheme.primary,
             ),
           ),
+          const SizedBox(width: 12),
           Expanded(
-            child: Text(value, style: const TextStyle(fontWeight: FontWeight.w500)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -2439,6 +2783,49 @@ class _AssessmentCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Tab with Badge Widget
+class _TabWithBadge extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final int count;
+
+  const _TabWithBadge({
+    required this.icon,
+    required this.label,
+    required this.count,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16),
+        const SizedBox(width: 6),
+        Text(label),
+        if (count > 0) ...[
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppTheme.primary,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              count.toString(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

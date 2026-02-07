@@ -2,13 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:intl/intl.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/user.dart';
 import '../../providers/providers.dart';
-import '../../services/global_user_service.dart';
 
 /// Academies Management Screen
 /// Shows list of linked academies with options to add, set primary, or unlink

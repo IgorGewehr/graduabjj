@@ -24,16 +24,6 @@ class ScheduleScreen extends ConsumerStatefulWidget {
 class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
   bool _isCreatingCheckin = false;
 
-  static const List<WeekDay> _weekDays = [
-    WeekDay(value: 0, label: 'Domingo', short: 'Dom'),
-    WeekDay(value: 1, label: 'Segunda', short: 'Seg'),
-    WeekDay(value: 2, label: 'Terca', short: 'Ter'),
-    WeekDay(value: 3, label: 'Quarta', short: 'Qua'),
-    WeekDay(value: 4, label: 'Quinta', short: 'Qui'),
-    WeekDay(value: 5, label: 'Sexta', short: 'Sex'),
-    WeekDay(value: 6, label: 'Sabado', short: 'Sab'),
-  ];
-
   @override
   Widget build(BuildContext context) {
     final currentUser = ref.watch(currentUserProvider).valueOrNull;

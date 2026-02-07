@@ -13,28 +13,7 @@ import '../../models/user.dart';
 import '../../providers/providers.dart';
 import '../../widgets/common/belt_badge.dart';
 
-/// Belt labels for display
-const Map<String, String> _beltLabels = {
-  'white': 'Branca',
-  'blue': 'Azul',
-  'purple': 'Roxa',
-  'brown': 'Marrom',
-  'black': 'Preta',
-  'grey': 'Cinza',
-  'grey-white': 'Cinza/Branca',
-  'grey-black': 'Cinza/Preta',
-  'yellow': 'Amarela',
-  'yellow-white': 'Amarela/Branca',
-  'yellow-black': 'Amarela/Preta',
-  'orange': 'Laranja',
-  'orange-white': 'Laranja/Branca',
-  'orange-black': 'Laranja/Preta',
-  'green': 'Verde',
-  'green-white': 'Verde/Branca',
-  'green-black': 'Verde/Preta',
-};
-
-/// Profile Screen - Clean read-only view with edit via bottom sheet
+/// Profile Screen - Redesigned with hero header, stats, and collapsed sections
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
@@ -50,6 +29,8 @@ class ProfileScreen extends ConsumerWidget {
 
         final attendanceCountAsync = ref.watch(studentAttendanceCountProvider(student.id));
         final plansAsync = ref.watch(studentPlansProvider(student.id));
+        final startDate = student.jiujitsuStartDate ?? student.startDate;
+        final trainingTime = _formatTrainingTime(startDate);
 
         return RefreshIndicator(
           onRefresh: () async {
@@ -60,35 +41,45 @@ class ProfileScreen extends ConsumerWidget {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.all(16),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // Timeline Link
-                _TimelineLink(
-                  onTap: () => context.go('/portal/linha-do-tempo'),
+                // Hero Header
+                _HeroHeader(student: student),
+
+                const SizedBox(height: 20),
+
+                // Stats Row
+                Row(
+                  children: [
+                    _StatCard(
+                      icon: LucideIcons.clipboardCheck,
+                      value: '${attendanceCountAsync.valueOrNull ?? 0}',
+                      label: 'presencas',
+                    ),
+                    const SizedBox(width: 12),
+                    _StatCard(
+                      icon: LucideIcons.calendar,
+                      value: trainingTime,
+                      label: 'de treino',
+                    ),
+                  ],
                 ),
 
                 const SizedBox(height: 16),
 
-                // Section title
-                Text(
-                  'Meu Perfil',
-                  style: AppTheme.titleLarge.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // Profile Card
-                _ProfileCard(
-                  student: student,
-                  attendanceCount: attendanceCountAsync.valueOrNull ?? 0,
+                // Quick Actions
+                _QuickActions(
+                  onTimeline: () => context.go('/portal/linha-do-tempo'),
+                  onEdit: () => _showEditPersonalDataSheet(context, ref, student),
                 ),
 
                 const SizedBox(height: 24),
 
-                // Academy Info (read-only)
-                _SectionHeader(title: 'GERENCIADO PELA ACADEMIA'),
+                // Academy-managed section
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _SectionHeader(title: 'GERENCIADO PELA ACADEMIA'),
+                ),
                 const SizedBox(height: 8),
                 _InfoCard(
                   children: [
@@ -111,113 +102,46 @@ class ProfileScreen extends ConsumerWidget {
 
                 const SizedBox(height: 24),
 
-                // Personal Data
-                _SectionHeader(
-                  title: 'DADOS PESSOAIS',
-                  onEdit: () => _showEditPersonalDataSheet(context, ref, student),
+                // My Data section
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _SectionHeader(title: 'MEUS DADOS'),
                 ),
                 const SizedBox(height: 8),
                 _InfoCard(
                   children: [
-                    if (student.nickname != null && student.nickname!.isNotEmpty)
-                      _InfoRow(label: 'Apelido', value: student.nickname!),
-                    if (student.birthDate != null)
-                      _InfoRow(
-                        label: 'Nascimento',
-                        value: DateFormat('dd/MM/yyyy').format(student.birthDate!),
-                      ),
-                    if (student.phone != null && student.phone!.isNotEmpty)
-                      _InfoRow(label: 'Telefone', value: student.phone!),
-                    if (student.email != null && student.email!.isNotEmpty)
-                      _InfoRow(label: 'Email', value: student.email!),
-                    if (student.cpf != null && student.cpf!.isNotEmpty)
-                      _InfoRow(label: 'CPF', value: student.cpf!),
-                    if (student.rg != null && student.rg!.isNotEmpty)
-                      _InfoRow(label: 'RG', value: student.rg!),
-                    if (student.weight != null)
-                      _InfoRow(label: 'Peso', value: '${student.weight} kg'),
-                    // Empty state
-                    if (_isPersonalDataEmpty(student))
-                      _EmptyFieldHint(
-                        text: 'Toque em editar para adicionar seus dados',
-                      ),
+                    _DataTile(
+                      icon: LucideIcons.user,
+                      title: 'Dados Pessoais',
+                      subtitle: _getPersonalDataSummary(student),
+                      isSubtitleEmpty: _isPersonalDataEmpty(student),
+                      onTap: () => _showEditPersonalDataSheet(context, ref, student),
+                    ),
+                    _DataTile(
+                      icon: LucideIcons.mapPin,
+                      title: 'Endereco',
+                      subtitle: _getAddressSummary(student),
+                      isSubtitleEmpty: student.address == null || !_hasAddress(student.address!),
+                      onTap: () => _showEditAddressSheet(context, ref, student),
+                    ),
+                    _DataTile(
+                      icon: LucideIcons.heartPulse,
+                      title: 'Saude e Emergencia',
+                      subtitle: _getHealthEmergencySummary(student),
+                      isSubtitleEmpty: _isHealthDataEmpty(student) && student.emergencyContact == null,
+                      onTap: () => _showEditHealthAndEmergencySheet(context, ref, student),
+                    ),
                   ],
                 ),
 
                 const SizedBox(height: 24),
 
-                // Address
-                _SectionHeader(
-                  title: 'ENDERECO',
-                  onEdit: () => _showEditAddressSheet(context, ref, student),
+                // Preferences
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _SectionHeader(title: 'PREFERENCIAS'),
                 ),
                 const SizedBox(height: 8),
-                _InfoCard(
-                  children: [
-                    if (student.address != null && _hasAddress(student.address!)) ...[
-                      if (student.address!.street != null)
-                        _InfoRow(
-                          label: 'Endereco',
-                          value: _formatAddress(student.address!),
-                        ),
-                      if (student.address!.neighborhood != null)
-                        _InfoRow(label: 'Bairro', value: student.address!.neighborhood!),
-                      if (student.address!.city != null)
-                        _InfoRow(
-                          label: 'Cidade',
-                          value: '${student.address!.city}${student.address!.state != null ? ' - ${student.address!.state}' : ''}',
-                        ),
-                      if (student.address!.zipCode != null)
-                        _InfoRow(label: 'CEP', value: student.address!.zipCode!),
-                    ] else
-                      _EmptyFieldHint(text: 'Nenhum endereco cadastrado'),
-                  ],
-                ),
-
-                const SizedBox(height: 24),
-
-                // Health Info
-                _SectionHeader(
-                  title: 'SAUDE',
-                  onEdit: () => _showEditHealthSheet(context, ref, student),
-                ),
-                const SizedBox(height: 8),
-                _InfoCard(
-                  children: [
-                    if (student.bloodType != null && student.bloodType!.isNotEmpty)
-                      _InfoRow(label: 'Tipo sanguineo', value: student.bloodType!),
-                    if (student.allergies != null && student.allergies!.isNotEmpty)
-                      _InfoRow(label: 'Alergias', value: student.allergies!.join(', ')),
-                    if (student.healthNotes != null && student.healthNotes!.isNotEmpty)
-                      _InfoRow(label: 'Observacoes', value: student.healthNotes!),
-                    if (_isHealthDataEmpty(student))
-                      _EmptyFieldHint(text: 'Nenhuma informacao de saude'),
-                  ],
-                ),
-
-                const SizedBox(height: 24),
-
-                // Emergency Contact
-                _SectionHeader(
-                  title: 'CONTATO DE EMERGENCIA',
-                  onEdit: () => _showEditEmergencySheet(context, ref, student),
-                ),
-                const SizedBox(height: 8),
-                _InfoCard(
-                  children: [
-                    if (student.emergencyContact != null) ...[
-                      _InfoRow(label: 'Nome', value: student.emergencyContact!.name),
-                      _InfoRow(label: 'Telefone', value: student.emergencyContact!.phone),
-                      if (student.emergencyContact!.relationship.isNotEmpty)
-                        _InfoRow(label: 'Parentesco', value: student.emergencyContact!.relationship),
-                    ] else
-                      _EmptyFieldHint(text: 'Nenhum contato de emergencia'),
-                  ],
-                ),
-
-                const SizedBox(height: 24),
-
-                // Privacy Toggle
                 _PrivacyToggle(
                   value: student.isProfilePublic,
                   onChanged: (value) => _updatePrivacy(context, ref, student, value),
@@ -225,12 +149,12 @@ class ProfileScreen extends ConsumerWidget {
 
                 const SizedBox(height: 24),
 
-                // Academies Section (for multi-academy users)
+                // Academies
                 _AcademiesSection(),
 
                 const SizedBox(height: 24),
 
-                // Account Section
+                // Account
                 _AccountSection(),
 
                 const SizedBox(height: 80),
@@ -242,6 +166,64 @@ class ProfileScreen extends ConsumerWidget {
       loading: () => _buildLoadingState(),
       error: (_, __) => _buildEmptyState(),
     );
+  }
+
+  // ============================================
+  // HELPERS
+  // ============================================
+
+  String _formatTrainingTime(DateTime startDate) {
+    final now = DateTime.now();
+    final difference = now.difference(startDate);
+    final months = difference.inDays ~/ 30;
+
+    if (months >= 12) {
+      final years = months ~/ 12;
+      final remainingMonths = months % 12;
+      if (remainingMonths > 0) {
+        return '${years}a ${remainingMonths}m';
+      }
+      return '$years ano${years > 1 ? 's' : ''}';
+    } else if (months > 0) {
+      return '$months mes${months > 1 ? 'es' : ''}';
+    } else {
+      final days = difference.inDays;
+      return '$days dia${days != 1 ? 's' : ''}';
+    }
+  }
+
+  String _getPersonalDataSummary(Student student) {
+    final parts = <String>[];
+    if (student.phone != null && student.phone!.isNotEmpty) parts.add(student.phone!);
+    if (student.email != null && student.email!.isNotEmpty) parts.add(student.email!);
+    if (student.nickname != null && student.nickname!.isNotEmpty) parts.add(student.nickname!);
+    if (parts.isEmpty) return 'Nenhum dado';
+    return parts.join(', ');
+  }
+
+  String _getAddressSummary(Student student) {
+    if (student.address == null || !_hasAddress(student.address!)) {
+      return 'Nenhum endereco cadastrado';
+    }
+    final city = student.address!.city;
+    final state = student.address!.state;
+    if (city.isNotEmpty && state.isNotEmpty) {
+      return '$city - $state';
+    }
+    if (city.isNotEmpty) return city;
+    return student.address!.street;
+  }
+
+  String _getHealthEmergencySummary(Student student) {
+    final parts = <String>[];
+    if (student.bloodType != null && student.bloodType!.isNotEmpty) {
+      parts.add('Tipo ${student.bloodType}');
+    }
+    if (student.emergencyContact != null && student.emergencyContact!.name.isNotEmpty) {
+      parts.add(student.emergencyContact!.name);
+    }
+    if (parts.isEmpty) return 'Nenhum dado';
+    return parts.join(', ');
   }
 
   bool _isPersonalDataEmpty(Student student) {
@@ -264,19 +246,9 @@ class ProfileScreen extends ConsumerWidget {
     return address.street.isNotEmpty || address.city.isNotEmpty;
   }
 
-  String _formatAddress(Address address) {
-    final parts = <String>[];
-    if (address.street.isNotEmpty) {
-      parts.add(address.street);
-    }
-    if (address.number.isNotEmpty) {
-      parts.add(address.number);
-    }
-    if (address.complement != null && address.complement!.isNotEmpty) {
-      parts.add(address.complement!);
-    }
-    return parts.join(', ');
-  }
+  // ============================================
+  // ACTIONS
+  // ============================================
 
   Future<void> _updatePrivacy(
     BuildContext context,
@@ -335,12 +307,12 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  void _showEditHealthSheet(BuildContext context, WidgetRef ref, Student student) {
+  void _showEditHealthAndEmergencySheet(BuildContext context, WidgetRef ref, Student student) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _EditHealthSheet(
+      builder: (ctx) => _EditHealthAndEmergencySheet(
         student: student,
         onSave: (data) async {
           final studentService = ref.read(studentServiceProvider);
@@ -352,45 +324,72 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  void _showEditEmergencySheet(BuildContext context, WidgetRef ref, Student student) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _EditEmergencySheet(
-        student: student,
-        onSave: (data) async {
-          final studentService = ref.read(studentServiceProvider);
-          if (studentService == null) return;
-          await studentService.update(student.id, data);
-          ref.invalidate(currentStudentProvider);
-        },
-      ),
-    );
-  }
+  // ============================================
+  // LOADING & EMPTY STATES
+  // ============================================
 
   Widget _buildLoadingState() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
+          const SizedBox(height: 16),
+          // Avatar shimmer
           Container(
-            height: 40,
-            width: double.infinity,
+            width: 88,
+            height: 88,
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceVariant,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Name shimmer
+          Container(
+            height: 20,
+            width: 160,
             decoration: BoxDecoration(
               color: AppTheme.surfaceVariant,
               borderRadius: BorderRadius.circular(8),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
+          // Belt shimmer
           Container(
-            height: 100,
+            height: 28,
+            width: 140,
             decoration: BoxDecoration(
               color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(8),
             ),
           ),
+          const SizedBox(height: 20),
+          // Stats shimmer
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 24),
+          // Card shimmer
           Container(
             height: 150,
             decoration: BoxDecoration(
@@ -427,36 +426,108 @@ class ProfileScreen extends ConsumerWidget {
 }
 
 // ============================================
-// WIDGETS
+// NEW WIDGETS
 // ============================================
 
-/// Timeline link at the top
-class _TimelineLink extends StatelessWidget {
-  final VoidCallback onTap;
+/// Hero Header — Centered avatar, name, belt, status
+class _HeroHeader extends StatelessWidget {
+  final Student student;
 
-  const _TimelineLink({required this.onTap});
+  const _HeroHeader({required this.student});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
+    return Column(
+      children: [
+        // Avatar
+        CircleAvatar(
+          radius: 44,
+          backgroundColor: AppTheme.primary,
+          backgroundImage: (student.photoUrl ?? '').isNotEmpty ? NetworkImage(student.photoUrl!) : null,
+          child: (student.photoUrl ?? '').isEmpty
+              ? Text(
+                  student.displayName[0].toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                )
+              : null,
+        ),
+        const SizedBox(height: 12),
+        // Name
+        Text(
+          student.fullName,
+          style: AppTheme.headlineSmall.copyWith(fontWeight: FontWeight.w600),
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 8),
+        // Belt Badge
+        BeltBadge(
+          belt: student.currentBelt,
+          stripes: student.currentStripes,
+          size: BeltSize.large,
+          showLabel: true,
+        ),
+        const SizedBox(height: 8),
+        // Status Pill
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppTheme.getStatusBackgroundColor(student.status.value),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            student.status.label,
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.getStatusColor(student.status.value),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Stat Card — Shows a single statistic
+class _StatCard extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  final String label;
+
+  const _StatCard({
+    required this.icon,
+    required this.value,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
           color: AppTheme.surfaceVariant,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(LucideIcons.history, size: 16, color: AppTheme.textSecondary),
-            const SizedBox(width: 8),
+            Icon(icon, size: 20, color: AppTheme.textSecondary),
+            const SizedBox(height: 8),
             Text(
-              'Ver linha do tempo',
-              style: AppTheme.labelMedium.copyWith(color: AppTheme.textSecondary),
+              value,
+              style: AppTheme.headlineMedium.copyWith(fontWeight: FontWeight.w600),
             ),
-            const SizedBox(width: 4),
-            const Icon(LucideIcons.chevronRight, size: 14, color: AppTheme.textSecondary),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+            ),
           ],
         ),
       ),
@@ -464,118 +535,146 @@ class _TimelineLink extends StatelessWidget {
   }
 }
 
-/// Profile Card
-class _ProfileCard extends StatelessWidget {
-  final Student student;
-  final int attendanceCount;
+/// Quick Actions — Timeline + Edit profile chips
+class _QuickActions extends StatelessWidget {
+  final VoidCallback onTimeline;
+  final VoidCallback onEdit;
 
-  const _ProfileCard({
-    required this.student,
-    required this.attendanceCount,
-  });
-
-  String _formatTrainingTime(DateTime startDate) {
-    final now = DateTime.now();
-    final difference = now.difference(startDate);
-    final months = difference.inDays ~/ 30;
-
-    if (months >= 12) {
-      final years = months ~/ 12;
-      final remainingMonths = months % 12;
-      if (remainingMonths > 0) {
-        return '${years}a ${remainingMonths}m';
-      }
-      return '$years ano${years > 1 ? 's' : ''}';
-    } else if (months > 0) {
-      return '$months mes${months > 1 ? 'es' : ''}';
-    } else {
-      final days = difference.inDays;
-      return '$days dia${days != 1 ? 's' : ''}';
-    }
-  }
+  const _QuickActions({required this.onTimeline, required this.onEdit});
 
   @override
   Widget build(BuildContext context) {
-    final beltLabel = _beltLabels[student.currentBelt] ?? student.currentBelt;
-    final startDate = student.jiujitsuStartDate ?? student.startDate;
-    final trainingTime = _formatTrainingTime(startDate);
+    return Row(
+      children: [
+        Expanded(
+          child: _QuickActionChip(
+            icon: LucideIcons.history,
+            label: 'Linha do tempo',
+            onTap: onTimeline,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _QuickActionChip(
+            icon: LucideIcons.pencil,
+            label: 'Editar perfil',
+            onTap: onEdit,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 32,
-            backgroundColor: AppTheme.primary,
-            backgroundImage: (student.photoUrl ?? '').isNotEmpty ? NetworkImage(student.photoUrl!) : null,
-            child: (student.photoUrl ?? '').isEmpty
-                ? Text(
-                    student.displayName[0].toUpperCase(),
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  )
-                : null,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  student.fullName,
-                  style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    BeltBadge(
-                      belt: student.currentBelt,
-                      stripes: student.currentStripes,
-                      size: BeltSize.small,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      beltLabel,
-                      style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(LucideIcons.clipboardCheck, size: 12, color: AppTheme.textSecondary),
-                    const SizedBox(width: 4),
-                    Text(
-                      '$attendanceCount presencas',
-                      style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-                    ),
-                    const SizedBox(width: 12),
-                    Icon(LucideIcons.calendar, size: 12, color: AppTheme.textSecondary),
-                    const SizedBox(width: 4),
-                    Text(
-                      '$trainingTime de treino',
-                      style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-                    ),
-                  ],
-                ),
-              ],
+class _QuickActionChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _QuickActionChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16, color: AppTheme.textSecondary),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                style: AppTheme.labelMedium.copyWith(color: AppTheme.textSecondary),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
+
+/// Data Tile — Navigable collapsed tile for "Meus Dados" section
+class _DataTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool isSubtitleEmpty;
+  final VoidCallback onTap;
+
+  const _DataTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.isSubtitleEmpty,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            // Leading icon
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, size: 18, color: AppTheme.textSecondary),
+            ),
+            const SizedBox(width: 12),
+            // Title + subtitle
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: AppTheme.labelSmall.copyWith(
+                      color: isSubtitleEmpty ? AppTheme.textDisabled : AppTheme.textSecondary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Trailing chevron
+            Icon(LucideIcons.chevronRight, size: 16, color: AppTheme.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================
+// KEPT WIDGETS (unchanged)
+// ============================================
 
 /// Section Header with optional edit button
 class _SectionHeader extends StatelessWidget {
@@ -687,30 +786,6 @@ class _InfoRow extends StatelessWidget {
                 fontWeight: FontWeight.w500,
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Empty field hint
-class _EmptyFieldHint extends StatelessWidget {
-  final String text;
-
-  const _EmptyFieldHint({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      child: Row(
-        children: [
-          Icon(LucideIcons.info, size: 14, color: AppTheme.textDisabled),
-          const SizedBox(width: 8),
-          Text(
-            text,
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.textDisabled),
           ),
         ],
       ),
@@ -963,21 +1038,26 @@ class _EditAddressSheetState extends State<_EditAddressSheet> {
   }
 }
 
-/// Edit Health Sheet
-class _EditHealthSheet extends StatefulWidget {
+/// Combined Edit Health & Emergency Contact Sheet
+class _EditHealthAndEmergencySheet extends StatefulWidget {
   final Student student;
   final Future<void> Function(Map<String, dynamic>) onSave;
 
-  const _EditHealthSheet({required this.student, required this.onSave});
+  const _EditHealthAndEmergencySheet({required this.student, required this.onSave});
 
   @override
-  State<_EditHealthSheet> createState() => _EditHealthSheetState();
+  State<_EditHealthAndEmergencySheet> createState() => _EditHealthAndEmergencySheetState();
 }
 
-class _EditHealthSheetState extends State<_EditHealthSheet> {
+class _EditHealthAndEmergencySheetState extends State<_EditHealthAndEmergencySheet> {
+  // Health controllers
   late final TextEditingController _bloodTypeController;
   late final TextEditingController _allergiesController;
   late final TextEditingController _healthNotesController;
+  // Emergency controllers
+  late final TextEditingController _emergencyNameController;
+  late final TextEditingController _emergencyPhoneController;
+  late final TextEditingController _emergencyRelationshipController;
   bool _isSaving = false;
 
   @override
@@ -986,6 +1066,9 @@ class _EditHealthSheetState extends State<_EditHealthSheet> {
     _bloodTypeController = TextEditingController(text: widget.student.bloodType);
     _allergiesController = TextEditingController(text: widget.student.allergies?.join(', '));
     _healthNotesController = TextEditingController(text: widget.student.healthNotes);
+    _emergencyNameController = TextEditingController(text: widget.student.emergencyContact?.name);
+    _emergencyPhoneController = TextEditingController(text: widget.student.emergencyContact?.phone);
+    _emergencyRelationshipController = TextEditingController(text: widget.student.emergencyContact?.relationship);
   }
 
   @override
@@ -993,6 +1076,9 @@ class _EditHealthSheetState extends State<_EditHealthSheet> {
     _bloodTypeController.dispose();
     _allergiesController.dispose();
     _healthNotesController.dispose();
+    _emergencyNameController.dispose();
+    _emergencyPhoneController.dispose();
+    _emergencyRelationshipController.dispose();
     super.dispose();
   }
 
@@ -1000,85 +1086,25 @@ class _EditHealthSheetState extends State<_EditHealthSheet> {
     setState(() => _isSaving = true);
     try {
       final allergiesText = _allergiesController.text.trim();
+      final hasEmergencyData = _emergencyNameController.text.trim().isNotEmpty ||
+          _emergencyPhoneController.text.trim().isNotEmpty;
+
       await widget.onSave({
         'bloodType': _bloodTypeController.text.trim().isEmpty ? null : _bloodTypeController.text.trim(),
-        'allergies': allergiesText.isEmpty ? null : allergiesText.split(',').map((a) => a.trim()).where((a) => a.isNotEmpty).toList(),
+        'allergies': allergiesText.isEmpty
+            ? null
+            : allergiesText.split(',').map((a) => a.trim()).where((a) => a.isNotEmpty).toList(),
         'healthNotes': _healthNotesController.text.trim().isEmpty ? null : _healthNotesController.text.trim(),
-      });
-      if (mounted) {
-        context.showSuccess('Dados de saude atualizados!');
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      if (mounted) context.showError('Erro: $e');
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _EditSheet(
-      title: 'Saude',
-      isSaving: _isSaving,
-      onSave: _save,
-      children: [
-        _SheetTextField(label: 'Tipo sanguineo', controller: _bloodTypeController, hint: 'Ex: A+, O-, AB+'),
-        _SheetTextField(label: 'Alergias', controller: _allergiesController, hint: 'Separe por virgula'),
-        _SheetTextField(label: 'Observacoes', controller: _healthNotesController, hint: 'Lesoes, medicamentos...', maxLines: 3),
-      ],
-    );
-  }
-}
-
-/// Edit Emergency Contact Sheet
-class _EditEmergencySheet extends StatefulWidget {
-  final Student student;
-  final Future<void> Function(Map<String, dynamic>) onSave;
-
-  const _EditEmergencySheet({required this.student, required this.onSave});
-
-  @override
-  State<_EditEmergencySheet> createState() => _EditEmergencySheetState();
-}
-
-class _EditEmergencySheetState extends State<_EditEmergencySheet> {
-  late final TextEditingController _nameController;
-  late final TextEditingController _phoneController;
-  late final TextEditingController _relationshipController;
-  bool _isSaving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _nameController = TextEditingController(text: widget.student.emergencyContact?.name);
-    _phoneController = TextEditingController(text: widget.student.emergencyContact?.phone);
-    _relationshipController = TextEditingController(text: widget.student.emergencyContact?.relationship);
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _phoneController.dispose();
-    _relationshipController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    setState(() => _isSaving = true);
-    try {
-      final hasData = _nameController.text.trim().isNotEmpty || _phoneController.text.trim().isNotEmpty;
-      await widget.onSave({
-        'emergencyContact': hasData
+        'emergencyContact': hasEmergencyData
             ? {
-                'name': _nameController.text.trim(),
-                'phone': _phoneController.text.trim(),
-                'relationship': _relationshipController.text.trim(),
+                'name': _emergencyNameController.text.trim(),
+                'phone': _emergencyPhoneController.text.trim(),
+                'relationship': _emergencyRelationshipController.text.trim(),
               }
             : null,
       });
       if (mounted) {
-        context.showSuccess('Contato de emergencia atualizado!');
+        context.showSuccess('Dados atualizados!');
         Navigator.pop(context);
       }
     } catch (e) {
@@ -1091,13 +1117,40 @@ class _EditEmergencySheetState extends State<_EditEmergencySheet> {
   @override
   Widget build(BuildContext context) {
     return _EditSheet(
-      title: 'Contato de Emergencia',
+      title: 'Saude e Emergencia',
       isSaving: _isSaving,
       onSave: _save,
       children: [
-        _SheetTextField(label: 'Nome', controller: _nameController, hint: 'Nome do contato'),
-        _SheetTextField(label: 'Telefone', controller: _phoneController, hint: '(00) 00000-0000', keyboardType: TextInputType.phone),
-        _SheetTextField(label: 'Parentesco', controller: _relationshipController, hint: 'Ex: Mae, Pai, Conjuge'),
+        // Health section label
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(
+            'SAUDE',
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        _SheetTextField(label: 'Tipo sanguineo', controller: _bloodTypeController, hint: 'Ex: A+, O-, AB+'),
+        _SheetTextField(label: 'Alergias', controller: _allergiesController, hint: 'Separe por virgula'),
+        _SheetTextField(label: 'Observacoes', controller: _healthNotesController, hint: 'Lesoes, medicamentos...', maxLines: 3),
+        // Emergency section label
+        Padding(
+          padding: const EdgeInsets.only(top: 8, bottom: 12),
+          child: Text(
+            'CONTATO DE EMERGENCIA',
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        _SheetTextField(label: 'Nome', controller: _emergencyNameController, hint: 'Nome do contato'),
+        _SheetTextField(label: 'Telefone', controller: _emergencyPhoneController, hint: '(00) 00000-0000', keyboardType: TextInputType.phone),
+        _SheetTextField(label: 'Parentesco', controller: _emergencyRelationshipController, hint: 'Ex: Mae, Pai, Conjuge'),
       ],
     );
   }

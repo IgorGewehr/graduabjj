@@ -312,7 +312,7 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
   Future<void> _toggleProductActive(StoreProduct product) async {
     final service = ref.read(storeServiceProvider);
     if (service == null) return;
-    await service.updateProduct(product.id, {'isActive': !product.isActive});
+    await service.updateProduct(product.id, {'active': !product.isActive});
     ref.invalidate(productsProvider);
   }
 

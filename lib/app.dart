@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:lucide_icons/lucide_icons.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 import 'core/theme.dart';
 import 'core/constants.dart';
@@ -116,35 +118,6 @@ CustomTransitionPage<T> _buildPageWithPushTransition<T>({
   );
 }
 
-/// Fade + slight scale for modal-like pages
-CustomTransitionPage<T> _buildPageWithScaleFade<T>({
-  required BuildContext context,
-  required GoRouterState state,
-  required Widget child,
-}) {
-  return CustomTransitionPage<T>(
-    key: state.pageKey,
-    child: child,
-    transitionDuration: const Duration(milliseconds: 250),
-    reverseTransitionDuration: const Duration(milliseconds: 200),
-    transitionsBuilder: (context, animation, secondaryAnimation, child) {
-      final curvedAnimation = CurvedAnimation(
-        parent: animation,
-        curve: Curves.easeOutCubic,
-        reverseCurve: Curves.easeInCubic,
-      );
-
-      return FadeTransition(
-        opacity: curvedAnimation,
-        child: ScaleTransition(
-          scale: Tween<double>(begin: 0.95, end: 1.0).animate(curvedAnimation),
-          child: child,
-        ),
-      );
-    },
-  );
-}
-
 /// Fade-only transition for auth screens
 CustomTransitionPage<T> _buildPageWithFadeTransition<T>({
   required BuildContext context,
@@ -175,6 +148,8 @@ class GraduaBJJApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
+    final isCreatingAccount = ref.watch(isCreatingAccountProvider);
+    final studentName = ref.watch(creatingAccountStudentNameProvider);
 
     return MaterialApp.router(
       title: AppConstants.appName,
@@ -196,9 +171,218 @@ class GraduaBJJApp extends ConsumerWidget {
           data: MediaQuery.of(context).copyWith(
             textScaler: TextScaler.noScaling,
           ),
-          child: child!,
+          child: Stack(
+            children: [
+              child!,
+              if (isCreatingAccount)
+                _AccountCreationOverlay(studentName: studentName),
+            ],
+          ),
         );
       },
+    );
+  }
+}
+
+/// Full-screen overlay shown during account creation.
+/// Lives above the GoRouter widget tree, so it survives router rebuilds.
+class _AccountCreationOverlay extends StatelessWidget {
+  final String studentName;
+
+  const _AccountCreationOverlay({required this.studentName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppTheme.background,
+      child: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Animated loading icon
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: 100,
+                        height: 100,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            AppTheme.primary.withValues(alpha: 0.3),
+                          ),
+                        ),
+                      )
+                          .animate(onPlay: (c) => c.repeat())
+                          .rotate(duration: 2000.ms),
+                      const Icon(
+                        LucideIcons.userPlus,
+                        size: 48,
+                        color: AppTheme.primary,
+                      ),
+                    ],
+                  ),
+                ).animate().fadeIn(duration: 300.ms).scale(
+                      begin: const Offset(0.8, 0.8),
+                    ),
+
+                const SizedBox(height: 40),
+
+                Text(
+                  'Criando sua conta...',
+                  style: AppTheme.displaySmall,
+                  textAlign: TextAlign.center,
+                ).animate().fadeIn(delay: 100.ms),
+
+                const SizedBox(height: 16),
+
+                if (studentName.isNotEmpty)
+                  Text(
+                    'Vinculando ao perfil de $studentName',
+                    style: AppTheme.bodyLarge.copyWith(
+                      color: AppTheme.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ).animate().fadeIn(delay: 200.ms),
+
+                const SizedBox(height: 32),
+
+                // Progress indicators
+                _OverlayProgressStep(
+                  icon: LucideIcons.check,
+                  text: 'Validando informacoes',
+                  isCompleted: true,
+                ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.2),
+
+                const SizedBox(height: 12),
+
+                _OverlayProgressStep(
+                  icon: LucideIcons.loader,
+                  text: 'Criando conta de acesso',
+                  isActive: true,
+                ).animate().fadeIn(delay: 400.ms).slideX(begin: -0.2),
+
+                const SizedBox(height: 12),
+
+                _OverlayProgressStep(
+                  icon: LucideIcons.link,
+                  text: 'Vinculando ao perfil do aluno',
+                ).animate().fadeIn(delay: 500.ms).slideX(begin: -0.2),
+
+                const SizedBox(height: 40),
+
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppTheme.primary.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(LucideIcons.info, color: AppTheme.primary, size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Aguarde enquanto preparamos tudo para voce...',
+                          style: AppTheme.bodySmall.copyWith(color: AppTheme.primary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ).animate().fadeIn(delay: 600.ms),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OverlayProgressStep extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final bool isCompleted;
+  final bool isActive;
+
+  const _OverlayProgressStep({
+    required this.icon,
+    required this.text,
+    this.isCompleted = false,
+    this.isActive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: isCompleted
+                ? AppTheme.success.withValues(alpha: 0.1)
+                : isActive
+                    ? AppTheme.primary.withValues(alpha: 0.1)
+                    : AppTheme.surface,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: isCompleted
+                  ? AppTheme.success
+                  : isActive
+                      ? AppTheme.primary
+                      : AppTheme.divider,
+              width: 2,
+            ),
+          ),
+          child: isActive
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
+                    ),
+                  ),
+                )
+              : Icon(
+                  icon,
+                  size: 16,
+                  color: isCompleted
+                      ? AppTheme.success
+                      : isActive
+                          ? AppTheme.primary
+                          : AppTheme.textDisabled,
+                ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            text,
+            style: AppTheme.bodyMedium.copyWith(
+              color: isCompleted || isActive
+                  ? AppTheme.textPrimary
+                  : AppTheme.textSecondary,
+              fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -210,6 +394,7 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authStateProvider);
   final currentUser = ref.watch(currentUserProvider);
+  final isCreatingAccount = ref.watch(isCreatingAccountProvider);
 
   return GoRouter(
     navigatorKey: navigatorKey,
@@ -223,7 +408,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isCreatingAcademy = state.matchedLocation == '/criar-academia';
       final isSplash = state.matchedLocation == '/';
 
-      print('[ROUTER] matchedLocation: ${state.matchedLocation}, isLoggedIn: $isLoggedIn, authLoading: ${authState.isLoading}, userLoading: ${currentUser.isLoading}');
+      print('[ROUTER] matchedLocation: ${state.matchedLocation}, isLoggedIn: $isLoggedIn, authLoading: ${authState.isLoading}, userLoading: ${currentUser.isLoading}, isCreatingAccount: $isCreatingAccount');
+
+      // Don't redirect while account creation is in progress
+      if (isCreatingAccount) {
+        print('[ROUTER] Account creation in progress, skipping redirect');
+        return null;
+      }
 
       // Show splash while loading auth state
       if (authState.isLoading) {
