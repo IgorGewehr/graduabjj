@@ -320,7 +320,6 @@ class AttendanceService {
 
     // Check for milestones (fire and forget)
     checkAttendanceMilestone(studentId, studentName, verifiedBy).ignore();
-    checkAnniversaryMilestone(studentId, studentName, verifiedBy).ignore();
 
     final doc = await docRef.get();
     return Attendance.fromFirestore(doc);
@@ -398,11 +397,6 @@ class AttendanceService {
 
       // Check for milestones (fire and forget)
       checkAttendanceMilestone(
-        attendance.studentId,
-        attendance.studentName,
-        verifiedBy,
-      ).ignore();
-      checkAnniversaryMilestone(
         attendance.studentId,
         attendance.studentName,
         verifiedBy,
@@ -527,61 +521,6 @@ class AttendanceService {
           studentName: studentName,
           attendanceCount: totalCount,
           milestoneDate: milestoneDate,
-          createdBy: createdBy,
-        );
-      }
-    }
-  }
-
-  // ============================================
-  // Check Anniversary Milestone
-  // ============================================
-  Future<void> checkAnniversaryMilestone(
-    String studentId,
-    String studentName,
-    String createdBy,
-  ) async {
-    const anniversaryMilestones = [1, 2, 3, 5, 10];
-
-    final studentService = StudentService(academyId);
-    final student = await studentService.getById(studentId);
-
-    if (student == null) return;
-
-    final startDate = student.startDate;
-    final now = DateTime.now();
-    
-    // Calculate difference in years
-    int yearsTraining = 0;
-    if (now.year > startDate.year) {
-      yearsTraining = now.year - startDate.year;
-      if (now.month < startDate.month || 
-          (now.month == startDate.month && now.day < startDate.day)) {
-        yearsTraining--;
-      }
-    }
-
-    if (anniversaryMilestones.contains(yearsTraining)) {
-      final achievementService = AchievementService(academyId);
-      final existing = await achievementService.getByStudent(studentId);
-
-      final alreadyHas = existing.any((a) =>
-          a.type == AchievementType.milestone &&
-          a.milestone == 'anniversary_$yearsTraining');
-
-      if (!alreadyHas) {
-        // Calculate anniversary date
-        final anniversaryDate = DateTime(
-          startDate.year + yearsTraining,
-          startDate.month,
-          startDate.day,
-        );
-
-        await achievementService.createAnniversaryMilestone(
-          studentId: studentId,
-          studentName: studentName,
-          years: yearsTraining,
-          anniversaryDate: anniversaryDate,
           createdBy: createdBy,
         );
       }

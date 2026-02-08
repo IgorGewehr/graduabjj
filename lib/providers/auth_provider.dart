@@ -597,6 +597,7 @@ class AuthService {
       try {
         final updateData = <String, dynamic>{
           'linkedUserId': credential.user!.uid,
+          'email': email,
           'updatedAt': FieldValue.serverTimestamp(),
         };
 
