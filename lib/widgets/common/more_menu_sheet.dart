@@ -67,29 +67,32 @@ class MoreMenuSheet extends StatelessWidget {
             ),
           ),
 
-          // Menu items
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                ...items.map((item) => _MenuItemTile(
-                      item: item,
-                      onTap: () => onNavigate(item.path),
-                    )),
-                const SizedBox(height: 16),
-                const Divider(),
-                const SizedBox(height: 16),
-                // Logout button
-                _MenuItemTile(
-                  item: const MoreMenuItem(
-                    label: 'Sair',
-                    icon: LucideIcons.logOut,
-                    path: '',
+          // Menu items (scrollable when list is long)
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ...items.map((item) => _MenuItemTile(
+                        item: item,
+                        onTap: () => onNavigate(item.path),
+                      )),
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  const SizedBox(height: 16),
+                  // Logout button
+                  _MenuItemTile(
+                    item: const MoreMenuItem(
+                      label: 'Sair',
+                      icon: LucideIcons.logOut,
+                      path: '',
+                    ),
+                    isLogout: true,
+                    onTap: onLogout,
                   ),
-                  isLogout: true,
-                  onTap: onLogout,
-                ),
-              ],
+                ],
+              ),
             ),
           ),
 

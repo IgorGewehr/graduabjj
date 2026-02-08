@@ -54,6 +54,7 @@ class Collections {
   CollectionReference get beltProgressions => academy.collection('beltProgressions');
   CollectionReference get notifications => academy.collection('notifications');
   CollectionReference get checkins => academy.collection('checkins');
+  CollectionReference get billingContactLog => academy.collection('billingContactLog');
 
   // Individual document references
   DocumentReference student(String id) => students.doc(id);

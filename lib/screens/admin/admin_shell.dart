@@ -237,9 +237,23 @@ class AdminSidebar extends ConsumerWidget {
                   currentPath: currentPath,
                 ),
                 _NavItem(
+                  icon: Icons.receipt_long_outlined,
+                  activeIcon: Icons.receipt_long,
+                  label: 'Cobranca',
+                  path: '/admin/cobranca',
+                  currentPath: currentPath,
+                ),
+                _NavItem(
+                  icon: Icons.shield_outlined,
+                  activeIcon: Icons.shield,
+                  label: 'Retencao',
+                  path: '/admin/retencao',
+                  currentPath: currentPath,
+                ),
+                _NavItem(
                   icon: Icons.bar_chart_outlined,
                   activeIcon: Icons.bar_chart,
-                  label: 'Relatórios',
+                  label: 'Relatorios',
                   path: '/admin/relatorios',
                   currentPath: currentPath,
                 ),
@@ -403,9 +417,24 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       path: '/admin/campeonatos',
     ),
     _AdminNavItem(
+      label: 'Cobranca',
+      icon: LucideIcons.receipt,
+      path: '/admin/cobranca',
+    ),
+    _AdminNavItem(
+      label: 'Retencao',
+      icon: LucideIcons.shieldAlert,
+      path: '/admin/retencao',
+    ),
+    _AdminNavItem(
       label: 'Relatorios',
       icon: LucideIcons.barChart3,
       path: '/admin/relatorios',
+    ),
+    _AdminNavItem(
+      label: 'Rel. Financeiro',
+      icon: LucideIcons.trendingUp,
+      path: '/admin/relatorios-financeiros',
     ),
     _AdminNavItem(
       label: 'Loja',

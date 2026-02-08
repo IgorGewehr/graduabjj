@@ -1,0 +1,1419 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import 'package:lucide_icons/lucide_icons.dart';
+
+import '../../core/theme.dart';
+import '../../core/feedback_utils.dart';
+import '../../services/firebase_service.dart';
+import '../../services/billing_reminder_service.dart';
+
+/// Admin Billing Reminders Screen
+/// Displays overdue payments organized by collection stages (D+1, D+3, D+7, D+15, D+30+)
+/// with WhatsApp and Email billing capabilities.
+class AdminBillingRemindersScreen extends ConsumerStatefulWidget {
+  const AdminBillingRemindersScreen({super.key});
+
+  @override
+  ConsumerState<AdminBillingRemindersScreen> createState() =>
+      _AdminBillingRemindersScreenState();
+}
+
+class _AdminBillingRemindersScreenState
+    extends ConsumerState<AdminBillingRemindersScreen>
+    with SingleTickerProviderStateMixin {
+  // Data
+  Map<BillingStage, List<Map<String, dynamic>>> _overdueStages = {
+    BillingStage.d1: [],
+    BillingStage.d3: [],
+    BillingStage.d7: [],
+    BillingStage.d15: [],
+    BillingStage.d30: [],
+  };
+  CollectionStats? _stats;
+  Map<String, StudentContact> _studentContacts = {};
+  BillingNotificationSettings? _notificationSettings;
+  bool _isLoading = true;
+  bool _isSending = false;
+
+  late TabController _tabController;
+  late BillingReminderService _billingService;
+  BillingNotificationService? _notificationService;
+
+  final _currencyFormat =
+      NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+  final _dateFormat = DateFormat('dd/MM/yyyy');
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 5, vsync: this);
+    _billingService = BillingReminderService(FirebaseService.academyId);
+    _loadData();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final academyId = FirebaseService.academyId;
+      _billingService = BillingReminderService(academyId);
+
+      final results = await Future.wait([
+        _billingService.getOverdueWithStages(),
+        _billingService.getCollectionStats(),
+        _billingService.getStudentContacts(),
+        _billingService.getNotificationSettings(),
+      ]);
+
+      // Get academy name for notification service
+      final academyDoc = await FirebaseFirestore.instance
+          .collection('academies')
+          .doc(academyId)
+          .get();
+      final academyName =
+          academyDoc.data()?['name'] as String? ?? 'Academia';
+
+      final notifSettings = results[3] as BillingNotificationSettings;
+
+      setState(() {
+        _overdueStages =
+            results[0] as Map<BillingStage, List<Map<String, dynamic>>>;
+        _stats = results[1] as CollectionStats;
+        _studentContacts = results[2] as Map<String, StudentContact>;
+        _notificationSettings = notifSettings;
+        _notificationService = BillingNotificationService(
+          academyId: academyId,
+          academyName: academyName,
+          customTemplates: notifSettings.messageTemplates,
+        );
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        FeedbackUtils.showError(context, 'Erro ao carregar dados: $e');
+      }
+    }
+  }
+
+  int _stageCount(BillingStage stage) {
+    return _overdueStages[stage]?.length ?? 0;
+  }
+
+  BillingStage get _currentStage => BillingStage.values[_tabController.index];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: const Text('Regua de Cobranca'),
+        actions: [
+          IconButton(
+            onPressed: () => _showSettingsDialog(),
+            icon: const Icon(LucideIcons.settings, size: 20),
+            tooltip: 'Configuracoes',
+          ),
+          IconButton(
+            onPressed: _loadData,
+            icon: const Icon(LucideIcons.refreshCw, size: 20),
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _loadData,
+              child: Column(
+                children: [
+                  // Stats Header
+                  _buildStatsHeader(),
+                  const SizedBox(height: 8),
+
+                  // API Warning
+                  if (_notificationSettings != null &&
+                      !_notificationSettings!.hasWhatsAppApi &&
+                      !_notificationSettings!.hasEmailApi)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.warning.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: AppTheme.warning.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(LucideIcons.alertTriangle,
+                                size: 16, color: AppTheme.warning),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Habilite os canais de cobranca (WhatsApp e/ou Email) nas configuracoes para enviar cobrancas automaticas.',
+                                style: AppTheme.bodySmall
+                                    .copyWith(color: AppTheme.warning),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  const SizedBox(height: 8),
+
+                  // Tab Bar
+                  _buildTabBar(),
+
+                  // Bulk action buttons
+                  _buildBulkActions(),
+
+                  // Tab Content
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: BillingStage.values
+                          .map((stage) => _buildStageList(stage))
+                          .toList(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  // ============================================
+  // Stats Header
+  // ============================================
+  Widget _buildStatsHeader() {
+    if (_stats == null) return const SizedBox.shrink();
+
+    return SizedBox(
+      height: 100,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        children: [
+          _buildStatCard(
+            icon: LucideIcons.alertCircle,
+            label: 'Total Vencido',
+            value: _currencyFormat.format(_stats!.totalOverdueAmount),
+            color: AppTheme.error,
+          ),
+          const SizedBox(width: 12),
+          _buildStatCard(
+            icon: LucideIcons.users,
+            label: 'Inadimplentes',
+            value: '${_stats!.totalStudentsOverdue}',
+            color: AppTheme.warning,
+          ),
+          const SizedBox(width: 12),
+          _buildStatCard(
+            icon: LucideIcons.trendingUp,
+            label: 'Taxa Recuperacao',
+            value: '${_stats!.recoveryRate.toStringAsFixed(1)}%',
+            color: AppTheme.success,
+          ),
+          const SizedBox(width: 12),
+          _buildStatCard(
+            icon: LucideIcons.clock,
+            label: 'Media Dias Atraso',
+            value: '${_stats!.averageDaysOverdue} dias',
+            color: AppTheme.info,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCard({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      width: 160,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  style: AppTheme.labelSmall.copyWith(color: color),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: AppTheme.titleLarge.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================
+  // Tab Bar
+  // ============================================
+  Widget _buildTabBar() {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppTheme.divider, width: 1),
+        ),
+      ),
+      child: TabBar(
+        controller: _tabController,
+        isScrollable: true,
+        tabAlignment: TabAlignment.start,
+        labelColor: AppTheme.textPrimary,
+        unselectedLabelColor: AppTheme.textSecondary,
+        indicatorColor: AppTheme.primary,
+        labelStyle: AppTheme.titleSmall,
+        unselectedLabelStyle: AppTheme.bodySmall,
+        onTap: (_) => setState(() {}),
+        tabs: BillingStage.values.map((stage) {
+          final count = _stageCount(stage);
+          return Tab(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(stage.label),
+                if (count > 0) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _stageColor(stage),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: Colors.white,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Color _stageColor(BillingStage stage) {
+    switch (stage) {
+      case BillingStage.d1:
+        return AppTheme.warning;
+      case BillingStage.d3:
+        return Colors.orange;
+      case BillingStage.d7:
+        return Colors.deepOrange;
+      case BillingStage.d15:
+        return AppTheme.error;
+      case BillingStage.d30:
+        return Colors.red.shade900;
+    }
+  }
+
+  // ============================================
+  // Bulk Action Buttons
+  // ============================================
+  Widget _buildBulkActions() {
+    final currentStage = _currentStage;
+    final stageItems = _overdueStages[currentStage] ?? [];
+    if (stageItems.isEmpty) return const SizedBox.shrink();
+
+    final hasWhatsApp = _notificationSettings?.hasWhatsAppApi ?? false;
+    final hasEmail = _notificationSettings?.hasEmailApi ?? false;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          if (hasWhatsApp)
+            Expanded(
+              child: _isSending
+                  ? const Center(
+                      child: SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2)))
+                  : ElevatedButton.icon(
+                      onPressed: () =>
+                          _showBulkSendDialog('whatsapp', currentStage),
+                      icon: const Icon(LucideIcons.messageCircle, size: 16),
+                      label: Text(
+                        'WhatsApp (${stageItems.length})',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.success,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+            ),
+          if (hasWhatsApp && hasEmail) const SizedBox(width: 8),
+          if (hasEmail)
+            Expanded(
+              child: _isSending
+                  ? const SizedBox.shrink()
+                  : ElevatedButton.icon(
+                      onPressed: () =>
+                          _showBulkSendDialog('email', currentStage),
+                      icon: const Icon(LucideIcons.mail, size: 16),
+                      label: Text(
+                        'Email (${stageItems.length})',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================
+  // Stage List
+  // ============================================
+  Widget _buildStageList(BillingStage stage) {
+    final items = _overdueStages[stage] ?? [];
+
+    if (items.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(LucideIcons.checkCircle,
+                size: 48, color: AppTheme.success.withValues(alpha: 0.5)),
+            const SizedBox(height: 16),
+            Text(
+              'Nenhum pagamento neste estagio',
+              style:
+                  AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return _buildPaymentItem(item, stage);
+      },
+    );
+  }
+
+  Widget _buildPaymentItem(Map<String, dynamic> item, BillingStage stage) {
+    final studentName = item['studentName'] as String? ?? '';
+    final amount = (item['amount'] as num?)?.toDouble() ?? 0;
+    final dueDate = item['dueDate'] as DateTime;
+    final daysOverdue = item['daysOverdue'] as int? ?? 0;
+    final financialId = item['id'] as String? ?? '';
+    final studentId = item['studentId'] as String? ?? '';
+    final contact = _studentContacts[studentId];
+    final phone = contact?.effectivePhone;
+    final email = contact?.effectiveEmail;
+    final hasWhatsApp = _notificationSettings?.hasWhatsAppApi ?? false;
+    final hasEmail = _notificationSettings?.hasEmailApi ?? false;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: _stageColor(stage).withValues(alpha: 0.1),
+                  child: Text(
+                    studentName.isNotEmpty
+                        ? studentName[0].toUpperCase()
+                        : '?',
+                    style: TextStyle(
+                      color: _stageColor(stage),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(studentName, style: AppTheme.titleMedium),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${_currencyFormat.format(amount)} - Venc: ${_dateFormat.format(dueDate)}',
+                        style: AppTheme.bodySmall,
+                      ),
+                      Text(
+                        '$daysOverdue dias em atraso',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: _stageColor(stage),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+
+            // Contact info chips
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                if (phone != null && phone.isNotEmpty)
+                  Chip(
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    avatar: Icon(LucideIcons.phone,
+                        size: 12, color: AppTheme.success),
+                    label: Text(phone,
+                        style: const TextStyle(fontSize: 11)),
+                    padding: EdgeInsets.zero,
+                  ),
+                if (email != null && email.isNotEmpty)
+                  Chip(
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    avatar:
+                        Icon(LucideIcons.mail, size: 12, color: AppTheme.info),
+                    label: Text(email,
+                        style: const TextStyle(fontSize: 11)),
+                    padding: EdgeInsets.zero,
+                  ),
+                if ((phone == null || phone.isEmpty) &&
+                    (email == null || email.isEmpty))
+                  Chip(
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    label: Text('Sem contato',
+                        style:
+                            TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                    padding: EdgeInsets.zero,
+                  ),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+
+            // Action buttons
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                // Send WhatsApp
+                if (hasWhatsApp && phone != null && phone.isNotEmpty)
+                  IconButton(
+                    onPressed: () => _showSendDialog(
+                      mode: 'whatsapp',
+                      financialItem: item,
+                      stage: stage,
+                      contact: contact!,
+                    ),
+                    icon: const Icon(LucideIcons.messageCircle, size: 20),
+                    color: AppTheme.success,
+                    tooltip: 'Enviar WhatsApp',
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(8),
+                  ),
+                // Send Email
+                if (hasEmail && email != null && email.isNotEmpty)
+                  IconButton(
+                    onPressed: () => _showSendDialog(
+                      mode: 'email',
+                      financialItem: item,
+                      stage: stage,
+                      contact: contact!,
+                    ),
+                    icon: const Icon(LucideIcons.mail, size: 20),
+                    color: AppTheme.info,
+                    tooltip: 'Enviar Email',
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(8),
+                  ),
+                // Phone
+                if (phone != null && phone.isNotEmpty)
+                  IconButton(
+                    onPressed: () {
+                      FeedbackUtils.showInfo(
+                          context, 'Ligar para $studentName: $phone');
+                    },
+                    icon: const Icon(LucideIcons.phone, size: 20),
+                    color: AppTheme.textSecondary,
+                    tooltip: 'Telefone',
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(8),
+                  ),
+                // Manual contact log
+                IconButton(
+                  onPressed: () => _showContactDialog(
+                    financialId: financialId,
+                    studentId: studentId,
+                    studentName: studentName,
+                    stage: stage,
+                    daysOverdue: daysOverdue,
+                  ),
+                  icon: const Icon(LucideIcons.clipboardList, size: 20),
+                  color: AppTheme.textSecondary,
+                  tooltip: 'Registrar Contato',
+                  constraints: const BoxConstraints(),
+                  padding: const EdgeInsets.all(8),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================
+  // Send Dialog (individual)
+  // ============================================
+  void _showSendDialog({
+    required String mode,
+    required Map<String, dynamic> financialItem,
+    required BillingStage stage,
+    required StudentContact contact,
+  }) {
+    final studentName = financialItem['studentName'] as String? ?? '';
+    final amount = (financialItem['amount'] as num?)?.toDouble() ?? 0;
+    final dueDate = financialItem['dueDate'] as DateTime;
+    final daysOverdue = financialItem['daysOverdue'] as int? ?? 0;
+    final financialId = financialItem['id'] as String? ?? '';
+    final studentId = financialItem['studentId'] as String? ?? '';
+
+    String message;
+    String subject = '';
+
+    if (mode == 'whatsapp') {
+      message = _notificationService!.generateWhatsAppMessage(
+        stage: stage,
+        studentName: studentName,
+        amount: amount,
+        dueDate: dueDate,
+        daysOverdue: daysOverdue,
+      );
+    } else {
+      final content = _notificationService!.generateEmailContent(
+        stage: stage,
+        studentName: studentName,
+        amount: amount,
+        dueDate: dueDate,
+        daysOverdue: daysOverdue,
+      );
+      subject = content.subject;
+      message = content.message;
+    }
+
+    final messageController = TextEditingController(text: message);
+    final subjectController = TextEditingController(text: subject);
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(
+                mode == 'whatsapp' ? LucideIcons.messageCircle : LucideIcons.mail,
+                color: mode == 'whatsapp' ? AppTheme.success : AppTheme.info,
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                mode == 'whatsapp' ? 'Enviar WhatsApp' : 'Enviar Email',
+                style:
+                    AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Para: $studentName',
+                  style: AppTheme.bodyMedium
+                      .copyWith(color: AppTheme.textSecondary),
+                ),
+                if (mode == 'whatsapp')
+                  Text(
+                    'Tel: ${contact.effectivePhone}',
+                    style: AppTheme.bodySmall
+                        .copyWith(color: AppTheme.textSecondary),
+                  ),
+                if (mode == 'email')
+                  Text(
+                    'Email: ${contact.effectiveEmail}',
+                    style: AppTheme.bodySmall
+                        .copyWith(color: AppTheme.textSecondary),
+                  ),
+                const SizedBox(height: 16),
+                if (mode == 'email') ...[
+                  Text('Assunto', style: AppTheme.labelMedium),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: subjectController,
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                Text('Mensagem', style: AppTheme.labelMedium),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: messageController,
+                  maxLines: 8,
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text('Cancelar',
+                  style: TextStyle(color: AppTheme.textSecondary)),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                await _executeSend(
+                  mode: mode,
+                  financialItem: financialItem,
+                  stage: stage,
+                  contact: contact,
+                  message: messageController.text,
+                  subject: mode == 'email' ? subjectController.text : null,
+                );
+              },
+              icon: Icon(LucideIcons.send, size: 16),
+              label: Text(mode == 'whatsapp' ? 'Enviar WhatsApp' : 'Enviar Email'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    mode == 'whatsapp' ? AppTheme.success : AppTheme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ============================================
+  // Execute Individual Send
+  // ============================================
+  Future<void> _executeSend({
+    required String mode,
+    required Map<String, dynamic> financialItem,
+    required BillingStage stage,
+    required StudentContact contact,
+    required String message,
+    String? subject,
+  }) async {
+    if (_notificationService == null) return;
+
+    setState(() => _isSending = true);
+
+    try {
+      final studentName = financialItem['studentName'] as String? ?? '';
+      final amount = (financialItem['amount'] as num?)?.toDouble() ?? 0;
+      final dueDate = financialItem['dueDate'] as DateTime;
+      final daysOverdue = financialItem['daysOverdue'] as int? ?? 0;
+      final financialId = financialItem['id'] as String? ?? '';
+      final studentId = financialItem['studentId'] as String? ?? '';
+
+      NotificationResult result;
+
+      if (mode == 'whatsapp') {
+        result = await _notificationService!.sendWhatsApp(
+          phone: contact.effectivePhone!,
+          studentName: studentName,
+          studentId: studentId,
+          financialId: financialId,
+          amount: amount,
+          dueDate: dueDate,
+          daysOverdue: daysOverdue,
+          stage: stage,
+          message: message,
+        );
+      } else {
+        result = await _notificationService!.sendEmail(
+          email: contact.effectiveEmail!,
+          studentName: studentName,
+          studentId: studentId,
+          financialId: financialId,
+          amount: amount,
+          dueDate: dueDate,
+          daysOverdue: daysOverdue,
+          stage: stage,
+          subject: subject ?? 'Cobranca - $studentName',
+          message: message,
+        );
+      }
+
+      if (result.success) {
+        // Auto-log contact
+        await _billingService.logContactAttempt(
+          financialId: financialId,
+          studentId: studentId,
+          studentName: studentName,
+          type: mode == 'whatsapp'
+              ? ContactType.whatsapp
+              : ContactType.email,
+          notes:
+              'Cobranca enviada via ${mode == 'whatsapp' ? 'WhatsApp' : 'Email'}',
+          stage: stage.value,
+          daysOverdue: daysOverdue,
+          contactedBy: FirebaseService.currentUserId ?? '',
+          contactedByName: 'Admin',
+        );
+
+        if (mounted) {
+          FeedbackUtils.showSuccess(
+              context, '${mode == 'whatsapp' ? 'WhatsApp' : 'Email'} enviado para $studentName!');
+        }
+      } else {
+        if (mounted) {
+          FeedbackUtils.showError(
+              context, 'Erro: ${result.error ?? 'Falha no envio'}');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        FeedbackUtils.showError(context, 'Erro ao enviar: $e');
+      }
+    } finally {
+      setState(() => _isSending = false);
+    }
+  }
+
+  // ============================================
+  // Bulk Send Dialog
+  // ============================================
+  void _showBulkSendDialog(String mode, BillingStage stage) {
+    final items = _overdueStages[stage] ?? [];
+    if (items.isEmpty || _notificationService == null) return;
+
+    final channelLabel = mode == 'whatsapp' ? 'WhatsApp' : 'Email';
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Cobranca em Massa via $channelLabel'),
+          content: Text(
+            'Enviar $channelLabel de cobranca para ${items.length} aluno(s) em ${stage.label}?\n\n'
+            'A mensagem sera personalizada para cada aluno com seu nome, valor e data de vencimento.\n\n'
+            '${mode == 'whatsapp' ? 'Alunos sem telefone serao ignorados.' : 'Alunos sem email serao ignorados.'}',
+            style: AppTheme.bodyMedium,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text('Cancelar',
+                  style: TextStyle(color: AppTheme.textSecondary)),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _executeBulkSend(mode, stage);
+              },
+              icon: Icon(LucideIcons.send, size: 16),
+              label: Text('Enviar $channelLabel'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    mode == 'whatsapp' ? AppTheme.success : AppTheme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ============================================
+  // Execute Bulk Send
+  // ============================================
+  Future<void> _executeBulkSend(String mode, BillingStage stage) async {
+    if (_notificationService == null) return;
+
+    setState(() => _isSending = true);
+
+    try {
+      final items = _overdueStages[stage] ?? [];
+      BulkNotificationResult result;
+
+      if (mode == 'whatsapp') {
+        result = await _notificationService!.sendBulkWhatsAppForStage(
+          financials: items,
+          contacts: _studentContacts,
+          stage: stage,
+        );
+      } else {
+        result = await _notificationService!.sendBulkEmailForStage(
+          financials: items,
+          contacts: _studentContacts,
+          stage: stage,
+        );
+      }
+
+      // Auto-log successful sends
+      for (final r in result.results) {
+        if (r.success) {
+          final financial = items.firstWhere(
+            (f) => (f['studentName'] as String?) == r.studentName,
+            orElse: () => <String, dynamic>{},
+          );
+          if (financial.isNotEmpty) {
+            await _billingService.logContactAttempt(
+              financialId: financial['id'] as String? ?? '',
+              studentId: financial['studentId'] as String? ?? '',
+              studentName: r.studentName,
+              type: mode == 'whatsapp'
+                  ? ContactType.whatsapp
+                  : ContactType.email,
+              notes: 'Cobranca em massa via ${mode == 'whatsapp' ? 'WhatsApp' : 'Email'}',
+              stage: stage.value,
+              daysOverdue: financial['daysOverdue'] as int? ?? 0,
+              contactedBy: FirebaseService.currentUserId ?? '',
+              contactedByName: 'Admin',
+            );
+          }
+        }
+      }
+
+      if (mounted) {
+        FeedbackUtils.showSuccess(
+          context,
+          '${mode == 'whatsapp' ? 'WhatsApp' : 'Email'}: ${result.sent} enviados, ${result.failed} falharam, ${result.skipped} sem contato',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        FeedbackUtils.showError(context, 'Erro no envio em massa: $e');
+      }
+    } finally {
+      setState(() => _isSending = false);
+    }
+  }
+
+  // ============================================
+  // Settings Dialog
+  // ============================================
+  void _showSettingsDialog() {
+    bool whatsappEnabled = _notificationSettings?.whatsappEnabled ?? false;
+    bool emailEnabled = _notificationSettings?.emailEnabled ?? false;
+    // Clone current templates or start empty
+    final waTemplates = Map<String, String>.from(
+        _notificationSettings?.messageTemplates?.whatsapp ?? {});
+    final emailSubjectTemplates = Map<String, String>.from(
+        _notificationSettings?.messageTemplates?.emailSubject ?? {});
+    final emailBodyTemplates = Map<String, String>.from(
+        _notificationSettings?.messageTemplates?.emailBody ?? {});
+    bool showTemplates = false;
+    int selectedStageIdx = 0;
+    final stages = ['D+1', 'D+3', 'D+7', 'D+15', 'D+30'];
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final stageKey = stages[selectedStageIdx];
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(LucideIcons.settings,
+                        color: AppTheme.primary, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Configuracoes',
+                    style: AppTheme.titleLarge
+                        .copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Canais de Cobranca', style: AppTheme.titleSmall),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Habilite os canais que deseja utilizar para enviar cobrancas aos alunos.',
+                        style: AppTheme.bodySmall
+                            .copyWith(color: AppTheme.textSecondary),
+                      ),
+                      const SizedBox(height: 16),
+                      SwitchListTile(
+                        title: const Text('Cobranca via WhatsApp'),
+                        secondary: Icon(LucideIcons.phone,
+                            color: whatsappEnabled
+                                ? AppTheme.success
+                                : AppTheme.textSecondary),
+                        value: whatsappEnabled,
+                        activeColor: AppTheme.success,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) {
+                          setDialogState(() => whatsappEnabled = value);
+                        },
+                      ),
+                      SwitchListTile(
+                        title: const Text('Cobranca via Email'),
+                        secondary: Icon(LucideIcons.mail,
+                            color: emailEnabled
+                                ? AppTheme.primary
+                                : AppTheme.textSecondary),
+                        value: emailEnabled,
+                        activeColor: AppTheme.primary,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) {
+                          setDialogState(() => emailEnabled = value);
+                        },
+                      ),
+
+                      const Divider(height: 24),
+
+                      // Template Editor Toggle
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Templates de Mensagem',
+                              style: AppTheme.titleSmall),
+                          TextButton(
+                            onPressed: () {
+                              setDialogState(
+                                  () => showTemplates = !showTemplates);
+                            },
+                            child: Text(showTemplates
+                                ? 'Ocultar'
+                                : 'Editar'),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        'Variaveis: {nome}, {valor}, {vencimento}, {dias}, {academia}',
+                        style: AppTheme.labelSmall
+                            .copyWith(color: AppTheme.textSecondary),
+                      ),
+
+                      if (showTemplates) ...[
+                        const SizedBox(height: 12),
+
+                        // Stage selector chips
+                        Wrap(
+                          spacing: 6,
+                          children: List.generate(stages.length, (i) {
+                            return ChoiceChip(
+                              label: Text(stages[i],
+                                  style: const TextStyle(fontSize: 12)),
+                              selected: selectedStageIdx == i,
+                              onSelected: (_) {
+                                setDialogState(() => selectedStageIdx = i);
+                              },
+                              selectedColor:
+                                  AppTheme.primary.withValues(alpha: 0.2),
+                              visualDensity: VisualDensity.compact,
+                            );
+                          }),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // WhatsApp template
+                        Text('WhatsApp - $stageKey',
+                            style: AppTheme.labelMedium),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          initialValue: waTemplates[stageKey] ??
+                              BillingNotificationService
+                                  .defaultWhatsAppTemplates[stageKey] ??
+                              '',
+                          maxLines: 3,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: InputDecoration(
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            contentPadding: const EdgeInsets.all(10),
+                          ),
+                          onChanged: (v) {
+                            waTemplates[stageKey] = v;
+                          },
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Email subject
+                        Text('Assunto Email - $stageKey',
+                            style: AppTheme.labelMedium),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          initialValue: emailSubjectTemplates[stageKey] ??
+                              BillingNotificationService
+                                  .defaultEmailSubjectTemplates[stageKey] ??
+                              '',
+                          style: const TextStyle(fontSize: 13),
+                          decoration: InputDecoration(
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 10),
+                          ),
+                          onChanged: (v) {
+                            emailSubjectTemplates[stageKey] = v;
+                          },
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Email body
+                        Text('Corpo Email - $stageKey',
+                            style: AppTheme.labelMedium),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          initialValue: emailBodyTemplates[stageKey] ??
+                              BillingNotificationService
+                                  .defaultEmailBodyTemplates[stageKey] ??
+                              '',
+                          maxLines: 4,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: InputDecoration(
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            contentPadding: const EdgeInsets.all(10),
+                          ),
+                          onChanged: (v) {
+                            emailBodyTemplates[stageKey] = v;
+                          },
+                        ),
+
+                        // Reset to default
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: () {
+                              setDialogState(() {
+                                waTemplates.remove(stageKey);
+                                emailSubjectTemplates.remove(stageKey);
+                                emailBodyTemplates.remove(stageKey);
+                              });
+                            },
+                            child: Text(
+                              'Restaurar padrao para $stageKey',
+                              style: TextStyle(
+                                  fontSize: 12, color: AppTheme.warning),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: Text('Cancelar',
+                      style: TextStyle(color: AppTheme.textSecondary)),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    try {
+                      final templates = BillingMessageTemplates(
+                        whatsapp: waTemplates,
+                        emailSubject: emailSubjectTemplates,
+                        emailBody: emailBodyTemplates,
+                      );
+
+                      final newSettings = BillingNotificationSettings(
+                        whatsappEnabled: whatsappEnabled,
+                        emailEnabled: emailEnabled,
+                        messageTemplates: templates,
+                      );
+
+                      await _billingService
+                          .saveNotificationSettings(newSettings);
+
+                      setState(() {
+                        _notificationSettings = newSettings;
+                        // Update notification service with new templates
+                        _notificationService?.customTemplates = templates;
+                      });
+
+                      if (dialogContext.mounted) {
+                        Navigator.pop(dialogContext);
+                      }
+                      if (mounted) {
+                        FeedbackUtils.showSuccess(
+                            context, 'Configuracoes salvas!');
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        FeedbackUtils.showError(
+                            context, 'Erro ao salvar: $e');
+                      }
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: const Text('Salvar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ============================================
+  // Contact Dialog (manual log)
+  // ============================================
+  void _showContactDialog({
+    required String financialId,
+    required String studentId,
+    required String studentName,
+    required BillingStage stage,
+    required int daysOverdue,
+  }) {
+    ContactType selectedType = ContactType.whatsapp;
+    final notesController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.info.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(LucideIcons.clipboardList,
+                        color: AppTheme.info, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Registrar Contato',
+                      style: AppTheme.titleLarge
+                          .copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Aluno: $studentName',
+                      style: AppTheme.bodyMedium
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 16),
+                    Text('Tipo de Contato',
+                        style: AppTheme.labelMedium),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<ContactType>(
+                      value: selectedType,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                      ),
+                      items: ContactType.values.map((type) {
+                        return DropdownMenuItem(
+                          value: type,
+                          child: Text(type.label),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setDialogState(() => selectedType = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    Text('Observacoes', style: AppTheme.labelMedium),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: notesController,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        hintText: 'Detalhes do contato...',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: Text(
+                    'Cancelar',
+                    style: TextStyle(color: AppTheme.textSecondary),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    try {
+                      await _billingService.logContactAttempt(
+                        financialId: financialId,
+                        studentId: studentId,
+                        studentName: studentName,
+                        type: selectedType,
+                        notes: notesController.text,
+                        stage: stage.value,
+                        daysOverdue: daysOverdue,
+                        contactedBy:
+                            FirebaseService.currentUserId ?? '',
+                        contactedByName: 'Admin',
+                      );
+
+                      if (dialogContext.mounted) {
+                        Navigator.pop(dialogContext);
+                      }
+                      if (mounted) {
+                        FeedbackUtils.showSuccess(
+                            context, 'Contato registrado com sucesso!');
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        FeedbackUtils.showError(
+                            context, 'Erro ao registrar contato: $e');
+                      }
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: const Text('Salvar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}

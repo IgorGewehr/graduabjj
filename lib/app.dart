@@ -760,6 +760,30 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
+            path: '/admin/cobranca',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminBillingRemindersScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/retencao',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminRetentionScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/relatorios-financeiros',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminFinancialReportsScreen(),
+            ),
+          ),
+          GoRoute(
             path: '/admin/configuracoes',
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,

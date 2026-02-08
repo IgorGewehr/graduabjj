@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
 import 'paying_students_screen.dart';
+import 'financial_reports_screen.dart';
 
 /// Admin Financial Screen - Matching webapp design
 class AdminFinancialScreen extends ConsumerStatefulWidget {
@@ -31,21 +32,20 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   DateTime _selectedMonth = DateTime.now();
   late TabController _tabController;
 
-  // Stats carousel
-  final PageController _statsPageController = PageController(viewportFraction: 0.85);
-  int _currentStatsPage = 0;
+  // Payments filter state
+  String _paymentFilter = 'all'; // all, paid, pending, overdue, cancelled
+  String _paymentSearch = '';
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _loadData();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _statsPageController.dispose();
     super.dispose();
   }
 
@@ -109,6 +109,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
+      floatingActionButton: _buildFAB(),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -131,16 +132,33 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                       controller: _tabController,
                       children: [
                         _buildPlansTab(),
-                        _buildPaymentsList(_allPayments),
-                        _buildPaymentsList(_pendingPayments),
-                        _buildPaymentsList(_overduePayments),
-                        _buildEvolutionTab(),
+                        _buildPaymentsTab(),
+                        _buildReportsTab(),
                       ],
                     ),
                   ),
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _buildFAB() {
+    // FAB changes based on current tab
+    return AnimatedBuilder(
+      animation: _tabController,
+      builder: (context, _) {
+        if (_tabController.index == 1) {
+          // Pagamentos tab - Gerar Mensalidades
+          return FloatingActionButton.extended(
+            onPressed: _showGenerateTuitionsDialog,
+            backgroundColor: AppTheme.primary,
+            icon: const Icon(LucideIcons.receipt, size: 20),
+            label: const Text('Gerar'),
+          );
+        }
+        return const SizedBox.shrink();
+      },
     );
   }
 
@@ -160,7 +178,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
           ),
           const SizedBox(width: 8),
           // Paying students button
-          ElevatedButton.icon(
+          IconButton(
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(
@@ -170,30 +188,27 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 ),
               ),
             ),
-            icon: const Icon(LucideIcons.users, size: 18),
-            label: const Text('Pagantes'),
-            style: ElevatedButton.styleFrom(
+            icon: const Icon(LucideIcons.users, size: 20),
+            tooltip: 'Alunos Pagantes',
+            style: IconButton.styleFrom(
               backgroundColor: AppTheme.surface,
-              foregroundColor: AppTheme.textPrimary,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
+              foregroundColor: AppTheme.textSecondary,
             ),
           ),
           const Spacer(),
-          // Generate button
-          ElevatedButton.icon(
-            onPressed: _showGenerateTuitionsDialog,
-            icon: const Icon(LucideIcons.receipt, size: 18),
-            label: const Text('Gerar Mensalidades'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.textPrimary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+          // Reports button
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const AdminFinancialReportsScreen(),
               ),
+            ),
+            icon: const Icon(LucideIcons.barChart2, size: 20),
+            tooltip: 'Relatórios Detalhados',
+            style: IconButton.styleFrom(
+              backgroundColor: AppTheme.surface,
+              foregroundColor: AppTheme.textSecondary,
             ),
           ),
         ],
@@ -258,89 +273,92 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     final totalExpected = (summary['totalExpected'] ?? 0).toDouble();
 
     final rate = totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0.0;
-    final totalPayments = paidCount + pendingCount + overdueCount;
 
-    return Column(
-      children: [
-        SizedBox(
-          height: 100,
-          child: PageView.builder(
-            controller: _statsPageController,
-            onPageChanged: (page) {
-              setState(() => _currentStatsPage = page);
-            },
-            itemCount: 4,
-            itemBuilder: (context, index) {
-              final cards = [
-                _StatsCarouselCard(
-                  icon: LucideIcons.dollarSign,
-                  iconBgColor: AppTheme.successLight,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        children: [
+          // 3-column stats grid (always visible)
+          Row(
+            children: [
+              Expanded(
+                child: _StatCard(
+                  icon: LucideIcons.checkCircle,
                   iconColor: AppTheme.success,
                   label: 'Recebido',
                   value: _formatCurrency(totalPaid),
-                  subtitle: '$paidCount pagamentos',
+                  subtitle: '$paidCount pagos',
                 ),
-                _StatsCarouselCard(
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _StatCard(
                   icon: LucideIcons.clock,
-                  iconBgColor: AppTheme.warning.withValues(alpha: 0.1),
                   iconColor: AppTheme.warning,
-                  label: 'A Receber',
+                  label: 'Pendente',
                   value: _formatCurrency(totalPending),
-                  subtitle: '$pendingCount pendentes',
+                  subtitle: '$pendingCount pend.',
                 ),
-                _StatsCarouselCard(
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _StatCard(
                   icon: LucideIcons.alertTriangle,
-                  iconBgColor: AppTheme.error.withValues(alpha: 0.1),
                   iconColor: AppTheme.error,
-                  label: 'Atrasados',
+                  label: 'Atrasado',
                   value: _formatCurrency(totalOverdue),
-                  subtitle: '$overdueCount em atraso',
+                  subtitle: '$overdueCount atras.',
                 ),
-                _StatsCarouselCard(
-                  icon: LucideIcons.trendingUp,
-                  iconBgColor: AppTheme.primary.withValues(alpha: 0.1),
-                  iconColor: AppTheme.primary,
-                  label: 'Taxa de Recebimento',
-                  value: '${rate.toStringAsFixed(0)}%',
-                  subtitle: '$paidCount de $totalPayments',
-                ),
-              ];
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: cards[index],
-              );
-            },
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: 12),
-        // Dot indicators
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(
-            4,
-            (index) {
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                width: _currentStatsPage == index ? 20 : 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _currentStatsPage == index
-                      ? AppTheme.textPrimary
-                      : AppTheme.divider,
-                  borderRadius: BorderRadius.circular(4),
+          const SizedBox(height: 12),
+          // Progress bar for collection rate
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppTheme.divider),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  LucideIcons.trendingUp,
+                  size: 18,
+                  color: rate >= 70 ? AppTheme.success : rate >= 40 ? AppTheme.warning : AppTheme.error,
                 ),
-              );
-            },
+                const SizedBox(width: 10),
+                Text(
+                  'Taxa: ${rate.toStringAsFixed(0)}%',
+                  style: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: rate / 100,
+                      minHeight: 8,
+                      backgroundColor: AppTheme.divider,
+                      valueColor: AlwaysStoppedAnimation(
+                        rate >= 70 ? AppTheme.success : rate >= 40 ? AppTheme.warning : AppTheme.error,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _buildTabBar() {
+    final pendingTotal = _pendingPayments.length + _overduePayments.length;
     return Container(
-      margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      margin: const EdgeInsets.fromLTRB(8, 16, 8, 0),
       decoration: const BoxDecoration(
         border: Border(
           bottom: BorderSide(color: AppTheme.divider, width: 1),
@@ -354,27 +372,24 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         unselectedLabelStyle: AppTheme.labelMedium,
         indicatorColor: AppTheme.textPrimary,
         indicatorWeight: 2,
-        isScrollable: true,
-        tabAlignment: TabAlignment.start,
+        labelPadding: const EdgeInsets.symmetric(horizontal: 4),
         tabs: [
           const Tab(text: 'Planos'),
-          const Tab(text: 'Mes'),
           Tab(
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Pend.'),
-                if (_pendingPayments.isNotEmpty) ...[
-                  const SizedBox(width: 6),
+                const Text('Pagamentos'),
+                if (pendingTotal > 0) ...[
+                  const SizedBox(width: 4),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: AppTheme.warning,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      '${_pendingPayments.length}',
+                      '$pendingTotal',
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 10,
@@ -386,8 +401,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
               ],
             ),
           ),
-          const Tab(text: 'Atras.'),
-          const Tab(text: 'Evol.'),
+          const Tab(text: 'Relatórios'),
         ],
       ),
     );
@@ -488,95 +502,324 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     );
   }
 
-  Widget _buildPaymentsList(List<Payment> payments) {
-    if (payments.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                LucideIcons.receipt,
-                size: 32,
-                color: AppTheme.textDisabled,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Nenhum pagamento',
-              style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Nao ha pagamentos nesta categoria',
-              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-            ),
-          ],
-        ),
-      );
+  /// Unified payments tab with filter chips and search
+  Widget _buildPaymentsTab() {
+    // Filter payments based on current filter
+    List<Payment> filteredPayments = _allPayments;
+    
+    switch (_paymentFilter) {
+      case 'paid':
+        filteredPayments = _allPayments.where((p) => p.status == PaymentStatus.paid).toList();
+        break;
+      case 'pending':
+        filteredPayments = _pendingPayments;
+        break;
+      case 'overdue':
+        filteredPayments = _overduePayments;
+        break;
+      case 'cancelled':
+        filteredPayments = _allPayments.where((p) => p.status == PaymentStatus.cancelled).toList();
+        break;
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(20),
-      itemCount: payments.length,
-      itemBuilder: (context, index) {
-        final payment = payments[index];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: _PaymentCard(
-            payment: payment,
-            formatCurrency: _formatCurrency,
-            onMarkPaid: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
-                ? () => _showMarkPaidDialog(payment)
-                : null,
-            onSendReminder: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
-                ? () => _sendReminder(payment)
-                : null,
-            onCancel: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
-                ? () => _cancelPayment(payment)
-                : null,
-            onReactivate: payment.status == PaymentStatus.cancelled
-                ? () => _reactivatePayment(payment)
-                : null,
+    // Apply search filter
+    if (_paymentSearch.isNotEmpty) {
+      filteredPayments = filteredPayments.where((p) =>
+        p.studentName.toLowerCase().contains(_paymentSearch.toLowerCase())
+      ).toList();
+    }
+
+    return Column(
+      children: [
+        // Filter chips and search
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Column(
+            children: [
+              // Search bar
+              Container(
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppTheme.divider),
+                ),
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Buscar por nome...',
+                    hintStyle: AppTheme.bodySmall.copyWith(color: AppTheme.textDisabled),
+                    prefixIcon: Icon(LucideIcons.search, size: 18, color: AppTheme.textSecondary),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    suffixIcon: _paymentSearch.isNotEmpty
+                        ? IconButton(
+                            icon: Icon(LucideIcons.x, size: 16, color: AppTheme.textSecondary),
+                            onPressed: () => setState(() => _paymentSearch = ''),
+                          )
+                        : null,
+                  ),
+                  onChanged: (value) => setState(() => _paymentSearch = value),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Filter chips
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _FilterChip(
+                      label: 'Todos',
+                      count: _allPayments.length,
+                      isSelected: _paymentFilter == 'all',
+                      onTap: () => setState(() => _paymentFilter = 'all'),
+                    ),
+                    const SizedBox(width: 8),
+                    _FilterChip(
+                      label: 'Pagos',
+                      count: _allPayments.where((p) => p.status == PaymentStatus.paid).length,
+                      isSelected: _paymentFilter == 'paid',
+                      color: AppTheme.success,
+                      onTap: () => setState(() => _paymentFilter = 'paid'),
+                    ),
+                    const SizedBox(width: 8),
+                    _FilterChip(
+                      label: 'Pendentes',
+                      count: _pendingPayments.length,
+                      isSelected: _paymentFilter == 'pending',
+                      color: AppTheme.warning,
+                      onTap: () => setState(() => _paymentFilter = 'pending'),
+                    ),
+                    const SizedBox(width: 8),
+                    _FilterChip(
+                      label: 'Atrasados',
+                      count: _overduePayments.length,
+                      isSelected: _paymentFilter == 'overdue',
+                      color: AppTheme.error,
+                      onTap: () => setState(() => _paymentFilter = 'overdue'),
+                    ),
+                    const SizedBox(width: 8),
+                    _FilterChip(
+                      label: 'Cancelados',
+                      count: _allPayments.where((p) => p.status == PaymentStatus.cancelled).length,
+                      isSelected: _paymentFilter == 'cancelled',
+                      color: AppTheme.textDisabled,
+                      onTap: () => setState(() => _paymentFilter = 'cancelled'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        );
-      },
+        ),
+        // Payments list
+        Expanded(
+          child: filteredPayments.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceVariant,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          LucideIcons.receipt,
+                          size: 32,
+                          color: AppTheme.textDisabled,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Nenhum pagamento',
+                        style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _paymentSearch.isNotEmpty 
+                            ? 'Nenhum resultado para "$_paymentSearch"'
+                            : 'Não há pagamentos nesta categoria',
+                        style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+                  itemCount: filteredPayments.length,
+                  itemBuilder: (context, index) {
+                    final payment = filteredPayments[index];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _PaymentCard(
+                        payment: payment,
+                        formatCurrency: _formatCurrency,
+                        onMarkPaid: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
+                            ? () => _showMarkPaidDialog(payment)
+                            : null,
+                        onSendReminder: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
+                            ? () => _sendReminder(payment)
+                            : null,
+                        onCancel: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
+                            ? () => _cancelPayment(payment)
+                            : null,
+                        onReactivate: payment.status == PaymentStatus.cancelled
+                            ? () => _reactivatePayment(payment)
+                            : null,
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 
-  Widget _buildEvolutionTab() {
-    return Center(
+  /// Reports tab - shows summary and link to detailed reports
+  Widget _buildReportsTab() {
+    final summary = _monthlySummary ?? {};
+    final totalPaid = (summary['paid']?['value'] ?? 0).toDouble();
+    final totalExpected = (summary['totalExpected'] ?? 0).toDouble();
+    final rate = totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0.0;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Quick summary
           Container(
-            width: 72,
-            height: 72,
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              shape: BoxShape.circle,
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.divider),
             ),
-            child: const Icon(
-              LucideIcons.lineChart,
-              size: 32,
-              color: AppTheme.textDisabled,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(LucideIcons.pieChart, color: AppTheme.primary),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Resumo do Mês',
+                            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            DateFormat("MMMM 'de' yyyy", 'pt_BR').format(_selectedMonth).capitalize(),
+                            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Recebido', style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
+                          const SizedBox(height: 4),
+                          Text(_formatCurrency(totalPaid), style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700, color: AppTheme.success)),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Esperado', style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
+                          const SizedBox(height: 4),
+                          Text(_formatCurrency(totalExpected), style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Taxa', style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
+                          const SizedBox(height: 4),
+                          Text('${rate.toStringAsFixed(0)}%', style: AppTheme.titleMedium.copyWith(
+                            fontWeight: FontWeight.w700, 
+                            color: rate >= 70 ? AppTheme.success : rate >= 40 ? AppTheme.warning : AppTheme.error,
+                          )),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Detailed reports button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AdminFinancialReportsScreen(),
+                ),
+              ),
+              icon: const Icon(LucideIcons.externalLink, size: 18),
+              label: const Text('Ver Relatórios Detalhados'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.textPrimary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 16),
+          // Quick info cards
           Text(
-            'Grafico de Evolucao',
-            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+            'Insights Rápidos',
+            style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Em desenvolvimento',
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+          const SizedBox(height: 12),
+          _QuickInsightCard(
+            icon: LucideIcons.users,
+            title: 'Alunos Pagantes',
+            value: '${_plans.expand((p) => p.studentIds).toSet().length}',
+            subtitle: 'com planos ativos',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => PayingStudentsScreen(
+                  students: _students,
+                  plans: _plans,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _QuickInsightCard(
+            icon: LucideIcons.package,
+            title: 'Planos Ativos',
+            value: '${_plans.where((p) => p.isActive).length}',
+            subtitle: 'de ${_plans.length} total',
           ),
         ],
       ),
@@ -1516,13 +1759,19 @@ class _PaymentCard extends StatelessWidget {
                       style: AppTheme.bodyMedium.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
+                    const SizedBox(height: 2),
                     Row(
                       children: [
-                        Text(
-                          payment.description ?? 'Mensalidade',
-                          style: AppTheme.labelSmall.copyWith(
-                            color: AppTheme.textSecondary,
+                        Flexible(
+                          child: Text(
+                            payment.description ?? 'Mensalidade',
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         Container(
@@ -2153,78 +2402,6 @@ class _StudentToggleCard extends StatelessWidget {
   }
 }
 
-/// Stats Carousel Card for financial overview
-class _StatsCarouselCard extends StatelessWidget {
-  final IconData icon;
-  final Color iconBgColor;
-  final Color iconColor;
-  final String label;
-  final String value;
-  final String subtitle;
-
-  const _StatsCarouselCard({
-    required this.icon,
-    required this.iconBgColor,
-    required this.iconColor,
-    required this.label,
-    required this.value,
-    required this.subtitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: iconBgColor,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, size: 24, color: iconColor),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  label,
-                  style: AppTheme.labelSmall.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: AppTheme.titleMedium.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  subtitle,
-                  style: AppTheme.labelSmall.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ============================================
 // Generate Tuitions Sheet
 // ============================================
@@ -2694,6 +2871,201 @@ class _StatItem extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Compact stat card for the 3-column stats grid
+class _StatCard extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final String value;
+  final String subtitle;
+
+  const _StatCard({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    required this.value,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: iconColor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w700),
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            subtitle,
+            style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary, fontSize: 10),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Filter chip for payment status filtering
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final int count;
+  final bool isSelected;
+  final Color? color;
+  final VoidCallback onTap;
+
+  const _FilterChip({
+    required this.label,
+    required this.count,
+    required this.isSelected,
+    this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final chipColor = color ?? AppTheme.textPrimary;
+    
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? chipColor.withValues(alpha: 0.1) : AppTheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? chipColor : AppTheme.divider,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: AppTheme.labelSmall.copyWith(
+                color: isSelected ? chipColor : AppTheme.textSecondary,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: isSelected ? chipColor : AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  color: isSelected ? Colors.white : AppTheme.textSecondary,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Quick insight card for reports tab
+class _QuickInsightCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String value;
+  final String subtitle;
+  final VoidCallback? onTap;
+
+  const _QuickInsightCard({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.subtitle,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.divider),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, size: 22, color: AppTheme.textSecondary),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                  ),
+                  Row(
+                    children: [
+                      Text(
+                        value,
+                        style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        subtitle,
+                        style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (onTap != null)
+              Icon(LucideIcons.chevronRight, size: 18, color: AppTheme.textSecondary),
+          ],
+        ),
+      ),
     );
   }
 }
