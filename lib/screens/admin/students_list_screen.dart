@@ -26,6 +26,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   StudentStatus? _statusFilter;
   StudentCategory? _categoryFilter;
   String? _beltFilter;
+  bool? _accountFilter; // null=all, true=linked, false=unlinked
   String _sortBy = 'name';
 
   final _searchController = TextEditingController();
@@ -86,6 +87,15 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       filtered = filtered.where((s) => s.currentBelt == _beltFilter).toList();
     }
 
+    // Account filter
+    if (_accountFilter != null) {
+      if (_accountFilter!) {
+        filtered = filtered.where((s) => s.linkedUserId != null && s.linkedUserId!.isNotEmpty).toList();
+      } else {
+        filtered = filtered.where((s) => s.linkedUserId == null || s.linkedUserId!.isEmpty).toList();
+      }
+    }
+
     // Sorting
     switch (_sortBy) {
       case 'name':
@@ -109,7 +119,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   }
 
   bool _hasActiveFilters() {
-    return _statusFilter != null || _categoryFilter != null || _beltFilter != null;
+    return _statusFilter != null || _categoryFilter != null || _beltFilter != null || _accountFilter != null;
   }
 
   void _clearFilters() {
@@ -117,6 +127,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       _statusFilter = null;
       _categoryFilter = null;
       _beltFilter = null;
+      _accountFilter = null;
       _applyFilters();
     });
   }
@@ -307,6 +318,16 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                 });
               },
             ),
+          if (_accountFilter != null)
+            _FilterChip(
+              label: _accountFilter! ? 'Com conta' : 'Sem conta',
+              onRemove: () {
+                setState(() {
+                  _accountFilter = null;
+                  _applyFilters();
+                });
+              },
+            ),
           GestureDetector(
             onTap: _clearFilters,
             child: Container(
@@ -352,12 +373,14 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         statusFilter: _statusFilter,
         categoryFilter: _categoryFilter,
         beltFilter: _beltFilter,
+        accountFilter: _accountFilter,
         sortBy: _sortBy,
-        onApply: (status, category, belt, sort) {
+        onApply: (status, category, belt, account, sort) {
           setState(() {
             _statusFilter = status;
             _categoryFilter = category;
             _beltFilter = belt;
+            _accountFilter = account;
             _sortBy = sort;
             _applyFilters();
           });
@@ -368,6 +391,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
             _statusFilter = null;
             _categoryFilter = null;
             _beltFilter = null;
+            _accountFilter = null;
             _sortBy = 'name';
             _applyFilters();
           });
@@ -669,14 +693,16 @@ class _FilterBottomSheet extends StatefulWidget {
   final StudentStatus? statusFilter;
   final StudentCategory? categoryFilter;
   final String? beltFilter;
+  final bool? accountFilter;
   final String sortBy;
-  final Function(StudentStatus?, StudentCategory?, String?, String) onApply;
+  final Function(StudentStatus?, StudentCategory?, String?, bool?, String) onApply;
   final VoidCallback onClear;
 
   const _FilterBottomSheet({
     required this.statusFilter,
     required this.categoryFilter,
     required this.beltFilter,
+    required this.accountFilter,
     required this.sortBy,
     required this.onApply,
     required this.onClear,
@@ -690,6 +716,7 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
   late StudentStatus? _status;
   late StudentCategory? _category;
   late String? _belt;
+  late bool? _account;
   late String _sort;
 
   @override
@@ -698,6 +725,7 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
     _status = widget.statusFilter;
     _category = widget.categoryFilter;
     _belt = widget.beltFilter;
+    _account = widget.accountFilter;
     _sort = widget.sortBy;
   }
 
@@ -781,6 +809,24 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
             ),
             const SizedBox(height: 20),
 
+            // Account filter
+            _buildSectionTitle('Conta'),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                (true, 'Com conta'),
+                (false, 'Sem conta'),
+              ].map((item) {
+                final isSelected = _account == item.$1;
+                return GestureDetector(
+                  onTap: () => setState(() => _account = isSelected ? null : item.$1),
+                  child: _buildChip(item.$2, isSelected),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 20),
+
             // Sort by
             _buildSectionTitle('Ordenar por'),
             Wrap(
@@ -825,7 +871,7 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () => widget.onApply(_status, _category, _belt, _sort),
+                    onPressed: () => widget.onApply(_status, _category, _belt, _account, _sort),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.textPrimary,
                       foregroundColor: Colors.white,
