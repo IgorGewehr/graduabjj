@@ -70,27 +70,6 @@ class NotificationDispatcher {
     );
   }
 
-  /// Notify student about new competition
-  Future<AppNotification> notifyNewCompetition({
-    required String userId,
-    required String competitionName,
-    required DateTime date,
-    required String location,
-    String? competitionId,
-  }) async {
-    return _notificationService.create(
-      userId: userId,
-      type: NotificationType.competitionReminder,
-      priority: NotificationPriority.normal,
-      title: 'Novo Campeonato!',
-      message: '$competitionName será realizado em ${_formatDate(date)}. Inscreva-se!',
-      actionUrl: '/portal/competicoes',
-      actionLabel: 'Ver campeonato',
-      competitionId: competitionId,
-      expiresInDays: 60,
-    );
-  }
-
   /// Notify student about new achievement
   Future<AppNotification> notifyNewAchievement({
     required String userId,
@@ -219,34 +198,6 @@ class NotificationDispatcher {
   // BULK NOTIFICATIONS
   // ============================================
 
-  /// Notify all students about a new competition
-  /// Takes a list of user IDs (linked users of active students)
-  Future<List<AppNotification>> notifyAllStudentsNewCompetition({
-    required List<String> userIds,
-    required String competitionName,
-    required DateTime date,
-    required String location,
-    String? competitionId,
-  }) async {
-    final notifications = <AppNotification>[];
-
-    for (final userId in userIds) {
-      try {
-        final notification = await notifyNewCompetition(
-          userId: userId,
-          competitionName: competitionName,
-          date: date,
-          location: location,
-          competitionId: competitionId,
-        );
-        notifications.add(notification);
-      } catch (e) {
-        print('Failed to notify user $userId: $e');
-      }
-    }
-
-    return notifications;
-  }
 }
 
 // ============================================

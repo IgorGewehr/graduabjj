@@ -1,8 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_service.dart';
-import 'notification_dispatcher.dart';
-import 'student_service.dart';
 
 /// Competition Status
 enum CompetitionStatus { upcoming, ongoing, completed, cancelled }
@@ -201,13 +199,9 @@ class CompetitionResult {
 class CompetitionService {
   final String academyId;
   late final Collections _collections;
-  late final NotificationDispatcher _notificationDispatcher;
-  late final StudentService _studentService;
 
   CompetitionService(this.academyId) {
     _collections = Collections(academyId);
-    _notificationDispatcher = NotificationDispatcher(academyId);
-    _studentService = StudentService(academyId);
   }
 
   CollectionReference get _competitionsRef => _collections.competitions;
@@ -295,7 +289,6 @@ class CompetitionService {
     String? transportNotes,
     int? transportCapacity,
     String? createdBy,
-    bool notifyStudents = true,
   }) async {
     final docRef = await _competitionsRef.add({
       'name': name,
@@ -316,35 +309,7 @@ class CompetitionService {
     });
 
     final doc = await docRef.get();
-    final competition = Competition.fromFirestore(doc);
-
-    // Notify all active students with linked accounts about the new competition
-    if (notifyStudents) {
-      try {
-        final activeStudents = await _studentService.getActive();
-        final activeStudentsWithAccounts = activeStudents
-            .where((s) => s.linkedUserId != null)
-            .toList();
-
-        for (final student in activeStudentsWithAccounts) {
-          try {
-            await _notificationDispatcher.notifyNewCompetition(
-              userId: student.linkedUserId!,
-              competitionName: name,
-              date: date,
-              location: location ?? '',
-              competitionId: competition.id,
-            );
-          } catch (e) {
-            print('Failed to notify student ${student.id}: $e');
-          }
-        }
-      } catch (e) {
-        print('Failed to send competition notifications: $e');
-      }
-    }
-
-    return competition;
+    return Competition.fromFirestore(doc);
   }
 
   // ============================================
