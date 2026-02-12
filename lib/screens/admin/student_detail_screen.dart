@@ -6,11 +6,13 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
+import '../../widgets/common/profile_photo_picker.dart';
 
 /// Admin Student Detail Screen - View and manage student
 class AdminStudentDetailScreen extends ConsumerStatefulWidget {
@@ -285,38 +287,17 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                   Row(
                     children: [
                       // Avatar com borda colorida
-                      Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.5),
-                            width: 3,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.2),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: (_student!.photoUrl ?? '').isNotEmpty
-                            ? CircleAvatar(
-                                radius: 48,
-                                backgroundImage: NetworkImage(_student!.photoUrl!),
-                              )
-                            : CircleAvatar(
-                                radius: 48,
-                                backgroundColor: Colors.white.withValues(alpha: 0.3),
-                                child: Text(
-                                  _student!.fullName.substring(0, 1).toUpperCase(),
-                                  style: TextStyle(
-                                    fontSize: 36,
-                                    fontWeight: FontWeight.bold,
-                                    color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
-                                  ),
-                                ),
-                              ),
+                      ProfilePhotoPicker(
+                        academyId: ref.watch(selectedAcademyIdProvider) ?? '',
+                        studentId: _student!.id,
+                        photoUrl: _student!.photoUrl,
+                        fullName: _student!.fullName,
+                        currentBelt: _student!.currentBelt,
+                        editable: true,
+                        size: 96.0,
+                        onPhotoUpdated: () {
+                          _loadData();
+                        },
                       ),
                       const SizedBox(width: 20),
                       Expanded(
@@ -1034,14 +1015,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
     String? selectedBelt;
     int selectedStripes = 0;
 
-    final beltOptions = ['white', 'blue', 'purple', 'brown', 'black'];
-    final beltLabels = {
-      'white': 'Branca',
-      'blue': 'Azul',
-      'purple': 'Roxa',
-      'brown': 'Marrom',
-      'black': 'Preta',
-    };
+    final beltOptions = _student?.category == StudentCategory.kids
+        ? BeltConstants.kidsBelts
+        : BeltConstants.adultBelts;
 
     // Store parent context before dialog
     final parentContext = context;
@@ -1099,7 +1075,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                       ),
                       items: beltOptions.map((belt) => DropdownMenuItem(
                         value: belt,
-                        child: Text(beltLabels[belt]!),
+                        child: Text(BeltConstants.beltLabels[belt] ?? belt),
                       )).toList(),
                       onChanged: (value) {
                         setDialogState(() => selectedBelt = value);

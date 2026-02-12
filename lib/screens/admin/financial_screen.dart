@@ -1690,7 +1690,7 @@ class _PaymentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isOverdue = payment.status == PaymentStatus.overdue;
+    final isOverdue = payment.isOverdue;
     final isPaid = payment.status == PaymentStatus.paid;
     final isCancelled = payment.status == PaymentStatus.cancelled;
 

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -37,6 +38,9 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   final _emergencyContactPhoneController = TextEditingController();
   final _guardianNameController = TextEditingController();
   final _guardianPhoneController = TextEditingController();
+  final _guardianEmailController = TextEditingController();
+  final _guardianCpfController = TextEditingController();
+  String _guardianRelationship = '';
   final _tuitionValueController = TextEditingController();
   final _tuitionDayController = TextEditingController();
   final _healthNotesController = TextEditingController();
@@ -125,6 +129,8 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     _emergencyContactPhoneController.dispose();
     _guardianNameController.dispose();
     _guardianPhoneController.dispose();
+    _guardianEmailController.dispose();
+    _guardianCpfController.dispose();
     _tuitionValueController.dispose();
     _tuitionDayController.dispose();
     _healthNotesController.dispose();
@@ -167,6 +173,9 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     _emergencyContactPhoneController.text = student.emergencyContact?.phone ?? '';
     _guardianNameController.text = student.guardian?.name ?? '';
     _guardianPhoneController.text = student.guardian?.phone ?? '';
+    _guardianEmailController.text = student.guardian?.email ?? '';
+    _guardianCpfController.text = student.guardian?.cpf ?? '';
+    _guardianRelationship = student.guardian?.relationship ?? '';
     _tuitionValueController.text = student.tuitionValue.toStringAsFixed(2).replaceAll('.', ',');
     _tuitionDayController.text = student.tuitionDay.toString();
     _healthNotesController.text = student.healthNotes ?? '';
@@ -450,23 +459,41 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
             badgeVariant: BadgeVariant.warning,
             child: Column(
               children: [
-                InputField(
-                  controller: _guardianNameController,
-                  label: 'Nome do Responsável',
-                  prefixIcon: LucideIcons.user,
-                  textCapitalization: TextCapitalization.words,
-                  validator: (value) {
-                    if (_category == StudentCategory.kids && (value?.isEmpty ?? true)) {
-                      return 'Responsável obrigatório para menores';
-                    }
-                    return null;
-                  },
+                FormRow(
+                  children: [
+                    InputField(
+                      controller: _guardianNameController,
+                      label: 'Nome do Responsável',
+                      prefixIcon: LucideIcons.user,
+                      textCapitalization: TextCapitalization.words,
+                      validator: (value) {
+                        if (_category == StudentCategory.kids && (value?.isEmpty ?? true)) {
+                          return 'Responsável obrigatório para menores';
+                        }
+                        return null;
+                      },
+                    ),
+                    PhoneInput(
+                      controller: _guardianPhoneController,
+                      label: 'WhatsApp do Responsável',
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 16),
-                PhoneInput(
-                  controller: _guardianPhoneController,
-                  label: 'Telefone do Responsável',
+                FormRow(
+                  children: [
+                    EmailInput(
+                      controller: _guardianEmailController,
+                      label: 'E-mail do Responsável',
+                    ),
+                    CPFInput(
+                      controller: _guardianCpfController,
+                      label: 'CPF do Responsável',
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 16),
+                _buildGuardianRelationshipDropdown(),
               ],
             ),
           ),
@@ -498,7 +525,45 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
           );
         }).toList(),
         onChanged: (value) {
-          if (value != null) setState(() => _category = value);
+          if (value != null) {
+            setState(() {
+              _category = value;
+              _belt = 'white';
+              _stripes = 0;
+            });
+          }
+        },
+        dropdownColor: AppTheme.surface,
+      ),
+    );
+  }
+
+  Widget _buildGuardianRelationshipDropdown() {
+    const options = ['Pai', 'Mãe', 'Avô/Avó', 'Tio/Tia', 'Outro'];
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: DropdownButtonFormField<String>(
+        value: _guardianRelationship.isEmpty ? null : _guardianRelationship,
+        isExpanded: true,
+        icon: Icon(LucideIcons.chevronDown, color: AppTheme.textSecondary, size: 20),
+        decoration: InputDecoration(
+          labelText: 'Parentesco',
+          prefixIcon: Icon(LucideIcons.users, size: 20, color: AppTheme.textSecondary),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        ),
+        items: options.map((rel) {
+          return DropdownMenuItem(
+            value: rel,
+            child: Text(rel, style: AppTheme.bodyMedium),
+          );
+        }).toList(),
+        onChanged: (value) {
+          if (value != null) setState(() => _guardianRelationship = value);
         },
         dropdownColor: AppTheme.surface,
       ),
@@ -632,18 +697,19 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
                   InputField(
                     controller: _tuitionDayController,
                     label: 'Dia de Vencimento',
-                    hintText: '1-28 (Opcional)',
+                    hintText: '1-31 (Opcional)',
                     prefixIcon: LucideIcons.calendar,
                     keyboardType: TextInputType.number,
                     validator: (value) {
                       if (value?.isNotEmpty == true) {
                         final day = int.tryParse(value!);
-                        if (day == null || day < 1 || day > 28) {
-                          return 'Dia inválido (1-28)';
+                        if (day == null || day < 1 || day > 31) {
+                          return 'Dia inválido (1-31)';
                         }
                       }
                       return null;
                     },
+                    helperText: 'Em meses curtos, ajusta para o último dia',
                   ),
                 ],
               ),
@@ -741,13 +807,10 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   }
 
   Widget _buildBeltSelector() {
-    final belts = [
-      ('white', 'Branca', const Color(0xFFF5F5F5)),
-      ('blue', 'Azul', const Color(0xFF2563EB)),
-      ('purple', 'Roxa', const Color(0xFF7C3AED)),
-      ('brown', 'Marrom', const Color(0xFF92400E)),
-      ('black', 'Preta', const Color(0xFF171717)),
-    ];
+    final beltKeys = _category == StudentCategory.kids
+        ? BeltConstants.kidsBelts
+        : BeltConstants.adultBelts;
+    final currentValue = beltKeys.contains(_belt) ? _belt : 'white';
 
     return Container(
       decoration: BoxDecoration(
@@ -756,7 +819,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         border: Border.all(color: AppTheme.divider),
       ),
       child: DropdownButtonFormField<String>(
-        value: _belt,
+        value: currentValue,
         isExpanded: true,
         icon: Icon(LucideIcons.chevronDown, color: AppTheme.textSecondary, size: 20),
         decoration: InputDecoration(
@@ -765,24 +828,45 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         ),
-        items: belts.map((belt) {
+        items: beltKeys.map((beltKey) {
+          final label = BeltConstants.beltLabels[beltKey] ?? beltKey;
+          final color = AppTheme.getBeltColor(beltKey);
+          final hasStripe = beltKey.contains('-');
+          final isWhiteStripe = beltKey.endsWith('-white');
+
           return DropdownMenuItem(
-            value: belt.$1,
+            value: beltKey,
             child: Row(
               children: [
-                Container(
+                SizedBox(
                   width: 20,
                   height: 8,
-                  decoration: BoxDecoration(
-                    color: belt.$3,
-                    borderRadius: BorderRadius.circular(2),
-                    border: belt.$1 == 'white'
-                        ? Border.all(color: AppTheme.divider)
-                        : null,
+                  child: Stack(
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(2),
+                          border: beltKey == 'white'
+                              ? Border.all(color: AppTheme.divider)
+                              : null,
+                        ),
+                      ),
+                      if (hasStripe)
+                        Positioned(
+                          top: 3,
+                          left: 0,
+                          right: 0,
+                          child: Container(
+                            height: 2,
+                            color: isWhiteStripe ? Colors.white : Colors.black,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 10),
-                Text(belt.$2, style: AppTheme.bodyMedium),
+                Text(label, style: AppTheme.bodyMedium),
               ],
             ),
           );
@@ -961,6 +1045,9 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         data['guardian'] = {
           'name': _guardianNameController.text.trim(),
           'phone': _guardianPhoneController.text.trim(),
+          'email': _guardianEmailController.text.trim().isEmpty ? null : _guardianEmailController.text.trim(),
+          'cpf': _guardianCpfController.text.trim().isEmpty ? null : _guardianCpfController.text.trim(),
+          'relationship': _guardianRelationship.isEmpty ? 'Outro' : _guardianRelationship,
         };
       }
 

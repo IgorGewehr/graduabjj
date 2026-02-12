@@ -128,7 +128,9 @@ class _AdminBillingRemindersScreenState
           ),
         ],
       ),
-      body: _isLoading
+      body: Stack(
+        children: [
+          _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _loadData,
@@ -191,6 +193,26 @@ class _AdminBillingRemindersScreenState
                 ],
               ),
             ),
+          // Loading overlay during bulk send
+          if (_isSending)
+            Container(
+              color: Colors.black.withValues(alpha: 0.3),
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 16),
+                    Text(
+                      'Enviando cobrancas...',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -352,7 +374,7 @@ class _AdminBillingRemindersScreenState
   }
 
   // ============================================
-  // Bulk Action Buttons
+  // Bulk Action Buttons (Unified)
   // ============================================
   Widget _buildBulkActions() {
     final currentStage = _currentStage;
@@ -362,62 +384,35 @@ class _AdminBillingRemindersScreenState
     final hasWhatsApp = _notificationSettings?.hasWhatsAppApi ?? false;
     final hasEmail = _notificationSettings?.hasEmailApi ?? false;
 
+    if (!hasWhatsApp && !hasEmail) return const SizedBox.shrink();
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          if (hasWhatsApp)
-            Expanded(
-              child: _isSending
-                  ? const Center(
-                      child: SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2)))
-                  : ElevatedButton.icon(
-                      onPressed: () =>
-                          _showBulkSendDialog('whatsapp', currentStage),
-                      icon: const Icon(LucideIcons.messageCircle, size: 16),
-                      label: Text(
-                        'WhatsApp (${stageItems.length})',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.success,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-            ),
-          if (hasWhatsApp && hasEmail) const SizedBox(width: 8),
-          if (hasEmail)
-            Expanded(
-              child: _isSending
-                  ? const SizedBox.shrink()
-                  : ElevatedButton.icon(
-                      onPressed: () =>
-                          _showBulkSendDialog('email', currentStage),
-                      icon: const Icon(LucideIcons.mail, size: 16),
-                      label: Text(
-                        'Email (${stageItems.length})',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-            ),
-        ],
+      child: SizedBox(
+        width: double.infinity,
+        child: _isSending
+            ? const Center(
+                child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2)))
+            : ElevatedButton.icon(
+                onPressed: () => _showBulkSendDialog(currentStage),
+                icon: const Icon(LucideIcons.send, size: 16),
+                label: Text(
+                  'Cobrar todos (${stageItems.length})',
+                  style: const TextStyle(fontSize: 13),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.success,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
       ),
     );
   }
@@ -468,6 +463,7 @@ class _AdminBillingRemindersScreenState
     final email = contact?.effectiveEmail;
     final hasWhatsApp = _notificationSettings?.hasWhatsAppApi ?? false;
     final hasEmail = _notificationSettings?.hasEmailApi ?? false;
+    final photoUrl = contact?.photoUrl;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -482,15 +478,20 @@ class _AdminBillingRemindersScreenState
                 CircleAvatar(
                   radius: 18,
                   backgroundColor: _stageColor(stage).withValues(alpha: 0.1),
-                  child: Text(
-                    studentName.isNotEmpty
-                        ? studentName[0].toUpperCase()
-                        : '?',
-                    style: TextStyle(
-                      color: _stageColor(stage),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
+                      ? NetworkImage(photoUrl)
+                      : null,
+                  child: (photoUrl == null || photoUrl.isEmpty)
+                      ? Text(
+                          studentName.isNotEmpty
+                              ? studentName[0].toUpperCase()
+                              : '?',
+                          style: TextStyle(
+                            color: _stageColor(stage),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        )
+                      : null,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -548,9 +549,13 @@ class _AdminBillingRemindersScreenState
                   Chip(
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     visualDensity: VisualDensity.compact,
-                    label: Text('Sem contato',
+                    avatar: Icon(LucideIcons.alertTriangle, size: 12, color: Colors.orange),
+                    label: Text(
+                        contact?.category == 'kids'
+                            ? 'Sem contato do responsavel'
+                            : 'Sem contato',
                         style:
-                            TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                            TextStyle(fontSize: 11, color: Colors.orange)),
                     padding: EdgeInsets.zero,
                   ),
               ],
@@ -867,99 +872,272 @@ class _AdminBillingRemindersScreenState
   }
 
   // ============================================
-  // Bulk Send Dialog
+  // Unified Bulk Send Dialog
   // ============================================
-  void _showBulkSendDialog(String mode, BillingStage stage) {
+  void _showBulkSendDialog(BillingStage stage) {
     final items = _overdueStages[stage] ?? [];
     if (items.isEmpty || _notificationService == null) return;
 
-    final channelLabel = mode == 'whatsapp' ? 'WhatsApp' : 'Email';
+    final recipients = _notificationService!.collectRecipientsForStage(
+      financials: items,
+      contacts: _studentContacts,
+    );
+
+    final messageController = TextEditingController(
+      text: _notificationService!.generateGenericStageMessage(stage),
+    );
+    final subjectController = TextEditingController(
+      text: _notificationService!.generateGenericEmailSubject(stage),
+    );
+    bool scheduleEnabled = false;
+    DateTime? scheduledDateTime;
 
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text('Cobranca em Massa via $channelLabel'),
-          content: Text(
-            'Enviar $channelLabel de cobranca para ${items.length} aluno(s) em ${stage.label}?\n\n'
-            'A mensagem sera personalizada para cada aluno com seu nome, valor e data de vencimento.\n\n'
-            '${mode == 'whatsapp' ? 'Alunos sem telefone serao ignorados.' : 'Alunos sem email serao ignorados.'}',
-            style: AppTheme.bodyMedium,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: Text('Cancelar',
-                  style: TextStyle(color: AppTheme.textSecondary)),
-            ),
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                _executeBulkSend(mode, stage);
-              },
-              icon: Icon(LucideIcons.send, size: 16),
-              label: Text('Enviar $channelLabel'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    mode == 'whatsapp' ? AppTheme.success : AppTheme.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Icon(LucideIcons.send, color: AppTheme.success, size: 22),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Cobrar todos (${items.length})',
+                    style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Recipients info card
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.info.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppTheme.info.withValues(alpha: 0.2)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(LucideIcons.messageCircle, size: 14, color: AppTheme.success),
+                                const SizedBox(width: 6),
+                                Text('${recipients.phones.length} telefone(s)', style: AppTheme.bodySmall),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(LucideIcons.mail, size: 14, color: AppTheme.info),
+                                const SizedBox(width: 6),
+                                Text('${recipients.emails.length} email(s)', style: AppTheme.bodySmall),
+                              ],
+                            ),
+                            if (recipients.skipped > 0) ...[
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Icon(LucideIcons.alertTriangle, size: 14, color: Colors.orange),
+                                  const SizedBox(width: 6),
+                                  Text('${recipients.skipped} sem contato',
+                                      style: AppTheme.bodySmall.copyWith(color: Colors.orange)),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Email subject
+                      if (recipients.emails.isNotEmpty) ...[
+                        Text('Assunto do Email', style: AppTheme.labelMedium),
+                        const SizedBox(height: 6),
+                        TextField(
+                          controller: subjectController,
+                          decoration: InputDecoration(
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+
+                      // Message
+                      Text('Mensagem', style: AppTheme.labelMedium),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: messageController,
+                        maxLines: 6,
+                        decoration: InputDecoration(
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          helperText: 'Mesma mensagem sera enviada via WhatsApp e Email',
+                          helperMaxLines: 2,
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+                      const Divider(),
+                      const SizedBox(height: 8),
+
+                      // Schedule toggle
+                      SwitchListTile(
+                        title: Row(
+                          children: [
+                            Icon(LucideIcons.clock, size: 18, color: AppTheme.primary),
+                            const SizedBox(width: 8),
+                            const Text('Agendar envio'),
+                          ],
+                        ),
+                        value: scheduleEnabled,
+                        activeColor: AppTheme.primary,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) {
+                          setDialogState(() => scheduleEnabled = value);
+                        },
+                      ),
+
+                      // Date/time picker
+                      if (scheduleEnabled) ...[
+                        const SizedBox(height: 8),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(LucideIcons.calendar, color: AppTheme.primary),
+                          title: Text(
+                            scheduledDateTime != null
+                                ? DateFormat('dd/MM/yyyy HH:mm').format(scheduledDateTime!)
+                                : 'Selecionar data e hora',
+                            style: AppTheme.bodyMedium.copyWith(
+                              color: scheduledDateTime != null ? AppTheme.textPrimary : AppTheme.textSecondary,
+                            ),
+                          ),
+                          subtitle: const Text('Horario de Brasilia'),
+                          trailing: Icon(LucideIcons.chevronRight, size: 18, color: AppTheme.textSecondary),
+                          onTap: () async {
+                            final now = DateTime.now();
+                            final date = await showDatePicker(
+                              context: context,
+                              initialDate: scheduledDateTime ?? now,
+                              firstDate: now,
+                              lastDate: now.add(const Duration(days: 90)),
+                            );
+                            if (date == null) return;
+
+                            final time = await showTimePicker(
+                              context: context,
+                              initialTime: scheduledDateTime != null
+                                  ? TimeOfDay.fromDateTime(scheduledDateTime!)
+                                  : TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
+                            );
+                            if (time == null) return;
+
+                            setDialogState(() {
+                              scheduledDateTime = DateTime(
+                                date.year, date.month, date.day,
+                                time.hour, time.minute,
+                              );
+                            });
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: Text('Cancelar', style: TextStyle(color: AppTheme.textSecondary)),
+                ),
+                ElevatedButton.icon(
+                  onPressed: (scheduleEnabled && scheduledDateTime == null)
+                      ? null
+                      : () {
+                          Navigator.pop(dialogContext);
+                          _executeBulkSendNew(
+                            stage: stage,
+                            message: messageController.text,
+                            subject: subjectController.text,
+                            phones: recipients.phones,
+                            emails: recipients.emails,
+                            scheduledTime: scheduleEnabled && scheduledDateTime != null
+                                ? DateFormat('yyyy-MM-dd HH:mm').format(scheduledDateTime!)
+                                : null,
+                          );
+                        },
+                  icon: Icon(
+                    scheduleEnabled ? LucideIcons.clock : LucideIcons.send,
+                    size: 16,
+                  ),
+                  label: Text(scheduleEnabled ? 'Agendar Envio' : 'Enviar Agora'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: scheduleEnabled ? AppTheme.primary : AppTheme.success,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
 
   // ============================================
-  // Execute Bulk Send
+  // Execute Bulk Send (New - unified)
   // ============================================
-  Future<void> _executeBulkSend(String mode, BillingStage stage) async {
+  Future<void> _executeBulkSendNew({
+    required BillingStage stage,
+    required String message,
+    required String subject,
+    required List<String> phones,
+    required List<String> emails,
+    String? scheduledTime,
+  }) async {
     if (_notificationService == null) return;
 
     setState(() => _isSending = true);
 
     try {
-      final items = _overdueStages[stage] ?? [];
-      BulkNotificationResult result;
+      final result = await _notificationService!.sendBulk(
+        message: message,
+        subject: emails.isNotEmpty ? subject : null,
+        phones: phones,
+        emails: emails,
+        scheduledTime: scheduledTime,
+      );
 
-      if (mode == 'whatsapp') {
-        result = await _notificationService!.sendBulkWhatsAppForStage(
-          financials: items,
-          contacts: _studentContacts,
-          stage: stage,
-        );
-      } else {
-        result = await _notificationService!.sendBulkEmailForStage(
-          financials: items,
-          contacts: _studentContacts,
-          stage: stage,
-        );
-      }
+      // Auto-log contact for immediate sends
+      if (!result.scheduled) {
+        final items = _overdueStages[stage] ?? [];
+        for (final item in items) {
+          final studentId = item['studentId'] as String? ?? '';
+          final contact = _studentContacts[studentId];
+          if (contact == null) continue;
 
-      // Auto-log successful sends
-      for (final r in result.results) {
-        if (r.success) {
-          final financial = items.firstWhere(
-            (f) => (f['studentName'] as String?) == r.studentName,
-            orElse: () => <String, dynamic>{},
-          );
-          if (financial.isNotEmpty) {
+          final phone = contact.effectivePhone;
+          final email = contact.effectiveEmail;
+
+          if ((phone != null && phone.isNotEmpty) || (email != null && email.isNotEmpty)) {
             await _billingService.logContactAttempt(
-              financialId: financial['id'] as String? ?? '',
-              studentId: financial['studentId'] as String? ?? '',
-              studentName: r.studentName,
-              type: mode == 'whatsapp'
-                  ? ContactType.whatsapp
-                  : ContactType.email,
-              notes: 'Cobranca em massa via ${mode == 'whatsapp' ? 'WhatsApp' : 'Email'}',
+              financialId: item['id'] as String? ?? '',
+              studentId: studentId,
+              studentName: item['studentName'] as String? ?? '',
+              type: (phone != null && phone.isNotEmpty) ? ContactType.whatsapp : ContactType.email,
+              notes: 'Cobranca em massa (bulk)',
               stage: stage.value,
-              daysOverdue: financial['daysOverdue'] as int? ?? 0,
+              daysOverdue: item['daysOverdue'] as int? ?? 0,
               contactedBy: FirebaseService.currentUserId ?? '',
               contactedByName: 'Admin',
             );
@@ -968,10 +1146,7 @@ class _AdminBillingRemindersScreenState
       }
 
       if (mounted) {
-        FeedbackUtils.showSuccess(
-          context,
-          '${mode == 'whatsapp' ? 'WhatsApp' : 'Email'}: ${result.sent} enviados, ${result.failed} falharam, ${result.skipped} sem contato',
-        );
+        _showBulkServerResultDialog(result);
       }
     } catch (e) {
       if (mounted) {
@@ -980,6 +1155,151 @@ class _AdminBillingRemindersScreenState
     } finally {
       setState(() => _isSending = false);
     }
+  }
+
+  // ============================================
+  // Bulk Server Result Dialog
+  // ============================================
+  void _showBulkServerResultDialog(BulkServerResult result) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(
+                result.scheduled ? LucideIcons.clock : LucideIcons.checkCircle,
+                color: result.scheduled ? AppTheme.info : AppTheme.success,
+                size: 22,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  result.scheduled ? 'Envio Agendado' : 'Resultado do Envio',
+                  style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (result.scheduled) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.info.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(LucideIcons.calendar, size: 18, color: AppTheme.info),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Agendado para ${result.scheduledTime ?? ""}',
+                            style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // Channel summary
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.success.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      Column(
+                        children: [
+                          Icon(LucideIcons.messageCircle, size: 18, color: AppTheme.success),
+                          const SizedBox(height: 4),
+                          Text('WhatsApp', style: AppTheme.labelSmall),
+                          Text(
+                            '${result.whatsapp.sent ?? result.whatsapp.total}/${result.whatsapp.total}',
+                            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                      Column(
+                        children: [
+                          Icon(LucideIcons.mail, size: 18, color: AppTheme.info),
+                          const SizedBox(height: 4),
+                          Text('Email', style: AppTheme.labelSmall),
+                          Text(
+                            '${result.email.sent ?? result.email.total}/${result.email.total}',
+                            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Failures
+                if (result.failures.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Falhas no envio:',
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.error,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...result.failures.map((f) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: [
+                        Icon(LucideIcons.xCircle, size: 14, color: AppTheme.error),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: AppTheme.divider,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            f.type == 'whatsapp' ? 'WA' : 'Email',
+                            style: const TextStyle(fontSize: 9),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(f.recipient, style: AppTheme.bodySmall, overflow: TextOverflow.ellipsis),
+                        ),
+                        Text(
+                          f.error,
+                          style: AppTheme.labelSmall.copyWith(color: AppTheme.error),
+                        ),
+                      ],
+                    ),
+                  )),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text('Fechar', style: TextStyle(color: AppTheme.textSecondary)),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   // ============================================

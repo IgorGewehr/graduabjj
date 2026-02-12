@@ -17,6 +17,7 @@ import 'screens/portal/home_screen.dart';
 import 'screens/portal/profile_screen.dart';
 import 'screens/portal/attendance_screen.dart';
 import 'screens/portal/competitions_screen.dart';
+import 'screens/portal/competition_detail_screen.dart';
 import 'screens/portal/schedule_screen.dart';
 import 'screens/portal/timeline_screen.dart';
 import 'screens/portal/financial_screen.dart';
@@ -529,6 +530,16 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
+            path: '/portal/competicoes/:id',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: CompetitionDetailScreen(
+                competitionId: state.pathParameters['id']!,
+              ),
+            ),
+          ),
+          GoRoute(
             path: '/portal/horarios',
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,
@@ -773,14 +784,6 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const AdminRetentionScreen(),
-            ),
-          ),
-          GoRoute(
-            path: '/admin/relatorios-financeiros',
-            pageBuilder: (context, state) => _buildPageWithCrossfade(
-              context: context,
-              state: state,
-              child: const AdminFinancialReportsScreen(),
             ),
           ),
           GoRoute(

@@ -7,7 +7,6 @@ import 'package:intl/intl.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
-import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 
 /// Competitions Screen - Competicoes (with Tabs)
@@ -443,10 +442,13 @@ class _CompetitionsList extends ConsumerWidget {
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: _CompetitionCard(
-            competition: competition,
-            isEnrolled: isEnrolled,
-            isUpcoming: isUpcoming,
+          child: GestureDetector(
+            onTap: () => context.push('/portal/competicoes/${competition.id}'),
+            child: _CompetitionCard(
+              competition: competition,
+              isEnrolled: isEnrolled,
+              isUpcoming: isUpcoming,
+            ),
           ),
         );
       },
@@ -582,6 +584,8 @@ class _CompetitionCard extends ConsumerWidget {
                     ),
                   ),
                 ),
+              const SizedBox(width: 4),
+              Icon(LucideIcons.chevronRight, size: 16, color: AppTheme.textSecondary),
             ],
           ),
           const SizedBox(height: 16),

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -330,7 +331,15 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
                 items: StudentCategory.values.map((cat) {
                   return DropdownMenuItem(value: cat, child: Text(cat.label));
                 }).toList(),
-                onChanged: (value) => setState(() => _category = value),
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() {
+                      _category = value;
+                      _belt = 'white';
+                      _stripes = 0;
+                    });
+                  }
+                },
               ),
             ),
           ],
@@ -486,22 +495,64 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
           children: [
             Expanded(
               child: DropdownButtonFormField<String>(
-                value: _belt,
+                value: (_category == StudentCategory.kids
+                        ? BeltConstants.kidsBelts
+                        : BeltConstants.adultBelts)
+                    .contains(_belt)
+                    ? _belt
+                    : 'white',
                 decoration: InputDecoration(
                   labelText: 'Faixa',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                items: const [
-                  DropdownMenuItem(value: 'white', child: Text('Branca')),
-                  DropdownMenuItem(value: 'grey', child: Text('Cinza')),
-                  DropdownMenuItem(value: 'yellow', child: Text('Amarela')),
-                  DropdownMenuItem(value: 'orange', child: Text('Laranja')),
-                  DropdownMenuItem(value: 'green', child: Text('Verde')),
-                  DropdownMenuItem(value: 'blue', child: Text('Azul')),
-                  DropdownMenuItem(value: 'purple', child: Text('Roxa')),
-                  DropdownMenuItem(value: 'brown', child: Text('Marrom')),
-                  DropdownMenuItem(value: 'black', child: Text('Preta')),
-                ],
+                items: (_category == StudentCategory.kids
+                        ? BeltConstants.kidsBelts
+                        : BeltConstants.adultBelts)
+                    .map((beltKey) {
+                  final label = BeltConstants.beltLabels[beltKey] ?? beltKey;
+                  final color = AppTheme.getBeltColor(beltKey);
+                  final hasStripe = beltKey.contains('-');
+                  final isWhiteStripe = beltKey.endsWith('-white');
+
+                  return DropdownMenuItem(
+                    value: beltKey,
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 8,
+                          child: Stack(
+                            children: [
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius: BorderRadius.circular(2),
+                                  border: beltKey == 'white'
+                                      ? Border.all(color: AppTheme.divider)
+                                      : null,
+                                ),
+                              ),
+                              if (hasStripe)
+                                Positioned(
+                                  top: 3,
+                                  left: 0,
+                                  right: 0,
+                                  child: Container(
+                                    height: 2,
+                                    color: isWhiteStripe
+                                        ? Colors.white
+                                        : Colors.black,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(label),
+                      ],
+                    ),
+                  );
+                }).toList(),
                 onChanged: (value) {
                   if (value != null) setState(() => _belt = value);
                 },

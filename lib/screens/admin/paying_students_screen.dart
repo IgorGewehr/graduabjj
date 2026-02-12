@@ -274,14 +274,19 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                                 CircleAvatar(
                                   radius: 24,
                                   backgroundColor: beltColor.withValues(alpha: 0.15),
-                                  child: Text(
-                                    _getInitials(student.fullName),
-                                    style: TextStyle(
-                                      color: beltColor,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14,
-                                    ),
-                                  ),
+                                  backgroundImage: (student.photoUrl != null && student.photoUrl!.isNotEmpty)
+                                      ? NetworkImage(student.photoUrl!)
+                                      : null,
+                                  child: (student.photoUrl == null || student.photoUrl!.isEmpty)
+                                      ? Text(
+                                          _getInitials(student.fullName),
+                                          style: TextStyle(
+                                            color: beltColor,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 14,
+                                          ),
+                                        )
+                                      : null,
                                 ),
                                 const SizedBox(width: 12),
                                 // Info
@@ -404,14 +409,19 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                   CircleAvatar(
                     radius: 28,
                     backgroundColor: beltColor.withValues(alpha: 0.15),
-                    child: Text(
-                      _getInitials(student.fullName),
-                      style: TextStyle(
-                        color: beltColor,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 16,
-                      ),
-                    ),
+                    backgroundImage: (student.photoUrl != null && student.photoUrl!.isNotEmpty)
+                        ? NetworkImage(student.photoUrl!)
+                        : null,
+                    child: (student.photoUrl == null || student.photoUrl!.isEmpty)
+                        ? Text(
+                            _getInitials(student.fullName),
+                            style: TextStyle(
+                              color: beltColor,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                            ),
+                          )
+                        : null,
                   ),
                   const SizedBox(width: 12),
                   Expanded(

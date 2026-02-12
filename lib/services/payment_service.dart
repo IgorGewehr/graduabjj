@@ -633,7 +633,7 @@ class PaymentService {
             studentId: studentId,
             planId: plan.id,
             value: plan.getStudentValue(studentId),
-            dueDay: plan.defaultDueDay,
+            dueDay: plan.getStudentDueDay(studentId),
           ));
         }
       }
@@ -686,7 +686,10 @@ class PaymentService {
         if (activeExisting.any((p) => p.planId == null)) continue;
       }
 
-      final dueDate = DateTime(year, month, student.dueDay);
+      // Clamp to last day of month (e.g., day 31 in February → Feb 28/29)
+      final lastDayOfMonth = DateTime(year, month + 1, 0).day;
+      final clampedDay = student.dueDay > lastDayOfMonth ? lastDayOfMonth : student.dueDay;
+      final dueDate = DateTime(year, month, clampedDay);
 
       final payment = await create(
         studentId: student.id,

@@ -12,6 +12,7 @@ import '../../models/student.dart';
 import '../../models/user.dart';
 import '../../providers/providers.dart';
 import '../../widgets/common/belt_badge.dart';
+import '../../widgets/common/profile_photo_picker.dart';
 
 /// Profile Screen - Redesigned with hero header, stats, and collapsed sections
 class ProfileScreen extends ConsumerWidget {
@@ -430,30 +431,29 @@ class ProfileScreen extends ConsumerWidget {
 // ============================================
 
 /// Hero Header — Centered avatar, name, belt, status
-class _HeroHeader extends StatelessWidget {
+class _HeroHeader extends ConsumerWidget {
   final Student student;
 
   const _HeroHeader({required this.student});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final academyId = ref.watch(selectedAcademyIdProvider);
+
     return Column(
       children: [
         // Avatar
-        CircleAvatar(
-          radius: 44,
-          backgroundColor: AppTheme.primary,
-          backgroundImage: (student.photoUrl ?? '').isNotEmpty ? NetworkImage(student.photoUrl!) : null,
-          child: (student.photoUrl ?? '').isEmpty
-              ? Text(
-                  student.displayName[0].toUpperCase(),
-                  style: const TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                )
-              : null,
+        ProfilePhotoPicker(
+          academyId: academyId ?? '',
+          studentId: student.id,
+          photoUrl: student.photoUrl,
+          fullName: student.fullName,
+          currentBelt: student.currentBelt,
+          editable: true,
+          size: 88.0,
+          onPhotoUpdated: () {
+            ref.invalidate(currentStudentProvider);
+          },
         ),
         const SizedBox(height: 12),
         // Name

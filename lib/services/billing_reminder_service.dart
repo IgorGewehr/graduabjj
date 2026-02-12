@@ -418,6 +418,7 @@ class BillingReminderService {
         guardianPhone: guardian?['phone'] as String?,
         guardianEmail: guardian?['email'] as String?,
         category: data['category'] as String? ?? 'adult',
+        photoUrl: data['photoUrl'] as String?,
       );
     }
 
@@ -484,6 +485,7 @@ class StudentContact {
   final String? guardianPhone;
   final String? guardianEmail;
   final String category;
+  final String? photoUrl;
 
   StudentContact({
     required this.studentId,
@@ -493,13 +495,14 @@ class StudentContact {
     this.guardianPhone,
     this.guardianEmail,
     this.category = 'adult',
+    this.photoUrl,
   });
 
   String? get effectivePhone =>
-      category == 'kids' && guardianPhone != null ? guardianPhone : phone;
+      category == 'kids' ? guardianPhone : phone;
 
   String? get effectiveEmail =>
-      category == 'kids' && guardianEmail != null ? guardianEmail : email;
+      category == 'kids' ? guardianEmail : email;
 }
 
 // ============================================
@@ -555,9 +558,23 @@ class BillingNotificationService {
       String.fromEnvironment('WHATSAPP_API_URL', defaultValue: '');
   static const String _emailApiUrl =
       String.fromEnvironment('EMAIL_API_URL', defaultValue: '');
+  static const String _apiKey =
+      String.fromEnvironment('NOTIFICATION_API_KEY', defaultValue: '');
+  static const String _bulkApiUrlEnv =
+      String.fromEnvironment('NOTIFICATION_BULK_API_URL', defaultValue: '');
 
   bool get hasWhatsAppApi => _whatsappApiUrl.isNotEmpty;
   bool get hasEmailApi => _emailApiUrl.isNotEmpty;
+
+  String get _bulkApiUrl {
+    if (_bulkApiUrlEnv.isNotEmpty) return _bulkApiUrlEnv;
+    if (_whatsappApiUrl.isNotEmpty) {
+      return _whatsappApiUrl.replaceAll('/api/send-whatsapp', '/api/send-bulk');
+    }
+    return '';
+  }
+
+  bool get hasBulkApi => _bulkApiUrl.isNotEmpty;
 
   final String academyId;
   final String academyName;
@@ -680,7 +697,10 @@ class BillingNotificationService {
     try {
       final response = await http.post(
         Uri.parse(_whatsappApiUrl),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          if (_apiKey.isNotEmpty) 'x-api-key': _apiKey,
+        },
         body: jsonEncode({
           'phone': _normalizePhone(phone),
           'studentName': studentName,
@@ -697,22 +717,32 @@ class BillingNotificationService {
           'message': message,
           'type': 'billing_reminder',
         }),
-      );
+      ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        return NotificationResult(success: true, studentName: studentName);
+        return NotificationResult(success: true, studentName: studentName, studentId: studentId);
       } else {
         return NotificationResult(
           success: false,
           studentName: studentName,
-          error: 'HTTP ${response.statusCode}: ${response.body}',
+          studentId: studentId,
+          error: 'Erro do servidor (${response.statusCode})',
         );
       }
-    } catch (e) {
+    } on http.ClientException {
       return NotificationResult(
         success: false,
         studentName: studentName,
-        error: e.toString(),
+        studentId: studentId,
+        error: 'Erro de conexao - verifique sua internet',
+      );
+    } catch (e) {
+      final isTimeout = e.toString().contains('TimeoutException');
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: isTimeout ? 'Timeout: API demorou mais de 30 segundos' : e.toString(),
       );
     }
   }
@@ -735,7 +765,10 @@ class BillingNotificationService {
     try {
       final response = await http.post(
         Uri.parse(_emailApiUrl),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          if (_apiKey.isNotEmpty) 'x-api-key': _apiKey,
+        },
         body: jsonEncode({
           'email': email,
           'studentName': studentName,
@@ -753,22 +786,32 @@ class BillingNotificationService {
           'message': message,
           'type': 'billing_reminder',
         }),
-      );
+      ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        return NotificationResult(success: true, studentName: studentName);
+        return NotificationResult(success: true, studentName: studentName, studentId: studentId);
       } else {
         return NotificationResult(
           success: false,
           studentName: studentName,
-          error: 'HTTP ${response.statusCode}: ${response.body}',
+          studentId: studentId,
+          error: 'Erro do servidor (${response.statusCode})',
         );
       }
-    } catch (e) {
+    } on http.ClientException {
       return NotificationResult(
         success: false,
         studentName: studentName,
-        error: e.toString(),
+        studentId: studentId,
+        error: 'Erro de conexao - verifique sua internet',
+      );
+    } catch (e) {
+      final isTimeout = e.toString().contains('TimeoutException');
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: isTimeout ? 'Timeout: API demorou mais de 30 segundos' : e.toString(),
       );
     }
   }
@@ -905,6 +948,196 @@ class BillingNotificationService {
       results: results,
     );
   }
+  // ============================================
+  // Generate Generic Stage Message (no per-student personalization)
+  // ============================================
+  String generateGenericStageMessage(BillingStage stage) {
+    final stageKey = stage.value;
+    final template = customTemplates?.whatsapp[stageKey]
+        ?? defaultWhatsAppTemplates[stageKey]
+        ?? defaultWhatsAppTemplates['D+1']!;
+    final days = stageKey == 'D+30' ? '30+' : stageKey.replaceAll('D+', '');
+    return template
+        .replaceAll('{nome}', 'aluno(a)')
+        .replaceAll('{valor}', '(valor)')
+        .replaceAll('{vencimento}', '(data)')
+        .replaceAll('{dias}', days)
+        .replaceAll('{academia}', academyName);
+  }
+
+  // ============================================
+  // Generate Generic Email Subject
+  // ============================================
+  String generateGenericEmailSubject(BillingStage stage) {
+    final stageKey = stage.value;
+    final template = customTemplates?.emailSubject[stageKey]
+        ?? defaultEmailSubjectTemplates[stageKey]
+        ?? defaultEmailSubjectTemplates['D+1']!;
+    return template.replaceAll('{academia}', academyName);
+  }
+
+  // ============================================
+  // Collect Recipients for Stage (phones + emails, deduplicated)
+  // ============================================
+  ({List<String> phones, List<String> emails, int skipped}) collectRecipientsForStage({
+    required List<Map<String, dynamic>> financials,
+    required Map<String, StudentContact> contacts,
+  }) {
+    final phonesSet = <String>{};
+    final emailsSet = <String>{};
+    int skipped = 0;
+
+    for (final item in financials) {
+      final studentId = item['studentId'] as String? ?? '';
+      final contact = contacts[studentId];
+      if (contact == null) {
+        skipped++;
+        continue;
+      }
+
+      final phone = contact.effectivePhone;
+      final email = contact.effectiveEmail;
+
+      if (phone != null && phone.isNotEmpty) {
+        phonesSet.add(_normalizePhone(phone));
+      }
+      if (email != null && email.isNotEmpty) {
+        emailsSet.add(email);
+      }
+
+      if ((phone == null || phone.isEmpty) && (email == null || email.isEmpty)) {
+        skipped++;
+      }
+    }
+
+    return (phones: phonesSet.toList(), emails: emailsSet.toList(), skipped: skipped);
+  }
+
+  // ============================================
+  // Send Bulk (unified WhatsApp + Email via /api/send-bulk)
+  // ============================================
+  Future<BulkServerResult> sendBulk({
+    required String message,
+    String? subject,
+    required List<String> phones,
+    required List<String> emails,
+    String? scheduledTime,
+  }) async {
+    if (_bulkApiUrl.isEmpty) {
+      throw Exception('Bulk API URL nao configurada');
+    }
+
+    try {
+      final body = <String, dynamic>{
+        'message': message,
+        'phones': phones,
+        'emails': emails,
+      };
+      if (subject != null && subject.isNotEmpty) body['subject'] = subject;
+      if (scheduledTime != null && scheduledTime.isNotEmpty) {
+        body['scheduledTime'] = scheduledTime;
+      }
+
+      final response = await http.post(
+        Uri.parse(_bulkApiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          if (_apiKey.isNotEmpty) 'x-api-key': _apiKey,
+        },
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 120));
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return BulkServerResult.fromJson(data);
+      } else {
+        throw Exception('Erro do servidor (${response.statusCode})');
+      }
+    } on http.ClientException {
+      throw Exception('Erro de conexao - verifique sua internet');
+    } catch (e) {
+      if (e.toString().contains('TimeoutException')) {
+        throw Exception('Timeout: API demorou mais de 120 segundos');
+      }
+      rethrow;
+    }
+  }
+}
+
+// ============================================
+// Bulk Server Result Models
+// ============================================
+class BulkChannelSummary {
+  final int total;
+  final int? sent;
+  final int? failed;
+
+  BulkChannelSummary({required this.total, this.sent, this.failed});
+
+  factory BulkChannelSummary.fromJson(Map<String, dynamic> json) {
+    return BulkChannelSummary(
+      total: json['total'] as int? ?? 0,
+      sent: json['sent'] as int?,
+      failed: json['failed'] as int?,
+    );
+  }
+}
+
+class BulkFailure {
+  final String type;
+  final String recipient;
+  final String error;
+
+  BulkFailure({required this.type, required this.recipient, required this.error});
+
+  factory BulkFailure.fromJson(Map<String, dynamic> json) {
+    return BulkFailure(
+      type: json['type'] as String? ?? '',
+      recipient: json['recipient'] as String? ?? '',
+      error: json['error'] as String? ?? 'Erro desconhecido',
+    );
+  }
+}
+
+class BulkServerResult {
+  final bool success;
+  final bool scheduled;
+  final String? jobId;
+  final String? scheduledTime;
+  final BulkChannelSummary whatsapp;
+  final BulkChannelSummary email;
+  final List<BulkFailure> failures;
+
+  BulkServerResult({
+    required this.success,
+    this.scheduled = false,
+    this.jobId,
+    this.scheduledTime,
+    required this.whatsapp,
+    required this.email,
+    this.failures = const [],
+  });
+
+  factory BulkServerResult.fromJson(Map<String, dynamic> json) {
+    final summary = json['summary'] as Map<String, dynamic>? ?? {};
+    final failuresList = (json['failures'] as List<dynamic>?)
+        ?.map((f) => BulkFailure.fromJson(f as Map<String, dynamic>))
+        .toList() ?? [];
+
+    return BulkServerResult(
+      success: json['success'] as bool? ?? false,
+      scheduled: json['scheduled'] as bool? ?? false,
+      jobId: json['jobId'] as String?,
+      scheduledTime: json['scheduledTime'] as String?,
+      whatsapp: BulkChannelSummary.fromJson(
+        summary['whatsapp'] as Map<String, dynamic>? ?? {'total': 0},
+      ),
+      email: BulkChannelSummary.fromJson(
+        summary['email'] as Map<String, dynamic>? ?? {'total': 0},
+      ),
+      failures: failuresList,
+    );
+  }
 }
 
 // ============================================
@@ -913,11 +1146,13 @@ class BillingNotificationService {
 class NotificationResult {
   final bool success;
   final String studentName;
+  final String? studentId;
   final String? error;
 
   NotificationResult({
     required this.success,
     required this.studentName,
+    this.studentId,
     this.error,
   });
 }

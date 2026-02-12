@@ -153,6 +153,8 @@ class CompetitionResult {
   final String? beltCategory;
   final String? ageCategory;
   final String? weightCategory;
+  final String? modality; // gi, nogi
+  final String? divisionType; // weight, absolute
   final String? notes;
   final DateTime date;
   final DateTime createdAt;
@@ -167,6 +169,8 @@ class CompetitionResult {
     this.beltCategory,
     this.ageCategory,
     this.weightCategory,
+    this.modality,
+    this.divisionType,
     this.notes,
     required this.date,
     required this.createdAt,
@@ -184,6 +188,8 @@ class CompetitionResult {
       beltCategory: data['beltCategory'],
       ageCategory: data['ageCategory'],
       weightCategory: data['weightCategory'],
+      modality: data['modality'],
+      divisionType: data['divisionType'],
       notes: data['notes'],
       date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
@@ -472,11 +478,13 @@ class CompetitionService {
     String? beltCategory,
     String? ageCategory,
     String? weightCategory,
+    String? modality,
+    String? divisionType,
     String? notes,
     DateTime? date,
     String? createdBy,
   }) async {
-    final docRef = await _resultsRef.add({
+    final data = <String, dynamic>{
       'competitionId': competitionId,
       'competitionName': competitionName,
       'studentId': studentId,
@@ -489,7 +497,10 @@ class CompetitionService {
       'date': Timestamp.fromDate(date ?? DateTime.now()),
       'createdAt': FieldValue.serverTimestamp(),
       'createdBy': createdBy,
-    });
+    };
+    if (modality != null) data['modality'] = modality;
+    if (divisionType != null) data['divisionType'] = divisionType;
+    final docRef = await _resultsRef.add(data);
 
     final doc = await docRef.get();
     return CompetitionResult.fromFirestore(doc);

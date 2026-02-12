@@ -8,6 +8,8 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
+import '../../widgets/competitions/competition_gallery.dart';
+import '../../widgets/competitions/photo_upload_sheet.dart';
 
 /// Admin Competitions Screen - Fintech style matching webapp
 class AdminCompetitionsScreen extends ConsumerStatefulWidget {
@@ -837,6 +839,32 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
               child: ElevatedButton(
                 onPressed: () {
                   Navigator.pop(context);
+                  _showCompetitionGallery(competition);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.warning,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(LucideIcons.image, size: 18),
+                    const SizedBox(width: 8),
+                    const Text('Ver Galeria'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
                   _showEnrollmentsSheet(competition);
                 },
                 style: ElevatedButton.styleFrom(
@@ -912,6 +940,38 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
             ),
             const SizedBox(height: 16),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _showCompetitionGallery(Competition competition) async {
+    if (_academyId == null) return;
+
+    final enrollmentService = CompetitionEnrollmentService(_academyId!);
+    final enrollments = await enrollmentService.getByCompetition(competition.id);
+
+    if (!mounted) return;
+
+    final enrolledStudents = enrollments
+        .map((e) => EnrolledStudent(id: e.studentId, name: e.studentName))
+        .toList();
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          appBar: AppBar(
+            title: Text(competition.name),
+            backgroundColor: AppTheme.surface,
+          ),
+          backgroundColor: AppTheme.background,
+          body: CompetitionGallery(
+            academyId: _academyId!,
+            competitionId: competition.id,
+            competitionName: competition.name,
+            isAdmin: true,
+            enrolledStudents: enrolledStudents,
+          ),
         ),
       ),
     );
