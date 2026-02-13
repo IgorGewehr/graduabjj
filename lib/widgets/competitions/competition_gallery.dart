@@ -105,6 +105,9 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
 
     if (uploadStudentId == null || uploadStudentId.isEmpty || uploadStudentName == null) return;
 
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUserId == null) return;
+
     try {
       await _photoService.uploadPhoto(
         academyId: widget.academyId,
@@ -114,7 +117,7 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
         studentName: uploadStudentName,
         imageFile: file,
         caption: caption,
-        createdBy: uploadStudentId,
+        createdBy: currentUserId,
       );
 
       if (mounted) {
