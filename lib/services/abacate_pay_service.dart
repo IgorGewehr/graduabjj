@@ -138,7 +138,7 @@ class AbacatePayService {
       final callable = _functions.httpsCallable('createPixPayment');
       final result = await callable.call({
         'academyId': academyId,
-        'amount': (amount * 100).round(), // Convert to cents
+        'amount': amount, // Send in reais — API handles centavo conversion
         'description': description ?? 'Mensalidade',
         'financialId': financialId,
         'studentId': studentId,
@@ -200,7 +200,7 @@ class AbacatePayService {
       final callable = _functions.httpsCallable('createCardPayment');
       final result = await callable.call({
         'academyId': academyId,
-        'amount': (amount * 100).round(), // Convert to cents
+        'amount': amount, // Send in reais — API handles centavo conversion
         'description': description ?? 'Pagamento',
         'financialId': financialId,
         'studentId': studentId,

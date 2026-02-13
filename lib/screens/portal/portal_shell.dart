@@ -159,8 +159,10 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       ));
     }
 
-    // Check if student has a plan (for showing Financeiro)
-    final hasPlan = student?.planId != null;
+    // Check if student is enrolled in any plan (via plan.studentIds)
+    final studentId2 = student?.id;
+    final hasPlan = studentId2 != null &&
+        ref.read(studentPlanProvider(studentId2)).valueOrNull != null;
 
     // Filter and add standard menu items
     for (final item in _moreMenuItems) {
@@ -209,6 +211,12 @@ class _PortalShellState extends ConsumerState<PortalShell> {
   Widget build(BuildContext context) {
     // Watch auth state for reactive updates
     ref.watch(currentUserProvider);
+
+    // Pre-load student plan so it's available synchronously in _showMoreMenu
+    final student = ref.watch(currentStudentProvider).valueOrNull;
+    if (student != null) {
+      ref.watch(studentPlanProvider(student.id));
+    }
 
     // Get current location from GoRouter
     final location = GoRouterState.of(context).matchedLocation;
