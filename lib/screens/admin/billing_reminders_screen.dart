@@ -981,7 +981,7 @@ class _AdminBillingRemindersScreenState
                         maxLines: 6,
                         decoration: InputDecoration(
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          helperText: 'Mesma mensagem sera enviada via WhatsApp e Email',
+                          helperText: 'Variaveis: {nome}, {valor}, {vencimento}, {dias} — personalizadas por aluno',
                           helperMaxLines: 2,
                         ),
                       ),
@@ -1095,7 +1095,7 @@ class _AdminBillingRemindersScreenState
   }
 
   // ============================================
-  // Execute Bulk Send (New - unified)
+  // Execute Bulk Send (personalized per student)
   // ============================================
   Future<void> _executeBulkSendNew({
     required BillingStage stage,
@@ -1110,43 +1110,102 @@ class _AdminBillingRemindersScreenState
     setState(() => _isSending = true);
 
     try {
-      final result = await _notificationService!.sendBulk(
-        message: message,
-        subject: emails.isNotEmpty ? subject : null,
-        phones: phones,
-        emails: emails,
-        scheduledTime: scheduledTime,
-      );
+      final items = _overdueStages[stage] ?? [];
+      final messageTemplate = message;
+      final subjectTemplate = subject;
+      int waSent = 0, waFailed = 0, waTotal = 0;
+      int emSent = 0, emFailed = 0, emTotal = 0;
+      final failures = <BulkFailure>[];
 
-      // Auto-log contact for immediate sends
-      if (!result.scheduled) {
-        final items = _overdueStages[stage] ?? [];
-        for (final item in items) {
-          final studentId = item['studentId'] as String? ?? '';
-          final contact = _studentContacts[studentId];
-          if (contact == null) continue;
+      for (final item in items) {
+        final studentId = item['studentId'] as String? ?? '';
+        final contact = _studentContacts[studentId];
+        if (contact == null) continue;
 
-          final phone = contact.effectivePhone;
-          final email = contact.effectiveEmail;
+        final studentName = item['studentName'] as String? ?? '';
+        final amount = (item['amount'] as num?)?.toDouble() ?? 0;
+        final dueDate = item['dueDate'] as DateTime;
+        final daysOverdue = item['daysOverdue'] as int? ?? 0;
+        final financialId = item['id'] as String? ?? '';
 
-          if ((phone != null && phone.isNotEmpty) || (email != null && email.isNotEmpty)) {
-            await _billingService.logContactAttempt(
-              financialId: item['id'] as String? ?? '',
-              studentId: studentId,
-              studentName: item['studentName'] as String? ?? '',
-              type: (phone != null && phone.isNotEmpty) ? ContactType.whatsapp : ContactType.email,
-              notes: 'Cobranca em massa (bulk)',
-              stage: stage.value,
-              daysOverdue: item['daysOverdue'] as int? ?? 0,
-              contactedBy: FirebaseService.currentUserId ?? '',
-              contactedByName: 'Admin',
-            );
+        final personalizedMessage = _notificationService!.applyMessageTemplate(
+          messageTemplate, studentName, amount, dueDate, daysOverdue,
+        );
+        final personalizedSubject = _notificationService!.applyMessageTemplate(
+          subjectTemplate, studentName, amount, dueDate, daysOverdue,
+        );
+
+        // Send WhatsApp
+        final phone = contact.effectivePhone;
+        if (phone != null && phone.isNotEmpty) {
+          waTotal++;
+          final result = await _notificationService!.sendWhatsApp(
+            phone: phone,
+            studentName: studentName,
+            studentId: studentId,
+            financialId: financialId,
+            amount: amount,
+            dueDate: dueDate,
+            daysOverdue: daysOverdue,
+            stage: stage,
+            message: personalizedMessage,
+          );
+          if (result.success) {
+            waSent++;
+          } else {
+            waFailed++;
+            failures.add(BulkFailure(type: 'whatsapp', recipient: phone, error: result.error ?? ''));
           }
+        }
+
+        // Send Email
+        final email = contact.effectiveEmail;
+        if (email != null && email.isNotEmpty) {
+          emTotal++;
+          final result = await _notificationService!.sendEmail(
+            email: email,
+            studentName: studentName,
+            studentId: studentId,
+            financialId: financialId,
+            amount: amount,
+            dueDate: dueDate,
+            daysOverdue: daysOverdue,
+            stage: stage,
+            subject: personalizedSubject,
+            message: personalizedMessage,
+          );
+          if (result.success) {
+            emSent++;
+          } else {
+            emFailed++;
+            failures.add(BulkFailure(type: 'email', recipient: email, error: result.error ?? ''));
+          }
+        }
+
+        // Auto-log contact
+        if ((phone != null && phone.isNotEmpty) || (email != null && email.isNotEmpty)) {
+          await _billingService.logContactAttempt(
+            financialId: financialId,
+            studentId: studentId,
+            studentName: studentName,
+            type: (phone != null && phone.isNotEmpty) ? ContactType.whatsapp : ContactType.email,
+            notes: 'Cobranca em massa (personalizada)',
+            stage: stage.value,
+            daysOverdue: daysOverdue,
+            contactedBy: FirebaseService.currentUserId ?? '',
+            contactedByName: 'Admin',
+          );
         }
       }
 
       if (mounted) {
-        _showBulkServerResultDialog(result);
+        _showBulkServerResultDialog(BulkServerResult(
+          success: true,
+          scheduled: false,
+          whatsapp: BulkChannelSummary(total: waTotal, sent: waSent, failed: waFailed),
+          email: BulkChannelSummary(total: emTotal, sent: emSent, failed: emFailed),
+          failures: failures,
+        ));
       }
     } catch (e) {
       if (mounted) {

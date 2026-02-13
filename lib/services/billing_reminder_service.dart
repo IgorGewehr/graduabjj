@@ -694,6 +694,14 @@ class BillingNotificationService {
     required BillingStage stage,
     required String message,
   }) async {
+    if (!hasWhatsAppApi) {
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: 'API de WhatsApp nao configurada',
+      );
+    }
     try {
       final response = await http.post(
         Uri.parse(_whatsappApiUrl),
@@ -762,6 +770,14 @@ class BillingNotificationService {
     required String subject,
     required String message,
   }) async {
+    if (!hasEmailApi) {
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: 'API de Email nao configurada',
+      );
+    }
     try {
       final response = await http.post(
         Uri.parse(_emailApiUrl),
@@ -949,20 +965,29 @@ class BillingNotificationService {
     );
   }
   // ============================================
-  // Generate Generic Stage Message (no per-student personalization)
+  // Generate Generic Stage Message (template preview with placeholders)
   // ============================================
   String generateGenericStageMessage(BillingStage stage) {
     final stageKey = stage.value;
     final template = customTemplates?.whatsapp[stageKey]
         ?? defaultWhatsAppTemplates[stageKey]
         ?? defaultWhatsAppTemplates['D+1']!;
-    final days = stageKey == 'D+30' ? '30+' : stageKey.replaceAll('D+', '');
-    return template
-        .replaceAll('{nome}', 'aluno(a)')
-        .replaceAll('{valor}', '(valor)')
-        .replaceAll('{vencimento}', '(data)')
-        .replaceAll('{dias}', days)
-        .replaceAll('{academia}', academyName);
+    return template.replaceAll('{academia}', academyName);
+  }
+
+  // ============================================
+  // Apply message template with per-student data
+  // ============================================
+  String applyMessageTemplate(
+    String template,
+    String studentName,
+    double amount,
+    DateTime dueDate,
+    int daysOverdue,
+  ) {
+    final amountStr = _currencyFormat.format(amount);
+    final dateStr = _dateFormat.format(dueDate);
+    return _applyTemplate(template, studentName, amountStr, dateStr, daysOverdue);
   }
 
   // ============================================
