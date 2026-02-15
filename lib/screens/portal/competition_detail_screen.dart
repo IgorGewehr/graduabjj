@@ -19,12 +19,15 @@ const _positionConfig = {
 };
 
 /// Competition Detail Screen - Shows results + gallery for a specific competition
+/// Used by both portal (student) and admin views.
 class CompetitionDetailScreen extends ConsumerStatefulWidget {
   final String competitionId;
+  final bool isAdmin;
 
   const CompetitionDetailScreen({
     super.key,
     required this.competitionId,
+    this.isAdmin = false,
   });
 
   @override
@@ -251,8 +254,8 @@ class _CompetitionDetailScreenState
               overflow: TextOverflow.ellipsis,
             ),
           ],
-          // Self-enrollment button
-          if (studentId != null && competition.status != CompetitionStatus.completed) ...[
+          // Self-enrollment button (students only)
+          if (!widget.isAdmin && studentId != null && competition.status != CompetitionStatus.completed) ...[
             const SizedBox(height: 12),
             const Divider(height: 1),
             const SizedBox(height: 12),
@@ -337,12 +340,12 @@ class _CompetitionDetailScreenState
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Team Result Card
-          if (_competition!.teamPosition != null)
+          // Team Result Card (admin can edit, students only see)
+          if (widget.isAdmin || _competition!.teamPosition != null)
             _buildTeamResultCard(),
 
-          // My Results Card (supports multiple)
-          if (studentId != null)
+          // My Results Card (supports multiple) - only for students
+          if (!widget.isAdmin && studentId != null)
             _buildMyResultsCard(
               studentId: studentId,
               studentName: student?.fullName ?? '',
@@ -352,7 +355,7 @@ class _CompetitionDetailScreenState
 
           const SizedBox(height: 16),
 
-          // All Results
+          // All Results (admin has full management)
           _buildAllResultsCard(studentId),
         ],
       ),
@@ -360,12 +363,40 @@ class _CompetitionDetailScreenState
   }
 
   Widget _buildTeamResultCard() {
-    final position = _competition!.teamPosition!;
+    final position = _competition!.teamPosition;
     final config = {
       'gold': {'label': 'Campeao por Equipes', 'bgColor': const Color(0xFFFEF3C7), 'borderColor': const Color(0xFFF59E0B), 'textColor': const Color(0xFF92400E)},
       'silver': {'label': 'Vice-campeao por Equipes', 'bgColor': const Color(0xFFF3F4F6), 'borderColor': const Color(0xFF9CA3AF), 'textColor': const Color(0xFF374151)},
       'bronze': {'label': '3o Lugar por Equipes', 'bgColor': const Color(0xFFFED7AA), 'borderColor': const Color(0xFFF97316), 'textColor': const Color(0xFF7C2D12)},
     };
+
+    // Admin without team result: show register button
+    if (position == null && widget.isAdmin) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        child: OutlinedButton(
+          onPressed: _showTeamResultDialog,
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            side: const BorderSide(color: AppTheme.warning, style: BorderStyle.solid, width: 2),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text('🏆', style: TextStyle(fontSize: 20)),
+              const SizedBox(width: 8),
+              Text(
+                'Registrar Resultado da Equipe',
+                style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (position == null) return const SizedBox.shrink();
 
     final c = config[position] ?? config['gold']!;
     final bgColor = c['bgColor'] as Color;
@@ -417,6 +448,16 @@ class _CompetitionDetailScreenState
               ],
             ),
           ),
+          if (widget.isAdmin) ...[
+            IconButton(
+              onPressed: _showTeamResultDialog,
+              icon: Icon(LucideIcons.edit, size: 18, color: textColor),
+            ),
+            IconButton(
+              onPressed: _removeTeamResult,
+              icon: Icon(LucideIcons.trash2, size: 18, color: textColor),
+            ),
+          ],
         ],
       ),
     );
@@ -591,10 +632,22 @@ class _CompetitionDetailScreenState
             children: [
               const Icon(LucideIcons.users, size: 16, color: AppTheme.textSecondary),
               const SizedBox(width: 8),
-              Text(
-                'Todos os Resultados',
-                style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+              Expanded(
+                child: Text(
+                  widget.isAdmin ? 'Resultados' : 'Todos os Resultados',
+                  style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                ),
               ),
+              if (widget.isAdmin)
+                TextButton.icon(
+                  onPressed: _enrollments.isEmpty ? null : _showAdminAddResultDialog,
+                  icon: const Icon(LucideIcons.plus, size: 16),
+                  label: const Text('Adicionar'),
+                  style: TextButton.styleFrom(
+                    textStyle: AppTheme.labelSmall,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 12),
@@ -683,7 +736,9 @@ class _CompetitionDetailScreenState
                             ],
                           ),
                           Text(
-                            '${pos['label'] as String}${result.weightCategory != null ? ' - ${result.weightCategory}' : ''}',
+                            '${pos['label'] as String}'
+                            '${result.modality != null ? ' - ${result.modality == 'gi' ? 'Gi' : 'No-Gi'}' : ''}'
+                            '${result.weightCategory != null ? ' - ${result.weightCategory}' : ''}',
                             style: AppTheme.labelSmall.copyWith(
                               color: AppTheme.textSecondary,
                             ),
@@ -691,6 +746,27 @@ class _CompetitionDetailScreenState
                         ],
                       ),
                     ),
+                    if (widget.isAdmin) ...[
+                      IconButton(
+                        onPressed: () => _showResultDialog(
+                          studentId: result.studentId,
+                          studentName: result.studentName,
+                          existingResult: result,
+                          enrollment: _enrollments.where((e) => e.studentId == result.studentId).firstOrNull,
+                        ),
+                        icon: const Icon(LucideIcons.edit, size: 16),
+                        color: AppTheme.textSecondary,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        padding: EdgeInsets.zero,
+                      ),
+                      IconButton(
+                        onPressed: () => _deleteResult(result),
+                        icon: const Icon(LucideIcons.trash2, size: 16),
+                        color: Colors.red.shade400,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        padding: EdgeInsets.zero,
+                      ),
+                    ],
                   ],
                 ),
               );
@@ -719,7 +795,7 @@ class _CompetitionDetailScreenState
         studentId: student?.id,
         studentName: student?.fullName,
         isEnrolled: isEnrolled,
-        isAdmin: false,
+        isAdmin: widget.isAdmin,
         enrolledStudents: enrolledStudents,
       ),
     );
@@ -808,6 +884,236 @@ class _CompetitionDetailScreenState
     } finally {
       if (mounted) setState(() => _isEnrolling = false);
     }
+  }
+
+  /// Admin: Show team result dialog
+  void _showTeamResultDialog() {
+    String teamPosition = _competition?.teamPosition ?? 'gold';
+    final notesController = TextEditingController(text: _competition?.teamNotes ?? '');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          return Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40, height: 4,
+                      decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2)),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    _competition?.teamPosition != null ? 'Editar Resultado da Equipe' : 'Registrar Resultado da Equipe',
+                    style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 20),
+                  Text('Posicao', style: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('🥇 Campeao'),
+                        selected: teamPosition == 'gold',
+                        onSelected: (_) => setSheetState(() => teamPosition = 'gold'),
+                        selectedColor: const Color(0xFFFEF3C7),
+                      ),
+                      ChoiceChip(
+                        label: const Text('🥈 Vice'),
+                        selected: teamPosition == 'silver',
+                        onSelected: (_) => setSheetState(() => teamPosition = 'silver'),
+                        selectedColor: const Color(0xFFF3F4F6),
+                      ),
+                      ChoiceChip(
+                        label: const Text('🥉 3o Lugar'),
+                        selected: teamPosition == 'bronze',
+                        onSelected: (_) => setSheetState(() => teamPosition = 'bronze'),
+                        selectedColor: const Color(0xFFFED7AA),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: notesController,
+                    decoration: const InputDecoration(
+                      labelText: 'Observacoes (opcional)',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    maxLines: 2,
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        final academyId = ref.read(selectedAcademyIdProvider);
+                        if (academyId == null || _competition == null) return;
+
+                        final competitionService = CompetitionService(academyId);
+                        try {
+                          await competitionService.update(_competition!.id, {
+                            'teamPosition': teamPosition,
+                            'teamNotes': notesController.text.isEmpty ? null : notesController.text,
+                          });
+                          if (mounted) {
+                            Navigator.of(ctx).pop();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Resultado da equipe salvo!'), backgroundColor: Colors.green),
+                            );
+                            _loadData();
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
+                            );
+                          }
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.textPrimary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: const Text('Salvar'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Admin: Remove team result
+  Future<void> _removeTeamResult() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover Resultado da Equipe'),
+        content: const Text('Deseja remover o resultado da equipe?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final academyId = ref.read(selectedAcademyIdProvider);
+    if (academyId == null || _competition == null) return;
+
+    final competitionService = CompetitionService(academyId);
+    try {
+      await competitionService.update(_competition!.id, {
+        'teamPosition': null,
+        'teamNotes': null,
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Resultado da equipe removido'), backgroundColor: Colors.green),
+        );
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  /// Admin: Show dialog to add result for any enrolled student
+  void _showAdminAddResultDialog() {
+    CompetitionEnrollment? selectedEnrollment;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          return Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40, height: 4,
+                    decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text('Adicionar Resultado', style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 20),
+                Text('Selecione o Aluno', style: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<CompetitionEnrollment>(
+                  value: selectedEnrollment,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    hintText: 'Selecione...',
+                  ),
+                  items: _enrollments.map((e) => DropdownMenuItem(
+                    value: e,
+                    child: Text(e.studentName),
+                  )).toList(),
+                  onChanged: (value) => setSheetState(() => selectedEnrollment = value),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: selectedEnrollment == null ? null : () {
+                      Navigator.of(ctx).pop();
+                      _showResultDialog(
+                        studentId: selectedEnrollment!.studentId,
+                        studentName: selectedEnrollment!.studentName,
+                        existingResult: null,
+                        enrollment: selectedEnrollment,
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.textPrimary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: const Text('Continuar'),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   /// Show result registration/edit dialog
