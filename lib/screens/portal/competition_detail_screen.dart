@@ -327,8 +327,8 @@ class _CompetitionDetailScreenState
 
   Widget _buildResultsTab(Student? student) {
     final studentId = student?.id;
-    final myResult =
-        _results.where((r) => r.studentId == studentId).firstOrNull;
+    final myResults =
+        _results.where((r) => r.studentId == studentId).toList();
     final myEnrollment =
         _enrollments.where((e) => e.studentId == studentId).firstOrNull;
 
@@ -341,12 +341,12 @@ class _CompetitionDetailScreenState
           if (_competition!.teamPosition != null)
             _buildTeamResultCard(),
 
-          // My Result Card
+          // My Results Card (supports multiple)
           if (studentId != null)
-            _buildMyResultCard(
+            _buildMyResultsCard(
               studentId: studentId,
               studentName: student?.fullName ?? '',
-              myResult: myResult,
+              myResults: myResults,
               myEnrollment: myEnrollment,
             ),
 
@@ -422,14 +422,14 @@ class _CompetitionDetailScreenState
     );
   }
 
-  Widget _buildMyResultCard({
+  Widget _buildMyResultsCard({
     required String studentId,
     required String studentName,
-    CompetitionResult? myResult,
+    required List<CompetitionResult> myResults,
     CompetitionEnrollment? myEnrollment,
   }) {
-    final pos = myResult != null
-        ? _positionConfig[myResult.position] ?? _positionConfig['participant']!
+    final firstPos = myResults.isNotEmpty
+        ? _positionConfig[myResults.first.position] ?? _positionConfig['participant']!
         : null;
 
     return Container(
@@ -438,8 +438,8 @@ class _CompetitionDetailScreenState
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: myResult != null
-              ? Color(pos!['color'] as int).withValues(alpha: 0.5)
+          color: myResults.isNotEmpty
+              ? Color(firstPos!['color'] as int).withValues(alpha: 0.5)
               : AppTheme.primary.withValues(alpha: 0.5),
           width: 2,
         ),
@@ -447,67 +447,97 @@ class _CompetitionDetailScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'MEU RESULTADO',
-            style: AppTheme.labelSmall.copyWith(
-              color: AppTheme.textSecondary,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                myResults.length > 1 ? 'MEUS RESULTADOS' : 'MEU RESULTADO',
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.textSecondary,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _showResultDialog(
+                  studentId: studentId,
+                  studentName: studentName,
+                  existingResult: null,
+                  enrollment: myEnrollment,
+                ),
+                icon: const Icon(LucideIcons.plus, size: 16),
+                label: const Text('Adicionar'),
+                style: TextButton.styleFrom(
+                  textStyle: AppTheme.labelSmall,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
-          if (myResult != null) ...[
-            Row(
-              children: [
-                Text(
-                  pos!['icon'] as String,
-                  style: const TextStyle(fontSize: 36),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        pos['label'] as String,
-                        style: AppTheme.titleMedium
-                            .copyWith(fontWeight: FontWeight.w600),
+          if (myResults.isNotEmpty) ...[
+            ...myResults.map((result) {
+              final pos = _positionConfig[result.position] ?? _positionConfig['participant']!;
+              return Padding(
+                padding: EdgeInsets.only(top: result == myResults.first ? 0 : 8),
+                child: Row(
+                  children: [
+                    Text(
+                      pos['icon'] as String,
+                      style: const TextStyle(fontSize: 36),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            pos['label'] as String,
+                            style: AppTheme.titleMedium
+                                .copyWith(fontWeight: FontWeight.w600),
+                          ),
+                          if (result.ageCategory != null ||
+                              result.weightCategory != null)
+                            Text(
+                              [
+                                if (result.modality != null)
+                                  result.modality == 'gi' ? 'Gi' : 'No-Gi',
+                                if (result.divisionType != null)
+                                  result.divisionType == 'absolute' ? 'Absoluto' : 'Peso',
+                                result.ageCategory,
+                                result.weightCategory,
+                              ].where((e) => e != null && e.isNotEmpty).join(' - '),
+                              style: AppTheme.bodySmall
+                                  .copyWith(color: AppTheme.textSecondary),
+                            ),
+                          if (result.notes != null)
+                            Text(
+                              result.notes!,
+                              style: AppTheme.bodySmall
+                                  .copyWith(color: AppTheme.textSecondary),
+                            ),
+                        ],
                       ),
-                      if (myResult.ageCategory != null ||
-                          myResult.weightCategory != null)
-                        Text(
-                          [myResult.ageCategory, myResult.weightCategory]
-                              .where((e) => e != null)
-                              .join(' - '),
-                          style: AppTheme.bodySmall
-                              .copyWith(color: AppTheme.textSecondary),
-                        ),
-                      if (myResult.notes != null)
-                        Text(
-                          myResult.notes!,
-                          style: AppTheme.bodySmall
-                              .copyWith(color: AppTheme.textSecondary),
-                        ),
-                    ],
-                  ),
+                    ),
+                    IconButton(
+                      onPressed: () => _showResultDialog(
+                        studentId: studentId,
+                        studentName: studentName,
+                        existingResult: result,
+                        enrollment: myEnrollment,
+                      ),
+                      icon: const Icon(LucideIcons.edit, size: 18),
+                      color: AppTheme.textSecondary,
+                    ),
+                    IconButton(
+                      onPressed: () => _deleteResult(result),
+                      icon: const Icon(LucideIcons.trash2, size: 18),
+                      color: Colors.red.shade400,
+                    ),
+                  ],
                 ),
-                IconButton(
-                  onPressed: () => _showResultDialog(
-                    studentId: studentId,
-                    studentName: studentName,
-                    existingResult: myResult,
-                    enrollment: myEnrollment,
-                  ),
-                  icon: const Icon(LucideIcons.edit, size: 18),
-                  color: AppTheme.textSecondary,
-                ),
-                IconButton(
-                  onPressed: () => _deleteResult(myResult),
-                  icon: const Icon(LucideIcons.trash2, size: 18),
-                  color: Colors.red.shade400,
-                ),
-              ],
-            ),
+              );
+            }),
           ] else ...[
             InkWell(
               onTap: () => _showResultDialog(
