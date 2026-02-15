@@ -355,16 +355,18 @@ Future<LinkCodeValidation> validateCodeGlobally(String code) async {
 
   try {
     // Search across ALL academies' linkCodes subcollections
+    // MUST filter by usedAt == null to match Firestore security rules constraint
     final query = await firestore
         .collectionGroup('linkCodes')
         .where('code', isEqualTo: code.toUpperCase())
+        .where('usedAt', isNull: true)
         .limit(1)
         .get();
 
     if (query.docs.isEmpty) {
       return LinkCodeValidation(
         valid: false,
-        error: 'Código não encontrado',
+        error: 'Código não encontrado ou já utilizado. Solicite um novo código.',
       );
     }
 
@@ -376,14 +378,6 @@ Future<LinkCodeValidation> validateCodeGlobally(String code) async {
       return LinkCodeValidation(
         valid: false,
         error: 'Erro ao identificar academia do código',
-      );
-    }
-
-    // Check if already used
-    if (linkCode.isUsed) {
-      return LinkCodeValidation(
-        valid: false,
-        error: 'Este código já foi utilizado',
       );
     }
 

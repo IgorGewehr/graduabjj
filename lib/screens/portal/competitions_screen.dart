@@ -84,6 +84,9 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
                     child: _ConquistasCard(studentId: student.id),
                   ),
 
+                  // Trophy Showcase
+                  _TrophyShowcase(competitions: competitions),
+
                   // Tab Bar
                   Container(
                     decoration: const BoxDecoration(
@@ -743,6 +746,119 @@ class _AcademyIndicator extends ConsumerWidget {
               textStyle: AppTheme.labelSmall.copyWith(
                 fontWeight: FontWeight.w600,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Trophy Showcase - horizontal carousel of academy team trophies
+class _TrophyShowcase extends StatelessWidget {
+  final List<Competition> competitions;
+
+  const _TrophyShowcase({required this.competitions});
+
+  @override
+  Widget build(BuildContext context) {
+    final trophyCompetitions =
+        competitions.where((c) => c.teamPosition != null).toList();
+
+    if (trophyCompetitions.isEmpty) return const SizedBox.shrink();
+
+    final config = {
+      'gold': {
+        'label': 'Campeao',
+        'bgColor': const Color(0xFFFEF3C7),
+        'borderColor': const Color(0xFFF59E0B),
+        'textColor': const Color(0xFF92400E),
+      },
+      'silver': {
+        'label': 'Vice',
+        'bgColor': const Color(0xFFF3F4F6),
+        'borderColor': const Color(0xFF9CA3AF),
+        'textColor': const Color(0xFF374151),
+      },
+      'bronze': {
+        'label': '3o Lugar',
+        'bgColor': const Color(0xFFFED7AA),
+        'borderColor': const Color(0xFFF97316),
+        'textColor': const Color(0xFF7C2D12),
+      },
+    };
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'TROFEUS DA ACADEMIA',
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 130,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: trophyCompetitions.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final comp = trophyCompetitions[index];
+                final c = config[comp.teamPosition] ?? config['gold']!;
+                final bgColor = c['bgColor'] as Color;
+                final borderColor = c['borderColor'] as Color;
+                final textColor = c['textColor'] as Color;
+                final label = c['label'] as String;
+
+                return GestureDetector(
+                  onTap: () => context.push('/portal/competicoes/${comp.id}'),
+                  child: Container(
+                    width: 160,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: bgColor,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: borderColor),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('🏆', style: TextStyle(fontSize: 28)),
+                        const SizedBox(height: 8),
+                        Text(
+                          comp.name,
+                          style: AppTheme.bodySmall.copyWith(
+                            color: textColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          DateFormat("MMM yyyy", 'pt_BR').format(comp.date),
+                          style: AppTheme.labelSmall.copyWith(
+                            color: textColor.withValues(alpha: 0.7),
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          label,
+                          style: AppTheme.labelSmall.copyWith(
+                            color: textColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         ],

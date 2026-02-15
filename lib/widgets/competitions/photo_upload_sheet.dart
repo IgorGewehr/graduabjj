@@ -17,6 +17,8 @@ class PhotoUploadSheet extends StatefulWidget {
   final List<EnrolledStudent> enrolledStudents;
   final String? selectedStudentId;
   final ValueChanged<String>? onStudentSelect;
+  final String photoType;
+  final ValueChanged<String>? onPhotoTypeChange;
 
   const PhotoUploadSheet({
     super.key,
@@ -27,6 +29,8 @@ class PhotoUploadSheet extends StatefulWidget {
     this.enrolledStudents = const [],
     this.selectedStudentId,
     this.onStudentSelect,
+    this.photoType = 'student',
+    this.onPhotoTypeChange,
   });
 
   @override
@@ -136,58 +140,84 @@ class _PhotoUploadSheetState extends State<PhotoUploadSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Header
-              Row(
-                children: [
-                  const Text(
-                    'Adicionar Foto',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
+    return SafeArea(
+      child: Container(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Drag handle
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
+                ),
+                // Header
+                Row(
+                  children: [
+                    const Text(
+                      'Adicionar Foto',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
 
-              // Admin student selector
-              if (widget.isAdmin && widget.enrolledStudents.isNotEmpty) ...[
-                DropdownButtonFormField<String>(
-                  value: widget.selectedStudentId?.isNotEmpty == true
-                      ? widget.selectedStudentId
-                      : null,
-                  decoration: const InputDecoration(
-                    labelText: 'Selecione o Aluno',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: widget.enrolledStudents
-                      .map((s) => DropdownMenuItem(
-                            value: s.id,
-                            child: Text(s.name),
-                          ))
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      widget.onStudentSelect?.call(value);
-                    }
+              // Admin: photo type toggle + student selector
+              if (widget.isAdmin) ...[
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'student', label: Text('Aluno')),
+                    ButtonSegment(value: 'team', label: Text('Equipe')),
+                  ],
+                  selected: {widget.photoType},
+                  onSelectionChanged: (Set<String> selected) {
+                    widget.onPhotoTypeChange?.call(selected.first);
                   },
                 ),
                 const SizedBox(height: 16),
+                if (widget.photoType == 'student' && widget.enrolledStudents.isNotEmpty) ...[
+                  DropdownButtonFormField<String>(
+                    value: widget.selectedStudentId?.isNotEmpty == true
+                        ? widget.selectedStudentId
+                        : null,
+                    decoration: const InputDecoration(
+                      labelText: 'Selecione o Aluno',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: widget.enrolledStudents
+                        .map((s) => DropdownMenuItem(
+                              value: s.id,
+                              child: Text(s.name),
+                            ))
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        widget.onStudentSelect?.call(value);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                ],
               ],
 
               // Photo counter
@@ -318,18 +348,25 @@ class _PhotoUploadSheetState extends State<PhotoUploadSheet> {
                                       _captionController.clear();
                                     });
                                   },
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                            ),
                             child: const Text('Cancelar'),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: ElevatedButton(
                             onPressed: _isUploading ||
                                     (widget.isAdmin &&
+                                        widget.photoType == 'student' &&
                                         (widget.selectedStudentId == null ||
                                             widget.selectedStudentId!.isEmpty))
                                 ? null
                                 : _handleUpload,
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                            ),
                             child: _isUploading
                                 ? const SizedBox(
                                     height: 20,
@@ -348,7 +385,8 @@ class _PhotoUploadSheetState extends State<PhotoUploadSheet> {
                     ),
                   ],
                 ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

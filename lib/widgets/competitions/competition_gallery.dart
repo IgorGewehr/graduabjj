@@ -94,14 +94,17 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
     }
   }
 
+  String _uploadPhotoType = 'student';
+
   Future<void> _handleUpload(file, caption) async {
-    final uploadStudentId = widget.isAdmin ? _selectedStudentId : widget.studentId;
-    final uploadStudentName = widget.isAdmin
+    final isTeam = _uploadPhotoType == 'team';
+    final uploadStudentId = isTeam ? '__team__' : (widget.isAdmin ? _selectedStudentId : widget.studentId);
+    final uploadStudentName = isTeam ? 'Equipe' : (widget.isAdmin
         ? widget.enrolledStudents
             .where((s) => s.id == _selectedStudentId)
             .map((s) => s.name)
             .firstOrNull
-        : widget.studentName;
+        : widget.studentName);
 
     if (uploadStudentId == null || uploadStudentId.isEmpty || uploadStudentName == null) return;
 
@@ -194,7 +197,10 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
   }
 
   void _showUploadSheet() {
-    setState(() => _selectedStudentId = '');
+    setState(() {
+      _selectedStudentId = '';
+      _uploadPhotoType = 'student';
+    });
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -210,6 +216,11 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
             setState(() => _selectedStudentId = id);
             setSheetState(() {});
           },
+          photoType: _uploadPhotoType,
+          onPhotoTypeChange: (type) {
+            setState(() => _uploadPhotoType = type);
+            setSheetState(() {});
+          },
         ),
       ),
     );
@@ -217,6 +228,9 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
 
   List<CompetitionPhoto> get _filteredPhotos {
     if (_filterStudentId.isEmpty) return _photos;
+    if (_filterStudentId == '__team__') {
+      return _photos.where((p) => p.photoType == 'team' || p.studentId == '__team__').toList();
+    }
     return _photos.where((p) => p.studentId == _filterStudentId).toList();
   }
 
@@ -335,7 +349,9 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
               ),
               items: [
                 const DropdownMenuItem<String?>(value: null, child: Text('Todos')),
+                const DropdownMenuItem<String?>(value: '__team__', child: Text('Equipe')),
                 ..._getFilterStudents()
+                    .where((s) => s.id != '__team__')
                     .map((s) => DropdownMenuItem<String?>(value: s.id, child: Text(s.name))),
               ],
               onChanged: (value) {

@@ -337,6 +337,10 @@ class _CompetitionDetailScreenState
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Team Result Card
+          if (_competition!.teamPosition != null)
+            _buildTeamResultCard(),
+
           // My Result Card
           if (studentId != null)
             _buildMyResultCard(
@@ -350,6 +354,69 @@ class _CompetitionDetailScreenState
 
           // All Results
           _buildAllResultsCard(studentId),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTeamResultCard() {
+    final position = _competition!.teamPosition!;
+    final config = {
+      'gold': {'label': 'Campeao por Equipes', 'bgColor': const Color(0xFFFEF3C7), 'borderColor': const Color(0xFFF59E0B), 'textColor': const Color(0xFF92400E)},
+      'silver': {'label': 'Vice-campeao por Equipes', 'bgColor': const Color(0xFFF3F4F6), 'borderColor': const Color(0xFF9CA3AF), 'textColor': const Color(0xFF374151)},
+      'bronze': {'label': '3o Lugar por Equipes', 'bgColor': const Color(0xFFFED7AA), 'borderColor': const Color(0xFFF97316), 'textColor': const Color(0xFF7C2D12)},
+    };
+
+    final c = config[position] ?? config['gold']!;
+    final bgColor = c['bgColor'] as Color;
+    final borderColor = c['borderColor'] as Color;
+    final textColor = c['textColor'] as Color;
+    final label = c['label'] as String;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor, width: 2),
+      ),
+      child: Row(
+        children: [
+          const Text('🏆', style: TextStyle(fontSize: 36)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'RESULTADO DA EQUIPE',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: textColor.withValues(alpha: 0.7),
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: AppTheme.titleMedium.copyWith(
+                    color: textColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (_competition!.teamNotes != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    _competition!.teamNotes!,
+                    style: AppTheme.bodySmall.copyWith(
+                      color: textColor.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );

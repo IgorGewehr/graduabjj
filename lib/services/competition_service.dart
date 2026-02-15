@@ -88,6 +88,8 @@ class Competition {
   final TransportStatus? transportStatus;
   final String? transportNotes;
   final int? transportCapacity;
+  final String? teamPosition; // 'gold' | 'silver' | 'bronze'
+  final String? teamNotes;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -103,6 +105,8 @@ class Competition {
     this.transportStatus,
     this.transportNotes,
     this.transportCapacity,
+    this.teamPosition,
+    this.teamNotes,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -127,6 +131,8 @@ class Competition {
           : null,
       transportNotes: data['transportNotes'],
       transportCapacity: data['transportCapacity'],
+      teamPosition: data['teamPosition'],
+      teamNotes: data['teamNotes'],
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );

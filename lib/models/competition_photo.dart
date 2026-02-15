@@ -57,6 +57,7 @@ class CompetitionPhoto {
   final int likes;
   final bool isHighlight;
   final CompetitionPosition? medalType;
+  final String? photoType; // 'student' | 'team'
   final DateTime createdAt;
   final DateTime updatedAt;
   final String createdBy;
@@ -73,6 +74,7 @@ class CompetitionPhoto {
     this.likes = 0,
     this.isHighlight = false,
     this.medalType,
+    this.photoType,
     required this.createdAt,
     required this.updatedAt,
     required this.createdBy,
@@ -94,6 +96,7 @@ class CompetitionPhoto {
       medalType: data['medalType'] != null
           ? CompetitionPositionExtension.fromString(data['medalType'])
           : null,
+      photoType: data['photoType'],
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       createdBy: data['createdBy'] ?? '',
@@ -112,6 +115,7 @@ class CompetitionPhoto {
       'likes': likes,
       'isHighlight': isHighlight,
       'medalType': medalType?.value,
+      'photoType': photoType,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(updatedAt),
       'createdBy': createdBy,
@@ -130,6 +134,7 @@ class CompetitionPhoto {
     int? likes,
     bool? isHighlight,
     CompetitionPosition? medalType,
+    String? photoType,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? createdBy,
@@ -146,6 +151,7 @@ class CompetitionPhoto {
       likes: likes ?? this.likes,
       isHighlight: isHighlight ?? this.isHighlight,
       medalType: medalType ?? this.medalType,
+      photoType: photoType ?? this.photoType,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       createdBy: createdBy ?? this.createdBy,
