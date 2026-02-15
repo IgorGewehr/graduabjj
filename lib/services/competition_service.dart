@@ -113,28 +113,40 @@ class Competition {
 
   factory Competition.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+
+    // Safe timestamp parser — handles Timestamp, null, or invalid types
+    DateTime? safeTimestamp(dynamic value) {
+      if (value == null) return null;
+      if (value is Timestamp) return value.toDate();
+      if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+      return null;
+    }
+
+    // Safe list parser
+    List<String> safeStringList(dynamic value) {
+      if (value == null) return [];
+      if (value is List) return value.map((e) => e.toString()).toList();
+      return [];
+    }
+
     return Competition(
       id: doc.id,
       name: data['name'] ?? '',
-      date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      location: data['location'],
-      description: data['description'],
+      date: safeTimestamp(data['date']) ?? DateTime.now(),
+      location: data['location']?.toString(),
+      description: data['description']?.toString(),
       status: CompetitionStatusExtension.fromString(data['status'] ?? 'upcoming'),
-      registrationDeadline: data['registrationDeadline'] != null
-          ? (data['registrationDeadline'] as Timestamp).toDate()
-          : null,
-      enrolledStudentIds: data['enrolledStudentIds'] != null
-          ? List<String>.from(data['enrolledStudentIds'])
-          : [],
+      registrationDeadline: safeTimestamp(data['registrationDeadline']),
+      enrolledStudentIds: safeStringList(data['enrolledStudentIds']),
       transportStatus: data['transportStatus'] != null
-          ? TransportStatusExtension.fromString(data['transportStatus'])
+          ? TransportStatusExtension.fromString(data['transportStatus'].toString())
           : null,
-      transportNotes: data['transportNotes'],
-      transportCapacity: data['transportCapacity'],
-      teamPosition: data['teamPosition'],
-      teamNotes: data['teamNotes'],
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      transportNotes: data['transportNotes']?.toString(),
+      transportCapacity: data['transportCapacity'] is int ? data['transportCapacity'] : null,
+      teamPosition: data['teamPosition']?.toString(),
+      teamNotes: data['teamNotes']?.toString(),
+      createdAt: safeTimestamp(data['createdAt']) ?? DateTime.now(),
+      updatedAt: safeTimestamp(data['updatedAt']) ?? DateTime.now(),
     );
   }
 
@@ -182,6 +194,14 @@ class CompetitionResult {
 
   factory CompetitionResult.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+
+    DateTime? safeTimestamp(dynamic value) {
+      if (value == null) return null;
+      if (value is Timestamp) return value.toDate();
+      if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+      return null;
+    }
+
     return CompetitionResult(
       id: doc.id,
       competitionId: data['competitionId'] ?? '',
@@ -189,14 +209,14 @@ class CompetitionResult {
       studentId: data['studentId'] ?? '',
       studentName: data['studentName'] ?? '',
       position: data['position'] ?? 'participant',
-      beltCategory: data['beltCategory'],
-      ageCategory: data['ageCategory'],
-      weightCategory: data['weightCategory'],
-      modality: data['modality'],
-      divisionType: data['divisionType'],
-      notes: data['notes'],
-      date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      beltCategory: data['beltCategory']?.toString(),
+      ageCategory: data['ageCategory']?.toString(),
+      weightCategory: data['weightCategory']?.toString(),
+      modality: data['modality']?.toString(),
+      divisionType: data['divisionType']?.toString(),
+      notes: data['notes']?.toString(),
+      date: safeTimestamp(data['date']) ?? DateTime.now(),
+      createdAt: safeTimestamp(data['createdAt']) ?? DateTime.now(),
     );
   }
 }

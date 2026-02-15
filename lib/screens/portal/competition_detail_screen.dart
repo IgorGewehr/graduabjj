@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/services.dart';
 import '../../widgets/competitions/competition_gallery.dart';
 import '../../widgets/competitions/photo_upload_sheet.dart';
@@ -74,18 +75,29 @@ class _CompetitionDetailScreenState
       final competitionService = CompetitionService(academyId);
       final enrollmentService = CompetitionEnrollmentService(academyId);
 
-      final results = await Future.wait([
-        competitionService.getById(widget.competitionId),
-        competitionService.getResultsForCompetition(widget.competitionId),
-        enrollmentService.getByCompetition(widget.competitionId),
-      ]);
+      // Load each independently to avoid one failure breaking all
+      final competition = await competitionService.getById(widget.competitionId);
+
+      List<CompetitionResult> resultsList = [];
+      try {
+        resultsList = await competitionService.getResultsForCompetition(widget.competitionId);
+      } catch (_) {
+        // Results may fail due to missing index — continue without them
+      }
+
+      List<CompetitionEnrollment> enrollmentsList = [];
+      try {
+        enrollmentsList = await enrollmentService.getByCompetition(widget.competitionId);
+      } catch (_) {
+        // Enrollments may fail — continue without them
+      }
 
       if (!mounted) return;
 
       setState(() {
-        _competition = results[0] as Competition?;
-        _results = results[1] as List<CompetitionResult>;
-        _enrollments = results[2] as List<CompetitionEnrollment>;
+        _competition = competition;
+        _results = resultsList;
+        _enrollments = enrollmentsList;
         _isLoading = false;
       });
     } catch (e) {
@@ -125,6 +137,22 @@ class _CompetitionDetailScreenState
                           'Erro ao carregar dados',
                           style: AppTheme.titleMedium
                               .copyWith(color: AppTheme.textSecondary),
+                        ),
+                        const SizedBox(height: 12),
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _isLoading = true;
+                              _error = null;
+                            });
+                            _loadData();
+                          },
+                          icon: const Icon(LucideIcons.refreshCw, size: 16),
+                          label: const Text('Tentar novamente'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.textPrimary,
+                            foregroundColor: Colors.white,
+                          ),
                         ),
                       ],
                     ),
@@ -963,10 +991,15 @@ class _CompetitionDetailScreenState
 
                         final competitionService = CompetitionService(academyId);
                         try {
-                          await competitionService.update(_competition!.id, {
+                          final teamData = <String, dynamic>{
                             'teamPosition': teamPosition,
-                            'teamNotes': notesController.text.isEmpty ? null : notesController.text,
-                          });
+                          };
+                          if (notesController.text.isNotEmpty) {
+                            teamData['teamNotes'] = notesController.text;
+                          } else {
+                            teamData['teamNotes'] = FieldValue.delete();
+                          }
+                          await competitionService.update(_competition!.id, teamData);
                           if (mounted) {
                             Navigator.of(ctx).pop();
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -1026,8 +1059,8 @@ class _CompetitionDetailScreenState
     final competitionService = CompetitionService(academyId);
     try {
       await competitionService.update(_competition!.id, {
-        'teamPosition': null,
-        'teamNotes': null,
+        'teamPosition': FieldValue.delete(),
+        'teamNotes': FieldValue.delete(),
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
