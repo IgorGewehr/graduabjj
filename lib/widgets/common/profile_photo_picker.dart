@@ -46,12 +46,148 @@ class _ProfilePhotoPickerState extends State<ProfilePhotoPicker> {
     return '${parts[0][0]}${parts[parts.length - 1][0]}'.toUpperCase();
   }
 
-  /// Pick image from gallery and crop
+  /// Show image source selection bottom sheet
+  Future<ImageSource?> _showImageSourceSheet() {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const Text(
+                'Selecionar Foto',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(context, ImageSource.camera),
+                      icon: const Icon(Icons.camera_alt),
+                      label: const Text('Câmera'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(context, ImageSource.gallery),
+                      icon: const Icon(Icons.photo_library),
+                      label: const Text('Galeria'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Show confirmation bottom sheet with image preview
+  Future<bool?> _showPhotoConfirmation(File imageFile) {
+    return showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const Text(
+                'Confirmar Foto',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(100),
+                child: Image.file(
+                  imageFile,
+                  height: 200,
+                  width: 200,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                      child: const Text('Cancelar'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                      child: const Text('Confirmar'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Pick image from gallery/camera and crop
   Future<void> _pickAndCropImage() async {
     try {
-      // Pick image from gallery
+      // Show source selection
+      final source = await _showImageSourceSheet();
+      if (source == null) return;
+
+      // Pick image
       final XFile? pickedFile = await _picker.pickImage(
-        source: ImageSource.gallery,
+        source: source,
         maxWidth: 2048,
         maxHeight: 2048,
         imageQuality: 85,
@@ -72,6 +208,7 @@ class _ProfilePhotoPickerState extends State<ProfilePhotoPicker> {
             toolbarTitle: 'Ajustar Foto',
             toolbarColor: Colors.black,
             toolbarWidgetColor: Colors.white,
+            statusBarLight: false,
             activeControlsWidgetColor: Colors.blue,
             cropFrameColor: Colors.blue,
             cropGridColor: Colors.white.withOpacity(0.5),
@@ -90,6 +227,11 @@ class _ProfilePhotoPickerState extends State<ProfilePhotoPicker> {
       );
 
       if (croppedFile == null) return;
+
+      // Show confirmation bottom sheet with preview
+      if (!mounted) return;
+      final confirmed = await _showPhotoConfirmation(File(croppedFile.path));
+      if (confirmed != true) return;
 
       // Upload cropped image
       setState(() => _uploading = true);

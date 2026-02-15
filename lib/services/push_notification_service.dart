@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -26,8 +27,19 @@ class PushNotificationService {
 
   bool _initialized = false;
   String? _fcmToken;
+  bool _isAdmin = false;
+
+  /// Pending notification data to process after router is ready
+  Map<String, dynamic>? _pendingNotificationData;
 
   String? get fcmToken => _fcmToken;
+
+  /// Set user role for correct notification routing
+  void setUserRole({required bool isAdmin}) {
+    _isAdmin = isAdmin;
+    // Process any pending notification now that we know the role
+    _processPendingNotification();
+  }
 
   /// Initialize push notifications
   Future<void> initialize() async {
@@ -54,10 +66,12 @@ class PushNotificationService {
     // Handle notification tap when app is in background
     FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
 
-    // Check if app was opened from a notification
+    // Check if app was opened from a notification (terminated state)
     final initialMessage = await _messaging.getInitialMessage();
     if (initialMessage != null) {
-      _handleNotificationTap(initialMessage);
+      // Store pending data - will navigate after router and auth are ready
+      _pendingNotificationData = Map<String, dynamic>.from(initialMessage.data);
+      print('Initial notification stored for deferred navigation: ${initialMessage.data}');
     }
 
     _initialized = true;
@@ -184,10 +198,12 @@ class PushNotificationService {
 
     final notification = message.notification;
     if (notification != null) {
+      // Serialize data as JSON so it can be parsed back on tap
+      final payloadJson = jsonEncode(message.data);
       await _showLocalNotification(
         title: notification.title ?? 'GraduaBJJ',
         body: notification.body ?? '',
-        payload: message.data.toString(),
+        payload: payloadJson,
       );
     }
   }
@@ -234,18 +250,39 @@ class PushNotificationService {
     _navigateFromNotification(message.data);
   }
 
-  /// Handle local notification tap
+  /// Handle local notification tap (foreground notifications)
   void _onNotificationTap(NotificationResponse response) {
     print('Local notification tapped: ${response.payload}');
-    // Payload is stored as string, would need to parse if used
-    // For now, RemoteMessage data is more reliable
+    final payload = response.payload;
+    if (payload == null || payload.isEmpty) return;
+
+    try {
+      final data = Map<String, dynamic>.from(jsonDecode(payload) as Map);
+      _navigateFromNotification(data);
+    } catch (e) {
+      print('Error parsing local notification payload: $e');
+    }
+  }
+
+  /// Process any pending notification that was deferred during app startup
+  void _processPendingNotification() {
+    if (_pendingNotificationData == null) return;
+
+    final data = _pendingNotificationData!;
+    _pendingNotificationData = null;
+
+    // Wait a short time for the router to stabilize after auth redirect
+    Future.delayed(const Duration(milliseconds: 500), () {
+      _navigateFromNotification(data);
+    });
   }
 
   /// Navigate based on notification data
   void _navigateFromNotification(Map<String, dynamic> data) {
     final context = navigatorKey.currentContext;
     if (context == null) {
-      print('Navigator context not available, cannot navigate');
+      print('Navigator context not available, storing as pending');
+      _pendingNotificationData = Map<String, dynamic>.from(data);
       return;
     }
 
@@ -253,7 +290,9 @@ class PushNotificationService {
     final id = data['id'] as String?;
     final academyId = data['academyId'] as String?;
 
-    print('Navigating from notification - type: $type, id: $id, academyId: $academyId');
+    print('Navigating from notification - type: $type, id: $id, academyId: $academyId, isAdmin: $_isAdmin');
+
+    final prefix = _isAdmin ? '/admin' : '/portal';
 
     try {
       switch (type) {
@@ -262,55 +301,47 @@ class PushNotificationService {
         case 'payment_pending':
         case 'payment_overdue':
         case 'payment_due_soon':
-          // Navigate to financial screen
-          context.push('/portal/financeiro');
+          context.go('$prefix/financeiro');
           break;
 
         case 'competition':
         case 'competition_reminder':
-          // Navigate to competitions screen
-          context.push('/portal/competicoes');
+          context.go(_isAdmin ? '/admin/campeonatos' : '/portal/competicoes');
           break;
 
         case 'achievement':
         case 'graduation':
         case 'belt_promotion':
         case 'student_milestone':
-          // Navigate to timeline/achievements screen
-          context.push('/portal/linha-do-tempo');
+          context.go(_isAdmin ? '/admin/graduacao' : '/portal/linha-do-tempo');
           break;
 
         case 'store_order':
         case 'order_paid':
-          // Navigate to store orders (admin)
-          if (id != null) {
-            context.push('/loja/pedidos/$id');
-          } else {
-            context.push('/loja/pedidos');
-          }
+          context.go(_isAdmin ? '/admin/loja/pedidos' : '/portal/loja/pedidos');
           break;
 
         case 'withdrawal_completed':
         case 'withdrawal_failed':
-          // Navigate to wallet (admin)
-          context.push('/admin/carteira');
+          context.go('/admin/carteira');
           break;
 
         case 'new_student_linked':
-          // Navigate to home/portal
-          context.push('/portal');
+          if (_isAdmin && id != null) {
+            context.go('/admin/alunos/$id');
+          } else {
+            context.go(prefix);
+          }
           break;
 
         default:
-          // Unknown type or no type, go to home
           print('Unknown notification type: $type, navigating to home');
-          context.push('/portal');
+          context.go(prefix);
       }
     } catch (e) {
       print('Error navigating from notification: $e');
-      // Fallback to home if navigation fails
       try {
-        context.push('/portal');
+        context.go(prefix);
       } catch (e2) {
         print('Failed to navigate to fallback route: $e2');
       }
@@ -327,6 +358,8 @@ class PushNotificationService {
   /// Clean up when user logs out
   Future<void> onUserLogout() async {
     await removeToken();
+    _isAdmin = false;
+    _pendingNotificationData = null;
   }
 
   /// Subscribe to topic (e.g., academy-wide notifications)
