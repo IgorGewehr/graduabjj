@@ -1457,6 +1457,32 @@ class _CompetitionDetailScreenState
           position: compPosition,
           date: _competition!.date,
         );
+
+        // Auto-enroll if not already enrolled
+        final alreadyEnrolled = _enrollments.any((e) => e.studentId == studentId);
+        if (!alreadyEnrolled) {
+          try {
+            final enrollmentService = CompetitionEnrollmentService(academyId);
+            final enrollment = await enrollmentService.enroll(
+              competitionId: _competition!.id,
+              competitionName: _competition!.name,
+              studentId: studentId,
+              studentName: studentName,
+              ageCategory: ageCategory,
+              weightCategory: weightCategory,
+              transportPreference: TransportPreference.undecided,
+            );
+            _enrollments = [..._enrollments, enrollment];
+
+            // Also update legacy enrolledStudentIds
+            try {
+              final compService = CompetitionService(academyId);
+              await compService.enrollStudent(_competition!.id, studentId);
+            } catch (_) {}
+          } catch (_) {
+            // Already enrolled - ignore
+          }
+        }
       }
 
       if (mounted) {

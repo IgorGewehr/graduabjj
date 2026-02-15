@@ -89,6 +89,15 @@ final studentCompetitionResultsProvider = FutureProvider.family<List<Competition
   return await service.getByStudent(studentId);
 });
 
+/// Student results provider (returns all CompetitionResult for a student)
+final studentAllResultsProvider = FutureProvider.family<List<CompetitionResult>, String>((ref, studentId) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+  if (currentUser?.academyId == null) return [];
+
+  final service = CompetitionService(currentUser!.academyId!);
+  return await service.getResultsForStudent(studentId);
+});
+
 // ============================================
 // Competition Enrollment Providers
 // ============================================

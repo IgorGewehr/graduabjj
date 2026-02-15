@@ -10,6 +10,7 @@ import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/competitions/competition_gallery.dart';
 import '../../widgets/competitions/photo_upload_sheet.dart';
+import '../../widgets/competitions/team_gallery_view.dart';
 import '../portal/competition_detail_screen.dart';
 
 /// Admin Competitions Screen - Fintech style matching webapp
@@ -26,10 +27,6 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
   bool _isLoading = true;
   int _selectedTabIndex = 0;
   String? _academyId;
-
-  // Stats carousel
-  final _statsPageController = PageController(viewportFraction: 0.85);
-  int _currentStatsPage = 0;
 
   final _tabs = ['Proximos', 'Passados'];
 
@@ -101,8 +98,8 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
             // Header
             SliverToBoxAdapter(child: _buildHeader()),
 
-            // Stats Cards
-            SliverToBoxAdapter(child: _buildStatsCards()),
+            // Trophy Showcase
+            SliverToBoxAdapter(child: _buildTrophyShowcase()),
 
             // Tabs
             SliverToBoxAdapter(child: _buildTabs()),
@@ -184,92 +181,152 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
     );
   }
 
-  Widget _buildStatsCards() {
-    final totalUpcoming = _upcomingCompetitions.length;
-    final totalPast = _pastCompetitions.length;
-    final totalEnrollments = _upcomingCompetitions.fold<int>(
-      0,
-      (sum, c) => sum + c.enrolledCount,
-    );
-    final nextCompetition = _upcomingCompetitions.isNotEmpty
-        ? _upcomingCompetitions.first.date.difference(DateTime.now()).inDays
-        : null;
+  Widget _buildTrophyShowcase() {
+    final allCompetitions = [..._upcomingCompetitions, ..._pastCompetitions];
+    final trophyCompetitions = allCompetitions.where((c) => c.teamPosition != null).toList();
 
-    return Column(
-      children: [
-        SizedBox(
-          height: 100,
-          child: PageView.builder(
-            controller: _statsPageController,
-            onPageChanged: (page) {
-              setState(() => _currentStatsPage = page);
-            },
-            itemCount: 4,
-            itemBuilder: (context, index) {
-              final cards = [
-                _StatsCarouselCard(
-                  icon: LucideIcons.trophy,
-                  iconBgColor: AppTheme.warning.withValues(alpha: 0.1),
-                  iconColor: AppTheme.warning,
-                  label: 'Proximos',
-                  value: totalUpcoming.toString(),
-                  subtitle: 'campeonatos',
-                ),
-                _StatsCarouselCard(
-                  icon: LucideIcons.users,
-                  iconBgColor: AppTheme.success.withValues(alpha: 0.1),
-                  iconColor: AppTheme.success,
-                  label: 'Inscricoes',
-                  value: totalEnrollments.toString(),
-                  subtitle: 'atletas inscritos',
-                ),
-                _StatsCarouselCard(
-                  icon: LucideIcons.calendar,
-                  iconBgColor: AppTheme.primary.withValues(alpha: 0.1),
-                  iconColor: AppTheme.primary,
-                  label: 'Proximo em',
-                  value: nextCompetition != null ? '$nextCompetition' : '-',
-                  subtitle: nextCompetition != null ? 'dias' : 'nenhum proximo',
-                ),
-                _StatsCarouselCard(
-                  icon: LucideIcons.checkCircle,
-                  iconBgColor: AppTheme.textSecondary.withValues(alpha: 0.1),
-                  iconColor: AppTheme.textSecondary,
-                  label: 'Finalizados',
-                  value: totalPast.toString(),
-                  subtitle: 'campeonatos',
-                ),
-              ];
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: cards[index],
-              );
-            },
-          ),
+    const config = {
+      'gold': {
+        'label': 'Campeao',
+        'bgColor': Color(0xFFFEF3C7),
+        'borderColor': Color(0xFFF59E0B),
+        'textColor': Color(0xFF92400E),
+      },
+      'silver': {
+        'label': 'Vice',
+        'bgColor': Color(0xFFF3F4F6),
+        'borderColor': Color(0xFF9CA3AF),
+        'textColor': Color(0xFF374151),
+      },
+      'bronze': {
+        'label': '3o Lugar',
+        'bgColor': Color(0xFFFED7AA),
+        'borderColor': Color(0xFFF97316),
+        'textColor': Color(0xFF7C2D12),
+      },
+    };
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.divider),
         ),
-        const SizedBox(height: 12),
-        // Dot indicators
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(
-            4,
-            (index) {
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                width: _currentStatsPage == index ? 20 : 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _currentStatsPage == index
-                      ? AppTheme.textPrimary
-                      : AppTheme.divider,
-                  borderRadius: BorderRadius.circular(4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'TROFEUS DA ACADEMIA ${trophyCompetitions.isNotEmpty ? "(${trophyCompetitions.length})" : ""}',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  ),
                 ),
-              );
-            },
-          ),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const TeamGalleryView(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(LucideIcons.image, size: 14),
+                  label: const Text('Galeria'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primary,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    textStyle: AppTheme.labelSmall.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            if (trophyCompetitions.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 130,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: trophyCompetitions.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  itemBuilder: (context, index) {
+                    final comp = trophyCompetitions[index];
+                    final c = config[comp.teamPosition] ?? config['gold']!;
+                    final bgColor = c['bgColor'] as Color;
+                    final borderColor = c['borderColor'] as Color;
+                    final textColor = c['textColor'] as Color;
+                    final label = c['label'] as String;
+
+                    return GestureDetector(
+                      onTap: () => _showCompetitionDetails(comp),
+                      child: Container(
+                        width: 160,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: bgColor,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: borderColor),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('🏆', style: TextStyle(fontSize: 28)),
+                            const SizedBox(height: 8),
+                            Text(
+                              comp.name,
+                              style: AppTheme.bodySmall.copyWith(
+                                color: textColor,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              DateFormat("MMM yyyy", 'pt_BR').format(comp.date),
+                              style: AppTheme.labelSmall.copyWith(
+                                color: textColor.withValues(alpha: 0.7),
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              label,
+                              style: AppTheme.labelSmall.copyWith(
+                                color: textColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 16),
+              Center(
+                child: Column(
+                  children: [
+                    Icon(LucideIcons.trophy, size: 32, color: AppTheme.textDisabled),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Registre o primeiro trofeu da academia!',
+                      style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -1286,80 +1343,6 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
 }
 
 /// Stats Carousel Card Widget (for horizontal scrolling stats)
-class _StatsCarouselCard extends StatelessWidget {
-  final IconData icon;
-  final Color? iconBgColor;
-  final Color? iconColor;
-  final String label;
-  final String value;
-  final String subtitle;
-
-  const _StatsCarouselCard({
-    required this.icon,
-    this.iconBgColor,
-    this.iconColor,
-    required this.label,
-    required this.value,
-    required this.subtitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: iconBgColor ?? AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              icon,
-              color: iconColor ?? AppTheme.textPrimary,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  label,
-                  style: AppTheme.labelSmall.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: AppTheme.headlineSmall.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  subtitle,
-                  style: AppTheme.labelSmall.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 /// Competition Card Widget
 class _CompetitionCard extends StatelessWidget {

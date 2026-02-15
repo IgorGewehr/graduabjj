@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
+import '../../widgets/competitions/team_gallery_view.dart';
 
 /// Competitions Screen - Competicoes (with Tabs)
 class CompetitionsScreen extends ConsumerStatefulWidget {
@@ -78,14 +79,14 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
                   // Academy indicator for multi-academy users
                   const _AcademyIndicator(),
 
-                  // Header
+                  // Trophy Showcase (before Conquistas)
+                  _TrophyShowcase(competitions: competitions),
+
+                  // Conquistas Card
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                     child: _ConquistasCard(studentId: student.id),
                   ),
-
-                  // Trophy Showcase
-                  _TrophyShowcase(competitions: competitions),
 
                   // Tab Bar
                   Container(
@@ -451,6 +452,7 @@ class _CompetitionsList extends ConsumerWidget {
               competition: competition,
               isEnrolled: isEnrolled,
               isUpcoming: isUpcoming,
+              studentId: student.id,
             ),
           ),
         );
@@ -464,11 +466,13 @@ class _CompetitionCard extends ConsumerWidget {
   final Competition competition;
   final bool isEnrolled;
   final bool isUpcoming;
+  final String studentId;
 
   const _CompetitionCard({
     required this.competition,
     required this.isEnrolled,
     required this.isUpcoming,
+    required this.studentId,
   });
 
   @override
@@ -479,6 +483,14 @@ class _CompetitionCard extends ConsumerWidget {
     // Get academy name for past competitions
     final academyInfo = ref.watch(currentAcademyInfoProvider);
     final academyName = academyInfo?.name;
+
+    // Get student results for this competition (history only)
+    final allResults = !isUpcoming
+        ? (ref.watch(studentAllResultsProvider(studentId)).valueOrNull ?? [])
+        : <CompetitionResult>[];
+    final competitionResults = allResults
+        .where((r) => r.competitionId == competition.id)
+        .toList();
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -678,6 +690,66 @@ class _CompetitionCard extends ConsumerWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ],
+
+          // Student results (history only)
+          if (!isUpcoming && competitionResults.isNotEmpty) ...[
+            const Divider(height: 24),
+            ...competitionResults.map((result) {
+              final positionConfig = {
+                'gold': (icon: LucideIcons.medal, label: 'Ouro', color: const Color(0xFFD4AF37)),
+                'silver': (icon: LucideIcons.medal, label: 'Prata', color: const Color(0xFF9CA3AF)),
+                'bronze': (icon: LucideIcons.medal, label: 'Bronze', color: const Color(0xFFCD7F32)),
+              };
+              final config = positionConfig[result.position];
+              final categoryParts = <String>[
+                if (result.ageCategory != null) result.ageCategory!,
+                if (result.weightCategory != null) result.weightCategory!,
+              ];
+              final categoryText = categoryParts.isNotEmpty ? categoryParts.join(' / ') : null;
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  children: [
+                    if (config != null) ...[
+                      Icon(config.icon, size: 16, color: config.color),
+                      const SizedBox(width: 6),
+                      Text(
+                        config.label,
+                        style: AppTheme.labelSmall.copyWith(
+                          color: config.color,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ] else ...[
+                      Icon(LucideIcons.user, size: 16, color: AppTheme.textSecondary),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Participante',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (categoryText != null) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          categoryText,
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }),
+          ],
         ],
       ),
     );
@@ -793,13 +865,34 @@ class _TrophyShowcase extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'TROFEUS DA ACADEMIA',
-            style: AppTheme.labelSmall.copyWith(
-              color: AppTheme.textSecondary,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'TROFEUS DA ACADEMIA',
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.textSecondary,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const TeamGalleryView(),
+                    ),
+                  );
+                },
+                icon: const Icon(LucideIcons.image, size: 14),
+                label: const Text('Galeria'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primary,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  textStyle: AppTheme.labelSmall.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           SizedBox(
