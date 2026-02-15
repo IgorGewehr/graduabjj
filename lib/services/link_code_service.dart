@@ -264,6 +264,8 @@ class LinkCodeService {
       'createdBy': createdBy,
       'createdAt': FieldValue.serverTimestamp(),
       'expiresAt': Timestamp.fromDate(expiresAt),
+      'usedAt': null,
+      'usedBy': null,
     });
 
     final doc = await docRef.get();
