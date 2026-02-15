@@ -355,6 +355,7 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
     final locationController = TextEditingController();
     final descriptionController = TextEditingController();
     DateTime? selectedDate;
+    bool isSaving = false;
 
     showModalBottomSheet(
       context: context,
@@ -427,8 +428,8 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                     onTap: () async {
                       final date = await showDatePicker(
                         context: context,
-                        initialDate: DateTime.now().add(const Duration(days: 30)),
-                        firstDate: DateTime.now(),
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime(2020),
                         lastDate: DateTime.now().add(const Duration(days: 365)),
                       );
                       if (date != null) {
@@ -460,6 +461,30 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                       ),
                     ),
                   ),
+                  if (selectedDate != null && selectedDate!.isBefore(DateTime.now()))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.warning.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppTheme.warning.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(LucideIcons.checkCircle, color: AppTheme.warning, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Sera criado como concluido. Alunos poderao adicionar seus resultados e fotos.',
+                                style: AppTheme.labelSmall.copyWith(color: AppTheme.warning),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 16),
                   _ModernTextField(
                     controller: locationController,
@@ -479,19 +504,21 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: () async {
+                      onPressed: isSaving ? null : () async {
                         if (nameController.text.isEmpty || selectedDate == null) {
                           sheetContext.showWarning('Preencha nome e data');
                           return;
                         }
 
-                        Navigator.pop(sheetContext);
+                        setSheetState(() => isSaving = true);
 
                         try {
                           if (_academyId == null) {
+                            setSheetState(() => isSaving = false);
                             sheetContext.showError('Academia nao encontrada');
                             return;
                           }
+                          final isPast = selectedDate!.isBefore(DateTime.now());
                           final service = CompetitionService(_academyId!);
                           await service.create(
                             name: nameController.text,
@@ -502,13 +529,16 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                             description: descriptionController.text.isEmpty
                                 ? null
                                 : descriptionController.text,
+                            status: isPast ? CompetitionStatus.completed : CompetitionStatus.upcoming,
                           );
 
                           if (mounted) {
-                            this.context.showSuccess('Campeonato criado!');
+                            Navigator.pop(sheetContext);
+                            this.context.showSuccess(isPast ? 'Campeonato concluido criado!' : 'Campeonato criado!');
                             _loadCompetitions();
                           }
                         } catch (e) {
+                          setSheetState(() => isSaving = false);
                           if (mounted) {
                             this.context.showError('Erro: $e');
                           }
@@ -522,14 +552,23 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(LucideIcons.plus, size: 20),
-                          const SizedBox(width: 8),
-                          const Text('Criar Campeonato'),
-                        ],
-                      ),
+                      child: isSaving
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(selectedDate != null && selectedDate!.isBefore(DateTime.now()) ? LucideIcons.checkCircle : LucideIcons.plus, size: 20),
+                                const SizedBox(width: 8),
+                                Text(selectedDate != null && selectedDate!.isBefore(DateTime.now()) ? 'Criar como Concluido' : 'Criar Campeonato'),
+                              ],
+                            ),
                     ),
                   ),
                 ],
@@ -542,6 +581,7 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
   }
 
   void _showEditCompetitionSheet(Competition competition) {
+    bool isSaving = false;
     final nameController = TextEditingController(text: competition.name);
     final locationController = TextEditingController(text: competition.location ?? '');
     final descriptionController = TextEditingController(text: competition.description ?? '');
@@ -664,16 +704,17 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: () async {
+                      onPressed: isSaving ? null : () async {
                         if (nameController.text.isEmpty) {
                           sheetContext.showWarning('Nome e obrigatorio');
                           return;
                         }
 
-                        Navigator.pop(sheetContext);
+                        setSheetState(() => isSaving = true);
 
                         try {
                           if (_academyId == null) {
+                            setSheetState(() => isSaving = false);
                             sheetContext.showError('Academia nao encontrada');
                             return;
                           }
@@ -690,10 +731,12 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           });
 
                           if (mounted) {
+                            Navigator.pop(sheetContext);
                             this.context.showSuccess('Campeonato atualizado!');
                             _loadCompetitions();
                           }
                         } catch (e) {
+                          setSheetState(() => isSaving = false);
                           if (mounted) {
                             this.context.showError('Erro: $e');
                           }
@@ -707,14 +750,23 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(LucideIcons.save, size: 20),
-                          const SizedBox(width: 8),
-                          const Text('Salvar'),
-                        ],
-                      ),
+                      child: isSaving
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(LucideIcons.save, size: 20),
+                                const SizedBox(width: 8),
+                                const Text('Salvar'),
+                              ],
+                            ),
                     ),
                   ),
                 ],
@@ -1279,8 +1331,6 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           return;
                         }
 
-                        Navigator.pop(sheetContext);
-
                         try {
                           if (_academyId == null) {
                             sheetContext.showError('Academia nao encontrada');
@@ -1301,6 +1351,7 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           );
 
                           if (mounted) {
+                            Navigator.pop(sheetContext);
                             this.context.showSuccess('Inscricao realizada!');
                             _loadCompetitions();
                           }
@@ -1401,8 +1452,6 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                 Expanded(
                   child: ElevatedButton(
                     onPressed: () async {
-                      Navigator.pop(context);
-
                       try {
                         if (_academyId == null) {
                           this.context.showError('Academia nao encontrada');
@@ -1412,6 +1461,7 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                         await service.delete(competition.id);
 
                         if (mounted) {
+                          Navigator.pop(context);
                           this.context.showSuccess('Campeonato excluido!');
                           _loadCompetitions();
                         }

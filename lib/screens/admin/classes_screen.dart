@@ -14,6 +14,34 @@ String _getDayLabel(int dayOfWeek) {
   return days[dayOfWeek % 7];
 }
 
+String _formatTimeOfDay(TimeOfDay t) {
+  return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+}
+
+TimeOfDay _parseTimeString(String time) {
+  final parts = time.split(':');
+  return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+}
+
+/// Mutable schedule entry for form state
+class _ScheduleEntry {
+  int dayOfWeek;
+  String startTime;
+  String endTime;
+
+  _ScheduleEntry({
+    required this.dayOfWeek,
+    required this.startTime,
+    required this.endTime,
+  });
+
+  Map<String, dynamic> toMap() => {
+        'dayOfWeek': dayOfWeek,
+        'startTime': startTime,
+        'endTime': endTime,
+      };
+}
+
 /// Admin Classes Screen - Fintech style matching webapp
 class AdminClassesScreen extends ConsumerStatefulWidget {
   const AdminClassesScreen({super.key});
@@ -427,10 +455,113 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
     );
   }
 
+  Widget _buildScheduleEntryRow({
+    required _ScheduleEntry schedule,
+    required bool canRemove,
+    required VoidCallback onChanged,
+    required VoidCallback onRemove,
+    required BuildContext dialogContext,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.divider),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: DropdownButton<int>(
+                value: schedule.dayOfWeek,
+                isExpanded: true,
+                underline: const SizedBox(),
+                items: List.generate(7, (i) {
+                  return DropdownMenuItem(
+                    value: i,
+                    child: Text(_getDayLabel(i), style: AppTheme.bodySmall),
+                  );
+                }),
+                onChanged: (value) {
+                  schedule.dayOfWeek = value!;
+                  onChanged();
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 1,
+              child: GestureDetector(
+                onTap: () async {
+                  final time = await showTimePicker(
+                    context: dialogContext,
+                    initialTime: _parseTimeString(schedule.startTime),
+                  );
+                  if (time != null) {
+                    schedule.startTime = _formatTimeOfDay(time);
+                    onChanged();
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  alignment: Alignment.center,
+                  child: Text(
+                    schedule.startTime,
+                    style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ),
+            Text(' - ', style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary)),
+            Expanded(
+              flex: 1,
+              child: GestureDetector(
+                onTap: () async {
+                  final time = await showTimePicker(
+                    context: dialogContext,
+                    initialTime: _parseTimeString(schedule.endTime),
+                  );
+                  if (time != null) {
+                    schedule.endTime = _formatTimeOfDay(time);
+                    onChanged();
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  alignment: Alignment.center,
+                  child: Text(
+                    schedule.endTime,
+                    style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ),
+            if (canRemove)
+              IconButton(
+                icon: Icon(LucideIcons.x, size: 18, color: AppTheme.error),
+                onPressed: onRemove,
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(4),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showCreateClassSheet() {
     final nameController = TextEditingController();
     final descriptionController = TextEditingController();
+    final instructorController = TextEditingController();
+    final maxStudentsController = TextEditingController();
     StudentCategory? selectedCategory;
+    bool isSaving = false;
+    List<_ScheduleEntry> scheduleEntries = [
+      _ScheduleEntry(dayOfWeek: 1, startTime: '19:00', endTime: '20:30'),
+    ];
 
     showModalBottomSheet(
       context: context,
@@ -439,6 +570,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) {
           return Container(
+            height: MediaQuery.of(context).size.height * 0.9,
             padding: EdgeInsets.only(
               left: 20,
               right: 20,
@@ -450,8 +582,6 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Center(
                   child: Container(
@@ -483,65 +613,120 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                _ModernTextField(
-                  controller: nameController,
-                  label: 'Nome da Turma',
-                  hint: 'Ex: Turma Iniciante',
-                  icon: LucideIcons.users,
-                ),
-                const SizedBox(height: 16),
-                _ModernTextField(
-                  controller: descriptionController,
-                  label: 'Descricao (opcional)',
-                  hint: 'Breve descricao da turma',
-                  icon: LucideIcons.fileText,
-                  maxLines: 2,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Categoria',
-                  style: AppTheme.labelSmall.copyWith(
-                    color: AppTheme.textSecondary,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.divider),
-                  ),
-                  child: DropdownButtonFormField<StudentCategory>(
-                    value: selectedCategory,
-                    items: StudentCategory.values.map((cat) {
-                      return DropdownMenuItem(
-                        value: cat,
-                        child: Text(cat.label),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setSheetState(() => selectedCategory = value);
-                    },
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _ModernTextField(
+                          controller: nameController,
+                          label: 'Nome da Turma',
+                          hint: 'Ex: Turma Iniciante',
+                          icon: LucideIcons.users,
+                        ),
+                        const SizedBox(height: 16),
+                        _ModernTextField(
+                          controller: descriptionController,
+                          label: 'Descricao (opcional)',
+                          hint: 'Breve descricao da turma',
+                          icon: LucideIcons.fileText,
+                          maxLines: 2,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Categoria',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: AppTheme.surfaceVariant,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppTheme.divider),
+                          ),
+                          child: DropdownButtonFormField<StudentCategory>(
+                            value: selectedCategory,
+                            items: StudentCategory.values.map((cat) {
+                              return DropdownMenuItem(
+                                value: cat,
+                                child: Text(cat.label),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setSheetState(() => selectedCategory = value);
+                            },
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            ),
+                            dropdownColor: AppTheme.surface,
+                            hint: const Text('Selecione a categoria'),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _ModernTextField(
+                          controller: instructorController,
+                          label: 'Instrutor (opcional)',
+                          hint: 'Nome do instrutor',
+                          icon: LucideIcons.userCircle,
+                        ),
+                        const SizedBox(height: 16),
+                        _ModernTextField(
+                          controller: maxStudentsController,
+                          label: 'Maximo de Alunos (opcional)',
+                          hint: 'Ex: 20',
+                          icon: LucideIcons.users,
+                          keyboardType: TextInputType.number,
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          'Horarios',
+                          style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 12),
+                        ...scheduleEntries.asMap().entries.map((entry) {
+                          final idx = entry.key;
+                          final schedule = entry.value;
+                          return _buildScheduleEntryRow(
+                            schedule: schedule,
+                            canRemove: scheduleEntries.length > 1,
+                            onChanged: () => setSheetState(() {}),
+                            onRemove: () {
+                              setSheetState(() => scheduleEntries.removeAt(idx));
+                            },
+                            dialogContext: context,
+                          );
+                        }),
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          onPressed: () {
+                            setSheetState(() {
+                              scheduleEntries.add(
+                                _ScheduleEntry(dayOfWeek: 1, startTime: '19:00', endTime: '20:30'),
+                              );
+                            });
+                          },
+                          icon: Icon(LucideIcons.plus, size: 18),
+                          label: const Text('Adicionar Horario'),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                     ),
-                    dropdownColor: AppTheme.surface,
-                    hint: const Text('Selecione a categoria'),
                   ),
                 ),
-                const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () async {
+                    onPressed: isSaving ? null : () async {
                       if (nameController.text.isEmpty) {
                         sheetContext.showWarning('Nome e obrigatorio');
                         return;
                       }
 
-                      Navigator.pop(sheetContext);
+                      setSheetState(() => isSaving = true);
 
                       try {
                         final currentUser = ref.read(currentUserProvider).valueOrNull;
@@ -554,15 +739,30 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                               ? null
                               : descriptionController.text,
                           category: selectedCategory,
+                          instructorName: instructorController.text.isEmpty
+                              ? null
+                              : instructorController.text,
+                          maxStudents: maxStudentsController.text.isEmpty
+                              ? null
+                              : int.tryParse(maxStudentsController.text),
+                          schedule: scheduleEntries
+                              .map((e) => ClassSchedule(
+                                    dayOfWeek: e.dayOfWeek,
+                                    startTime: e.startTime,
+                                    endTime: e.endTime,
+                                  ))
+                              .toList(),
                         );
 
                         if (mounted) {
-                          context.showSuccess('Turma criada com sucesso!');
+                          Navigator.pop(sheetContext);
+                          this.context.showSuccess('Turma criada com sucesso!');
                           _loadClasses();
                         }
                       } catch (e) {
+                        setSheetState(() => isSaving = false);
                         if (mounted) {
-                          context.showError('Erro: $e');
+                          this.context.showError('Erro: $e');
                         }
                       }
                     },
@@ -574,14 +774,23 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(LucideIcons.plus, size: 20),
-                        const SizedBox(width: 8),
-                        const Text('Criar Turma'),
-                      ],
-                    ),
+                    child: isSaving
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(LucideIcons.plus, size: 20),
+                              const SizedBox(width: 8),
+                              const Text('Criar Turma'),
+                            ],
+                          ),
                   ),
                 ),
               ],
@@ -595,7 +804,19 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
   void _showEditClassSheet(BJJClass cls) {
     final nameController = TextEditingController(text: cls.name);
     final descriptionController = TextEditingController(text: cls.description ?? '');
+    final instructorController = TextEditingController(text: cls.instructorName ?? '');
+    final maxStudentsController = TextEditingController(text: cls.maxStudents?.toString() ?? '');
     StudentCategory? selectedCategory = cls.category;
+    bool isSaving = false;
+    List<_ScheduleEntry> scheduleEntries = cls.schedule.isNotEmpty
+        ? cls.schedule
+            .map((s) => _ScheduleEntry(
+                  dayOfWeek: s.dayOfWeek,
+                  startTime: s.startTime,
+                  endTime: s.endTime,
+                ))
+            .toList()
+        : [_ScheduleEntry(dayOfWeek: 1, startTime: '19:00', endTime: '20:30')];
 
     showModalBottomSheet(
       context: context,
@@ -604,6 +825,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) {
           return Container(
+            height: MediaQuery.of(context).size.height * 0.9,
             padding: EdgeInsets.only(
               left: 20,
               right: 20,
@@ -615,8 +837,6 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Center(
                   child: Container(
@@ -648,64 +868,119 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                _ModernTextField(
-                  controller: nameController,
-                  label: 'Nome da Turma',
-                  hint: 'Ex: Turma Iniciante',
-                  icon: LucideIcons.users,
-                ),
-                const SizedBox(height: 16),
-                _ModernTextField(
-                  controller: descriptionController,
-                  label: 'Descricao (opcional)',
-                  hint: 'Breve descricao da turma',
-                  icon: LucideIcons.fileText,
-                  maxLines: 2,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Categoria',
-                  style: AppTheme.labelSmall.copyWith(
-                    color: AppTheme.textSecondary,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.divider),
-                  ),
-                  child: DropdownButtonFormField<StudentCategory>(
-                    value: selectedCategory,
-                    items: StudentCategory.values.map((cat) {
-                      return DropdownMenuItem(
-                        value: cat,
-                        child: Text(cat.label),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setSheetState(() => selectedCategory = value);
-                    },
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _ModernTextField(
+                          controller: nameController,
+                          label: 'Nome da Turma',
+                          hint: 'Ex: Turma Iniciante',
+                          icon: LucideIcons.users,
+                        ),
+                        const SizedBox(height: 16),
+                        _ModernTextField(
+                          controller: descriptionController,
+                          label: 'Descricao (opcional)',
+                          hint: 'Breve descricao da turma',
+                          icon: LucideIcons.fileText,
+                          maxLines: 2,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Categoria',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: AppTheme.surfaceVariant,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppTheme.divider),
+                          ),
+                          child: DropdownButtonFormField<StudentCategory>(
+                            value: selectedCategory,
+                            items: StudentCategory.values.map((cat) {
+                              return DropdownMenuItem(
+                                value: cat,
+                                child: Text(cat.label),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setSheetState(() => selectedCategory = value);
+                            },
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            ),
+                            dropdownColor: AppTheme.surface,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _ModernTextField(
+                          controller: instructorController,
+                          label: 'Instrutor (opcional)',
+                          hint: 'Nome do instrutor',
+                          icon: LucideIcons.userCircle,
+                        ),
+                        const SizedBox(height: 16),
+                        _ModernTextField(
+                          controller: maxStudentsController,
+                          label: 'Maximo de Alunos (opcional)',
+                          hint: 'Ex: 20',
+                          icon: LucideIcons.users,
+                          keyboardType: TextInputType.number,
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          'Horarios',
+                          style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 12),
+                        ...scheduleEntries.asMap().entries.map((entry) {
+                          final idx = entry.key;
+                          final schedule = entry.value;
+                          return _buildScheduleEntryRow(
+                            schedule: schedule,
+                            canRemove: scheduleEntries.length > 1,
+                            onChanged: () => setSheetState(() {}),
+                            onRemove: () {
+                              setSheetState(() => scheduleEntries.removeAt(idx));
+                            },
+                            dialogContext: context,
+                          );
+                        }),
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          onPressed: () {
+                            setSheetState(() {
+                              scheduleEntries.add(
+                                _ScheduleEntry(dayOfWeek: 1, startTime: '19:00', endTime: '20:30'),
+                              );
+                            });
+                          },
+                          icon: Icon(LucideIcons.plus, size: 18),
+                          label: const Text('Adicionar Horario'),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                     ),
-                    dropdownColor: AppTheme.surface,
                   ),
                 ),
-                const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () async {
+                    onPressed: isSaving ? null : () async {
                       if (nameController.text.isEmpty) {
                         sheetContext.showWarning('Nome e obrigatorio');
                         return;
                       }
 
-                      Navigator.pop(sheetContext);
+                      setSheetState(() => isSaving = true);
 
                       try {
                         final currentUser = ref.read(currentUserProvider).valueOrNull;
@@ -717,15 +992,24 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                           if (descriptionController.text.isNotEmpty)
                             'description': descriptionController.text,
                           if (selectedCategory != null) 'category': selectedCategory!.value,
+                          'instructorName': instructorController.text.isEmpty
+                              ? null
+                              : instructorController.text,
+                          'maxStudents': maxStudentsController.text.isEmpty
+                              ? null
+                              : int.tryParse(maxStudentsController.text),
+                          'schedule': scheduleEntries.map((s) => s.toMap()).toList(),
                         });
 
                         if (mounted) {
-                          context.showSuccess('Turma atualizada!');
+                          Navigator.pop(sheetContext);
+                          this.context.showSuccess('Turma atualizada!');
                           _loadClasses();
                         }
                       } catch (e) {
+                        setSheetState(() => isSaving = false);
                         if (mounted) {
-                          context.showError('Erro: $e');
+                          this.context.showError('Erro: $e');
                         }
                       }
                     },
@@ -737,14 +1021,23 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(LucideIcons.save, size: 20),
-                        const SizedBox(width: 8),
-                        const Text('Salvar'),
-                      ],
-                    ),
+                    child: isSaving
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(LucideIcons.save, size: 20),
+                              const SizedBox(width: 8),
+                              const Text('Salvar'),
+                            ],
+                          ),
                   ),
                 ),
               ],
@@ -830,8 +1123,18 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                   _DetailRow(
                     icon: LucideIcons.users,
                     label: 'Alunos',
-                    value: '${cls.studentIds.length}',
+                    value: cls.maxStudents != null
+                        ? '${cls.studentIds.length}/${cls.maxStudents}'
+                        : '${cls.studentIds.length}',
                   ),
+                  if (cls.maxStudents != null) ...[
+                    const SizedBox(height: 12),
+                    _DetailRow(
+                      icon: LucideIcons.userPlus,
+                      label: 'Maximo de Alunos',
+                      value: '${cls.maxStudents}',
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   _DetailRow(
                     icon: LucideIcons.userCircle,
@@ -999,8 +1302,6 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                 Expanded(
                   child: ElevatedButton(
                     onPressed: () async {
-                      Navigator.pop(context);
-
                       try {
                         final currentUser = ref.read(currentUserProvider).valueOrNull;
                         if (currentUser?.academyId == null) return;
@@ -1009,6 +1310,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                         await service.delete(cls.id);
 
                         if (mounted) {
+                          Navigator.pop(context);
                           this.context.showSuccess('Turma excluida!');
                           _loadClasses();
                         }
@@ -1254,17 +1556,25 @@ class _ClassCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 _InfoBadge(
                   icon: LucideIcons.userCheck,
-                  label: '${bjjClass.studentIds.length} alunos',
+                  label: bjjClass.maxStudents != null
+                      ? '${bjjClass.studentIds.length}/${bjjClass.maxStudents} alunos'
+                      : '${bjjClass.studentIds.length} alunos',
                 ),
-                const SizedBox(width: 12),
                 _InfoBadge(
                   icon: LucideIcons.clock,
                   label: '${bjjClass.schedule.length} horarios',
                 ),
+                if (bjjClass.instructorName != null && bjjClass.instructorName!.isNotEmpty)
+                  _InfoBadge(
+                    icon: LucideIcons.userCircle,
+                    label: bjjClass.instructorName!,
+                  ),
               ],
             ),
           ],
@@ -1344,6 +1654,7 @@ class _ModernTextField extends StatelessWidget {
   final String hint;
   final IconData icon;
   final int maxLines;
+  final TextInputType? keyboardType;
 
   const _ModernTextField({
     required this.controller,
@@ -1351,6 +1662,7 @@ class _ModernTextField extends StatelessWidget {
     required this.hint,
     required this.icon,
     this.maxLines = 1,
+    this.keyboardType,
   });
 
   @override
@@ -1375,6 +1687,7 @@ class _ModernTextField extends StatelessWidget {
           child: TextField(
             controller: controller,
             maxLines: maxLines,
+            keyboardType: keyboardType,
             decoration: InputDecoration(
               hintText: hint,
               hintStyle: AppTheme.bodyMedium.copyWith(

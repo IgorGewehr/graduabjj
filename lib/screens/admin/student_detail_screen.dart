@@ -1914,8 +1914,6 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
               ),
               FilledButton(
                 onPressed: () async {
-                  Navigator.pop(context);
-
                   try {
                     final service = BeltProgressionService(FirebaseService.academyId);
 
@@ -1938,12 +1936,13 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                     }
 
                     if (mounted) {
-                      context.showSuccess('Graduação realizada com sucesso!');
+                      Navigator.pop(context);
+                      this.context.showSuccess('Graduação realizada com sucesso!');
                       _loadData();
                     }
                   } catch (e) {
                     if (mounted) {
-                      context.showError('Erro: $e');
+                      this.context.showError('Erro: $e');
                     }
                   }
                 },
@@ -2005,19 +2004,18 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
-              Navigator.pop(context);
-
               try {
                 final service = StudentService(FirebaseService.academyId);
                 await service.delete(_student!.id);
 
                 if (mounted) {
-                  context.showSuccess('Aluno excluído!');
                   Navigator.pop(context);
+                  this.context.showSuccess('Aluno excluído!');
+                  Navigator.pop(this.context);
                 }
               } catch (e) {
                 if (mounted) {
-                  context.showError('Erro: $e');
+                  this.context.showError('Erro: $e');
                 }
               }
             },

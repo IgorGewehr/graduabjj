@@ -594,11 +594,13 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: () async {
-                  Navigator.of(dialogContext).pop();
                   final planService = PlanService(FirebaseService.academyId);
                   await planService.removeCustomValue(plan.id, student.id);
-                  if (mounted) parentContext.showSuccess('Valor restaurado ao padrão do plano');
-                  _refreshPlans();
+                  if (mounted) {
+                    Navigator.of(dialogContext).pop();
+                    parentContext.showSuccess('Valor restaurado ao padrão do plano');
+                    _refreshPlans();
+                  }
                 },
                 icon: const Icon(LucideIcons.rotateCcw, size: 16),
                 label: const Text('Restaurar valor do plano'),
@@ -623,11 +625,13 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: () async {
-                  Navigator.of(dialogContext).pop();
                   final planService = PlanService(FirebaseService.academyId);
                   await planService.removeCustomDueDay(plan.id, student.id);
-                  if (mounted) parentContext.showSuccess('Vencimento restaurado ao padrão do plano');
-                  _refreshPlans();
+                  if (mounted) {
+                    Navigator.of(dialogContext).pop();
+                    parentContext.showSuccess('Vencimento restaurado ao padrão do plano');
+                    _refreshPlans();
+                  }
                 },
                 icon: const Icon(LucideIcons.rotateCcw, size: 16),
                 label: const Text('Restaurar vencimento do plano'),
@@ -646,7 +650,6 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
               if (value == null || value <= 0) return;
               final dueDay = int.tryParse(dueDayController.text);
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;
-              Navigator.of(dialogContext).pop();
               final planService = PlanService(FirebaseService.academyId);
               // Save value
               if (value == plan.monthlyValue) {
@@ -660,8 +663,11 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
               } else {
                 await planService.setCustomDueDay(plan.id, student.id, dueDay);
               }
-              if (mounted) parentContext.showSuccess('Valor e vencimento atualizados');
-              _refreshPlans();
+              if (mounted) {
+                Navigator.of(dialogContext).pop();
+                parentContext.showSuccess('Valor e vencimento atualizados');
+                _refreshPlans();
+              }
             },
             child: const Text('Salvar'),
           ),

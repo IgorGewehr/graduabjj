@@ -284,18 +284,20 @@ class CompetitionService {
     required DateTime date,
     String? location,
     String? description,
+    CompetitionStatus? status,
     DateTime? registrationDeadline,
     TransportStatus? transportStatus,
     String? transportNotes,
     int? transportCapacity,
     String? createdBy,
   }) async {
+    final effectiveStatus = status ?? (date.isBefore(DateTime.now()) ? CompetitionStatus.completed : CompetitionStatus.upcoming);
     final docRef = await _competitionsRef.add({
       'name': name,
       'date': Timestamp.fromDate(date),
       'location': location,
       'description': description,
-      'status': CompetitionStatus.upcoming.value,
+      'status': effectiveStatus.value,
       'registrationDeadline': registrationDeadline != null
           ? Timestamp.fromDate(registrationDeadline)
           : null,

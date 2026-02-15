@@ -434,6 +434,11 @@ class _CompetitionDetailScreenState
                   icon: const Icon(LucideIcons.edit, size: 18),
                   color: AppTheme.textSecondary,
                 ),
+                IconButton(
+                  onPressed: () => _deleteResult(myResult),
+                  icon: const Icon(LucideIcons.trash2, size: 18),
+                  color: Colors.red.shade400,
+                ),
               ],
             ),
           ] else ...[
@@ -909,6 +914,56 @@ class _CompetitionDetailScreenState
         },
       ),
     );
+  }
+
+  Future<void> _deleteResult(CompetitionResult result) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir Resultado'),
+        content: const Text('Deseja excluir seu resultado desta competição?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final academyId = ref.read(selectedAcademyIdProvider);
+    if (academyId == null) return;
+
+    final competitionService = CompetitionService(academyId);
+
+    try {
+      await competitionService.deleteResult(result.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Resultado excluído!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao excluir resultado: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _saveResult({
