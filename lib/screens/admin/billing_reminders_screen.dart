@@ -1106,6 +1106,10 @@ class _AdminBillingRemindersScreenState
     String? scheduledTime,
   }) async {
     if (_notificationService == null) return;
+    if (!(_notificationSettings?.whatsappEnabled ?? false) && !(_notificationSettings?.emailEnabled ?? false)) {
+      FeedbackUtils.showError(context, 'Nenhum canal de notificacao esta habilitado. Habilite WhatsApp ou Email nas configuracoes.');
+      return;
+    }
 
     setState(() => _isSending = true);
 
@@ -1135,9 +1139,9 @@ class _AdminBillingRemindersScreenState
           subjectTemplate, studentName, amount, dueDate, daysOverdue,
         );
 
-        // Send WhatsApp
+        // Send WhatsApp (only if enabled in settings)
         final phone = contact.effectivePhone;
-        if (phone != null && phone.isNotEmpty) {
+        if ((_notificationSettings?.whatsappEnabled ?? false) && phone != null && phone.isNotEmpty) {
           waTotal++;
           final result = await _notificationService!.sendWhatsApp(
             phone: phone,
@@ -1158,9 +1162,9 @@ class _AdminBillingRemindersScreenState
           }
         }
 
-        // Send Email
+        // Send Email (only if enabled in settings)
         final email = contact.effectiveEmail;
-        if (email != null && email.isNotEmpty) {
+        if ((_notificationSettings?.emailEnabled ?? false) && email != null && email.isNotEmpty) {
           emTotal++;
           final result = await _notificationService!.sendEmail(
             email: email,
@@ -1183,12 +1187,14 @@ class _AdminBillingRemindersScreenState
         }
 
         // Auto-log contact
-        if ((phone != null && phone.isNotEmpty) || (email != null && email.isNotEmpty)) {
+        final sentWhatsApp = (_notificationSettings?.whatsappEnabled ?? false) && phone != null && phone.isNotEmpty;
+        final sentEmail = (_notificationSettings?.emailEnabled ?? false) && email != null && email.isNotEmpty;
+        if (sentWhatsApp || sentEmail) {
           await _billingService.logContactAttempt(
             financialId: financialId,
             studentId: studentId,
             studentName: studentName,
-            type: (phone != null && phone.isNotEmpty) ? ContactType.whatsapp : ContactType.email,
+            type: sentWhatsApp ? ContactType.whatsapp : ContactType.email,
             notes: 'Cobranca em massa (personalizada)',
             stage: stage.value,
             daysOverdue: daysOverdue,
