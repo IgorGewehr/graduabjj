@@ -3,6 +3,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -174,6 +176,26 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
     return null;
   }
 
+  // ============================================
+  // Check if Academy Name Already Exists
+  // Must be called AFTER authentication (Firestore rules require it)
+  // ============================================
+  Future<bool> _checkAcademyNameExists(String name) async {
+    final normalizedName = name.trim().toLowerCase();
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('academies')
+        .get();
+
+    for (final doc in snapshot.docs) {
+      final academyName = doc.data()['name'] as String?;
+      if (academyName != null && academyName.toLowerCase().trim() == normalizedName) {
+        return true;
+      }
+    }
+
+    return false;
+  }
 
   // ============================================
   // Slug Generation (automatic from name)
@@ -244,11 +266,31 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
     final container = ProviderScope.containerOf(context);
 
-    // Show full-screen overlay (survives GoRouter rebuilds since it's in app.dart builder)
-    container.read(creatingAccountStudentNameProvider.notifier).state = '';
-    container.read(isCreatingAccountProvider.notifier).state = true;
-
     try {
+      // Step 1: Create Firebase Auth user first (must authenticate BEFORE name check - Firestore rules require it)
+      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+
+      // Step 2: Check if academy name already exists (now authenticated, list rule allows it)
+      final nameExists = await _checkAcademyNameExists(_academyNameController.text.trim());
+      if (nameExists) {
+        // Clean up: delete the auth user we just created
+        await credential.user?.delete();
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'Já existe uma academia com este nome. Escolha outro nome.';
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+
+      // Step 3: Show overlay and proceed with academy creation
+      container.read(creatingAccountStudentNameProvider.notifier).state = '';
+      container.read(isCreatingAccountProvider.notifier).state = true;
+
       final slug = _generateSlug(_academyNameController.text.trim());
       final documentDigits = _documentController.text.replaceAll(RegExp(r'\D'), '');
 
@@ -261,6 +303,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         academySlug: slug,
         documentType: _documentType == _DocumentType.cpf ? 'cpf' : 'cnpj',
         documentNumber: documentDigits,
+        existingCredential: credential,
       );
 
       // All Firestore documents are created. Force Riverpod to reload user data.
@@ -285,7 +328,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
       // Dismiss overlay - the router will naturally redirect to /admin
       container.read(isCreatingAccountProvider.notifier).state = false;
     } catch (e) {
-      // Dismiss overlay on error
+      // Dismiss overlay on error (if it was shown)
       container.read(isCreatingAccountProvider.notifier).state = false;
 
       if (mounted) {

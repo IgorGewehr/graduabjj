@@ -449,6 +449,8 @@ class AuthService {
   }
 
   /// Create academy account (registers professor and creates academy)
+  /// If [existingCredential] is provided, skips auth user creation (used when
+  /// the auth user was already created for name uniqueness check).
   Future<UserCredential> createAcademyAccount({
     required String email,
     required String password,
@@ -457,9 +459,10 @@ class AuthService {
     required String academySlug,
     String? documentType,
     String? documentNumber,
+    UserCredential? existingCredential,
   }) async {
-    // Step 1: Create Firebase Auth user
-    final credential = await _auth.createUserWithEmailAndPassword(
+    // Step 1: Create Firebase Auth user (or reuse existing)
+    final credential = existingCredential ?? await _auth.createUserWithEmailAndPassword(
       email: email,
       password: password,
     );
