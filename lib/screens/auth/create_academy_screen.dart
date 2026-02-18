@@ -3,8 +3,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -177,51 +175,6 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   }
 
   // ============================================
-  // Check if Academy Name Already Exists
-  // Must be called AFTER authentication (Firestore rules require it)
-  // ============================================
-  Future<bool> _checkAcademyNameExists(String name) async {
-    final normalizedName = name.trim().toLowerCase();
-
-    final snapshot = await FirebaseFirestore.instance
-        .collection('academies')
-        .get();
-
-    for (final doc in snapshot.docs) {
-      final academyName = doc.data()['name'] as String?;
-      if (academyName != null && academyName.toLowerCase().trim() == normalizedName) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  // ============================================
-  // Slug Generation (automatic from name)
-  // ============================================
-  String _generateSlug(String name) {
-    // Remove accents
-    const accents = 'ÀÁÂÃÄÅàáâãäåÒÓÔÕÖØòóôõöøÈÉÊËèéêëÇçÌÍÎÏìíîïÙÚÛÜùúûüÿÑñ';
-    const noAccents = 'AAAAAAaaaaaaOOOOOOooooooEEEEeeeeCcIIIIiiiiUUUUuuuuyNn';
-
-    var slug = name.toLowerCase();
-    for (var i = 0; i < accents.length; i++) {
-      slug = slug.replaceAll(accents[i], noAccents[i]);
-    }
-
-    slug = slug
-        .replaceAll(RegExp(r'[^a-z0-9\s-]'), '')
-        .replaceAll(RegExp(r'\s+'), '-')
-        .replaceAll(RegExp(r'-+'), '-')
-        .replaceAll(RegExp(r'^-|-$'), '');
-    
-    // Add timestamp for uniqueness
-    final timestamp = DateTime.now().millisecondsSinceEpoch.toString().substring(6);
-    return '${slug.substring(0, slug.length.clamp(0, 30))}-$timestamp';
-  }
-
-  // ============================================
   // Navigation
   // ============================================
   void _goToStep(int step) {
@@ -267,31 +220,10 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
     final container = ProviderScope.containerOf(context);
 
     try {
-      // Step 1: Create Firebase Auth user first (must authenticate BEFORE name check - Firestore rules require it)
-      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-      );
-
-      // Step 2: Check if academy name already exists (now authenticated, list rule allows it)
-      final nameExists = await _checkAcademyNameExists(_academyNameController.text.trim());
-      if (nameExists) {
-        // Clean up: delete the auth user we just created
-        await credential.user?.delete();
-        if (mounted) {
-          setState(() {
-            _errorMessage = 'Já existe uma academia com este nome. Escolha outro nome.';
-            _isLoading = false;
-          });
-        }
-        return;
-      }
-
-      // Step 3: Show overlay and proceed with academy creation
+      // Show overlay
       container.read(creatingAccountStudentNameProvider.notifier).state = '';
       container.read(isCreatingAccountProvider.notifier).state = true;
 
-      final slug = _generateSlug(_academyNameController.text.trim());
       final documentDigits = _documentController.text.replaceAll(RegExp(r'\D'), '');
 
       final authService = ref.read(authServiceProvider);
@@ -300,10 +232,8 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         password: _passwordController.text,
         displayName: _nameController.text.trim(),
         academyName: _academyNameController.text.trim(),
-        academySlug: slug,
         documentType: _documentType == _DocumentType.cpf ? 'cpf' : 'cnpj',
         documentNumber: documentDigits,
-        existingCredential: credential,
       );
 
       // All Firestore documents are created. Force Riverpod to reload user data.

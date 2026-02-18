@@ -449,20 +449,17 @@ class AuthService {
   }
 
   /// Create academy account (registers professor and creates academy)
-  /// If [existingCredential] is provided, skips auth user creation (used when
-  /// the auth user was already created for name uniqueness check).
+  /// Uses a Firestore auto-generated ID for the academy document.
   Future<UserCredential> createAcademyAccount({
     required String email,
     required String password,
     required String displayName,
     required String academyName,
-    required String academySlug,
     String? documentType,
     String? documentNumber,
-    UserCredential? existingCredential,
   }) async {
-    // Step 1: Create Firebase Auth user (or reuse existing)
-    final credential = existingCredential ?? await _auth.createUserWithEmailAndPassword(
+    // Step 1: Create Firebase Auth user
+    final credential = await _auth.createUserWithEmailAndPassword(
       email: email,
       password: password,
     );
@@ -478,10 +475,12 @@ class AuthService {
       accountType: AccountType.linked,
     );
 
-    // Step 4: Create academy document
+    // Step 4: Create academy document with auto-generated ID
+    final academyRef = _firestore.collection('academies').doc();
+    final academyId = academyRef.id;
+
     final academyData = <String, dynamic>{
       'name': academyName,
-      'slug': academySlug,
       'ownerId': credential.user!.uid,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -500,16 +499,16 @@ class AuthService {
       'autoGraduationEnabled': false,
       'studentCheckinEnabled': true,
     };
-    
+
     // Add document info if provided
     if (documentType != null) academyData['ownerDocumentType'] = documentType;
     if (documentNumber != null) academyData['ownerDocumentNumber'] = documentNumber;
-    
-    await _firestore.collection('academies').doc(academySlug).set(academyData);
+
+    await academyRef.set(academyData);
 
     // Step 5: Create academy user document (role: admin)
     await globalUserService.upsertAcademyUser(
-      academyId: academySlug,
+      academyId: academyId,
       userId: credential.user!.uid,
       data: {
         'email': email,
@@ -523,7 +522,7 @@ class AuthService {
     // Step 6: Link user to academy via globalUserService
     await globalUserService.linkUserToAcademy(
       userId: credential.user!.uid,
-      academyId: academySlug,
+      academyId: academyId,
       role: UserRole.admin,
     );
 
@@ -531,7 +530,7 @@ class AuthService {
     await pushNotificationService.onUserLogin();
 
     // Step 8: Subscribe to academy push notifications topic
-    await pushNotificationService.subscribeToTopic('academy_$academySlug');
+    await pushNotificationService.subscribeToTopic('academy_$academyId');
 
     return credential;
   }
