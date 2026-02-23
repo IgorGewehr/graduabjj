@@ -604,6 +604,14 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
   int _quantity = 1;
   String? _selectedSize;
   String? _selectedColor;
+  int _currentImageIndex = 0;
+  late final PageController _imagePageController = PageController();
+
+  @override
+  void dispose() {
+    _imagePageController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -647,8 +655,8 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Product Image
-                    if (product.mainImageUrl != null)
+                    // Product Image(s)
+                    if (product.imageUrls.isNotEmpty)
                       Container(
                         height: 250,
                         width: double.infinity,
@@ -658,16 +666,53 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                           borderRadius: BorderRadius.circular(16),
                         ),
                         clipBehavior: Clip.antiAlias,
-                        child: Image.network(
-                          product.mainImageUrl!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Center(
-                            child: Icon(
-                              LucideIcons.package,
-                              size: 64,
-                              color: AppTheme.textSecondary,
+                        child: Stack(
+                          children: [
+                            PageView.builder(
+                              controller: _imagePageController,
+                              itemCount: product.imageUrls.length,
+                              onPageChanged: (index) =>
+                                  setState(() => _currentImageIndex = index),
+                              itemBuilder: (_, index) => Image.network(
+                                product.imageUrls[index],
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const Center(
+                                  child: Icon(
+                                    LucideIcons.package,
+                                    size: 64,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
+                            if (product.imageUrls.length > 1)
+                              Positioned(
+                                bottom: 10,
+                                left: 0,
+                                right: 0,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: List.generate(
+                                    product.imageUrls.length,
+                                    (i) => AnimatedContainer(
+                                      duration:
+                                          const Duration(milliseconds: 200),
+                                      margin: const EdgeInsets.symmetric(
+                                          horizontal: 3),
+                                      width: i == _currentImageIndex ? 16 : 6,
+                                      height: 6,
+                                      decoration: BoxDecoration(
+                                        color: i == _currentImageIndex
+                                            ? Colors.white
+                                            : Colors.white54,
+                                        borderRadius:
+                                            BorderRadius.circular(3),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     // Product Info
