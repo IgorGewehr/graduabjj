@@ -1,10 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:image_cropper/image_cropper.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/photo_upload_service.dart';
 import '../../core/theme.dart';
+import 'image_crop_screen.dart';
 
 /// Widget for displaying and picking student profile photos
 class ProfilePhotoPicker extends StatefulWidget {
@@ -195,42 +195,23 @@ class _ProfilePhotoPickerState extends State<ProfilePhotoPicker> {
 
       if (pickedFile == null) return;
 
-      // Crop image
-      final CroppedFile? croppedFile = await ImageCropper().cropImage(
-        sourcePath: pickedFile.path,
-        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-        compressQuality: 85,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        compressFormat: ImageCompressFormat.jpg,
-        uiSettings: [
-          AndroidUiSettings(
-            toolbarTitle: 'Ajustar Foto',
-            toolbarColor: Colors.black,
-            toolbarWidgetColor: Colors.white,
-            statusBarLight: false,
-            activeControlsWidgetColor: Colors.blue,
-            cropFrameColor: Colors.blue,
-            cropGridColor: Colors.white.withOpacity(0.5),
-            backgroundColor: Colors.black,
-            lockAspectRatio: true,
-            hideBottomControls: false,
+      // Crop image using custom screen with buttons at the bottom
+      if (!mounted) return;
+      final File? croppedFile = await Navigator.push<File>(
+        context,
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (context) => ImageCropScreen(
+            imageFile: File(pickedFile.path),
           ),
-          IOSUiSettings(
-            title: 'Ajustar Foto',
-            doneButtonTitle: 'Confirmar',
-            cancelButtonTitle: 'Cancelar',
-            aspectRatioLockEnabled: true,
-            resetAspectRatioEnabled: false,
-          ),
-        ],
+        ),
       );
 
       if (croppedFile == null) return;
 
       // Show confirmation bottom sheet with preview
       if (!mounted) return;
-      final confirmed = await _showPhotoConfirmation(File(croppedFile.path));
+      final confirmed = await _showPhotoConfirmation(croppedFile);
       if (confirmed != true) return;
 
       // Upload cropped image
@@ -239,7 +220,7 @@ class _ProfilePhotoPickerState extends State<ProfilePhotoPicker> {
       await _uploadService.uploadStudentPhoto(
         academyId: widget.academyId,
         studentId: widget.studentId,
-        imageFile: File(croppedFile.path),
+        imageFile: croppedFile,
       );
 
       if (mounted) {
