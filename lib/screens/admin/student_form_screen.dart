@@ -4,8 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
-import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -807,10 +807,10 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   }
 
   Widget _buildBeltSelector() {
-    final beltKeys = _category == StudentCategory.kids
-        ? BeltConstants.kidsBelts
-        : BeltConstants.adultBelts;
-    final currentValue = beltKeys.contains(_belt) ? _belt : 'white';
+    final categoryStr = _category == StudentCategory.kids ? 'kids' : 'adult';
+    final grades = getGradesForSport(SportId.bjj, category: categoryStr);
+    final gradeIds = grades.map((g) => g.id).toList();
+    final currentValue = gradeIds.contains(_belt) ? _belt : 'white';
 
     return Container(
       decoration: BoxDecoration(
@@ -828,14 +828,12 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         ),
-        items: beltKeys.map((beltKey) {
-          final label = BeltConstants.beltLabels[beltKey] ?? beltKey;
-          final color = AppTheme.getBeltColor(beltKey);
-          final hasStripe = beltKey.contains('-');
-          final isWhiteStripe = beltKey.endsWith('-white');
+        items: grades.map((grade) {
+          final hasStripe = grade.id.contains('-');
+          final isWhiteStripe = grade.id.endsWith('-white');
 
           return DropdownMenuItem(
-            value: beltKey,
+            value: grade.id,
             child: Row(
               children: [
                 SizedBox(
@@ -845,9 +843,9 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
                     children: [
                       Container(
                         decoration: BoxDecoration(
-                          color: color,
+                          color: grade.color,
                           borderRadius: BorderRadius.circular(2),
-                          border: beltKey == 'white'
+                          border: grade.id == 'white'
                               ? Border.all(color: AppTheme.divider)
                               : null,
                         ),
@@ -866,7 +864,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
                   ),
                 ),
                 const SizedBox(width: 10),
-                Text(label, style: AppTheme.bodyMedium),
+                Text(grade.label, style: AppTheme.bodyMedium),
               ],
             ),
           );
@@ -880,6 +878,15 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   }
 
   Widget _buildStripesSelector() {
+    final gradeDef = getGradeDefinition(SportId.bjj, _belt);
+    final maxStripes = gradeDef?.maxStripes ?? 4;
+    // Clamp current stripes to valid range
+    if (_stripes > maxStripes) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        setState(() => _stripes = 0);
+      });
+    }
+
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.surface,
@@ -887,7 +894,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         border: Border.all(color: AppTheme.divider),
       ),
       child: DropdownButtonFormField<int>(
-        value: _stripes,
+        value: _stripes > maxStripes ? 0 : _stripes,
         isExpanded: true,
         icon: Icon(LucideIcons.chevronDown, color: AppTheme.textSecondary, size: 20),
         decoration: InputDecoration(
@@ -896,7 +903,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         ),
-        items: List.generate(5, (i) {
+        items: List.generate(maxStripes + 1, (i) {
           return DropdownMenuItem(
             value: i,
             child: Row(

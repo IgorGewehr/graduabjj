@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/sports.dart';
 import '../models/student.dart';
 import 'firebase_service.dart';
 
@@ -179,6 +180,40 @@ class StudentService {
     return update(id, {
       'currentBelt': newBelt,
       'currentStripes': newStripes,
+    });
+  }
+
+  // ============================================
+  // Update Grade (multi-sport aware)
+  // ============================================
+  Future<Student> updateGrade(String id, SportId sportId, String grade, int stripes) async {
+    final data = <String, dynamic>{};
+    // Always update legacy fields for BJJ (backward compat with marcusjj)
+    if (sportId == SportId.bjj) {
+      data['currentBelt'] = grade;
+      data['currentStripes'] = stripes;
+    }
+    // Write to sportData
+    data['sportData.${ sportId.value }.currentGrade'] = grade;
+    data['sportData.${ sportId.value }.currentStripes'] = stripes;
+    return update(id, data);
+  }
+
+  // ============================================
+  // Update Sports List
+  // ============================================
+  Future<Student> updateSports(String id, List<SportId> sportIds) async {
+    return update(id, {
+      'sports': sportIds.map((s) => s.value).toList(),
+    });
+  }
+
+  // ============================================
+  // Update Primary Sport
+  // ============================================
+  Future<Student> updatePrimarySport(String id, SportId sportId) async {
+    return update(id, {
+      'primarySport': sportId.value,
     });
   }
 

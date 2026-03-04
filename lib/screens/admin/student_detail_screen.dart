@@ -8,11 +8,13 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 import '../../widgets/common/profile_photo_picker.dart';
+import '../../widgets/common/sport_chip.dart';
 
 /// Admin Student Detail Screen - View and manage student
 class AdminStudentDetailScreen extends ConsumerStatefulWidget {
@@ -272,8 +274,8 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                _getBeltColor(_student!.currentBelt),
-                _getBeltColor(_student!.currentBelt).withValues(alpha: 0.7),
+                getGradeColor(_student!.getPrimarySport(), _student!.currentBelt),
+                getGradeColor(_student!.getPrimarySport(), _student!.currentBelt).withValues(alpha: 0.7),
               ],
             ),
           ),
@@ -309,7 +311,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                               style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
+                                color: (_student!.currentBelt == 'white' || _student!.currentBelt == 'yellow') ? Colors.black : Colors.white,
                               ),
                             ),
                             const SizedBox(height: 4),
@@ -335,64 +337,69 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
   }
 
   Widget _buildBeltBadge() {
-    final beltNames = {
-      'white': 'Branca',
-      'blue': 'Azul',
-      'purple': 'Roxa',
-      'brown': 'Marrom',
-      'black': 'Preta',
-    };
+    final sports = _student!.getSports();
+    return Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      children: sports.map((sportId) {
+        final grade = _student!.getGrade(sportId);
+        final gradeId = grade?.currentGrade ?? 'white';
+        final stripes = grade?.currentStripes ?? 0;
+        final gradeLabel = getGradeLabel(sportId, gradeId);
+        final gradeColor = getGradeColor(sportId, gradeId);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            LucideIcons.award,
-            size: 16,
-            color: _getBeltColor(_student!.currentBelt),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            beltNames[_student!.currentBelt] ?? _student!.currentBelt,
-            style: TextStyle(
-              color: Colors.black87,
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
-            ),
-          ),
-          if (_student!.currentStripes > 0) ...[
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: _getBeltColor(_student!.currentBelt).withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(8),
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.9),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.1),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
               ),
-              child: Text(
-                '${_student!.currentStripes} grau${_student!.currentStripes > 1 ? "s" : ""}',
-                style: TextStyle(
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (sports.length > 1) ...[
+                SportChip(sportId: sportId, size: SportChipSize.xs),
+                const SizedBox(width: 4),
+              ],
+              Icon(LucideIcons.award, size: 16, color: gradeColor),
+              const SizedBox(width: 6),
+              Text(
+                gradeLabel,
+                style: const TextStyle(
                   color: Colors.black87,
                   fontWeight: FontWeight.w600,
-                  fontSize: 11,
+                  fontSize: 13,
                 ),
               ),
-            ),
-          ],
-        ],
-      ),
+              if (stripes > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: gradeColor.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '$stripes grau${stripes > 1 ? "s" : ""}',
+                    style: const TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -1829,7 +1836,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
         title: p.isBeltChange ? 'Faixa ${p.newBelt}' : 'Grau ${p.newStripes}',
         subtitle: p.notes,
         icon: Icons.military_tech,
-        color: _getBeltColor(p.newBelt),
+        color: getGradeColor(p.getSport(), p.newBelt),
       ));
     }
 
@@ -1881,30 +1888,61 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
   }
 
   void _showPromoteDialog() {
+    final sports = _student!.getSports();
+    SportId selectedSport = _student!.getPrimarySport();
     bool isStripe = true;
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
+          final grade = _student!.getGrade(selectedSport);
+          final currentGrade = grade?.currentGrade ?? 'white';
+          final currentStripes = grade?.currentStripes ?? 0;
+          final sportDef = getSport(selectedSport);
+          final hasStripes = sportDef.supportsStripes;
+          final hasGrades = sportDef.gradeSystem != GradeSystem.none;
+
           return AlertDialog(
             title: const Text('Graduar Aluno'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('Aluno: ${_student!.fullName}'),
-                Text('Faixa atual: ${_student!.currentBelt} - ${_student!.currentStripes} grau(s)'),
-                const SizedBox(height: 16),
-                SegmentedButton<bool>(
-                  segments: const [
-                    ButtonSegment(value: true, label: Text('Grau')),
-                    ButtonSegment(value: false, label: Text('Faixa')),
-                  ],
-                  selected: {isStripe},
-                  onSelectionChanged: (value) {
-                    setDialogState(() => isStripe = value.first);
-                  },
-                ),
+                if (sports.length > 1) ...[
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<SportId>(
+                    value: selectedSport,
+                    items: sports.map((s) {
+                      final sport = getSport(s);
+                      return DropdownMenuItem(value: s, child: Text(sport.label));
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value != null) setDialogState(() => selectedSport = value);
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Esporte',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+                if (hasGrades) ...[
+                  const SizedBox(height: 8),
+                  Text('Graduação atual: ${getGradeLabel(selectedSport, currentGrade)} - $currentStripes grau(s)'),
+                ],
+                if (hasGrades && hasStripes) ...[
+                  const SizedBox(height: 16),
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: true, label: Text('Grau')),
+                      ButtonSegment(value: false, label: Text('Faixa')),
+                    ],
+                    selected: {isStripe},
+                    onSelectionChanged: (value) {
+                      setDialogState(() => isStripe = value.first);
+                    },
+                  ),
+                ],
               ],
             ),
             actions: [
@@ -1917,21 +1955,23 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                   try {
                     final service = BeltProgressionService(FirebaseService.academyId);
 
-                    if (isStripe) {
+                    if (isStripe && hasStripes) {
                       await service.addStripe(
                         studentId: _student!.id,
                         studentName: _student!.fullName,
                         promotedBy: 'admin',
                         promotedByName: 'Administrador',
+                        sportId: selectedSport,
                       );
-                    } else {
-                      final nextBelt = _getNextBelt(_student!.currentBelt);
+                    } else if (hasGrades) {
+                      final nextGrade = _getNextGrade(selectedSport, currentGrade);
                       await service.changeBelt(
                         studentId: _student!.id,
                         studentName: _student!.fullName,
-                        newBelt: nextBelt,
+                        newBelt: nextGrade,
                         promotedBy: 'admin',
                         promotedByName: 'Administrador',
+                        sportId: selectedSport,
                       );
                     }
 
@@ -1955,11 +1995,11 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
     );
   }
 
-  String _getNextBelt(String current) {
-    const order = ['white', 'blue', 'purple', 'brown', 'black'];
-    final index = order.indexOf(current);
-    if (index < order.length - 1) {
-      return order[index + 1];
+  String _getNextGrade(SportId sportId, String current) {
+    final grades = getGradesForSport(sportId);
+    final index = grades.indexWhere((g) => g.id == current);
+    if (index >= 0 && index < grades.length - 1) {
+      return grades[index + 1].id;
     }
     return current;
   }
@@ -2011,7 +2051,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 if (mounted) {
                   Navigator.pop(context);
                   this.context.showSuccess('Aluno excluído!');
-                  Navigator.pop(this.context);
+                  this.context.go('/admin/alunos');
                 }
               } catch (e) {
                 if (mounted) {
@@ -2103,16 +2143,6 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
     );
   }
 
-  Color _getBeltColor(String belt) {
-    const colors = {
-      'white': Color(0xFFF5F5F5),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-    };
-    return colors[belt] ?? Colors.grey;
-  }
 }
 
 /// Stat Card Widget

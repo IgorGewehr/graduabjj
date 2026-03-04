@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/sports.dart';
 import '../models/student.dart';
 import 'firebase_service.dart';
 
@@ -42,6 +43,7 @@ class BJJClass {
   final List<String> studentIds;
   final List<ClassSchedule> schedule;
   final StudentCategory? category;
+  final String? sport; // Multi-sport: defaults to 'bjj' if absent
   final String? minBelt;
   final String? maxBelt;
   final int? maxStudents;
@@ -58,6 +60,7 @@ class BJJClass {
     this.studentIds = const [],
     this.schedule = const [],
     this.category,
+    this.sport,
     this.minBelt,
     this.maxBelt,
     this.maxStudents,
@@ -65,6 +68,9 @@ class BJJClass {
     required this.createdAt,
     required this.updatedAt,
   });
+
+  /// Returns the effective sport for this class (backward compat: absent = 'bjj')
+  SportId getSport() => SportId.fromString(sport ?? 'bjj');
 
   factory BJJClass.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -85,6 +91,7 @@ class BJJClass {
       category: data['category'] != null
           ? StudentCategoryExtension.fromString(data['category'])
           : null,
+      sport: data['sport'],
       minBelt: data['minBelt'],
       maxBelt: data['maxBelt'],
       maxStudents: data['maxStudents'],
@@ -272,6 +279,7 @@ class ClassService {
     String? instructorName,
     List<ClassSchedule>? schedule,
     StudentCategory? category,
+    String? sport,
     String? minBelt,
     String? maxBelt,
     int? maxStudents,
@@ -284,6 +292,7 @@ class ClassService {
       'studentIds': [],
       'schedule': schedule?.map((s) => s.toMap()).toList() ?? [],
       'category': category?.value,
+      'sport': sport,
       'minBelt': minBelt,
       'maxBelt': maxBelt,
       'maxStudents': maxStudents,

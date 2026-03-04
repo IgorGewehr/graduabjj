@@ -11,7 +11,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../models/user.dart';
 import '../../providers/providers.dart';
-import '../../widgets/common/belt_badge.dart';
+import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/profile_photo_picker.dart';
 
 /// Profile Screen - Redesigned with hero header, stats, and collapsed sections
@@ -465,11 +465,12 @@ class _HeroHeader extends ConsumerWidget {
           overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 8),
-        // Belt Badge
-        BeltBadge(
-          belt: student.currentBelt,
+        // Grade Display (sport-aware)
+        GradeDisplay(
+          sportId: student.getPrimarySport(),
+          grade: student.currentBelt,
           stripes: student.currentStripes,
-          size: BeltSize.large,
+          size: GradeDisplaySize.large,
           showLabel: true,
         ),
         const SizedBox(height: 8),

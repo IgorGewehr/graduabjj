@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../services/services.dart';
 
@@ -316,7 +317,7 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                ...['white', 'blue', 'purple', 'brown', 'black'].map((belt) {
+                ..._beltDistribution.keys.map((belt) {
                   final count = _beltDistribution[belt] ?? 0;
                   final percentage = total > 0 ? (count / total * 100) : 0.0;
                   return Padding(
@@ -741,35 +742,22 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
     }
   }
 
-  String _getNextBelt(String currentBelt) {
-    const beltOrder = ['white', 'blue', 'purple', 'brown', 'black'];
-    final index = beltOrder.indexOf(currentBelt);
-    if (index < beltOrder.length - 1) {
-      return beltOrder[index + 1];
+  String _getNextBelt(String currentBelt, {SportId sportId = SportId.bjj}) {
+    final grades = getGradesForSport(sportId);
+    final gradeIds = grades.map((g) => g.id).toList();
+    final index = gradeIds.indexOf(currentBelt);
+    if (index >= 0 && index < gradeIds.length - 1) {
+      return gradeIds[index + 1];
     }
     return currentBelt;
   }
 
-  String _getBeltLabel(String belt) {
-    const labels = {
-      'white': 'Branca',
-      'blue': 'Azul',
-      'purple': 'Roxa',
-      'brown': 'Marrom',
-      'black': 'Preta',
-    };
-    return labels[belt] ?? belt;
+  String _getBeltLabel(String belt, {SportId sportId = SportId.bjj}) {
+    return getGradeLabel(sportId, belt);
   }
 
-  Color _getBeltColor(String belt) {
-    const colors = {
-      'white': Color(0xFFF5F5F5),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-    };
-    return colors[belt] ?? Colors.grey;
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) {
+    return getGradeColor(sportId, belt);
   }
 }
 
@@ -984,25 +972,12 @@ class _EligibleStudentCard extends StatelessWidget {
   }
 
   Color _getBeltColor(String belt) {
-    const colors = {
-      'white': Color(0xFFF5F5F5),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-    };
-    return colors[belt] ?? Colors.grey;
+    return getGradeColor(SportId.bjj, belt);
   }
 
   String _getBeltShortLabel(String belt) {
-    const labels = {
-      'white': 'BR',
-      'blue': 'AZ',
-      'purple': 'RX',
-      'brown': 'MR',
-      'black': 'PT',
-    };
-    return labels[belt] ?? belt.toUpperCase().substring(0, 2);
+    final label = getGradeLabel(SportId.bjj, belt);
+    return label.length >= 2 ? label.substring(0, 2).toUpperCase() : label.toUpperCase();
   }
 }
 
@@ -1071,25 +1046,11 @@ class _PromotionHistoryCard extends StatelessWidget {
   }
 
   String _getBeltLabel(String belt) {
-    const labels = {
-      'white': 'Branca',
-      'blue': 'Azul',
-      'purple': 'Roxa',
-      'brown': 'Marrom',
-      'black': 'Preta',
-    };
-    return labels[belt] ?? belt;
+    return getGradeLabel(SportId.bjj, belt);
   }
 
   Color _getBeltColor(String belt) {
-    const colors = {
-      'white': Color(0xFFF5F5F5),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-    };
-    return colors[belt] ?? Colors.grey;
+    return getGradeColor(SportId.bjj, belt);
   }
 }
 
@@ -1152,35 +1113,17 @@ class _BeltDistributionBar extends StatelessWidget {
   }
 
   String _getBeltLabel(String belt) {
-    const labels = {
-      'white': 'Branca',
-      'blue': 'Azul',
-      'purple': 'Roxa',
-      'brown': 'Marrom',
-      'black': 'Preta',
-    };
-    return labels[belt] ?? belt;
+    return getGradeLabel(SportId.bjj, belt);
   }
 
   Color _getBeltColor(String belt) {
-    const colors = {
-      'white': Color(0xFFF5F5F5),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-    };
-    return colors[belt] ?? Colors.grey;
+    return getGradeColor(SportId.bjj, belt);
   }
 
   Color _getBeltDisplayColor(String belt) {
-    const colors = {
-      'white': Color(0xFF9E9E9E),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-    };
-    return colors[belt] ?? Colors.grey;
+    final color = getGradeColor(SportId.bjj, belt);
+    // White belt needs a visible color for the progress bar
+    if (belt == 'white') return const Color(0xFF9E9E9E);
+    return color;
   }
 }

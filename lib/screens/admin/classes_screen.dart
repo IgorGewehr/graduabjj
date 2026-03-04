@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
+import '../../widgets/common/sport_chip.dart';
 
 // Helper to convert dayOfWeek int to label
 String _getDayLabel(int dayOfWeek) {
@@ -558,6 +560,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
     final instructorController = TextEditingController();
     final maxStudentsController = TextEditingController();
     StudentCategory? selectedCategory;
+    SportId selectedSport = SportId.bjj;
     bool isSaving = false;
     List<_ScheduleEntry> scheduleEntries = [
       _ScheduleEntry(dayOfWeek: 1, startTime: '19:00', endTime: '20:30'),
@@ -667,6 +670,46 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                           ),
                         ),
                         const SizedBox(height: 16),
+                        Text(
+                          'Esporte',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: AppTheme.surfaceVariant,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppTheme.divider),
+                          ),
+                          child: DropdownButtonFormField<SportId>(
+                            value: selectedSport,
+                            items: sportOptions.map((sportId) {
+                              final sport = getSport(sportId);
+                              return DropdownMenuItem(
+                                value: sportId,
+                                child: Row(
+                                  children: [
+                                    Icon(sport.icon, size: 18, color: sportChipColors[sportId]),
+                                    const SizedBox(width: 8),
+                                    Text(sport.label),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              if (value != null) setSheetState(() => selectedSport = value);
+                            },
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            ),
+                            dropdownColor: AppTheme.surface,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
                         _ModernTextField(
                           controller: instructorController,
                           label: 'Instrutor (opcional)',
@@ -739,6 +782,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                               ? null
                               : descriptionController.text,
                           category: selectedCategory,
+                          sport: selectedSport.value,
                           instructorName: instructorController.text.isEmpty
                               ? null
                               : instructorController.text,
@@ -807,6 +851,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
     final instructorController = TextEditingController(text: cls.instructorName ?? '');
     final maxStudentsController = TextEditingController(text: cls.maxStudents?.toString() ?? '');
     StudentCategory? selectedCategory = cls.category;
+    SportId selectedSport = cls.getSport();
     bool isSaving = false;
     List<_ScheduleEntry> scheduleEntries = cls.schedule.isNotEmpty
         ? cls.schedule
@@ -921,6 +966,46 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                           ),
                         ),
                         const SizedBox(height: 16),
+                        Text(
+                          'Esporte',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: AppTheme.surfaceVariant,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppTheme.divider),
+                          ),
+                          child: DropdownButtonFormField<SportId>(
+                            value: selectedSport,
+                            items: sportOptions.map((sportId) {
+                              final sport = getSport(sportId);
+                              return DropdownMenuItem(
+                                value: sportId,
+                                child: Row(
+                                  children: [
+                                    Icon(sport.icon, size: 18, color: sportChipColors[sportId]),
+                                    const SizedBox(width: 8),
+                                    Text(sport.label),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              if (value != null) setSheetState(() => selectedSport = value);
+                            },
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            ),
+                            dropdownColor: AppTheme.surface,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
                         _ModernTextField(
                           controller: instructorController,
                           label: 'Instrutor (opcional)',
@@ -992,6 +1077,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                           if (descriptionController.text.isNotEmpty)
                             'description': descriptionController.text,
                           if (selectedCategory != null) 'category': selectedCategory!.value,
+                          'sport': selectedSport.value,
                           'instructorName': instructorController.text.isEmpty
                               ? null
                               : instructorController.text,
@@ -1505,22 +1591,30 @@ class _ClassCard extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      if (bjjClass.category != null)
-                        Container(
-                          margin: const EdgeInsets.only(top: 4),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            bjjClass.category!.label,
-                            style: AppTheme.labelSmall.copyWith(
-                              color: AppTheme.primary,
-                              fontWeight: FontWeight.w500,
+                      Row(
+                        children: [
+                          if (bjjClass.category != null)
+                            Container(
+                              margin: const EdgeInsets.only(top: 4, right: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                bjjClass.category!.label,
+                                style: AppTheme.labelSmall.copyWith(
+                                  color: AppTheme.primary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
                             ),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: SportChip(sportId: bjjClass.getSport()),
                           ),
-                        ),
+                        ],
+                      ),
                     ],
                   ),
                 ),

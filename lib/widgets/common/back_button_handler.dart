@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/feedback_utils.dart';
 
 /// Widget que gerencia o comportamento do botão voltar do sistema
@@ -63,9 +64,6 @@ class _BackButtonHandlerState extends State<BackButtonHandler> {
 
   @override
   Widget build(BuildContext context) {
-    // Captura o Navigator antes de qualquer operação async
-    final navigator = Navigator.of(context);
-
     return PopScope(
       canPop: false, // Sempre intercepta o pop
       onPopInvokedWithResult: (bool didPop, dynamic result) async {
@@ -77,17 +75,20 @@ class _BackButtonHandlerState extends State<BackButtonHandler> {
         // Verifica se pode fazer pop
         final shouldPop = await _onWillPop();
 
-        // Verifica mounted antes de usar o navigator
+        // Verifica mounted antes de usar o context
         if (!mounted) return;
 
         if (shouldPop) {
-          // Se deve fazer pop, usa o Navigator ou SystemNavigator
           if (widget.isRootRoute) {
             // Na rota raiz, fecha o app
             SystemNavigator.pop();
           } else {
-            // Em outras rotas, usa o Navigator capturado antes do async
-            navigator.pop();
+            // Usa o GoRouter para navegar — evita dessincronia com o estado interno do router
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              SystemNavigator.pop();
+            }
           }
         }
       },

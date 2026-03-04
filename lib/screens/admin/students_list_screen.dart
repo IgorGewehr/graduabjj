@@ -3,10 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
-import '../../widgets/common/belt_badge.dart';
+import '../../widgets/common/grade_display.dart';
 
 /// Students List Screen - Fintech style matching webapp
 class StudentsListScreen extends ConsumerStatefulWidget {
@@ -402,14 +403,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   }
 
   String _getBeltLabel(String belt) {
-    const labels = {
-      'white': 'Branca',
-      'blue': 'Azul',
-      'purple': 'Roxa',
-      'brown': 'Marrom',
-      'black': 'Preta',
-    };
-    return labels[belt] ?? belt;
+    return getGradeLabel(SportId.bjj, belt);
   }
 
   Widget _buildEmptyState() {
@@ -564,10 +558,11 @@ class _StudentCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      BeltBadge(
-                        belt: student.currentBelt,
+                      GradeDisplay(
+                        sportId: student.getPrimarySport(),
+                        grade: student.currentBelt,
                         stripes: student.currentStripes,
-                        size: BeltSize.small,
+                        size: GradeDisplaySize.small,
                       ),
                       const SizedBox(width: 8),
                       Container(
@@ -933,13 +928,6 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
   }
 
   String _getBeltLabel(String belt) {
-    const labels = {
-      'white': 'Branca',
-      'blue': 'Azul',
-      'purple': 'Roxa',
-      'brown': 'Marrom',
-      'black': 'Preta',
-    };
-    return labels[belt] ?? belt;
+    return getGradeLabel(SportId.bjj, belt);
   }
 }

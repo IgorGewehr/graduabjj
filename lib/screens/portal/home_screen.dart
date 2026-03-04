@@ -8,7 +8,8 @@ import '../../core/theme.dart';
 import '../../providers/providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/checkin_service.dart';
-import '../../widgets/common/belt_badge.dart';
+import '../../core/sports.dart';
+import '../../widgets/common/grade_display.dart';
 
 /// Home Screen - Portal do Aluno (New Layout)
 class HomeScreen extends ConsumerStatefulWidget {
@@ -209,10 +210,11 @@ class _WelcomeHeaderWithBelt extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            BeltBadge(
-              belt: belt,
+            GradeDisplay(
+              sportId: SportId.bjj,
+              grade: belt,
               stripes: stripes,
-              size: BeltSize.small,
+              size: GradeDisplaySize.small,
             ),
           ],
         ),

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/sports.dart';
 import 'firebase_service.dart';
 
 /// Belt Order (adult)
@@ -27,6 +28,7 @@ class BeltProgression {
   final String? promotedBy;
   final String? promotedByName;
   final String? notes;
+  final String? sport; // Multi-sport: absent = 'bjj'
   final DateTime createdAt;
 
   BeltProgression({
@@ -41,8 +43,12 @@ class BeltProgression {
     this.promotedBy,
     this.promotedByName,
     this.notes,
+    this.sport,
     required this.createdAt,
   });
+
+  /// Returns the effective sport for this progression (backward compat: absent = 'bjj')
+  SportId getSport() => SportId.fromString(sport ?? 'bjj');
 
   factory BeltProgression.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -58,6 +64,7 @@ class BeltProgression {
       promotedBy: data['promotedBy'],
       promotedByName: data['promotedByName'],
       notes: data['notes'],
+      sport: data['sport'],
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
@@ -106,24 +113,35 @@ class BeltProgressionService {
   // For now, we'll work with what's available
 
   // ============================================
-  // Calculate Next Promotion
+  // Calculate Next Promotion (sport-aware)
   // ============================================
-  Map<String, dynamic>? getNextPromotion(String currentBelt, int currentStripes) {
-    if (currentStripes < 4) {
+  Map<String, dynamic>? getNextPromotion(String currentBelt, int currentStripes, {SportId sportId = SportId.bjj, String category = 'adult'}) {
+    final sport = getSport(sportId);
+
+    // No grade system = no promotions
+    if (sport.gradeSystem == GradeSystem.none) return null;
+
+    final grades = getGradesForSport(sportId, category: category);
+    if (grades.isEmpty) return null;
+
+    final currentGrade = grades.where((g) => g.id == currentBelt).firstOrNull;
+    final maxStripes = currentGrade?.maxStripes ?? 4;
+
+    if (sport.supportsStripes && currentStripes < maxStripes) {
       // Next is a stripe
       return {
         'belt': currentBelt,
         'stripes': currentStripes + 1,
       };
     } else {
-      // Next is a belt change
-      final currentIndex = beltOrder.indexOf(currentBelt);
-      if (currentIndex >= beltOrder.length - 1) {
-        // Already black belt with 4 stripes
-        return null;
+      // Next is a grade change
+      final gradeIds = grades.map((g) => g.id).toList();
+      final currentIndex = gradeIds.indexOf(currentBelt);
+      if (currentIndex < 0 || currentIndex >= gradeIds.length - 1) {
+        return null; // Already at max grade
       }
       return {
-        'belt': beltOrder[currentIndex + 1],
+        'belt': gradeIds[currentIndex + 1],
         'stripes': 0,
       };
     }
@@ -136,8 +154,10 @@ class BeltProgressionService {
     required String currentBelt,
     required int currentStripes,
     required int totalClasses,
+    SportId sportId = SportId.bjj,
+    String category = 'adult',
   }) {
-    final nextPromotion = getNextPromotion(currentBelt, currentStripes);
+    final nextPromotion = getNextPromotion(currentBelt, currentStripes, sportId: sportId, category: category);
 
     if (nextPromotion == null) {
       return EligibilityResult(
@@ -149,7 +169,10 @@ class BeltProgressionService {
       );
     }
 
-    final requirements = stripeRequirements[currentBelt] ?? [0, 0, 0, 0];
+    // Class requirements only defined for BJJ; other sports are always eligible
+    final requirements = sportId == SportId.bjj
+        ? (stripeRequirements[currentBelt] ?? [0, 0, 0, 0])
+        : <int>[];
     final requiredClasses = requirements.length > currentStripes
         ? requirements[currentStripes]
         : 0;
@@ -158,17 +181,18 @@ class BeltProgressionService {
 
     final nextBelt = nextPromotion['belt'] as String;
     final nextStripes = nextPromotion['stripes'] as int;
+    final gradeLabel = getGradeLabel(sportId, nextBelt);
 
     String message;
     if (eligible) {
       if (nextStripes == 0) {
-        message = 'Elegível para faixa ${_getBeltName(nextBelt)}!';
+        message = 'Elegível para faixa $gradeLabel!';
       } else {
         message = 'Elegível para $nextStripesº grau!';
       }
     } else {
       if (nextStripes == 0) {
-        message = 'Faltam $missingClasses aulas para faixa ${_getBeltName(nextBelt)}';
+        message = 'Faltam $missingClasses aulas para faixa $gradeLabel';
       } else {
         message = 'Faltam $missingClasses aulas para $nextStripesº grau';
       }
@@ -217,34 +241,21 @@ class BeltProgressionService {
     return (required - totalClasses).clamp(0, required);
   }
 
-  String _getBeltName(String belt) {
-    const names = {
-      'white': 'Branca',
-      'blue': 'Azul',
-      'purple': 'Roxa',
-      'brown': 'Marrom',
-      'black': 'Preta',
-    };
-    return names[belt] ?? belt;
+  String _getBeltName(String belt, {SportId sportId = SportId.bjj}) {
+    return getGradeLabel(sportId, belt);
   }
 
   // ============================================
-  // Belt Label Helper (public)
+  // Belt Label Helper (public, sport-aware)
   // ============================================
-  String getBeltLabel(String belt) => _getBeltName(belt);
+  String getBeltLabelFor(String belt, {SportId sportId = SportId.bjj}) => _getBeltName(belt, sportId: sportId);
 
   // ============================================
-  // Belt Color Hex
+  // Belt Color Hex (sport-aware)
   // ============================================
-  String getBeltColorHex(String belt) {
-    const colors = {
-      'white': '#F5F5F5',
-      'blue': '#2563EB',
-      'purple': '#7C3AED',
-      'brown': '#92400E',
-      'black': '#171717',
-    };
-    return colors[belt] ?? '#F5F5F5';
+  String getBeltColorHex(String belt, {SportId sportId = SportId.bjj}) {
+    final color = getGradeColor(sportId, belt);
+    return '#${color.value.toRadixString(16).padLeft(8, '0').substring(2)}';
   }
 
   // ============================================
@@ -309,14 +320,30 @@ class BeltProgressionService {
     required String promotedBy,
     required String promotedByName,
     String? notes,
+    SportId sportId = SportId.bjj,
   }) async {
     // Get current student data
     final studentDoc = await _collections.student(studentId).get();
     final studentData = studentDoc.data() as Map<String, dynamic>;
-    final currentBelt = studentData['currentBelt'] ?? 'white';
-    final currentStripes = studentData['currentStripes'] ?? 0;
+
+    // Resolve current grade for this sport
+    String currentBelt;
+    int currentStripes;
+    if (sportId == SportId.bjj && (studentData['sportData'] == null || (studentData['sportData'] as Map)['bjj'] == null)) {
+      // Backward compat: use legacy fields
+      currentBelt = studentData['currentBelt'] ?? 'white';
+      currentStripes = studentData['currentStripes'] ?? 0;
+    } else {
+      final sd = (studentData['sportData'] as Map?)?[sportId.value];
+      currentBelt = sd?['currentGrade'] ?? 'white';
+      currentStripes = sd?['currentStripes'] ?? 0;
+    }
+
     final totalClasses = (studentData['initialAttendanceCount'] ?? 0) +
         (studentData['attendanceCount'] ?? 0);
+
+    final sportLabel = getSport(sportId).label;
+    final gradeLabelStr = getGradeLabel(sportId, newBelt);
 
     // Create progression record
     final progressionRef = await _progressionsRef.add({
@@ -330,15 +357,21 @@ class BeltProgressionService {
       'promotedBy': promotedBy,
       'promotedByName': promotedByName,
       'notes': notes,
+      'sport': sportId.value,
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    // Update student
-    await _collections.student(studentId).update({
-      'currentBelt': newBelt,
-      'currentStripes': newStripes,
+    // Update student — always update legacy fields for BJJ
+    final updateData = <String, dynamic>{
       'updatedAt': FieldValue.serverTimestamp(),
-    });
+      'sportData.${sportId.value}.currentGrade': newBelt,
+      'sportData.${sportId.value}.currentStripes': newStripes,
+    };
+    if (sportId == SportId.bjj) {
+      updateData['currentBelt'] = newBelt;
+      updateData['currentStripes'] = newStripes;
+    }
+    await _collections.student(studentId).update(updateData);
 
     // Create achievement
     final isBeltChange = currentBelt != newBelt;
@@ -347,14 +380,15 @@ class BeltProgressionService {
       'studentName': studentName,
       'type': isBeltChange ? 'graduation' : 'stripe',
       'title': isBeltChange
-          ? 'Graduação para Faixa ${_getBeltName(newBelt)}'
-          : '$newStripes° Grau na Faixa ${_getBeltName(newBelt)}',
+          ? 'Graduacao para $gradeLabelStr ($sportLabel)'
+          : '$newStripes° Grau - $gradeLabelStr ($sportLabel)',
       'description': notes,
       'date': FieldValue.serverTimestamp(),
       'fromBelt': currentBelt,
       'toBelt': newBelt,
       'fromStripes': currentStripes,
       'toStripes': newStripes,
+      'sport': sportId.value,
       'isPublic': true,
       'createdAt': FieldValue.serverTimestamp(),
       'createdBy': promotedBy,
@@ -373,14 +407,30 @@ class BeltProgressionService {
     required String promotedBy,
     required String promotedByName,
     String? notes,
+    SportId sportId = SportId.bjj,
+    String category = 'adult',
   }) async {
     final studentDoc = await _collections.student(studentId).get();
     final studentData = studentDoc.data() as Map<String, dynamic>;
-    final currentBelt = studentData['currentBelt'] ?? 'white';
-    final currentStripes = studentData['currentStripes'] ?? 0;
 
-    if (currentStripes >= 4) {
-      throw Exception('Aluno já possui 4 graus. Use a promoção de faixa.');
+    // Resolve current grade for this sport
+    String currentBelt;
+    int currentStripes;
+    if (sportId == SportId.bjj && (studentData['sportData'] == null || (studentData['sportData'] as Map)['bjj'] == null)) {
+      currentBelt = studentData['currentBelt'] ?? 'white';
+      currentStripes = studentData['currentStripes'] ?? 0;
+    } else {
+      final sd = (studentData['sportData'] as Map?)?[sportId.value];
+      currentBelt = sd?['currentGrade'] ?? 'white';
+      currentStripes = sd?['currentStripes'] ?? 0;
+    }
+
+    // Check max stripes for this sport/grade
+    final gradeDef = getGradeDefinition(sportId, currentBelt);
+    final maxStripes = gradeDef?.maxStripes ?? 4;
+
+    if (currentStripes >= maxStripes) {
+      throw Exception('Aluno já possui o máximo de graus. Use a promoção de faixa.');
     }
 
     return promote(
@@ -391,6 +441,7 @@ class BeltProgressionService {
       promotedBy: promotedBy,
       promotedByName: promotedByName,
       notes: notes,
+      sportId: sportId,
     );
   }
 
@@ -404,6 +455,7 @@ class BeltProgressionService {
     required String promotedBy,
     required String promotedByName,
     String? notes,
+    SportId sportId = SportId.bjj,
   }) async {
     return promote(
       studentId: studentId,
@@ -413,6 +465,7 @@ class BeltProgressionService {
       promotedBy: promotedBy,
       promotedByName: promotedByName,
       notes: notes,
+      sportId: sportId,
     );
   }
 

@@ -4,32 +4,12 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
-
-/// Belt labels for display
-const Map<String, String> _beltLabels = {
-  'white': 'Branca',
-  'blue': 'Azul',
-  'purple': 'Roxa',
-  'brown': 'Marrom',
-  'black': 'Preta',
-  'grey': 'Cinza',
-  'grey-white': 'Cinza/Branca',
-  'grey-black': 'Cinza/Preta',
-  'yellow': 'Amarela',
-  'yellow-white': 'Amarela/Branca',
-  'yellow-black': 'Amarela/Preta',
-  'orange': 'Laranja',
-  'orange-white': 'Laranja/Branca',
-  'orange-black': 'Laranja/Preta',
-  'green': 'Verde',
-  'green-white': 'Verde/Branca',
-  'green-black': 'Verde/Preta',
-};
 
 /// Timeline event types
 enum TimelineEventType {
@@ -183,7 +163,7 @@ class TimelineScreen extends ConsumerWidget {
         date: p.promotionDate,
         type: p.isBeltChange ? TimelineEventType.graduation : TimelineEventType.stripe,
         title: p.isBeltChange
-            ? 'Faixa ${_beltLabels[p.newBelt] ?? p.newBelt}'
+            ? 'Faixa ${getGradeLabel(p.getSport(), p.newBelt)}'
             : '${p.newStripes}o Grau',
         description: p.notes,
         belt: p.newBelt,
@@ -446,7 +426,7 @@ class _JourneyCardState extends State<_JourneyCard> {
                 icon: LucideIcons.award,
                 iconColor: beltColor,
                 iconBgColor: beltColor.withValues(alpha: 0.15),
-                value: _beltLabels[widget.student.currentBelt] ?? widget.student.currentBelt,
+                value: getGradeLabel(widget.student.getPrimarySport(), widget.student.currentBelt),
                 label: widget.student.currentStripes > 0
                     ? '${widget.student.currentStripes} grau${widget.student.currentStripes > 1 ? 's' : ''}'
                     : 'Faixa Atual',
@@ -942,7 +922,7 @@ class _BeltIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final beltColor = _getBeltColor(belt);
-    final beltLabel = _beltLabels[belt] ?? belt;
+    final beltLabel = getGradeLabel(SportId.bjj, belt);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

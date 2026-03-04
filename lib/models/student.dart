@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/sports.dart';
+
 /// Student Status
 enum StudentStatus { active, injured, inactive, suspended }
 
@@ -279,6 +281,11 @@ class Student {
   final List<String>? allergies;
   final EmergencyContact? emergencyContact;
 
+  // Multi-Sport (optional — backward compat: absent = assume BJJ)
+  final List<String>? sportsList;
+  final Map<String, dynamic>? sportData;
+  final String? primarySport;
+
   // Privacy & Account Link
   final bool isProfilePublic;
   final String? linkedUserId;
@@ -321,6 +328,9 @@ class Student {
     this.bloodType,
     this.allergies,
     this.emergencyContact,
+    this.sportsList,
+    this.sportData,
+    this.primarySport,
     this.isProfilePublic = false,
     this.linkedUserId,
     required this.createdAt,
@@ -378,6 +388,11 @@ class Student {
       emergencyContact: data['emergencyContact'] != null
           ? EmergencyContact.fromMap(data['emergencyContact'])
           : null,
+      sportsList: data['sports'] != null ? List<String>.from(data['sports']) : null,
+      sportData: data['sportData'] != null
+          ? Map<String, dynamic>.from(data['sportData'])
+          : null,
+      primarySport: data['primarySport'],
       isProfilePublic: data['isProfilePublic'] ?? false,
       linkedUserId: data['linkedUserId'],
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
@@ -422,6 +437,9 @@ class Student {
       'bloodType': bloodType,
       'allergies': allergies,
       'emergencyContact': emergencyContact?.toMap(),
+      'sports': sportsList,
+      'sportData': sportData,
+      'primarySport': primarySport,
       'isProfilePublic': isProfilePublic,
       'linkedUserId': linkedUserId,
       'createdAt': Timestamp.fromDate(createdAt),
@@ -459,6 +477,40 @@ class Student {
   // Medical notes alias (for backwards compatibility)
   String? get medicalNotes => healthNotes;
 
+  // ============================================
+  // Multi-Sport Helpers (backward compat)
+  // ============================================
+
+  /// Returns the effective list of sports for this student.
+  /// If `sports` field is absent, falls back to ['bjj'].
+  List<SportId> getSports() {
+    if (sportsList != null && sportsList!.isNotEmpty) {
+      return sportsList!.map((s) => SportId.fromString(s)).toList();
+    }
+    return [SportId.bjj];
+  }
+
+  /// Returns the primary sport for this student.
+  SportId getPrimarySport() {
+    if (primarySport != null) return SportId.fromString(primarySport!);
+    return getSports().first;
+  }
+
+  /// Returns grade info for this student in a given sport.
+  /// For BJJ without sportData, falls back to legacy currentBelt/currentStripes.
+  ({String currentGrade, int currentStripes})? getGrade(SportId sport) {
+    if (sport == SportId.bjj && (sportData == null || sportData!['bjj'] == null)) {
+      // Backward compat: use legacy fields
+      return (currentGrade: currentBelt, currentStripes: currentStripes);
+    }
+    final data = sportData?[sport.value];
+    if (data == null) return null;
+    return (
+      currentGrade: data['currentGrade'] as String? ?? 'white',
+      currentStripes: data['currentStripes'] as int? ?? 0,
+    );
+  }
+
   Student copyWith({
     String? id,
     String? fullName,
@@ -492,6 +544,9 @@ class Student {
     String? bloodType,
     List<String>? allergies,
     EmergencyContact? emergencyContact,
+    List<String>? sportsList,
+    Map<String, dynamic>? sportData,
+    String? primarySport,
     bool? isProfilePublic,
     String? linkedUserId,
     DateTime? createdAt,
@@ -531,6 +586,9 @@ class Student {
       bloodType: bloodType ?? this.bloodType,
       allergies: allergies ?? this.allergies,
       emergencyContact: emergencyContact ?? this.emergencyContact,
+      sportsList: sportsList ?? this.sportsList,
+      sportData: sportData ?? this.sportData,
+      primarySport: primarySport ?? this.primarySport,
       isProfilePublic: isProfilePublic ?? this.isProfilePublic,
       linkedUserId: linkedUserId ?? this.linkedUserId,
       createdAt: createdAt ?? this.createdAt,
