@@ -57,12 +57,22 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // Skip the NDK debug-symbol strip step that was failing on this
+            // host ("failed to strip debug symbols from native libraries").
+            // Symbols are not required to upload to Google Play.
+            ndk {
+                debugSymbolLevel = "NONE"
+            }
         }
     }
 
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            // Skip stripping for all .so files — the local NDK toolchain on
+            // this build host fails on `llvm-strip` and aborts the bundle.
+            // Symbols are not required for Play Store uploads.
+            keepDebugSymbols += "**/*.so"
         }
     }
 }

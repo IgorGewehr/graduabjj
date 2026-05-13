@@ -49,7 +49,10 @@ dependencies:
   collection: ^1.19.0
   http: ^1.2.0
   qr_flutter: ^4.1.0
-  mobile_scanner: ^5.2.3
+  # mobile_scanner 7.x bumps the underlying GoogleMLKit pods to a version
+  # whose GTMSessionFetcher constraint aligns with Firebase 11.x. Older 5.x
+  # pulled in GTMSessionFetcher < 4.0 which conflicts with our Firebase set.
+  mobile_scanner: ^7.2.0
   in_app_update: ^4.2.3
 
   # Animations
