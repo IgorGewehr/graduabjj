@@ -3,6 +3,7 @@ export 'firebase_service.dart';
 export 'global_user_service.dart';
 export 'student_service.dart';
 export 'attendance_service.dart';
+export 'qr_attendance_service.dart';
 export 'achievement_service.dart';
 export 'assessment_service.dart';
 export 'payment_service.dart';

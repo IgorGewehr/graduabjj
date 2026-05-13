@@ -15,6 +15,10 @@ class Attendance {
   final String verifiedBy;
   final String verifiedByName;
   final String? notes;
+  /// Snapshot of Class.weight at the time the attendance was created. Null
+  /// or 1 means "counts as one normal attendance". Kept immutable so old
+  /// graduation math stays stable even if the class weight changes later.
+  final double? weight;
   final DateTime createdAt;
 
   Attendance({
@@ -27,6 +31,7 @@ class Attendance {
     required this.verifiedBy,
     required this.verifiedByName,
     this.notes,
+    this.weight,
     required this.createdAt,
   });
 
@@ -42,6 +47,7 @@ class Attendance {
       verifiedBy: data['verifiedBy'] ?? '',
       verifiedByName: data['verifiedByName'] ?? '',
       notes: data['notes'],
+      weight: data['weight'] is num ? (data['weight'] as num).toDouble() : null,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
@@ -294,6 +300,7 @@ class AttendanceService {
     required String verifiedByName,
     DateTime? date,
     String? notes,
+    double? weight,
   }) async {
     final attendanceDate = date ?? DateTime.now();
 
@@ -303,7 +310,7 @@ class AttendanceService {
       throw Exception('Aluno já marcado como presente nesta aula');
     }
 
-    final docRef = await _attendanceRef.add({
+    final payload = <String, dynamic>{
       'studentId': studentId,
       'studentName': studentName,
       'classId': classId,
@@ -313,7 +320,14 @@ class AttendanceService {
       'verifiedByName': verifiedByName,
       'notes': notes,
       'createdAt': FieldValue.serverTimestamp(),
-    });
+    };
+    // Persist weight only when meaningful (non-default). Keeps old docs
+    // and new docs interchangeable when the academy isn't using weights.
+    if (weight != null && weight != 1.0) {
+      payload['weight'] = weight;
+    }
+
+    final docRef = await _attendanceRef.add(payload);
 
     // Update student's attendance count
     await _updateStudentAttendanceCount(studentId, 1);
@@ -352,6 +366,7 @@ class AttendanceService {
     required String verifiedBy,
     required String verifiedByName,
     DateTime? date,
+    double? weight,
   }) async {
     final attendanceDate = date ?? DateTime.now();
     final results = <Attendance>[];
@@ -367,7 +382,7 @@ class AttendanceService {
       if (presentIds.contains(student.studentId)) continue;
 
       final docRef = _attendanceRef.doc();
-      batch.set(docRef, {
+      final payload = <String, dynamic>{
         'studentId': student.studentId,
         'studentName': student.studentName,
         'classId': classId,
@@ -376,7 +391,11 @@ class AttendanceService {
         'verifiedBy': verifiedBy,
         'verifiedByName': verifiedByName,
         'createdAt': FieldValue.serverTimestamp(),
-      });
+      };
+      if (weight != null && weight != 1.0) {
+        payload['weight'] = weight;
+      }
+      batch.set(docRef, payload);
       newRecords.add(docRef);
     }
 
@@ -431,6 +450,7 @@ class AttendanceService {
     required String verifiedBy,
     required String verifiedByName,
     DateTime? date,
+    double? weight,
   }) async {
     final attendanceDate = date ?? DateTime.now();
     final isPresent = await isStudentPresent(studentId, classId, attendanceDate);
@@ -447,6 +467,7 @@ class AttendanceService {
         verifiedBy: verifiedBy,
         verifiedByName: verifiedByName,
         date: attendanceDate,
+        weight: weight,
       );
       return true;
     }

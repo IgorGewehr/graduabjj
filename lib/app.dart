@@ -20,6 +20,7 @@ import 'screens/portal/attendance_screen.dart';
 import 'screens/portal/competitions_screen.dart';
 import 'screens/portal/competition_detail_screen.dart';
 import 'screens/portal/schedule_screen.dart';
+import 'screens/portal/qr_scan_screen.dart';
 import 'screens/portal/timeline_screen.dart';
 import 'screens/portal/financial_screen.dart';
 import 'screens/portal/notifications_screen.dart';
@@ -669,6 +670,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
 
+      // QR scanner (outside shell for fullscreen camera)
+      GoRoute(
+        path: '/portal/scan',
+        pageBuilder: (context, state) => _buildPageWithPushTransition(
+          context: context,
+          state: state,
+          child: const QrScanScreen(),
+        ),
+      ),
+
       // Portal Notifications (outside shell for full-screen overlay)
       GoRoute(
         path: '/portal/notificacoes',
@@ -736,6 +747,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const AdminAttendanceScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/chamada/qr',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const AdminQrSessionScreen(),
             ),
           ),
           GoRoute(

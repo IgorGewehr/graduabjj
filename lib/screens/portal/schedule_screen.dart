@@ -98,6 +98,15 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      icon: const Icon(LucideIcons.qrCode, size: 16),
+                      label: const Text('Escanear QR da aula'),
+                      onPressed: () => context.push('/portal/scan'),
+                    ),
+                  ),
                   const SizedBox(height: 16),
                 ],
 

@@ -216,6 +216,13 @@ class AdminSidebar extends ConsumerWidget {
                   currentPath: currentPath,
                 ),
                 _NavItem(
+                  icon: Icons.qr_code_2_outlined,
+                  activeIcon: Icons.qr_code_2,
+                  label: 'Chamada QR',
+                  path: '/admin/chamada/qr',
+                  currentPath: currentPath,
+                ),
+                _NavItem(
                   icon: Icons.calendar_month_outlined,
                   activeIcon: Icons.calendar_month,
                   label: 'Turmas',

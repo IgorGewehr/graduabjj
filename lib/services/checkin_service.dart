@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/checkin.dart';
 import 'attendance_service.dart';
+import 'class_service.dart';
 import 'firebase_service.dart';
 
 /// Helper: Check if current time is within check-in window
@@ -304,6 +305,8 @@ class CheckinService {
     String confirmedByName,
   ) async {
     final attendanceService = AttendanceService(academyId);
+    final classService = ClassService(academyId);
+    final classWeightCache = <String, double>{};
     int success = 0;
     int failed = 0;
 
@@ -319,6 +322,15 @@ class CheckinService {
 
         final checkin = Checkin.fromFirestore(docSnap);
 
+        // Look up the class weight (cached per call) so weighted academies
+        // can still benefit from check-in approvals.
+        double? weight;
+        if (!classWeightCache.containsKey(checkin.classId)) {
+          final cls = await classService.getById(checkin.classId);
+          classWeightCache[checkin.classId] = cls?.effectiveWeight() ?? 1.0;
+        }
+        weight = classWeightCache[checkin.classId];
+
         // Create attendance record
         await attendanceService.markPresent(
           studentId: checkin.studentId,
@@ -328,6 +340,7 @@ class CheckinService {
           verifiedBy: confirmedBy,
           verifiedByName: confirmedByName,
           date: checkin.scheduleDate,
+          weight: weight,
         );
 
         // Delete the check-in

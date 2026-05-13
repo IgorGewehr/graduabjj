@@ -6,7 +6,9 @@ import 'firebase_service.dart';
 /// Belt Order (adult)
 const List<String> beltOrder = ['white', 'blue', 'purple', 'brown', 'black'];
 
-/// Stripe Requirements (classes needed per stripe for each belt)
+/// Stripe Requirements (legacy fallback when the academy hasn't configured
+/// `autoGraduationAttendances`). Kept as a transitional default — new
+/// deployments should set a single threshold per academy in Settings.
 const Map<String, List<int>> stripeRequirements = {
   'white': [30, 60, 90, 120],
   'blue': [50, 100, 150, 200],
@@ -14,6 +16,19 @@ const Map<String, List<int>> stripeRequirements = {
   'brown': [100, 200, 300, 400],
   'black': [150, 300, 450, 600],
 };
+
+/// Snapshot of the academy-level graduation configuration. Used by the
+/// eligibility helpers so a single config read can serve a whole batch
+/// (e.g. computing eligibility for every active student).
+class AcademyGraduationConfig {
+  final int? threshold;        // `autoGraduationAttendances` if set
+  final bool useClassWeights;  // `useClassWeights`
+
+  const AcademyGraduationConfig({
+    this.threshold,
+    this.useClassWeights = false,
+  });
+}
 
 /// Belt Progression Model
 class BeltProgression {
@@ -88,6 +103,7 @@ class EligibilityResult {
   final int requiredClasses;
   final int missingClasses;
   final String message;
+  final bool weighted; // true when current count used Class.weight summation
 
   EligibilityResult({
     required this.eligible,
@@ -97,6 +113,26 @@ class EligibilityResult {
     required this.requiredClasses,
     required this.missingClasses,
     required this.message,
+    this.weighted = false,
+  });
+}
+
+/// Per-student eligibility row used by the students list.
+class EligibilitySnapshotEntry {
+  final String studentId;
+  final bool eligible;
+  final int currentClasses;
+  final int requiredClasses;
+  final int missingClasses;
+  final bool weighted;
+
+  const EligibilitySnapshotEntry({
+    required this.studentId,
+    required this.eligible,
+    required this.currentClasses,
+    required this.requiredClasses,
+    required this.missingClasses,
+    required this.weighted,
   });
 }
 
@@ -149,6 +185,13 @@ class BeltProgressionService {
 
   // ============================================
   // Check Eligibility for Promotion
+  //
+  // [config.threshold] overrides the per-belt [stripeRequirements] table.
+  // Used by academies that prefer "X aulas/pontos para qualquer graduação".
+  // [config.useClassWeights] only flips the message unit (pts vs aulas) —
+  // the caller is responsible for passing a weighted [totalClasses] when
+  // weights are active. Use `checkEligibilityForStudent` to let the service
+  // do the math end-to-end.
   // ============================================
   EligibilityResult checkEligibility({
     required String currentBelt,
@@ -156,7 +199,9 @@ class BeltProgressionService {
     required int totalClasses,
     SportId sportId = SportId.bjj,
     String category = 'adult',
+    AcademyGraduationConfig? config,
   }) {
+    final cfg = config ?? const AcademyGraduationConfig();
     final nextPromotion = getNextPromotion(currentBelt, currentStripes, sportId: sportId, category: category);
 
     if (nextPromotion == null) {
@@ -166,36 +211,41 @@ class BeltProgressionService {
         requiredClasses: 0,
         missingClasses: 0,
         message: 'Grau máximo atingido',
+        weighted: cfg.useClassWeights,
       );
     }
 
-    // Class requirements only defined for BJJ; other sports are always eligible
-    final requirements = sportId == SportId.bjj
-        ? (stripeRequirements[currentBelt] ?? [0, 0, 0, 0])
-        : <int>[];
-    final requiredClasses = requirements.length > currentStripes
-        ? requirements[currentStripes]
+    int requiredClasses;
+    if (cfg.threshold != null && cfg.threshold! > 0) {
+      // Single configurable threshold for any belt/stripe transition.
+      requiredClasses = cfg.threshold!;
+    } else {
+      // Legacy fallback: per-belt requirements (BJJ only — other sports always eligible).
+      final requirements = sportId == SportId.bjj
+          ? (stripeRequirements[currentBelt] ?? [0, 0, 0, 0])
+          : <int>[];
+      requiredClasses = requirements.length > currentStripes
+          ? requirements[currentStripes]
+          : 0;
+    }
+    final missingClasses = requiredClasses > 0
+        ? (requiredClasses - totalClasses).clamp(0, requiredClasses).toInt()
         : 0;
-    final missingClasses = (requiredClasses - totalClasses).clamp(0, requiredClasses);
-    final eligible = totalClasses >= requiredClasses;
+    final eligible = requiredClasses > 0 && totalClasses >= requiredClasses;
 
     final nextBelt = nextPromotion['belt'] as String;
     final nextStripes = nextPromotion['stripes'] as int;
     final gradeLabel = getGradeLabel(sportId, nextBelt);
+    final unit = cfg.useClassWeights ? 'pontos' : 'aulas';
 
     String message;
     if (eligible) {
-      if (nextStripes == 0) {
-        message = 'Elegível para faixa $gradeLabel!';
-      } else {
-        message = 'Elegível para $nextStripesº grau!';
-      }
+      message = nextStripes == 0
+          ? 'Elegível para faixa $gradeLabel!'
+          : 'Elegível para $nextStripesº grau!';
     } else {
-      if (nextStripes == 0) {
-        message = 'Faltam $missingClasses aulas para faixa $gradeLabel';
-      } else {
-        message = 'Faltam $missingClasses aulas para $nextStripesº grau';
-      }
+      final target = nextStripes == 0 ? 'faixa $gradeLabel' : '$nextStripesº grau';
+      message = 'Faltam $missingClasses $unit para $target';
     }
 
     return EligibilityResult(
@@ -206,7 +256,161 @@ class BeltProgressionService {
       requiredClasses: requiredClasses,
       missingClasses: missingClasses,
       message: message,
+      weighted: cfg.useClassWeights,
     );
+  }
+
+  // ============================================
+  // Async helpers (do the lookups for you)
+  // ============================================
+
+  /// Reads the academy doc and extracts the graduation config snapshot.
+  Future<AcademyGraduationConfig> loadAcademyConfig() async {
+    try {
+      final doc = await _collections.academy.get();
+      if (!doc.exists) return const AcademyGraduationConfig();
+      final data = doc.data() as Map<String, dynamic>? ?? {};
+      final rawThreshold = data['autoGraduationAttendances'];
+      final threshold =
+          rawThreshold is int && rawThreshold > 0 ? rawThreshold : null;
+      return AcademyGraduationConfig(
+        threshold: threshold,
+        useClassWeights: data['useClassWeights'] == true,
+      );
+    } catch (_) {
+      return const AcademyGraduationConfig();
+    }
+  }
+
+  /// Sums Attendance.weight (defaulting to 1 for legacy docs) for a student.
+  /// Use when [AcademyGraduationConfig.useClassWeights] is true.
+  Future<int> getWeightedAttendanceCount(String studentId) async {
+    final snap = await _collections.attendance
+        .where('studentId', isEqualTo: studentId)
+        .get();
+    double total = 0;
+    for (final d in snap.docs) {
+      final data = d.data() as Map<String, dynamic>;
+      final w = data['weight'];
+      total += (w is num && w > 0) ? w.toDouble() : 1.0;
+    }
+    return total.round();
+  }
+
+  /// Convenience: resolves config, counts (weighted or not), reads the
+  /// student's current grade per sport, and returns the eligibility.
+  Future<EligibilityResult> checkEligibilityForStudent(
+    String studentId, {
+    SportId sportId = SportId.bjj,
+    AcademyGraduationConfig? config,
+  }) async {
+    final cfg = config ?? await loadAcademyConfig();
+    final studentDoc = await _collections.student(studentId).get();
+    if (!studentDoc.exists) {
+      return EligibilityResult(
+        eligible: false,
+        currentClasses: 0,
+        requiredClasses: 0,
+        missingClasses: 0,
+        message: 'Aluno não encontrado',
+        weighted: cfg.useClassWeights,
+      );
+    }
+    final data = studentDoc.data() as Map<String, dynamic>;
+
+    // Resolve current grade for this sport (multi-sport aware)
+    String currentBelt;
+    int currentStripes;
+    final sportData = (data['sportData'] as Map?)?[sportId.value];
+    if (sportId == SportId.bjj && sportData == null) {
+      currentBelt = data['currentBelt'] ?? 'white';
+      currentStripes = data['currentStripes'] ?? 0;
+    } else {
+      currentBelt = sportData?['currentGrade'] ?? 'white';
+      currentStripes = sportData?['currentStripes'] ?? 0;
+    }
+
+    final category = data['category'] ?? 'adult';
+
+    // System count: weighted if academy uses it, otherwise raw doc count.
+    int systemCount;
+    if (cfg.useClassWeights) {
+      systemCount = await getWeightedAttendanceCount(studentId);
+    } else {
+      final attendSnap = await _collections.attendance
+          .where('studentId', isEqualTo: studentId)
+          .get();
+      systemCount = attendSnap.size;
+    }
+    final initial = (data['initialAttendanceCount'] ?? 0) as int;
+    final totalClasses = systemCount + initial;
+
+    return checkEligibility(
+      currentBelt: currentBelt,
+      currentStripes: currentStripes,
+      totalClasses: totalClasses,
+      sportId: sportId,
+      category: category,
+      config: cfg,
+    );
+  }
+
+  /// Batch helper: loads the config once, then resolves eligibility for every
+  /// active student. Used by the admin students list to render the progress
+  /// column / "Elegível" badge.
+  Future<List<EligibilitySnapshotEntry>> getEligibilitySnapshot({
+    SportId sportId = SportId.bjj,
+  }) async {
+    final cfg = await loadAcademyConfig();
+    final snap = await _studentsRef.where('status', isEqualTo: 'active').get();
+    final results = <EligibilitySnapshotEntry>[];
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+
+      String currentBelt;
+      int currentStripes;
+      final sportData = (data['sportData'] as Map?)?[sportId.value];
+      if (sportId == SportId.bjj && sportData == null) {
+        currentBelt = data['currentBelt'] ?? 'white';
+        currentStripes = data['currentStripes'] ?? 0;
+      } else {
+        currentBelt = sportData?['currentGrade'] ?? 'white';
+        currentStripes = sportData?['currentStripes'] ?? 0;
+      }
+      final category = data['category'] ?? 'adult';
+
+      int systemCount;
+      if (cfg.useClassWeights) {
+        systemCount = await getWeightedAttendanceCount(doc.id);
+      } else {
+        final ac = await _collections.attendance
+            .where('studentId', isEqualTo: doc.id)
+            .get();
+        systemCount = ac.size;
+      }
+      final initial = (data['initialAttendanceCount'] ?? 0) as int;
+      final total = systemCount + initial;
+
+      final e = checkEligibility(
+        currentBelt: currentBelt,
+        currentStripes: currentStripes,
+        totalClasses: total,
+        sportId: sportId,
+        category: category,
+        config: cfg,
+      );
+      results.add(
+        EligibilitySnapshotEntry(
+          studentId: doc.id,
+          eligible: e.eligible,
+          currentClasses: e.currentClasses,
+          requiredClasses: e.requiredClasses,
+          missingClasses: e.missingClasses,
+          weighted: e.weighted,
+        ),
+      );
+    }
+    return results;
   }
 
   // ============================================

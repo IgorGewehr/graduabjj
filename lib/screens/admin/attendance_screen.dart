@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
@@ -265,6 +266,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           verifiedBy: 'admin',
           verifiedByName: 'Administrador',
           date: _selectedDate,
+          weight: _selectedClass!.effectiveWeight(),
         );
         setState(() {
           _presentStudentIds.add(student.id);
@@ -332,6 +334,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           verifiedBy: 'admin',
           verifiedByName: 'Administrador',
           date: _selectedDate,
+          weight: _selectedClass!.effectiveWeight(),
         )),
       );
 
@@ -484,6 +487,13 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push('/admin/chamada/qr'),
+        icon: const Icon(LucideIcons.qrCode, size: 18),
+        label: const Text('Chamada por QR'),
+        backgroundColor: AppTheme.primary,
+        foregroundColor: Colors.white,
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(

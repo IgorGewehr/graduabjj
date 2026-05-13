@@ -11,7 +11,9 @@ import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
+import '../../services/belt_progression_service.dart';
 import '../../services/services.dart';
 import '../../widgets/common/profile_photo_picker.dart';
 import '../../widgets/common/sport_chip.dart';
@@ -38,6 +40,8 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
   List<Assessment> _assessments = [];
   List<Plan> _studentPlans = [];
   bool _isLoading = true;
+  EligibilityResult? _eligibility;
+  bool _autoGradEnabled = false;
 
   @override
   void initState() {
@@ -76,6 +80,18 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       final assessments = await assessmentService.getByStudent(widget.studentId);
       final studentPlans = await planService.getPlansForStudent(widget.studentId);
 
+      // Auto-graduation eligibility — only computed when the academy has
+      // the feature on (cheap settings doc read first, then the actual math).
+      final settings = ref.read(academySettingsProvider).valueOrNull;
+      final autoGradOn = settings?.autoGraduationEnabled == true;
+      EligibilityResult? eligibility;
+      if (autoGradOn && student != null) {
+        eligibility = await beltService.checkEligibilityForStudent(
+          student.id,
+          sportId: student.getPrimarySport(),
+        );
+      }
+
       setState(() {
         _student = student;
         _attendances = attendances;
@@ -85,6 +101,8 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
         _achievements = achievements;
         _assessments = assessments;
         _studentPlans = studentPlans;
+        _autoGradEnabled = autoGradOn;
+        _eligibility = eligibility;
         _isLoading = false;
       });
     } catch (e) {
@@ -450,12 +468,90 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
     );
   }
 
+  Widget _buildEligibilityBanner(EligibilityResult e) {
+    final eligible = e.eligible;
+    final color = eligible ? AppTheme.warning : AppTheme.info;
+    final lightColor = eligible ? AppTheme.warningLight : AppTheme.infoLight;
+    final icon = eligible ? LucideIcons.zap : LucideIcons.target;
+    final unit = e.weighted ? 'pts' : 'aulas';
+    final progress = e.requiredClasses > 0
+        ? (e.currentClasses / e.requiredClasses).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: lightColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: color),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  eligible ? 'Elegivel para graduar' : 'Proxima graduacao',
+                  style: AppTheme.titleSmall.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (eligible)
+                ElevatedButton.icon(
+                  onPressed: _showPromoteDialog,
+                  icon: const Icon(LucideIcons.award, size: 14),
+                  label: const Text('Graduar agora'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: color,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    textStyle: AppTheme.labelSmall.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 6,
+              backgroundColor: Colors.white,
+              valueColor: AlwaysStoppedAnimation(color),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            eligible
+                ? '${e.currentClasses}/${e.requiredClasses} $unit — pronto para a proxima graduacao.'
+                : 'Faltam ${e.missingClasses} $unit (${e.currentClasses}/${e.requiredClasses})',
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildInfoTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Auto-graduation banner (only when feature is enabled)
+          if (_autoGradEnabled && _eligibility != null) ...[
+            _buildEligibilityBanner(_eligibility!),
+            const SizedBox(height: 16),
+          ],
+
           // Quick stats
           Row(
             children: [

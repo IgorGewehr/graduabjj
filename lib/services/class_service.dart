@@ -48,6 +48,10 @@ class BJJClass {
   final String? maxBelt;
   final int? maxStudents;
   final bool isActive;
+  /// Optional weight applied to attendances marked in this class. Only
+  /// effective when the academy has `useClassWeights = true`. Null/1 means
+  /// "counts as one normal attendance" — the default for any new class.
+  final double? weight;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -65,12 +69,16 @@ class BJJClass {
     this.maxBelt,
     this.maxStudents,
     this.isActive = true,
+    this.weight,
     required this.createdAt,
     required this.updatedAt,
   });
 
   /// Returns the effective sport for this class (backward compat: absent = 'bjj')
   SportId getSport() => SportId.fromString(sport ?? 'bjj');
+
+  /// Effective weight (default 1 when unset).
+  double effectiveWeight() => weight ?? 1.0;
 
   factory BJJClass.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -96,6 +104,7 @@ class BJJClass {
       maxBelt: data['maxBelt'],
       maxStudents: data['maxStudents'],
       isActive: data['isActive'] ?? true,
+      weight: data['weight'] is num ? (data['weight'] as num).toDouble() : null,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -283,8 +292,9 @@ class ClassService {
     String? minBelt,
     String? maxBelt,
     int? maxStudents,
+    double? weight,
   }) async {
-    final docRef = await _classesRef.add({
+    final payload = <String, dynamic>{
       'name': name,
       'description': description,
       'instructorId': instructorId,
@@ -299,7 +309,11 @@ class ClassService {
       'isActive': true,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
-    });
+    };
+    if (weight != null && weight != 1.0) {
+      payload['weight'] = weight;
+    }
+    final docRef = await _classesRef.add(payload);
 
     final doc = await docRef.get();
     return BJJClass.fromFirestore(doc);
@@ -334,14 +348,75 @@ class ClassService {
 
   // ============================================
   // Add Student to Class
+  //
+  // Also enrolls the student in the class's sport: adds the sport to
+  // `sports` array, seeds `sportData[sport]` with the lowest-rank grade
+  // for that sport, and sets `primarySport` if the student doesn't have one.
   // ============================================
   Future<BJJClass> addStudent(String classId, String studentId) async {
+    final cls = await getById(classId);
+    if (cls == null) throw Exception('Turma não encontrada');
+
     await _collections.classDoc(classId).update({
       'studentIds': FieldValue.arrayUnion([studentId]),
       'updatedAt': FieldValue.serverTimestamp(),
     });
+
+    await _enrollStudentInSport(studentId, cls.getSport(), cls.category);
+
     final updated = await getById(classId);
     return updated!;
+  }
+
+  /// Ensures the student doc carries the sport in `sports`, `sportData`,
+  /// and `primarySport`. Idempotent — safe to call when already enrolled.
+  Future<void> _enrollStudentInSport(
+    String studentId,
+    SportId sport,
+    StudentCategory? classCategory,
+  ) async {
+    final studentRef = _collections.student(studentId);
+    final snap = await studentRef.get();
+    if (!snap.exists) return;
+
+    final data = snap.data() as Map<String, dynamic>;
+    final sportValue = sport.value;
+
+    final existingSports = (data['sports'] as List?)?.cast<String>() ?? const [];
+    final existingSportData =
+        (data['sportData'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final existingPrimary = data['primarySport'] as String?;
+
+    final updates = <String, dynamic>{};
+
+    if (!existingSports.contains(sportValue)) {
+      updates['sports'] = FieldValue.arrayUnion([sportValue]);
+    }
+
+    if (!existingSportData.containsKey(sportValue)) {
+      final category = classCategory?.value ??
+          (data['category'] as String?) ??
+          'adult';
+      final grades = getGradesForSport(sport, category: category);
+      final defaultGrade = grades.isNotEmpty ? grades.first.id : 'white';
+
+      // For BJJ the legacy `currentBelt`/`currentStripes` fields already hold
+      // the grade — preserve them so we don't downgrade existing students.
+      final isLegacyBjj = sport == SportId.bjj && data['currentBelt'] != null;
+      updates['sportData.$sportValue'] = {
+        'currentGrade': isLegacyBjj ? data['currentBelt'] : defaultGrade,
+        'currentStripes':
+            isLegacyBjj ? (data['currentStripes'] ?? 0) : 0,
+      };
+    }
+
+    if (existingPrimary == null || existingPrimary.isEmpty) {
+      updates['primarySport'] = sportValue;
+    }
+
+    if (updates.isEmpty) return;
+    updates['updatedAt'] = FieldValue.serverTimestamp();
+    await studentRef.update(updates);
   }
 
   // ============================================

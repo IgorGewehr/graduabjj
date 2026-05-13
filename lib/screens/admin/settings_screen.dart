@@ -18,6 +18,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
+import '../../widgets/common/delete_account_helper.dart';
 
 /// Admin Settings Screen - Fintech style matching webapp
 class AdminSettingsScreen extends ConsumerStatefulWidget {
@@ -56,6 +57,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _storeCreditCardEnabled = false;
   bool _studentCheckinEnabled = false;
 
+  // Auto-graduation + class weights
+  bool _autoGraduationEnabled = false;
+  bool _useClassWeights = false;
+  final _autoGraduationAttendancesController = TextEditingController(text: '70');
+
   // Monitors
   List<String> _monitorIds = [];
   List<Map<String, dynamic>> _linkedStudents = [];
@@ -89,6 +95,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     _pixKeyController.dispose();
     _storeWelcomeController.dispose();
     _storeMinAmountController.dispose();
+    _autoGraduationAttendancesController.dispose();
     super.dispose();
   }
 
@@ -123,6 +130,12 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _storePublished = settings.storePublished;
           _storeCreditCardEnabled = settings.storeCreditCardEnabled;
           _studentCheckinEnabled = settings.studentCheckinEnabled;
+          _autoGraduationEnabled = settings.autoGraduationEnabled;
+          _useClassWeights = settings.useClassWeights;
+          if (settings.autoGraduationAttendances != null) {
+            _autoGraduationAttendancesController.text =
+                settings.autoGraduationAttendances.toString();
+          }
           _monitorIds = settings.monitorIds;
         });
       }
@@ -254,6 +267,15 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
       // Save student check-in settings
       await service.toggleStudentCheckin(_studentCheckinEnabled);
+
+      // Save auto-graduation settings
+      final attendancesValue =
+          int.tryParse(_autoGraduationAttendancesController.text);
+      await service.updateAutoGraduation(
+        _autoGraduationEnabled,
+        attendances: attendancesValue,
+      );
+      await service.updateUseClassWeights(_useClassWeights);
 
       // Invalidate the settings provider to refresh UI across the app
       ref.invalidate(academySettingsProvider);
@@ -1255,6 +1277,102 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         children: [
           const SizedBox(height: 8),
 
+          // Auto-graduation settings
+          _SettingsCard(
+            title: 'Graduacao Automatica',
+            icon: LucideIcons.award,
+            child: Column(
+              children: [
+                _ModernSwitch(
+                  title: 'Habilitar Graduacao Automatica',
+                  subtitle:
+                      'Sinaliza alunos elegiveis com base no numero de presencas',
+                  value: _autoGraduationEnabled,
+                  onChanged: (value) {
+                    setState(() => _autoGraduationEnabled = value);
+                  },
+                  icon: LucideIcons.award,
+                  iconColor: AppTheme.warning,
+                ),
+                if (_autoGraduationEnabled) ...[
+                  const SizedBox(height: 16),
+                  _ModernTextField(
+                    controller: _autoGraduationAttendancesController,
+                    label: 'Presencas para graduar',
+                    hint: '70',
+                    icon: LucideIcons.target,
+                    keyboardType: TextInputType.number,
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.info.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: AppTheme.info.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(LucideIcons.info, size: 18, color: AppTheme.info),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Alunos serao destacados na lista quando atingirem o numero configurado. A graduacao em si precisa ser confirmada por um admin.',
+                            style: AppTheme.labelSmall
+                                .copyWith(color: AppTheme.info),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _ModernSwitch(
+                    title: 'Usar pesos por turma',
+                    subtitle:
+                        'Aula particular pode valer 2 ou mais (configurado por turma)',
+                    value: _useClassWeights,
+                    onChanged: (value) {
+                      setState(() => _useClassWeights = value);
+                    },
+                    icon: LucideIcons.scale,
+                    iconColor: AppTheme.info,
+                  ),
+                  if (_useClassWeights) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.warning.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: AppTheme.warning.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(LucideIcons.info,
+                              size: 18, color: AppTheme.warning),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Defina o peso de cada turma na tela de Turmas. Turmas sem peso configurado contam como 1.',
+                              style: AppTheme.labelSmall
+                                  .copyWith(color: AppTheme.warning),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // Student Check-in Settings
           _SettingsCard(
             title: 'Check-in de Alunos',
@@ -1362,70 +1480,44 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           const SizedBox(height: 16),
 
-          // Logout
+          // Account section with logout, legal links, and account deletion
           _SettingsCard(
             title: 'Conta',
             icon: LucideIcons.user,
             child: Column(
               children: [
-                GestureDetector(
+                // Legal links
+                _AccountActionTile(
+                  icon: LucideIcons.fileText,
+                  title: 'Termos de Uso',
+                  onTap: () => _openUrl(AppConstants.termsOfServiceUrl),
+                ),
+                const SizedBox(height: 8),
+                _AccountActionTile(
+                  icon: LucideIcons.shield,
+                  title: 'Politica de Privacidade',
+                  onTap: () => _openUrl(AppConstants.privacyPolicyUrl),
+                ),
+                const SizedBox(height: 8),
+                // Sign out
+                _AccountActionTile(
+                  icon: LucideIcons.logOut,
+                  title: 'Sair da conta',
+                  subtitle: 'Encerrar sessao atual',
+                  isDestructive: true,
                   onTap: () async {
                     final authService = ref.read(authServiceProvider);
                     await authService.signOut();
                   },
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppTheme.error.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppTheme.error.withValues(alpha: 0.2),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: AppTheme.error.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(
-                            LucideIcons.logOut,
-                            color: AppTheme.error,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Sair da conta',
-                                style: AppTheme.bodyMedium.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.error,
-                                ),
-                              ),
-                              Text(
-                                'Encerrar sessao atual',
-                                style: AppTheme.labelSmall.copyWith(
-                                  color: AppTheme.error.withValues(alpha: 0.7),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Icon(
-                          LucideIcons.chevronRight,
-                          color: AppTheme.error,
-                          size: 20,
-                        ),
-                      ],
-                    ),
-                  ),
+                ),
+                const SizedBox(height: 8),
+                // Delete account (App Store / Play Store policy)
+                _AccountActionTile(
+                  icon: LucideIcons.trash2,
+                  title: 'Excluir minha conta',
+                  subtitle: 'Remover permanentemente seus dados',
+                  isDestructive: true,
+                  onTap: () => DeleteAccountHelper.showConfirmation(context, ref),
                 ),
               ],
             ),
@@ -1433,6 +1525,13 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   Widget _buildSaveButton() {
@@ -1737,6 +1836,90 @@ class _ModernSwitch extends StatelessWidget {
               value: value,
               onChanged: disabled ? null : onChanged,
               activeColor: effectiveColor,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Tile used inside the admin "Conta" card for legal links,
+/// sign-out and account deletion. Mirrors the visual styling
+/// of _ModernSwitch but acts as a tap target.
+class _AccountActionTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final bool isDestructive;
+  final VoidCallback onTap;
+
+  const _AccountActionTile({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+    this.subtitle,
+    this.isDestructive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = isDestructive ? AppTheme.error : AppTheme.textPrimary;
+    final bgColor = isDestructive
+        ? AppTheme.error.withValues(alpha: 0.05)
+        : AppTheme.surfaceVariant;
+    final borderColor = isDestructive
+        ? AppTheme.error.withValues(alpha: 0.2)
+        : AppTheme.divider;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: isDestructive ? 0.1 : 0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: accent, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: accent,
+                    ),
+                  ),
+                  if (subtitle != null)
+                    Text(
+                      subtitle!,
+                      style: AppTheme.labelSmall.copyWith(
+                        color: isDestructive
+                            ? accent.withValues(alpha: 0.7)
+                            : AppTheme.textSecondary,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Icon(
+              LucideIcons.chevronRight,
+              color: isDestructive ? accent : AppTheme.textSecondary,
+              size: 20,
             ),
           ],
         ),

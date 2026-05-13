@@ -96,6 +96,8 @@ class AcademySettings {
   // Auto-graduation Settings
   final bool autoGraduationEnabled;
   final int? autoGraduationAttendances;
+  /// When true, attendance counts use Class.weight instead of 1 per doc.
+  final bool useClassWeights;
 
   // Store Settings
   final bool storeEnabled;
@@ -138,6 +140,7 @@ class AcademySettings {
     this.asaasKycOnboardingUrl,
     this.autoGraduationEnabled = false,
     this.autoGraduationAttendances,
+    this.useClassWeights = false,
     this.storeEnabled = false,
     this.storePublished = false,
     this.storeCreditCardEnabled = false,
@@ -178,6 +181,7 @@ class AcademySettings {
       asaasKycOnboardingUrl: data['asaasKycOnboardingUrl'],
       autoGraduationEnabled: data['autoGraduationEnabled'] ?? false,
       autoGraduationAttendances: data['autoGraduationAttendances'],
+      useClassWeights: data['useClassWeights'] ?? false,
       storeEnabled: data['storeEnabled'] ?? false,
       storePublished: data['storePublished'] ?? false,
       storeCreditCardEnabled: data['storeCreditCardEnabled'] ?? false,
@@ -365,6 +369,16 @@ class SettingsService {
       data['autoGraduationAttendances'] = attendances;
     }
     await _academyRef.update(data);
+  }
+
+  // ============================================
+  // Toggle Class Weights Feature
+  // ============================================
+  Future<void> updateUseClassWeights(bool enabled) async {
+    await _academyRef.update({
+      'useClassWeights': enabled,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   // ============================================
