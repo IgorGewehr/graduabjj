@@ -262,12 +262,18 @@ class AcademyDetail {
   final UserRole role;
   final DateTime joinedAt;
   final String status; // 'active' | 'inactive' | 'pending'
+  /// Permissions granted on top of the role's defaults. Only meaningful for
+  /// `instructor` — the academy owner can opt instructors into extra
+  /// capabilities (e.g. financial:view) without promoting them to admin.
+  /// Stored as raw strings ("financial:view") to match the web side.
+  final List<String> extraPermissions;
 
   AcademyDetail({
     this.studentId,
     required this.role,
     required this.joinedAt,
     this.status = 'active',
+    this.extraPermissions = const [],
   });
 
   factory AcademyDetail.fromMap(Map<String, dynamic> data) {
@@ -276,6 +282,9 @@ class AcademyDetail {
       role: UserRoleExtension.fromString(data['role'] ?? 'student'),
       joinedAt: _parseDate(data['joinedAt']) ?? DateTime.now(),
       status: data['status'] ?? 'active',
+      extraPermissions: data['extraPermissions'] is List
+          ? List<String>.from(data['extraPermissions'])
+          : const [],
     );
   }
 
@@ -285,6 +294,7 @@ class AcademyDetail {
       'role': role.value,
       'joinedAt': Timestamp.fromDate(joinedAt),
       'status': status,
+      if (extraPermissions.isNotEmpty) 'extraPermissions': extraPermissions,
     };
   }
 }
