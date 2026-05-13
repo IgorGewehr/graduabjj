@@ -324,18 +324,24 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           .where((s) => !_presentStudentIds.contains(s.id))
           .toList();
 
-      // Execute all operations in parallel for better performance
-      await Future.wait(
-        studentsToMark.map((student) => attendanceService.markPresent(
-          studentId: student.id,
-          studentName: student.fullName,
-          classId: _selectedClass!.id,
-          className: _selectedClass!.name,
-          verifiedBy: 'admin',
-          verifiedByName: 'Administrador',
-          date: _selectedDate,
-          weight: _selectedClass!.effectiveWeight(),
-        )),
+      if (studentsToMark.isEmpty) {
+        if (mounted) context.showInfo('Todos ja estavam marcados.');
+        return;
+      }
+
+      // bulkMarkPresent collapses everything into a single Firestore batch —
+      // one round trip total instead of ~3N (insert + counter update + read)
+      // that the previous Future.wait+markPresent path was producing.
+      await attendanceService.bulkMarkPresent(
+        students: studentsToMark
+            .map((s) => (studentId: s.id, studentName: s.fullName))
+            .toList(),
+        classId: _selectedClass!.id,
+        className: _selectedClass!.name,
+        verifiedBy: 'admin',
+        verifiedByName: 'Administrador',
+        date: _selectedDate,
+        weight: _selectedClass!.effectiveWeight(),
       );
 
       // Update local state
@@ -388,15 +394,13 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       if (currentUser?.academyId == null) return;
 
       final attendanceService = AttendanceService(currentUser!.academyId!);
-      final studentIdsToRemove = _presentStudentIds.toList();
 
-      // Execute all operations in parallel for better performance
-      await Future.wait(
-        studentIdsToRemove.map((studentId) => attendanceService.unmarkPresent(
-          studentId,
-          _selectedClass!.id,
-          _selectedDate,
-        )),
+      // bulkUnmarkPresent collapses the previous N parallel unmarkPresent
+      // calls (each: query + delete + counter update = 3 round trips per
+      // student) into a single query + single batch commit.
+      final removed = await attendanceService.bulkUnmarkPresent(
+        classId: _selectedClass!.id,
+        date: _selectedDate,
       );
 
       setState(() {
@@ -404,7 +408,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       });
 
       if (mounted) {
-        context.showInfo('Presencas removidas!');
+        context.showInfo('$removed presencas removidas!');
       }
     } catch (e) {
       if (mounted) {
@@ -487,18 +491,22 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/admin/chamada/qr'),
-        icon: const Icon(LucideIcons.qrCode, size: 18),
-        label: const Text('Chamada por QR'),
-        backgroundColor: AppTheme.primary,
-        foregroundColor: Colors.white,
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadData,
-              child: CustomScrollView(
+      floatingActionButton: _isSaving
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => context.push('/admin/chamada/qr'),
+              icon: const Icon(LucideIcons.qrCode, size: 18),
+              label: const Text('Chamada por QR'),
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+            ),
+      body: Stack(
+        children: [
+          _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                  onRefresh: _loadData,
+                  child: CustomScrollView(
                 slivers: [
                   // Class + Date Selectors
                   SliverToBoxAdapter(
@@ -553,6 +561,46 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                 ],
               ),
             ),
+          // Loading overlay: covers the screen while a bulk operation runs.
+          // Blocks taps and shows a clear "doing work" affordance — without
+          // this the user sees a frozen UI for several seconds with no signal.
+          if (_isSaving)
+            Positioned.fill(
+              child: AbsorbPointer(
+                absorbing: true,
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  alignment: Alignment.center,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 20),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        ),
+                        const SizedBox(width: 14),
+                        Text(
+                          'Processando presencas...',
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

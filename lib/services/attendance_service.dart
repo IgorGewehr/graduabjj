@@ -358,6 +358,17 @@ class AttendanceService {
 
   // ============================================
   // Bulk Mark Students as Present
+  //
+  // Optimized for "mark all" operations on a full class: everything ships in
+  // a SINGLE Firestore WriteBatch — both the attendance docs and the
+  // denormalized student.attendanceCount increments. This collapses what used
+  // to be ~3N round trips (N inserts + N counter updates + N doc reads) into
+  // one round trip total. Milestone checks remain fire-and-forget afterwards
+  // since they only matter for rare ~50/100/200/etc thresholds.
+  //
+  // Firestore caps batches at 500 writes — we shard automatically when the
+  // input exceeds that. With weight + counter, each student costs 2 writes,
+  // so we cap students per batch at 240 to stay safely under the limit.
   // ============================================
   Future<List<Attendance>> bulkMarkPresent({
     required List<({String studentId, String studentName})> students,
@@ -369,60 +380,130 @@ class AttendanceService {
     double? weight,
   }) async {
     final attendanceDate = date ?? DateTime.now();
+    final now = DateTime.now();
     final results = <Attendance>[];
 
-    // Get already present students
+    // Get already present students (single query)
     final presentIds = await getPresentStudentIds(classId, date: attendanceDate);
 
-    final batch = FirebaseService.firestore.batch();
-    final newRecords = <DocumentReference>[];
+    // Filter once
+    final toMark = students.where((s) => !presentIds.contains(s.studentId)).toList();
+    if (toMark.isEmpty) return results;
 
-    for (final student in students) {
-      // Skip if already present
-      if (presentIds.contains(student.studentId)) continue;
+    // Shard into batches of 240 students (≤ 480 writes, under Firestore's 500 cap)
+    const int batchStudentLimit = 240;
+    for (int start = 0; start < toMark.length; start += batchStudentLimit) {
+      final end = (start + batchStudentLimit).clamp(0, toMark.length);
+      final shard = toMark.sublist(start, end);
 
-      final docRef = _attendanceRef.doc();
-      final payload = <String, dynamic>{
-        'studentId': student.studentId,
-        'studentName': student.studentName,
-        'classId': classId,
-        'className': className,
-        'date': Timestamp.fromDate(attendanceDate),
-        'verifiedBy': verifiedBy,
-        'verifiedByName': verifiedByName,
-        'createdAt': FieldValue.serverTimestamp(),
-      };
-      if (weight != null && weight != 1.0) {
-        payload['weight'] = weight;
+      final batch = FirebaseService.firestore.batch();
+
+      for (final student in shard) {
+        // 1) Attendance doc
+        final docRef = _attendanceRef.doc();
+        final payload = <String, dynamic>{
+          'studentId': student.studentId,
+          'studentName': student.studentName,
+          'classId': classId,
+          'className': className,
+          'date': Timestamp.fromDate(attendanceDate),
+          'verifiedBy': verifiedBy,
+          'verifiedByName': verifiedByName,
+          'createdAt': FieldValue.serverTimestamp(),
+        };
+        if (weight != null && weight != 1.0) {
+          payload['weight'] = weight;
+        }
+        batch.set(docRef, payload);
+
+        // 2) Student counter increment — in the SAME batch (was a separate
+        // serial loop before, costing N extra round trips for a class of 30)
+        batch.update(_collections.student(student.studentId), {
+          'attendanceCount': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // Build result locally — no doc.get() needed
+        results.add(Attendance(
+          id: docRef.id,
+          studentId: student.studentId,
+          studentName: student.studentName,
+          classId: classId,
+          className: className,
+          date: attendanceDate,
+          verifiedBy: verifiedBy,
+          verifiedByName: verifiedByName,
+          weight: (weight != null && weight != 1.0) ? weight : null,
+          createdAt: now,
+        ));
       }
-      batch.set(docRef, payload);
-      newRecords.add(docRef);
+
+      await batch.commit();
     }
 
-    await batch.commit();
-
-    // Update attendance counts for new records
-    for (final student in students) {
-      if (!presentIds.contains(student.studentId)) {
-        await _updateStudentAttendanceCount(student.studentId, 1);
-      }
-    }
-
-    // Fetch created records
-    for (final docRef in newRecords) {
-      final doc = await docRef.get();
-      final attendance = Attendance.fromFirestore(doc);
-      results.add(attendance);
-
-      // Check for milestones (fire and forget)
+    // Milestones: fire-and-forget after the batch is durable.
+    for (final student in toMark) {
       checkAttendanceMilestone(
-        attendance.studentId,
-        attendance.studentName,
+        student.studentId,
+        student.studentName,
         verifiedBy,
       ).ignore();
     }
 
     return results;
+  }
+
+  // ============================================
+  // Bulk Unmark Present (batched delete + counter decrement)
+  //
+  // Single Firestore query to locate today's attendance docs for the class,
+  // then one WriteBatch deletes them all and decrements each student's
+  // attendanceCount. Replaces the previous Future.wait(N×unmarkPresent) which
+  // produced 3N round trips for a 30-student class.
+  // ============================================
+  Future<int> bulkUnmarkPresent({
+    required String classId,
+    required DateTime date,
+  }) async {
+    final start = _startOfDay(date);
+    final end = _endOfDay(date);
+
+    // Single query for the day's attendance in this class
+    final snap = await _attendanceRef
+        .where('classId', isEqualTo: classId)
+        .get();
+
+    final matching = snap.docs.where((d) {
+      final data = d.data() as Map<String, dynamic>;
+      final docDate = (data['date'] as Timestamp?)?.toDate();
+      return docDate != null &&
+          docDate.isAfter(start.subtract(const Duration(seconds: 1))) &&
+          docDate.isBefore(end.add(const Duration(seconds: 1)));
+    }).toList();
+    if (matching.isEmpty) return 0;
+
+    const int batchLimit = 240; // 2 writes per student = under 500 cap
+    int removed = 0;
+    for (int s = 0; s < matching.length; s += batchLimit) {
+      final e = (s + batchLimit).clamp(0, matching.length);
+      final shard = matching.sublist(s, e);
+
+      final batch = FirebaseService.firestore.batch();
+      for (final doc in shard) {
+        final data = doc.data() as Map<String, dynamic>;
+        final sid = data['studentId'] as String?;
+        batch.delete(doc.reference);
+        if (sid != null && sid.isNotEmpty) {
+          batch.update(_collections.student(sid), {
+            'attendanceCount': FieldValue.increment(-1),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+      await batch.commit();
+      removed += shard.length;
+    }
+    return removed;
   }
 
   // ============================================
