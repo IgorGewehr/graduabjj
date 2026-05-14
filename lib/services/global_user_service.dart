@@ -178,6 +178,7 @@ class GlobalUserService {
     required String academyId,
     String? studentId,
     required UserRole role,
+    List<String>? extraPermissions,
   }) async {
     final mappingRef = RootCollections.userAcademyMappingDoc(userId);
     final userRef = RootCollections.user(userId);
@@ -187,12 +188,16 @@ class GlobalUserService {
     final currentMapping =
         mappingSnap.exists ? mappingSnap.data() as Map<String, dynamic>? : null;
 
-    final academyDetail = {
+    final academyDetail = <String, dynamic>{
       'studentId': studentId,
       'role': role.value,
       'joinedAt': FieldValue.serverTimestamp(),
       'status': 'active',
     };
+    // Only persist extraPermissions when meaningful (instructor + non-empty).
+    if (extraPermissions != null && extraPermissions.isNotEmpty) {
+      academyDetail['extraPermissions'] = extraPermissions;
+    }
 
     if (currentMapping != null) {
       // Update existing mapping

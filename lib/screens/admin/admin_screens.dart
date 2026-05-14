@@ -4,6 +4,7 @@ export 'admin_dashboard_screen.dart';
 export 'students_list_screen.dart';
 export 'attendance_screen.dart';
 export 'qr_session_screen.dart';
+export 'team_tab_content.dart';
 export 'financial_screen.dart';
 export 'graduation_screen.dart';
 export 'settings_screen.dart';

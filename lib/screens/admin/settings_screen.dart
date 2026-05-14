@@ -19,6 +19,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../widgets/common/delete_account_helper.dart';
+import 'team_tab_content.dart';
 
 /// Admin Settings Screen - Fintech style matching webapp
 class AdminSettingsScreen extends ConsumerStatefulWidget {
@@ -72,7 +73,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   String? _kycOnboardingUrl;
   bool _isCheckingKyc = false;
 
-  final _tabs = ['Academia', 'Financeiro', 'Monitores', 'Funcionalidades'];
+  final _tabs = ['Academia', 'Financeiro', 'Monitores', 'Funcionalidades', 'Equipe'];
 
   @override
   void initState() {
@@ -546,6 +547,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         return _buildMonitorsTab();
       case 3:
         return _buildFeaturesTab();
+      case 4:
+        return const TeamTabContent();
       default:
         return const SizedBox.shrink();
     }

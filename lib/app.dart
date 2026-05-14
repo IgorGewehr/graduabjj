@@ -12,6 +12,7 @@ import 'services/push_notification_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/auth/link_code_screen.dart';
+import 'screens/auth/instructor_code_screen.dart';
 import 'screens/auth/create_academy_screen.dart';
 import 'screens/portal/portal_shell.dart';
 import 'screens/portal/home_screen.dart';
@@ -490,6 +491,14 @@ final routerProvider = Provider<GoRouter>((ref) {
           context: context,
           state: state,
           child: const LinkCodeScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/codigo-equipe',
+        pageBuilder: (context, state) => _buildPageWithPushTransition(
+          context: context,
+          state: state,
+          child: const InstructorCodeScreen(),
         ),
       ),
       GoRoute(

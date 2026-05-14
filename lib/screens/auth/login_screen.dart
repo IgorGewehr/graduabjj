@@ -290,7 +290,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                   ).animate().fadeIn(delay: 900.ms),
 
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 8),
+
+                  TextButton(
+                    onPressed: () => context.push('/codigo-equipe'),
+                    child: Text(
+                      'Recebi codigo de equipe (instrutor)',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ).animate().fadeIn(delay: 950.ms),
+
+                  const SizedBox(height: 24),
 
                   // Legal links
                   Row(

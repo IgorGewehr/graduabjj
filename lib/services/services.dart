@@ -13,6 +13,7 @@ export 'competition_enrollment_service.dart';
 export 'plan_service.dart';
 export 'settings_service.dart';
 export 'link_code_service.dart';
+export 'instructor_link_code_service.dart';
 export 'belt_progression_service.dart';
 export 'notification_service.dart';
 export 'notification_dispatcher.dart';
