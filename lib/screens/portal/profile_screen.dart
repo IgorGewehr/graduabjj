@@ -11,6 +11,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../models/user.dart';
 import '../../providers/providers.dart';
+import '../../widgets/common/delete_account_helper.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/profile_photo_picker.dart';
 
@@ -404,10 +405,12 @@ class ProfileScreen extends ConsumerWidget {
   }
 
   Widget _buildEmptyState() {
-    return Center(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          const SizedBox(height: 80),
           Icon(LucideIcons.userX, size: 48, color: AppTheme.textDisabled),
           const SizedBox(height: 16),
           Text(
@@ -420,6 +423,10 @@ class ProfileScreen extends ConsumerWidget {
             style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
             textAlign: TextAlign.center,
           ),
+          const SizedBox(height: 40),
+          // Account section always visible for account deletion
+          _AccountSection(),
+          const SizedBox(height: 80),
         ],
       ),
     );
@@ -1605,6 +1612,13 @@ class _AccountSection extends ConsumerWidget {
           ),
           child: Column(
             children: [
+              // Change password
+              _AccountTile(
+                icon: LucideIcons.lock,
+                title: 'Trocar senha',
+                onTap: () => _showChangePasswordDialog(context, ref),
+              ),
+              const Divider(height: 1),
               // Legal links
               _AccountTile(
                 icon: LucideIcons.fileText,
@@ -1623,7 +1637,7 @@ class _AccountSection extends ConsumerWidget {
                 icon: LucideIcons.trash2,
                 title: 'Excluir minha conta',
                 isDestructive: true,
-                onTap: () => _showDeleteAccountDialog(context, ref),
+                onTap: () => DeleteAccountHelper.showConfirmation(context, ref),
               ),
             ],
           ),
@@ -1639,87 +1653,212 @@ class _AccountSection extends ConsumerWidget {
     }
   }
 
-  Future<void> _showDeleteAccountDialog(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
+  void _showChangePasswordDialog(BuildContext context, WidgetRef ref) {
+    showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Excluir conta'),
-        content: const Text(
-          'Tem certeza que deseja excluir sua conta? Esta acao nao pode ser desfeita.\n\n'
-          'Todos os seus dados serao removidos permanentemente.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
-            child: const Text('Excluir'),
-          ),
-        ],
+      builder: (_) => _ChangePasswordDialog(
+        onSubmit: (current, next) async {
+          final authService = ref.read(authServiceProvider);
+          await authService.updatePassword(
+            currentPassword: current,
+            newPassword: next,
+          );
+        },
       ),
     );
+  }
+}
 
-    if (confirmed == true && context.mounted) {
-      // Show second confirmation
-      final finalConfirm = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Confirmacao final'),
-          content: const Text(
-            'Esta e sua ultima chance. Todos os dados serao perdidos:\n\n'
-            '- Historico de treinos\n'
-            '- Graduacoes\n'
-            '- Resultados de competicoes\n'
-            '- Dados pessoais\n\n'
-            'Deseja continuar?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.error),
-              child: const Text('Excluir permanentemente'),
-            ),
-          ],
-        ),
-      );
+/// Dialog that asks for current password + new password + confirmation, then
+/// triggers reauth + update. Validates new password length and confirmation
+/// match client-side; Firebase errors (`wrong-password`,
+/// `requires-recent-login`, etc.) are surfaced inline.
+class _ChangePasswordDialog extends StatefulWidget {
+  final Future<void> Function(String currentPassword, String newPassword)
+      onSubmit;
 
-      if (finalConfirm == true && context.mounted) {
-        await _deleteAccount(context, ref);
-      }
+  const _ChangePasswordDialog({required this.onSubmit});
+
+  @override
+  State<_ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
+  final _currentController = TextEditingController();
+  final _newController = TextEditingController();
+  final _confirmController = TextEditingController();
+  bool _showCurrent = false;
+  bool _showNew = false;
+  bool _saving = false;
+  bool _success = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _currentController.dispose();
+    _newController.dispose();
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final cur = _currentController.text;
+    final next = _newController.text;
+    final conf = _confirmController.text;
+
+    if (cur.isEmpty) {
+      setState(() => _error = 'Informe sua senha atual.');
+      return;
+    }
+    if (next.length < 6) {
+      setState(() => _error = 'A nova senha precisa ter pelo menos 6 caracteres.');
+      return;
+    }
+    if (next != conf) {
+      setState(() => _error = 'A confirmacao nao bate com a nova senha.');
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.onSubmit(cur, next);
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _success = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = _mapError(e);
+      });
     }
   }
 
-  Future<void> _deleteAccount(BuildContext context, WidgetRef ref) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
-
-    try {
-      final authService = ref.read(authServiceProvider);
-      await authService.deleteAccount();
-      // User will be automatically redirected to login by auth state change
-    } catch (e) {
-      if (context.mounted) {
-        Navigator.pop(context); // Remove loading
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString().replaceAll('Exception: ', '')),
-            backgroundColor: AppTheme.error,
-          ),
-        );
-      }
+  String _mapError(Object e) {
+    final s = e.toString();
+    if (s.contains('wrong-password') || s.contains('invalid-credential')) {
+      return 'Senha atual incorreta.';
     }
+    if (s.contains('requires-recent-login')) {
+      return 'Por seguranca, saia e entre novamente antes de trocar a senha.';
+    }
+    if (s.contains('weak-password')) {
+      return 'Senha muito fraca. Use ao menos 6 caracteres.';
+    }
+    return 'Erro ao trocar a senha. Tente novamente.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_success ? 'Senha atualizada' : 'Trocar senha'),
+      content: _success
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(LucideIcons.checkCircle, color: AppTheme.success, size: 36),
+                const SizedBox(height: 12),
+                Text(
+                  'Sua senha foi alterada com sucesso.',
+                  style: AppTheme.bodyMedium,
+                ),
+              ],
+            )
+          : SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: _currentController,
+                    obscureText: !_showCurrent,
+                    enabled: !_saving,
+                    decoration: InputDecoration(
+                      labelText: 'Senha atual',
+                      prefixIcon: const Icon(LucideIcons.lock, size: 18),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _showCurrent ? LucideIcons.eyeOff : LucideIcons.eye,
+                          size: 18,
+                        ),
+                        onPressed: () =>
+                            setState(() => _showCurrent = !_showCurrent),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _newController,
+                    obscureText: !_showNew,
+                    enabled: !_saving,
+                    decoration: InputDecoration(
+                      labelText: 'Nova senha',
+                      prefixIcon: const Icon(LucideIcons.key, size: 18),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _showNew ? LucideIcons.eyeOff : LucideIcons.eye,
+                          size: 18,
+                        ),
+                        onPressed: () => setState(() => _showNew = !_showNew),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _confirmController,
+                    obscureText: !_showNew,
+                    enabled: !_saving,
+                    decoration: const InputDecoration(
+                      labelText: 'Confirmar nova senha',
+                      prefixIcon: Icon(LucideIcons.key, size: 18),
+                    ),
+                    onSubmitted: (_) => _submit(),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _error!,
+                      style: AppTheme.labelSmall.copyWith(color: AppTheme.error),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+      actions: _success
+          ? [
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ]
+          : [
+              TextButton(
+                onPressed:
+                    _saving ? null : () => Navigator.of(context).pop(),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: _saving ? null : _submit,
+                child: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Text('Salvar'),
+              ),
+            ],
+    );
   }
 }
 

@@ -225,6 +225,30 @@ class AuthService {
     await _auth.sendPasswordResetEmail(email: email);
   }
 
+  /// Change the current user's password.
+  ///
+  /// Firebase requires a recent re-authentication for sensitive operations
+  /// like updating the password; if the cached credential is too old the call
+  /// throws `requires-recent-login`. We reauthenticate explicitly with the
+  /// user's current password first so the caller always gets a deterministic
+  /// success/fail without surprise prompts.
+  Future<void> updatePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null || user.email == null) {
+      throw Exception('Usuario nao autenticado');
+    }
+
+    final credential = EmailAuthProvider.credential(
+      email: user.email!,
+      password: currentPassword,
+    );
+    await user.reauthenticateWithCredential(credential);
+    await user.updatePassword(newPassword);
+  }
+
   /// Delete user account and all associated data
   /// This is required by Google Play Store policy
   Future<void> deleteAccount() async {

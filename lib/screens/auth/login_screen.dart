@@ -82,38 +82,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _handleForgotPassword() async {
-    final email = _emailController.text.trim();
-    if (email.isEmpty || !email.contains('@')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Digite seu email primeiro'),
-          backgroundColor: AppTheme.warning,
-        ),
-      );
-      return;
-    }
-
-    try {
-      final authService = ref.read(authServiceProvider);
-      await authService.resetPassword(email);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Email de recuperacao enviado para $email'),
-            backgroundColor: AppTheme.success,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Erro ao enviar email. Verifique o endereco.'),
-            backgroundColor: AppTheme.error,
-          ),
-        );
-      }
-    }
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _ForgotPasswordDialog(
+        initialEmail: _emailController.text.trim(),
+        onSubmit: (email) async {
+          final authService = ref.read(authServiceProvider);
+          await authService.resetPassword(email);
+        },
+      ),
+    );
   }
 
   @override
@@ -352,6 +330,165 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Modal dedicated to the "forgot password" flow.
+///
+/// Replaces the previous snackbar-based flow where the user could miss the
+/// feedback (snackbars time out after a few seconds and the original
+/// implementation also bailed silently when the email field was empty).
+/// Here the user sees a clear loading state, gets a confirmation screen on
+/// success, and any Firebase error is shown inside the dialog itself.
+class _ForgotPasswordDialog extends StatefulWidget {
+  final String initialEmail;
+  final Future<void> Function(String email) onSubmit;
+
+  const _ForgotPasswordDialog({
+    required this.initialEmail,
+    required this.onSubmit,
+  });
+
+  @override
+  State<_ForgotPasswordDialog> createState() => _ForgotPasswordDialogState();
+}
+
+class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
+  late final TextEditingController _emailController;
+  bool _isSending = false;
+  bool _sent = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController = TextEditingController(text: widget.initialEmail);
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => _error = 'Digite um email válido.');
+      return;
+    }
+    setState(() {
+      _isSending = true;
+      _error = null;
+    });
+    try {
+      await widget.onSubmit(email);
+      if (!mounted) return;
+      setState(() {
+        _isSending = false;
+        _sent = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSending = false;
+        _error = _mapAuthError(e);
+      });
+    }
+  }
+
+  String _mapAuthError(Object e) {
+    final s = e.toString();
+    if (s.contains('user-not-found')) {
+      return 'Email nao cadastrado.';
+    }
+    if (s.contains('invalid-email')) {
+      return 'Email invalido.';
+    }
+    if (s.contains('too-many-requests')) {
+      return 'Muitas tentativas. Tente novamente em alguns minutos.';
+    }
+    return 'Erro ao enviar email. Tente novamente.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_sent ? 'Email enviado' : 'Recuperar senha'),
+      content: _sent
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(LucideIcons.checkCircle,
+                    color: AppTheme.success, size: 36),
+                const SizedBox(height: 12),
+                Text(
+                  'Enviamos um link de recuperacao para ${_emailController.text.trim()}.',
+                  style: AppTheme.bodyMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Verifique tambem sua caixa de spam.',
+                  style: AppTheme.labelSmall
+                      .copyWith(color: AppTheme.textSecondary),
+                ),
+              ],
+            )
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Digite seu email cadastrado. Enviaremos um link para criar uma nova senha.',
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  autofocus: true,
+                  enabled: !_isSending,
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    prefixIcon: const Icon(LucideIcons.mail, size: 18),
+                    errorText: _error,
+                  ),
+                  onSubmitted: (_) => _submit(),
+                ),
+              ],
+            ),
+      actions: _sent
+          ? [
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ]
+          : [
+              TextButton(
+                onPressed:
+                    _isSending ? null : () => Navigator.of(context).pop(),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: _isSending ? null : _submit,
+                child: _isSending
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Text('Enviar'),
+              ),
+            ],
     );
   }
 }
