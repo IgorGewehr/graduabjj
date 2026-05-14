@@ -39,7 +39,18 @@ class BeltProgression {
   final String newBelt;
   final int newStripes;
   final DateTime promotionDate;
+  /// Simple attendance count at the time of promotion (kept for back-compat
+  /// and reporting). When the academy uses class weights, this still records
+  /// the *raw* count of attendances — the weighted snapshot lives in
+  /// [effectiveCountAtPromotion].
   final int totalClasses;
+  /// Snapshot of the value that was compared against the academy's
+  /// graduation threshold at the moment of this promotion. For weighted
+  /// academies this is the weighted sum; otherwise it equals totalClasses.
+  /// Used by checkEligibility to count attendances *since the last
+  /// promotion* — preventing the "graduate at 75, become instantly eligible
+  /// again at 82" bug.
+  final int? effectiveCountAtPromotion;
   final String? promotedBy;
   final String? promotedByName;
   final String? notes;
@@ -55,6 +66,7 @@ class BeltProgression {
     required this.newStripes,
     required this.promotionDate,
     required this.totalClasses,
+    this.effectiveCountAtPromotion,
     this.promotedBy,
     this.promotedByName,
     this.notes,
@@ -64,6 +76,11 @@ class BeltProgression {
 
   /// Returns the effective sport for this progression (backward compat: absent = 'bjj')
   SportId getSport() => SportId.fromString(sport ?? 'bjj');
+
+  /// Returns the count to subtract from a current attendance total when
+  /// computing "attendances since this promotion". Falls back to totalClasses
+  /// for legacy docs that don't have effectiveCountAtPromotion stored.
+  int get baselineCount => effectiveCountAtPromotion ?? totalClasses;
 
   factory BeltProgression.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -76,6 +93,9 @@ class BeltProgression {
       newStripes: data['newStripes'] ?? 0,
       promotionDate: (data['promotionDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
       totalClasses: data['totalClasses'] ?? 0,
+      effectiveCountAtPromotion: data['effectiveCountAtPromotion'] is int
+          ? data['effectiveCountAtPromotion'] as int
+          : null,
       promotedBy: data['promotedBy'],
       promotedByName: data['promotedByName'],
       notes: data['notes'],
@@ -282,6 +302,28 @@ class BeltProgressionService {
     }
   }
 
+  /// Returns the baseline count to subtract when computing "attendances since
+  /// the last promotion" for [studentId] in [sportId]. If the student has
+  /// never been promoted in this sport, returns 0 — every attendance counts.
+  /// Otherwise returns the value that was the comparison snapshot at the
+  /// time of their most recent promotion in this sport.
+  ///
+  /// Optionally accepts the student's full progression list so callers
+  /// looping over many students can avoid re-querying per call.
+  Future<int> getLastPromotionBaseline(
+    String studentId, {
+    SportId sportId = SportId.bjj,
+    List<BeltProgression>? progressionsHint,
+  }) async {
+    final progressions = progressionsHint ?? await getByStudent(studentId);
+    final forSport = progressions
+        .where((p) => p.getSport() == sportId)
+        .toList()
+      ..sort((a, b) => b.promotionDate.compareTo(a.promotionDate));
+    if (forSport.isEmpty) return 0;
+    return forSport.first.baselineCount;
+  }
+
   /// Sums Attendance.weight (defaulting to 1 for legacy docs) for a student.
   /// Use when [AcademyGraduationConfig.useClassWeights] is true.
   Future<int> getWeightedAttendanceCount(String studentId) async {
@@ -345,10 +387,20 @@ class BeltProgressionService {
     final initial = (data['initialAttendanceCount'] ?? 0) as int;
     final totalClasses = systemCount + initial;
 
+    // Subtract the snapshot at the last promotion so we count only
+    // attendances accumulated *since* that promotion. The mestre may have
+    // chosen to wait past the threshold (e.g. promoted at 82 with target 75)
+    // — those 7 extra do NOT carry over to the next graduation.
+    final baseline = await getLastPromotionBaseline(
+      studentId,
+      sportId: sportId,
+    );
+    final sinceLastPromotion = (totalClasses - baseline).clamp(0, totalClasses);
+
     return checkEligibility(
       currentBelt: currentBelt,
       currentStripes: currentStripes,
-      totalClasses: totalClasses,
+      totalClasses: sinceLastPromotion,
       sportId: sportId,
       category: category,
       config: cfg,
@@ -363,6 +415,40 @@ class BeltProgressionService {
   }) async {
     final cfg = await loadAcademyConfig();
     final snap = await _studentsRef.where('status', isEqualTo: 'active').get();
+
+    // Pre-fetch the most recent promotion per student in one query, so the
+    // per-student loop below doesn't trigger N progression reads.
+    final progSnap = await _progressionsRef
+        .where('sport', isEqualTo: sportId.value)
+        .get();
+    final baselineByStudent = <String, int>{};
+    for (final p in progSnap.docs) {
+      final bp = BeltProgression.fromFirestore(p);
+      final existing = baselineByStudent[bp.studentId];
+      // Keep the latest baseline only (sorted by promotionDate desc).
+      if (existing == null) {
+        baselineByStudent[bp.studentId] = bp.baselineCount;
+      } else {
+        // Re-evaluate: we sort the docs after collecting; here just keep
+        // the highest baseline (last promotion has the biggest snapshot).
+        baselineByStudent[bp.studentId] =
+            bp.baselineCount > existing ? bp.baselineCount : existing;
+      }
+    }
+    // Also include BJJ progressions without a sport field (legacy data).
+    if (sportId == SportId.bjj) {
+      final legacy = await _progressionsRef.get();
+      for (final p in legacy.docs) {
+        final data = p.data() as Map<String, dynamic>;
+        if (data['sport'] != null) continue; // skip already-sport-tagged docs
+        final bp = BeltProgression.fromFirestore(p);
+        final existing = baselineByStudent[bp.studentId];
+        if (existing == null || bp.baselineCount > existing) {
+          baselineByStudent[bp.studentId] = bp.baselineCount;
+        }
+      }
+    }
+
     final results = <EligibilitySnapshotEntry>[];
     for (final doc in snap.docs) {
       final data = doc.data() as Map<String, dynamic>;
@@ -390,11 +476,13 @@ class BeltProgressionService {
       }
       final initial = (data['initialAttendanceCount'] ?? 0) as int;
       final total = systemCount + initial;
+      final baseline = baselineByStudent[doc.id] ?? 0;
+      final sinceLastPromotion = (total - baseline).clamp(0, total);
 
       final e = checkEligibility(
         currentBelt: currentBelt,
         currentStripes: currentStripes,
-        totalClasses: total,
+        totalClasses: sinceLastPromotion,
         sportId: sportId,
         category: category,
         config: cfg,
@@ -546,6 +634,20 @@ class BeltProgressionService {
     final totalClasses = (studentData['initialAttendanceCount'] ?? 0) +
         (studentData['attendanceCount'] ?? 0);
 
+    // Snapshot the value that was compared against the academy threshold so
+    // future checkEligibility calls can count "presenças desde a graduação"
+    // instead of accumulating over the student's lifetime. When the academy
+    // uses class weights, this is the weighted sum at promotion time.
+    final config = await loadAcademyConfig();
+    int effectiveCount;
+    if (config.useClassWeights) {
+      final systemCount = await getWeightedAttendanceCount(studentId);
+      final initial = (studentData['initialAttendanceCount'] ?? 0) as int;
+      effectiveCount = systemCount + initial;
+    } else {
+      effectiveCount = totalClasses;
+    }
+
     final sportLabel = getSport(sportId).label;
     final gradeLabelStr = getGradeLabel(sportId, newBelt);
 
@@ -558,6 +660,7 @@ class BeltProgressionService {
       'newStripes': newStripes,
       'promotionDate': FieldValue.serverTimestamp(),
       'totalClasses': totalClasses,
+      'effectiveCountAtPromotion': effectiveCount,
       'promotedBy': promotedBy,
       'promotedByName': promotedByName,
       'notes': notes,
