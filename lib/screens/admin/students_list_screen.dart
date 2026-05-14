@@ -9,6 +9,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
+import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/sport_chip.dart';
 
@@ -203,9 +204,20 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         onRefresh: _loadStudents,
         child: CustomScrollView(
           slivers: [
-            // Header
+            // Multi-academy aware header — shows current academy + switcher
             SliverToBoxAdapter(
-              child: _buildHeader(),
+              child: AcademyPageHeader(
+                icon: LucideIcons.users,
+                title: 'Alunos',
+                description: '${_students.length} alunos cadastrados',
+                actions: [
+                  IconButton(
+                    onPressed: _loadStudents,
+                    icon: const Icon(LucideIcons.refreshCw, size: 20),
+                    tooltip: 'Atualizar',
+                  ),
+                ],
+              ),
             ),
 
             // Search and filters

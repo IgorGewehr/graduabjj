@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../widgets/common/academy_page_header.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -163,56 +164,40 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   }
 
   Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-      child: Row(
-        children: [
-          // Refresh button
-          IconButton(
-            onPressed: _loadData,
-            icon: const Icon(LucideIcons.refreshCw, size: 20),
-            style: IconButton.styleFrom(
-              backgroundColor: AppTheme.surface,
-              foregroundColor: AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Paying students button
-          IconButton(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => PayingStudentsScreen(
-                  students: _students,
-                  plans: _plans,
-                ),
+    return AcademyPageHeader(
+      icon: LucideIcons.dollarSign,
+      title: 'Financeiro',
+      description: 'Mensalidades e pagamentos',
+      actions: [
+        IconButton(
+          onPressed: _loadData,
+          icon: const Icon(LucideIcons.refreshCw, size: 20),
+          tooltip: 'Atualizar',
+        ),
+        IconButton(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PayingStudentsScreen(
+                students: _students,
+                plans: _plans,
               ),
             ),
-            icon: const Icon(LucideIcons.users, size: 20),
-            tooltip: 'Alunos Pagantes',
-            style: IconButton.styleFrom(
-              backgroundColor: AppTheme.surface,
-              foregroundColor: AppTheme.textSecondary,
+          ),
+          icon: const Icon(LucideIcons.users, size: 20),
+          tooltip: 'Alunos Pagantes',
+        ),
+        IconButton(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const AdminFinancialReportsScreen(),
             ),
           ),
-          const Spacer(),
-          // Reports button
-          IconButton(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const AdminFinancialReportsScreen(),
-              ),
-            ),
-            icon: const Icon(LucideIcons.barChart2, size: 20),
-            tooltip: 'Relatórios Detalhados',
-            style: IconButton.styleFrom(
-              backgroundColor: AppTheme.surface,
-              foregroundColor: AppTheme.textSecondary,
-            ),
-          ),
-        ],
-      ),
+          icon: const Icon(LucideIcons.barChart2, size: 20),
+          tooltip: 'Relatórios',
+        ),
+      ],
     );
   }
 
