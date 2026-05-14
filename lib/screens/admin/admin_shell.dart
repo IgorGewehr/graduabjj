@@ -273,6 +273,13 @@ class AdminSidebar extends ConsumerWidget {
                   path: '/admin/configuracoes',
                   currentPath: currentPath,
                 ),
+                _NavItem(
+                  icon: Icons.key_outlined,
+                  activeIcon: Icons.key,
+                  label: 'Código de equipe',
+                  path: '/codigo-equipe',
+                  currentPath: currentPath,
+                ),
               ],
             ),
           ),

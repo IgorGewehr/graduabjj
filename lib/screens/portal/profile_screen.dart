@@ -1619,6 +1619,14 @@ class _AccountSection extends ConsumerWidget {
                 onTap: () => _showChangePasswordDialog(context, ref),
               ),
               const Divider(height: 1),
+              // Redeem instructor code (for users invited as instructor in
+              // another academy — they enter the 8-char code here)
+              _AccountTile(
+                icon: LucideIcons.key,
+                title: 'Resgatar código de equipe',
+                onTap: () => context.push('/codigo-equipe'),
+              ),
+              const Divider(height: 1),
               // Legal links
               _AccountTile(
                 icon: LucideIcons.fileText,

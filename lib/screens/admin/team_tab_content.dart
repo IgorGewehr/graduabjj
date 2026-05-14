@@ -5,8 +5,10 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/instructor_link_code_service.dart';
+import '../../services/student_service.dart';
 
 /// Team management tab for academy admins.
 ///
@@ -67,6 +69,15 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
     );
   }
 
+  Future<void> _openPromoteDialog() async {
+    final user = ref.read(currentUserProvider).valueOrNull;
+    if (user?.academyId == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _PromoteDialog(academyId: user!.academyId!),
+    );
+  }
+
   Future<void> _copyCode(String code) async {
     await Clipboard.setData(ClipboardData(text: code));
     if (!mounted) return;
@@ -119,13 +130,24 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
               ),
             ),
             const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _service == null ? null : _openInviteDialog,
-                icon: const Icon(LucideIcons.userPlus, size: 16),
-                label: const Text('Convidar professor'),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _service == null ? null : _openPromoteDialog,
+                    icon: const Icon(LucideIcons.arrowUpCircle, size: 16),
+                    label: const Text('Promover aluno'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _service == null ? null : _openInviteDialog,
+                    icon: const Icon(LucideIcons.userPlus, size: 16),
+                    label: const Text('Convidar professor'),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 24),
             Text(
@@ -438,6 +460,237 @@ class _InviteDialogState extends State<_InviteDialog> {
                         ),
                       )
                     : const Text('Gerar codigo'),
+              ),
+            ],
+    );
+  }
+}
+
+/// Promote an existing linked student to instructor with optional extra
+/// permissions. Mirrors the web PromoteDialog.
+class _PromoteDialog extends ConsumerStatefulWidget {
+  final String academyId;
+  const _PromoteDialog({required this.academyId});
+
+  @override
+  ConsumerState<_PromoteDialog> createState() => _PromoteDialogState();
+}
+
+class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
+  final _searchController = TextEditingController();
+  final Set<String> _extras = {};
+  List<Student> _candidates = const [];
+  Student? _selected;
+  bool _loading = true;
+  bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStudents();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadStudents() async {
+    try {
+      final svc = StudentService(widget.academyId);
+      final all = await svc.listAll();
+      if (!mounted) return;
+      setState(() {
+        _candidates =
+            all.where((s) => (s.linkedUserId ?? '').isNotEmpty).toList();
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  List<Student> get _filtered {
+    final q = _searchController.text.trim().toLowerCase();
+    if (q.isEmpty) return _candidates;
+    return _candidates.where((s) {
+      return s.fullName.toLowerCase().contains(q) ||
+          (s.nickname?.toLowerCase().contains(q) ?? false) ||
+          (s.email?.toLowerCase().contains(q) ?? false);
+    }).toList();
+  }
+
+  Future<void> _submit() async {
+    if (_selected == null || (_selected!.linkedUserId ?? '').isEmpty) return;
+    setState(() => _submitting = true);
+    try {
+      await promoteUserToInstructor(
+        userId: _selected!.linkedUserId!,
+        academyId: widget.academyId,
+        extraPermissions: _extras.toList(),
+        email: _selected!.email,
+        displayName: _selected!.fullName,
+      );
+      if (!mounted) return;
+      context.showSuccess('${_selected!.fullName} promovido a instrutor.');
+      Navigator.of(context).pop();
+    } catch (_) {
+      if (!mounted) return;
+      context.showError('Erro ao promover aluno.');
+      setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(
+        _selected == null
+            ? 'Promover aluno a instrutor'
+            : 'Promover ${_selected!.fullName}',
+      ),
+      content: SizedBox(
+        width: 500,
+        child: _selected != null
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'O aluno mantem o acesso ao portal de aluno, mas passa a ver os recursos de instrutor com as permissoes selecionadas.',
+                    style: AppTheme.bodySmall
+                        .copyWith(color: AppTheme.textSecondary),
+                  ),
+                  const SizedBox(height: 12),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: kGrantableExtraPermissions
+                            .map(
+                              (def) => CheckboxListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                value: _extras.contains(def.permission),
+                                onChanged: _submitting
+                                    ? null
+                                    : (v) {
+                                        setState(() {
+                                          if (v == true) {
+                                            _extras.add(def.permission);
+                                          } else {
+                                            _extras.remove(def.permission);
+                                          }
+                                        });
+                                      },
+                                title: Text(def.label,
+                                    style: AppTheme.bodyMedium.copyWith(
+                                        fontWeight: FontWeight.w500)),
+                                subtitle: Text(
+                                  def.description,
+                                  style: AppTheme.labelSmall.copyWith(
+                                      color: AppTheme.textSecondary),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Apenas alunos com conta criada aparecem na lista.',
+                    style: AppTheme.bodySmall
+                        .copyWith(color: AppTheme.textSecondary),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _searchController,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      hintText: 'Buscar por nome ou email...',
+                      prefixIcon: Icon(LucideIcons.search, size: 16),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: _loading
+                        ? const Center(child: CircularProgressIndicator())
+                        : _filtered.isEmpty
+                            ? Center(
+                                child: Text(
+                                  'Nenhum aluno encontrado.',
+                                  style: AppTheme.bodyMedium.copyWith(
+                                      color: AppTheme.textSecondary),
+                                ),
+                              )
+                            : ListView.separated(
+                                shrinkWrap: true,
+                                itemCount: _filtered.length,
+                                separatorBuilder: (_, __) =>
+                                    const Divider(height: 1),
+                                itemBuilder: (_, i) {
+                                  final s = _filtered[i];
+                                  return ListTile(
+                                    leading: CircleAvatar(
+                                      radius: 16,
+                                      backgroundImage: (s.photoUrl ?? '')
+                                              .isNotEmpty
+                                          ? NetworkImage(s.photoUrl!)
+                                          : null,
+                                      child: (s.photoUrl ?? '').isEmpty
+                                          ? Text(
+                                              s.fullName
+                                                  .substring(0, 1)
+                                                  .toUpperCase(),
+                                            )
+                                          : null,
+                                    ),
+                                    title: Text(s.fullName),
+                                    subtitle: Text(s.email ?? '—'),
+                                    onTap: () => setState(() {
+                                      _selected = s;
+                                    }),
+                                  );
+                                },
+                              ),
+                  ),
+                ],
+              ),
+      ),
+      actions: _selected != null
+          ? [
+              TextButton(
+                onPressed:
+                    _submitting ? null : () => setState(() => _selected = null),
+                child: const Text('Voltar'),
+              ),
+              ElevatedButton(
+                onPressed: _submitting ? null : _submit,
+                child: _submitting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Text('Promover a instrutor'),
+              ),
+            ]
+          : [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancelar'),
               ),
             ],
     );

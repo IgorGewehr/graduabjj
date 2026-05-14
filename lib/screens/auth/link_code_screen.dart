@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/instructor_link_code_service.dart';
 import '../../services/link_code_service.dart';
 
 /// Link Code Screen - Create account using access code
@@ -37,6 +39,15 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
   String? _errorMessage;
   LinkCode? _validatedLinkCode;
 
+  // Instructor flow state. Populated when the entered code is 8 chars and
+  // resolves in /instructorLinkCodes — switches the form to a minimal
+  // name+email+password layout and routes submit to redeemInstructorCode.
+  InstructorLinkCode? _validatedInstructorCode;
+  String? _validatedInstructorAcademyId;
+  final _fullNameController = TextEditingController();
+
+  bool get _isInstructorMode => _validatedInstructorCode != null;
+
   @override
   void dispose() {
     _codeController.dispose();
@@ -45,6 +56,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _fullNameController.dispose();
     super.dispose();
   }
 
@@ -88,14 +100,39 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _validatedLinkCode = null;
+      _validatedInstructorCode = null;
+      _validatedInstructorAcademyId = null;
     });
 
+    final raw = _codeController.text.trim().toUpperCase();
+
     try {
-      // Use global validation (collectionGroup) to search across ALL academies
-      // This is critical for multi-tenant support during registration
-      final validation = await validateCodeGlobally(_codeController.text.trim().toUpperCase());
+      // Dispatch by length: 6 = student linkCode, 8 = instructor invite.
+      if (raw.length == 8) {
+        final found = await validateInstructorCodeGlobally(raw);
+        if (!mounted) return;
+        if (found == null) {
+          setState(() {
+            _errorMessage = 'Codigo nao encontrado, expirado ou ja utilizado.';
+            _isLoading = false;
+          });
+          return;
+        }
+        setState(() {
+          _validatedInstructorCode = found.code;
+          _validatedInstructorAcademyId = found.academyId;
+          _currentStep = _Step.register;
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // Student flow (6 chars).
+      final validation = await validateCodeGlobally(raw);
 
       if (!validation.valid) {
+        if (!mounted) return;
         setState(() {
           _errorMessage = validation.error;
           _isLoading = false;
@@ -103,15 +140,107 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         return;
       }
 
+      if (!mounted) return;
       setState(() {
         _validatedLinkCode = validation.linkCode;
         _currentStep = _Step.register;
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Erro ao validar codigo. Tente novamente.';
         _isLoading = false;
+      });
+    }
+  }
+
+  /// Instructor signup: creates the Firebase Auth user, writes the root
+  /// `users/{uid}` doc, then calls [redeemInstructorCode] which links the
+  /// user to the academy as `instructor` with extraPermissions and marks
+  /// the invite as used.
+  Future<void> _createInstructorAccount() async {
+    if (_validatedInstructorCode == null ||
+        _validatedInstructorAcademyId == null) return;
+    if (_fullNameController.text.trim().isEmpty) {
+      setState(() => _errorMessage = 'Informe seu nome completo.');
+      return;
+    }
+    if (_passwordController.text.length < 6) {
+      setState(() => _errorMessage =
+          'A senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+    if (_passwordController.text != _confirmPasswordController.text) {
+      setState(() => _errorMessage = 'As senhas nao coincidem.');
+      return;
+    }
+    if (_validatedInstructorCode!.isExpired) {
+      setState(() {
+        _errorMessage = 'Este codigo expirou. Solicite um novo.';
+        _currentStep = _Step.code;
+        _validatedInstructorCode = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _currentStep = _Step.creating;
+    });
+
+    try {
+      final email = _emailController.text.trim();
+      final displayName = _fullNameController.text.trim();
+      final credential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(
+        email: email,
+        password: _passwordController.text,
+      );
+      final user = credential.user;
+      if (user == null) throw Exception('No user returned from Firebase Auth');
+      await user.updateDisplayName(displayName);
+
+      // Root /users/{uid} doc so subsequent updates by linkUserToAcademy can
+      // bump accountType to "linked" without failing on a missing doc.
+      await FirebaseFirestore.instance.doc('users/${user.uid}').set({
+        'email': email,
+        'displayName': displayName,
+        'accountType': 'free',
+        'isActive': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      await redeemInstructorCode(
+        code: _validatedInstructorCode!,
+        academyId: _validatedInstructorAcademyId!,
+        userId: user.uid,
+        userEmail: email,
+        userDisplayName: displayName,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _currentStep = _Step.success;
+        _isLoading = false;
+      });
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _currentStep = _Step.register;
+        _isLoading = false;
+        _errorMessage = e.code == 'email-already-in-use'
+            ? 'Email ja em uso. Faca login e use "Recebi codigo de equipe".'
+            : 'Erro ao criar conta: ${e.message}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _currentStep = _Step.register;
+        _isLoading = false;
+        _errorMessage = 'Erro ao criar conta. Tente novamente.';
       });
     }
   }
@@ -472,7 +601,9 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
                         ),
                       ),
                       Text(
-                        'Aluno: ${_validatedLinkCode!.studentName}',
+                        _isInstructorMode
+                            ? 'Convite de ${_validatedInstructorCode!.createdByName}'
+                            : 'Aluno: ${_validatedLinkCode!.studentName}',
                         style: AppTheme.bodySmall.copyWith(
                           color: AppTheme.success,
                         ),
@@ -550,73 +681,80 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
           const SizedBox(height: 16),
 
-          // CPF field
-          TextFormField(
-            controller: _cpfController,
-            keyboardType: TextInputType.number,
-            textInputAction: TextInputAction.next,
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[\d.\-]')),
-              LengthLimitingTextInputFormatter(14), // 000.000.000-00
-            ],
-            onChanged: (value) {
-              final formatted = _formatCpf(value);
-              if (formatted != _cpfController.text) {
-                _cpfController.value = TextEditingValue(
-                  text: formatted,
-                  selection: TextSelection.collapsed(offset: formatted.length),
-                );
-              }
-            },
-            decoration: const InputDecoration(
-              labelText: 'CPF',
-              hintText: '000.000.000-00',
-              prefixIcon: Icon(LucideIcons.fileText, size: 20),
-            ),
-            validator: (value) {
-              if (value == null || value.isEmpty) {
-                return 'Informe seu CPF';
-              }
-              final digits = value.replaceAll(RegExp(r'\D'), '');
-              if (digits.length != 11) {
-                return 'CPF deve ter 11 digitos';
-              }
-              if (!_validateCpf(value)) {
-                return 'CPF invalido';
-              }
-              return null;
-            },
-          ).animate().fadeIn(delay: 350.ms).slideX(begin: -0.1),
-
-          const SizedBox(height: 16),
-
-          // WhatsApp field
-          TextFormField(
-            controller: _phoneController,
-            keyboardType: TextInputType.phone,
-            textInputAction: TextInputAction.next,
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(11),
-            ],
-            decoration: const InputDecoration(
-              labelText: 'WhatsApp',
-              hintText: '11999999999',
-              prefixIcon: Icon(LucideIcons.phone, size: 20),
-            ),
-            validator: (value) {
-              if (value == null || value.isEmpty) {
-                return 'Informe seu WhatsApp';
-              }
-              final digits = value.replaceAll(RegExp(r'\D'), '');
-              if (digits.length < 10) {
-                return 'WhatsApp deve ter pelo menos 10 digitos';
-              }
-              return null;
-            },
-          ).animate().fadeIn(delay: 375.ms).slideX(begin: -0.1),
-
-          const SizedBox(height: 16),
+          // Instructor: full name field (student name comes from linkCode)
+          if (_isInstructorMode) ...[
+            TextFormField(
+              controller: _fullNameController,
+              keyboardType: TextInputType.name,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Nome completo',
+                prefixIcon: Icon(LucideIcons.user, size: 20),
+              ),
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Informe seu nome' : null,
+            ).animate().fadeIn(delay: 350.ms).slideX(begin: -0.1),
+            const SizedBox(height: 16),
+          ] else ...[
+            // CPF field (student only)
+            TextFormField(
+              controller: _cpfController,
+              keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.next,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[\d.\-]')),
+                LengthLimitingTextInputFormatter(14),
+              ],
+              onChanged: (value) {
+                final formatted = _formatCpf(value);
+                if (formatted != _cpfController.text) {
+                  _cpfController.value = TextEditingValue(
+                    text: formatted,
+                    selection: TextSelection.collapsed(offset: formatted.length),
+                  );
+                }
+              },
+              decoration: const InputDecoration(
+                labelText: 'CPF',
+                hintText: '000.000.000-00',
+                prefixIcon: Icon(LucideIcons.fileText, size: 20),
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) return 'Informe seu CPF';
+                final digits = value.replaceAll(RegExp(r'\D'), '');
+                if (digits.length != 11) return 'CPF deve ter 11 digitos';
+                if (!_validateCpf(value)) return 'CPF invalido';
+                return null;
+              },
+            ).animate().fadeIn(delay: 350.ms).slideX(begin: -0.1),
+            const SizedBox(height: 16),
+            // WhatsApp field (student only)
+            TextFormField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              textInputAction: TextInputAction.next,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(11),
+              ],
+              decoration: const InputDecoration(
+                labelText: 'WhatsApp',
+                hintText: '11999999999',
+                prefixIcon: Icon(LucideIcons.phone, size: 20),
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Informe seu WhatsApp';
+                }
+                final digits = value.replaceAll(RegExp(r'\D'), '');
+                if (digits.length < 10) {
+                  return 'WhatsApp deve ter pelo menos 10 digitos';
+                }
+                return null;
+              },
+            ).animate().fadeIn(delay: 375.ms).slideX(begin: -0.1),
+            const SizedBox(height: 16),
+          ],
 
           // Email field
           TextFormField(
@@ -710,11 +848,15 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
           const SizedBox(height: 32),
 
-          // Create account button
+          // Create account button (instructor uses dedicated handler)
           SizedBox(
             height: 52,
             child: ElevatedButton(
-              onPressed: _isLoading ? null : _createAccount,
+              onPressed: _isLoading
+                  ? null
+                  : (_isInstructorMode
+                      ? _createInstructorAccount
+                      : _createAccount),
               child: _isLoading
                   ? const SizedBox(
                       width: 20,

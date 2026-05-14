@@ -177,6 +177,36 @@ Future<({InstructorLinkCode code, String academyId})?>
   return null;
 }
 
+/// Promote an existing user (already linked to the academy) to instructor.
+/// Keeps studentId intact so the user still has access to their student
+/// portal data, but switches role and stamps extraPermissions. Idempotent:
+/// calling twice rewrites permissions instead of stacking.
+Future<void> promoteUserToInstructor({
+  required String userId,
+  required String academyId,
+  required List<String> extraPermissions,
+  String? email,
+  String? displayName,
+}) async {
+  final mappingRef = FirebaseService.firestore.doc('userAcademyMapping/$userId');
+  await mappingRef.set({
+    'academyDetails.$academyId.role': 'instructor',
+    'academyDetails.$academyId.extraPermissions': extraPermissions,
+    'updatedAt': FieldValue.serverTimestamp(),
+  }, SetOptions(merge: true));
+
+  await globalUserService.upsertAcademyUser(
+    academyId: academyId,
+    userId: userId,
+    data: {
+      'role': 'instructor',
+      if (email != null) 'email': email,
+      if (displayName != null) 'displayName': displayName,
+      'status': 'active',
+    },
+  );
+}
+
 /// Redeem a code: link user to the academy as instructor + persist
 /// extraPermissions + mark the code as used.
 Future<void> redeemInstructorCode({
