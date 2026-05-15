@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/selected_academy_provider.dart';
+import '../cached_image.dart';
 
 /// Standard page header used on admin screens that scope their data to the
 /// current academy (Alunos, Financeiro, Equipe, etc).
@@ -41,19 +42,24 @@ class AcademyPageHeader extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final mapping = ref.watch(userAcademyMappingProvider).valueOrNull;
-    final academyIds = mapping?.academyIds ?? const <String>[];
+    // Only watch the small derived bits we actually render — `.select` keeps
+    // this header (used on most pages) inert when other fields of the
+    // mapping/info change.
+    final academyIds = ref.watch(
+      userAcademyMappingProvider.select(
+        (m) => m.valueOrNull?.academyIds ?? const <String>[],
+      ),
+    );
     final hasMultiple = academyIds.length > 1;
-    final currentInfo = ref.watch(currentAcademyInfoProvider);
-    final academyName = currentInfo?.name;
+    final academyName = ref.watch(
+      currentAcademyInfoProvider.select((info) => info?.name),
+    );
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       decoration: BoxDecoration(
         color: AppTheme.surface,
-        border: Border(
-          bottom: BorderSide(color: AppTheme.divider),
-        ),
+        border: Border(bottom: BorderSide(color: AppTheme.divider)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -86,8 +92,9 @@ class AcademyPageHeader extends ConsumerWidget {
                     if (description != null)
                       Text(
                         description!,
-                        style: AppTheme.bodySmall
-                            .copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -103,7 +110,10 @@ class AcademyPageHeader extends ConsumerWidget {
               onTap: hasMultiple ? () => _openSwitcher(context, ref) : null,
               borderRadius: BorderRadius.circular(999),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(999),
@@ -111,8 +121,11 @@ class AcademyPageHeader extends ConsumerWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(LucideIcons.building2,
-                        size: 12, color: AppTheme.primary),
+                    const Icon(
+                      LucideIcons.building2,
+                      size: 12,
+                      color: AppTheme.primary,
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       academyName ?? 'Academia',
@@ -123,8 +136,11 @@ class AcademyPageHeader extends ConsumerWidget {
                     ),
                     if (hasMultiple) ...[
                       const SizedBox(width: 4),
-                      Icon(LucideIcons.chevronDown,
-                          size: 12, color: AppTheme.primary),
+                      const Icon(
+                        LucideIcons.chevronDown,
+                        size: 12,
+                        color: AppTheme.primary,
+                      ),
                     ],
                   ],
                 ),
@@ -156,8 +172,7 @@ class _AcademySwitcherSheet extends ConsumerWidget {
           children: [
             Text(
               'Trocar academia',
-              style: AppTheme.titleMedium
-                  .copyWith(fontWeight: FontWeight.w700),
+              style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 12),
             academiesAsync.when(
@@ -169,8 +184,9 @@ class _AcademySwitcherSheet extends ConsumerWidget {
                 padding: const EdgeInsets.all(16),
                 child: Text(
                   'Erro ao carregar academias.',
-                  style: AppTheme.bodyMedium
-                      .copyWith(color: AppTheme.textSecondary),
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
               ),
               data: (infos) => Column(
@@ -180,32 +196,39 @@ class _AcademySwitcherSheet extends ConsumerWidget {
                   final isPrimary = mapping?.primaryAcademyId == info.id;
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: CircleAvatar(
-                      backgroundColor: AppTheme.primary
-                          .withValues(alpha: isCurrent ? 0.2 : 0.08),
-                      backgroundImage: (info.logoUrl ?? '').isNotEmpty
-                          ? NetworkImage(info.logoUrl!)
-                          : null,
+                    leading: AppCachedAvatar(
+                      imageUrl: info.logoUrl,
+                      backgroundColor: AppTheme.primary.withValues(
+                        alpha: isCurrent ? 0.2 : 0.08,
+                      ),
                       child: (info.logoUrl ?? '').isEmpty
-                          ? Icon(LucideIcons.building2,
-                              size: 18, color: AppTheme.primary)
+                          ? Icon(
+                              LucideIcons.building2,
+                              size: 18,
+                              color: AppTheme.primary,
+                            )
                           : null,
                     ),
                     title: Text(
                       info.name,
                       style: AppTheme.bodyMedium.copyWith(
-                        fontWeight:
-                            isCurrent ? FontWeight.w700 : FontWeight.w500,
+                        fontWeight: isCurrent
+                            ? FontWeight.w700
+                            : FontWeight.w500,
                       ),
                     ),
                     subtitle: Text(
                       '${detail != null ? detail.role.value : 'aluno'}${isPrimary ? ' • Principal' : ''}',
-                      style: AppTheme.labelSmall
-                          .copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                     trailing: isCurrent
-                        ? Icon(LucideIcons.check,
-                            size: 18, color: AppTheme.primary)
+                        ? Icon(
+                            LucideIcons.check,
+                            size: 18,
+                            color: AppTheme.primary,
+                          )
                         : null,
                     onTap: isCurrent
                         ? null

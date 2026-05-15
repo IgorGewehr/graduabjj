@@ -70,7 +70,9 @@ extension StoreStockTypeExtension on StoreStockType {
   }
 
   static StoreStockType fromString(String value) {
-    return value == 'in_stock' ? StoreStockType.inStock : StoreStockType.onDemand;
+    return value == 'in_stock'
+        ? StoreStockType.inStock
+        : StoreStockType.onDemand;
   }
 }
 
@@ -81,7 +83,7 @@ enum StoreOrderStatus {
   preparing,
   ready,
   delivered,
-  cancelled
+  cancelled,
 }
 
 extension StoreOrderStatusExtension on StoreOrderStatus {
@@ -178,11 +180,15 @@ class StoreProduct {
       name: data['name'] ?? '',
       description: data['description'],
       price: (data['price'] ?? 0).toDouble(),
-      category: StoreProductCategoryExtension.fromString(data['category'] ?? 'other'),
+      category: StoreProductCategoryExtension.fromString(
+        data['category'] ?? 'other',
+      ),
       imageUrls: data['images'] != null
           ? List<String>.from(data['images'])
           : [],
-      stockType: StoreStockTypeExtension.fromString(data['stockType'] ?? 'in_stock'),
+      stockType: StoreStockTypeExtension.fromString(
+        data['stockType'] ?? 'in_stock',
+      ),
       stockQuantity: data['stockQuantity'],
       sizes: data['sizes'] != null ? List<String>.from(data['sizes']) : null,
       colors: data['colors'] != null ? List<String>.from(data['colors']) : null,
@@ -226,7 +232,8 @@ class StoreOrderItem {
     return StoreOrderItem(
       productId: map['productId'] ?? '',
       productName: map['productName'] ?? '',
-      price: (map['price'] ?? map['unitPrice'] ?? 0).toDouble(), // Support both 'price' and 'unitPrice' field names
+      price: (map['price'] ?? map['unitPrice'] ?? 0)
+          .toDouble(), // Support both 'price' and 'unitPrice' field names
       quantity: map['quantity'] ?? 1,
       size: map['size'],
       color: map['color'],
@@ -302,15 +309,18 @@ class StoreOrder {
       studentName: data['studentName'] ?? '',
       items: data['items'] != null
           ? (data['items'] as List)
-              .map((item) => StoreOrderItem.fromMap(item))
-              .toList()
+                .map((item) => StoreOrderItem.fromMap(item))
+                .toList()
           : [],
       total: (data['total'] ?? data['totalAmount'] ?? 0).toDouble(),
-      status: StoreOrderStatusExtension.fromString(data['status'] ?? 'pending_payment'),
+      status: StoreOrderStatusExtension.fromString(
+        data['status'] ?? 'pending_payment',
+      ),
       notes: data['notes'],
       pixCode: data['pixCode'],
       pixQrCode: data['pixQrCode'],
-      externalPaymentId: data['externalPaymentId'] ?? data['abacatePayTransactionId'],
+      externalPaymentId:
+          data['externalPaymentId'] ?? data['abacatePayTransactionId'],
       paidAt: data['paidAt'] != null
           ? (data['paidAt'] as Timestamp).toDate()
           : null,
@@ -330,7 +340,8 @@ class StoreOrder {
 
   String get formattedTotal => 'R\$ ${total.toStringAsFixed(2)}';
   bool get isPending => status == StoreOrderStatus.pendingPayment;
-  bool get isPaid => status == StoreOrderStatus.paid ||
+  bool get isPaid =>
+      status == StoreOrderStatus.paid ||
       status == StoreOrderStatus.preparing ||
       status == StoreOrderStatus.ready ||
       status == StoreOrderStatus.delivered;
@@ -357,9 +368,39 @@ class StoreService {
   /// Get all products
   Future<List<StoreProduct>> getProducts() async {
     final snapshot = await _productsRef.get();
-    var products = snapshot.docs.map((doc) => StoreProduct.fromFirestore(doc)).toList();
+    var products = snapshot.docs
+        .map((doc) => StoreProduct.fromFirestore(doc))
+        .toList();
     products.sort((a, b) => a.name.compareTo(b.name));
     return products;
+  }
+
+  /// Get products — PAGINATED (Sprint 5)
+  ///
+  /// Cursor pagination using `startAfterDocument`. Returns a slice of products
+  /// ordered by `name` ascending. A single-field index on `name` is created
+  /// automatically by Firestore — no manual `firestore.indexes.json` entry
+  /// required. Use [activeOnly] to skip soft-disabled products at query time.
+  Future<({List<StoreProduct> items, DocumentSnapshot? lastDoc})>
+  getProductsPaginated({
+    int limit = 12,
+    DocumentSnapshot? startAfter,
+    bool activeOnly = false,
+  }) async {
+    Query query = _productsRef;
+    if (activeOnly) {
+      query = query.where('active', isEqualTo: true);
+    }
+    query = query.orderBy('name').limit(limit);
+    if (startAfter != null) {
+      query = query.startAfterDocument(startAfter);
+    }
+
+    final snap = await query.get();
+    final items = snap.docs
+        .map((doc) => StoreProduct.fromFirestore(doc))
+        .toList();
+    return (items: items, lastDoc: snap.docs.isEmpty ? null : snap.docs.last);
   }
 
   /// Get active products only
@@ -376,7 +417,9 @@ class StoreService {
   }
 
   /// Get products by category
-  Future<List<StoreProduct>> getProductsByCategory(StoreProductCategory category) async {
+  Future<List<StoreProduct>> getProductsByCategory(
+    StoreProductCategory category,
+  ) async {
     final products = await getActiveProducts();
     return products.where((p) => p.category == category).toList();
   }
@@ -398,6 +441,7 @@ class StoreService {
     List<String>? colors,
   }) async {
     final docRef = await _productsRef.add({
+      'academyId': academyId,
       'name': name,
       'description': description,
       'price': price,
@@ -417,7 +461,10 @@ class StoreService {
   }
 
   /// Update product
-  Future<StoreProduct> updateProduct(String id, Map<String, dynamic> data) async {
+  Future<StoreProduct> updateProduct(
+    String id,
+    Map<String, dynamic> data,
+  ) async {
     data['updatedAt'] = FieldValue.serverTimestamp();
     await _productsRef.doc(id).update(data);
     final doc = await _productsRef.doc(id).get();
@@ -452,7 +499,9 @@ class StoreService {
   /// Get all orders
   Future<List<StoreOrder>> getOrders() async {
     final snapshot = await _ordersRef.get();
-    var orders = snapshot.docs.map((doc) => StoreOrder.fromFirestore(doc)).toList();
+    var orders = snapshot.docs
+        .map((doc) => StoreOrder.fromFirestore(doc))
+        .toList();
     orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return orders;
   }
@@ -468,18 +517,46 @@ class StoreService {
     final query = await _ordersRef
         .where('studentId', isEqualTo: studentId)
         .get();
-    var orders = query.docs.map((doc) => StoreOrder.fromFirestore(doc)).toList();
+    var orders = query.docs
+        .map((doc) => StoreOrder.fromFirestore(doc))
+        .toList();
     orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return orders;
   }
 
+  /// Get orders by student — PAGINATED (Sprint 5)
+  ///
+  /// Composite index required: `storeOrders` (studentId ASC, createdAt DESC)
+  /// — already declared in `firestore.indexes.json`.
+  Future<({List<StoreOrder> items, DocumentSnapshot? lastDoc})>
+  getOrdersByStudentPaginated(
+    String studentId, {
+    int limit = 15,
+    DocumentSnapshot? startAfter,
+  }) async {
+    Query query = _ordersRef
+        .where('studentId', isEqualTo: studentId)
+        .orderBy('createdAt', descending: true)
+        .limit(limit);
+    if (startAfter != null) {
+      query = query.startAfterDocument(startAfter);
+    }
+
+    final snap = await query.get();
+    final items = snap.docs
+        .map((doc) => StoreOrder.fromFirestore(doc))
+        .toList();
+    return (items: items, lastDoc: snap.docs.isEmpty ? null : snap.docs.last);
+  }
+
   /// Stream orders by student (Real-time updates)
   Stream<List<StoreOrder>> streamOrdersByStudent(String studentId) {
-    return _ordersRef
-        .where('studentId', isEqualTo: studentId)
-        .snapshots()
-        .map((snapshot) {
-      var orders = snapshot.docs.map((doc) => StoreOrder.fromFirestore(doc)).toList();
+    return _ordersRef.where('studentId', isEqualTo: studentId).snapshots().map((
+      snapshot,
+    ) {
+      var orders = snapshot.docs
+          .map((doc) => StoreOrder.fromFirestore(doc))
+          .toList();
       orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       return orders;
     });
@@ -488,7 +565,9 @@ class StoreService {
   /// Stream all orders (Real-time updates)
   Stream<List<StoreOrder>> streamOrders() {
     return _ordersRef.snapshots().map((snapshot) {
-      var orders = snapshot.docs.map((doc) => StoreOrder.fromFirestore(doc)).toList();
+      var orders = snapshot.docs
+          .map((doc) => StoreOrder.fromFirestore(doc))
+          .toList();
       orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       return orders;
     });
@@ -497,12 +576,15 @@ class StoreService {
   /// Stream pending orders (Real-time updates)
   Stream<List<StoreOrder>> streamPendingOrders() {
     return streamOrders().map((orders) {
-      return orders.where((o) =>
-          o.status == StoreOrderStatus.pendingPayment ||
-          o.status == StoreOrderStatus.paid ||
-          o.status == StoreOrderStatus.preparing ||
-          o.status == StoreOrderStatus.ready
-      ).toList();
+      return orders
+          .where(
+            (o) =>
+                o.status == StoreOrderStatus.pendingPayment ||
+                o.status == StoreOrderStatus.paid ||
+                o.status == StoreOrderStatus.preparing ||
+                o.status == StoreOrderStatus.ready,
+          )
+          .toList();
     });
   }
 
@@ -516,12 +598,15 @@ class StoreService {
   /// Get pending orders
   Future<List<StoreOrder>> getPendingOrders() async {
     final orders = await getOrders();
-    return orders.where((o) =>
-        o.status == StoreOrderStatus.pendingPayment ||
-        o.status == StoreOrderStatus.paid ||
-        o.status == StoreOrderStatus.preparing ||
-        o.status == StoreOrderStatus.ready
-    ).toList();
+    return orders
+        .where(
+          (o) =>
+              o.status == StoreOrderStatus.pendingPayment ||
+              o.status == StoreOrderStatus.paid ||
+              o.status == StoreOrderStatus.preparing ||
+              o.status == StoreOrderStatus.ready,
+        )
+        .toList();
   }
 
   // ============================================
@@ -558,20 +643,26 @@ class StoreService {
         final availableStock = product.stockQuantity ?? 0;
         if (availableStock < item.quantity) {
           throw Exception(
-            'Estoque insuficiente para "${product.name}". Disponivel: $availableStock, Solicitado: ${item.quantity}'
+            'Estoque insuficiente para "${product.name}". Disponivel: $availableStock, Solicitado: ${item.quantity}',
           );
         }
       }
 
       // Validate size if product has sizes
-      if (product.sizes != null && product.sizes!.isNotEmpty && item.size != null) {
+      if (product.sizes != null &&
+          product.sizes!.isNotEmpty &&
+          item.size != null) {
         if (!product.sizes!.contains(item.size)) {
-          throw Exception('Tamanho invalido para "${product.name}": ${item.size}');
+          throw Exception(
+            'Tamanho invalido para "${product.name}": ${item.size}',
+          );
         }
       }
 
       // Validate color if product has colors
-      if (product.colors != null && product.colors!.isNotEmpty && item.color != null) {
+      if (product.colors != null &&
+          product.colors!.isNotEmpty &&
+          item.color != null) {
         if (!product.colors!.contains(item.color)) {
           throw Exception('Cor invalida para "${product.name}": ${item.color}');
         }
@@ -612,7 +703,8 @@ class StoreService {
         await _notificationDispatcher.notifyStoreOrder(
           adminUserId: adminUserIdToNotify,
           studentName: studentName,
-          total: (total * 100).toInt(), // Convert Reais to cents for notification
+          total: (total * 100)
+              .toInt(), // Convert Reais to cents for notification
           orderId: order.id,
         );
       } catch (e) {
@@ -624,12 +716,16 @@ class StoreService {
   }
 
   /// Update order status
-  Future<StoreOrder> updateOrderStatus(String id, StoreOrderStatus status) async {
+  Future<StoreOrder> updateOrderStatus(
+    String id,
+    StoreOrderStatus status,
+  ) async {
     final order = await getOrderById(id);
     if (order == null) throw Exception('Pedido nao encontrado');
 
     // If changing to "paid" status, validate and decrement stock
-    if (status == StoreOrderStatus.paid && order.status == StoreOrderStatus.pendingPayment) {
+    if (status == StoreOrderStatus.paid &&
+        order.status == StoreOrderStatus.pendingPayment) {
       // SECURITY: Validate stock before payment (prevent race conditions)
       for (final item in order.items) {
         final product = await getProductById(item.productId);
@@ -642,7 +738,7 @@ class StoreService {
           if (availableStock < item.quantity) {
             throw Exception(
               'Estoque insuficiente para "${product.name}".\n'
-              'Disponivel: $availableStock, Solicitado: ${item.quantity}'
+              'Disponivel: $availableStock, Solicitado: ${item.quantity}',
             );
           }
         }
@@ -683,7 +779,10 @@ class StoreService {
       for (final item in order.items) {
         final product = await getProductById(item.productId);
         if (product != null && product.stockType == StoreStockType.inStock) {
-          await updateStock(item.productId, (product.stockQuantity ?? 0) + item.quantity);
+          await updateStock(
+            item.productId,
+            (product.stockQuantity ?? 0) + item.quantity,
+          );
         }
       }
     }
@@ -711,7 +810,7 @@ class StoreService {
             'Estoque insuficiente para "${product.name}".\n'
             'O produto foi vendido enquanto seu pedido estava pendente.\n'
             'Disponivel: $availableStock, Solicitado: ${item.quantity}\n\n'
-            'Por favor, ajuste a quantidade ou remova o item do pedido.'
+            'Por favor, ajuste a quantidade ou remova o item do pedido.',
           );
         }
       }

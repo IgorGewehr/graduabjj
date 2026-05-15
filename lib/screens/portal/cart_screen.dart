@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -8,6 +9,7 @@ import '../../core/theme.dart';
 import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../widgets/loading_button.dart';
 
 /// Portal Cart Screen
 class PortalCartScreen extends ConsumerStatefulWidget {
@@ -70,18 +72,31 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                   ),
                 ),
 
-                // Cart Items
+                // Cart Items — keep each item keyed so the list animates
+                // adds/removes via the implicit AnimatedSwitcher below.
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (context, index) => Padding(
+                        key: ValueKey(
+                          '${cart[index].productId}-${cart[index].size ?? ''}-${cart[index].color ?? ''}',
+                        ),
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: _CartItemCard(
-                          item: cart[index],
-                          onUpdateQuantity: (qty) =>
-                              cartNotifier.updateQuantity(index, qty),
-                          onRemove: () => cartNotifier.removeItem(index),
+                        child: AnimatedSize(
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeInOut,
+                          child: _CartItemCard(
+                            item: cart[index],
+                            onUpdateQuantity: (qty) {
+                              HapticFeedback.selectionClick();
+                              cartNotifier.updateQuantity(index, qty);
+                            },
+                            onRemove: () {
+                              HapticFeedback.lightImpact();
+                              cartNotifier.removeItem(index);
+                            },
+                          ),
                         ),
                       ),
                       childCount: cart.length,
@@ -150,32 +165,29 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                   ),
                 ),
 
-                // Checkout Button
+                // Checkout Button — uses LoadingButton helper for consistent
+                // inline spinner + disabled state.
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: _isLoading ? null : _checkout,
-                        icon: _isLoading
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(LucideIcons.shoppingBag),
-                        label: Text(
-                          _isLoading ? 'Processando...' : 'Finalizar Pedido',
-                        ),
+                      child: LoadingButton(
+                        isLoading: _isLoading,
+                        onPressed: _checkout,
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(LucideIcons.shoppingBag),
+                            SizedBox(width: 8),
+                            Text('Finalizar Pedido'),
+                          ],
                         ),
                       ),
                     ),
@@ -183,9 +195,7 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                 ),
 
                 // Bottom padding
-                const SliverToBoxAdapter(
-                  child: SizedBox(height: 40),
-                ),
+                const SliverToBoxAdapter(child: SizedBox(height: 40)),
               ],
             ),
     );
@@ -219,7 +229,9 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
             const SizedBox(height: 8),
             Text(
               'Adicione produtos para continuar',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -249,6 +261,7 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
       return;
     }
 
+    HapticFeedback.selectionClick();
     setState(() => _isLoading = true);
 
     try {
@@ -269,6 +282,7 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
 
       // Show success and navigate to orders
       if (mounted) {
+        HapticFeedback.heavyImpact();
         context.showSuccess('Pedido criado com sucesso!');
         context.push('/portal/loja/pedidos');
       }
@@ -349,9 +363,7 @@ class _CartItemCard extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   '${item.formattedPrice} cada',
-                  style: AppTheme.bodySmall.copyWith(
-                    color: AppTheme.primary,
-                  ),
+                  style: AppTheme.bodySmall.copyWith(color: AppTheme.primary),
                 ),
               ],
             ),

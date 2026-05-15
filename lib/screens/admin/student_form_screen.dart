@@ -50,11 +50,17 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   DateTime? _birthDate;
   DateTime _startDate = DateTime.now();
   StudentCategory _category = StudentCategory.adult;
-  String _belt = 'white';
-  int _stripes = 0;
   StudentStatus _status = StudentStatus.active;
   List<Plan> _selectedPlans = [];
   List<Plan> _availablePlans = [];
+
+  // Multi-sport graduation state. Each entry holds the current belt+stripes
+  // for one modality the student practices. Starts empty so that creating a
+  // new student forces the admin to consciously pick at least one modality
+  // (BJJ is no longer assumed). When editing, the map is hydrated from the
+  // student's sportsList in `_loadStudentData`.
+  final Map<SportId, ({String belt, int stripes})> _grades = {};
+  SportId? _primarySport;
 
   // Error tracking per tab
   final Map<String, bool> _tabErrors = {
@@ -74,7 +80,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
 
     // Optional but valuable fields
     total += 9;
-    if (_belt.isNotEmpty) filled++;
+    if (_grades[_primarySport]?.belt.isNotEmpty ?? false) filled++;
     if (_phoneController.text.isNotEmpty) filled++;
     if (_emailController.text.isNotEmpty) filled++;
     if (_birthDate != null) filled++;
@@ -182,9 +188,29 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     _birthDate = student.birthDate;
     _startDate = student.startDate;
     _category = student.category;
-    _belt = student.currentBelt;
-    _stripes = student.currentStripes;
     _status = student.status;
+
+    // Hydrate per-sport grades from the student. Falls back to BJJ legacy
+    // fields when sportsList/sportData are absent.
+    _grades.clear();
+    final sportList = student.getSports();
+    for (final sport in sportList) {
+      final grade = student.getGrade(sport);
+      _grades[sport] = (
+        belt: grade?.currentGrade ?? 'white',
+        stripes: grade?.currentStripes ?? 0,
+      );
+    }
+    if (_grades.isEmpty) {
+      _grades[SportId.bjj] = (
+        belt: student.currentBelt,
+        stripes: student.currentStripes,
+      );
+    }
+    _primarySport = student.getPrimarySport();
+    if (!_grades.containsKey(_primarySport)) {
+      _primarySport = _grades.isEmpty ? null : _grades.keys.first;
+    }
 
     _selectedPlans = _availablePlans
         .where((p) => p.studentIds.contains(student.id))
@@ -528,8 +554,14 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
           if (value != null) {
             setState(() {
               _category = value;
-              _belt = 'white';
-              _stripes = 0;
+              // Category change can swap kids ↔ adult grades. Reset each sport
+              // to the first available grade so we never leave an orphan id.
+              final categoryStr = value.value;
+              for (final sport in _grades.keys.toList()) {
+                final list = getGradesForSport(sport, category: categoryStr);
+                final firstId = list.isNotEmpty ? list.first.id : 'white';
+                _grades[sport] = (belt: firstId, stripes: 0);
+              }
             });
           }
         },
@@ -661,18 +693,9 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
 
         FormSection(
           title: 'Graduação',
-          subtitle: 'Faixa e graus atuais',
+          subtitle: 'Modalidades, faixas e graus atuais',
           icon: LucideIcons.medal,
-          child: Column(
-            children: [
-              FormRow(
-                children: [
-                  _buildBeltSelector(),
-                  _buildStripesSelector(),
-                ],
-              ),
-            ],
-          ),
+          child: _buildGraduationEditor(),
         ),
 
         const SizedBox(height: 16),
@@ -806,11 +829,306 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     }
   }
 
-  Widget _buildBeltSelector() {
-    final categoryStr = _category == StudentCategory.kids ? 'kids' : 'adult';
-    final grades = getGradesForSport(SportId.bjj, category: categoryStr);
+  Widget _buildGraduationEditor() {
+    final usedSports = _grades.keys.toList();
+    final availableToAdd =
+        sportOptions.where((s) => !_grades.containsKey(s)).toList();
+    final hasError = _tabErrors['academy'] == true && _grades.isEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_grades.isEmpty) ...[
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: hasError
+                  ? AppTheme.error.withValues(alpha: 0.08)
+                  : AppTheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: hasError ? AppTheme.error : AppTheme.divider,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  hasError ? LucideIcons.alertCircle : LucideIcons.medal,
+                  color: hasError ? AppTheme.error : AppTheme.textSecondary,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        hasError
+                            ? 'Modalidade é obrigatória'
+                            : 'Nenhuma modalidade selecionada',
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: hasError
+                              ? AppTheme.error
+                              : AppTheme.textPrimary,
+                        ),
+                      ),
+                      Text(
+                        'Adicione pelo menos uma modalidade para definir as faixas do aluno.',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        for (final sport in usedSports) ...[
+          _buildSportGradeBlock(sport),
+          const SizedBox(height: 12),
+        ],
+        if (availableToAdd.isNotEmpty)
+          _buildAddSportButton(availableToAdd),
+      ],
+    );
+  }
+
+  Widget _buildSportGradeBlock(SportId sport) {
+    final sportDef = sports[sport]!;
+    final accent = sportChipColors[sport] ?? AppTheme.primary;
+    final isPrimary = _primarySport == sport;
+    final isOnlySport = _grades.length == 1;
+    final hasGradeSystem = sportDef.gradeSystem != GradeSystem.none;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isPrimary ? accent : AppTheme.divider,
+          width: isPrimary ? 1.5 : 1,
+        ),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(sportDef.icon, color: accent, size: 16),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          sportDef.label,
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        if (isPrimary)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: accent.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'PRINCIPAL',
+                              style: AppTheme.labelSmall.copyWith(
+                                color: accent,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (!hasGradeSystem)
+                      Text(
+                        'Sem sistema de graduação',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (!isPrimary)
+                IconButton(
+                  tooltip: 'Definir como principal',
+                  icon: Icon(LucideIcons.star,
+                      size: 18, color: AppTheme.textSecondary),
+                  onPressed: () => setState(() => _primarySport = sport),
+                ),
+              if (!isOnlySport)
+                IconButton(
+                  tooltip: 'Remover modalidade',
+                  icon: Icon(LucideIcons.x, size: 18, color: AppTheme.error),
+                  onPressed: () => _removeSport(sport),
+                ),
+            ],
+          ),
+          if (hasGradeSystem) ...[
+            const SizedBox(height: 10),
+            FormRow(
+              children: [
+                _buildBeltSelectorForSport(sport),
+                _buildStripesSelectorForSport(sport),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _removeSport(SportId sport) {
+    if (_grades.length <= 1) return;
+    setState(() {
+      _grades.remove(sport);
+      if (_primarySport == sport) {
+        _primarySport = _grades.isEmpty ? null : _grades.keys.first;
+      }
+    });
+  }
+
+  Widget _buildAddSportButton(List<SportId> available) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _showAddSportSheet(available),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceVariant,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: AppTheme.divider,
+              style: BorderStyle.solid,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(LucideIcons.plus, size: 18, color: AppTheme.textPrimary),
+              const SizedBox(width: 8),
+              Text(
+                'Adicionar modalidade',
+                style: AppTheme.bodyMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAddSportSheet(List<SportId> available) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.divider,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Adicionar modalidade',
+              style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+            ...available.map((sport) {
+              final def = sports[sport]!;
+              final accent = sportChipColors[sport] ?? AppTheme.primary;
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(def.icon, color: accent, size: 18),
+                ),
+                title: Text(def.label,
+                    style: AppTheme.bodyMedium
+                        .copyWith(fontWeight: FontWeight.w600)),
+                subtitle: Text(
+                  def.gradeSystem == GradeSystem.none
+                      ? 'Sem graduação'
+                      : 'Faixas iniciam em ${getGradesForSport(sport, category: _category.value).firstOrNull?.label ?? '-'}',
+                  style: AppTheme.labelSmall
+                      .copyWith(color: AppTheme.textSecondary),
+                ),
+                onTap: () {
+                  final grades =
+                      getGradesForSport(sport, category: _category.value);
+                  final firstId = grades.isNotEmpty ? grades.first.id : 'white';
+                  setState(() {
+                    _grades[sport] = (belt: firstId, stripes: 0);
+                    // First sport added → becomes the primary by default.
+                    _primarySport ??= sport;
+                    _tabErrors['academy'] = false;
+                  });
+                  Navigator.pop(sheetCtx);
+                },
+              );
+            }),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBeltSelectorForSport(SportId sport) {
+    final grades = getGradesForSport(sport, category: _category.value);
+    if (grades.isEmpty) {
+      return const SizedBox.shrink();
+    }
     final gradeIds = grades.map((g) => g.id).toList();
-    final currentValue = gradeIds.contains(_belt) ? _belt : 'white';
+    final current = _grades[sport]!;
+    final value =
+        gradeIds.contains(current.belt) ? current.belt : grades.first.id;
 
     return Container(
       decoration: BoxDecoration(
@@ -819,19 +1137,21 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         border: Border.all(color: AppTheme.divider),
       ),
       child: DropdownButtonFormField<String>(
-        value: currentValue,
+        value: value,
         isExpanded: true,
-        icon: Icon(LucideIcons.chevronDown, color: AppTheme.textSecondary, size: 20),
+        icon: Icon(LucideIcons.chevronDown,
+            color: AppTheme.textSecondary, size: 20),
         decoration: InputDecoration(
           labelText: 'Faixa',
-          prefixIcon: Icon(LucideIcons.award, size: 20, color: AppTheme.textSecondary),
+          prefixIcon:
+              Icon(LucideIcons.award, size: 20, color: AppTheme.textSecondary),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         ),
         items: grades.map((grade) {
           final hasStripe = grade.id.contains('-');
           final isWhiteStripe = grade.id.endsWith('-white');
-
           return DropdownMenuItem(
             value: grade.id,
             child: Row(
@@ -869,21 +1189,32 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
             ),
           );
         }).toList(),
-        onChanged: (value) {
-          if (value != null) setState(() => _belt = value);
+        onChanged: (v) {
+          if (v == null) return;
+          setState(() {
+            _grades[sport] = (belt: v, stripes: _grades[sport]!.stripes);
+          });
         },
         dropdownColor: AppTheme.surface,
       ),
     );
   }
 
-  Widget _buildStripesSelector() {
-    final gradeDef = getGradeDefinition(SportId.bjj, _belt);
+  Widget _buildStripesSelectorForSport(SportId sport) {
+    final sportDef = sports[sport]!;
+    if (!sportDef.supportsStripes) {
+      return const SizedBox.shrink();
+    }
+    final entry = _grades[sport]!;
+    final gradeDef = getGradeDefinition(sport, entry.belt);
     final maxStripes = gradeDef?.maxStripes ?? 4;
-    // Clamp current stripes to valid range
-    if (_stripes > maxStripes) {
+    final clampedStripes = entry.stripes > maxStripes ? 0 : entry.stripes;
+    if (entry.stripes > maxStripes) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        setState(() => _stripes = 0);
+        if (!mounted) return;
+        setState(() {
+          _grades[sport] = (belt: entry.belt, stripes: 0);
+        });
       });
     }
 
@@ -894,14 +1225,17 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         border: Border.all(color: AppTheme.divider),
       ),
       child: DropdownButtonFormField<int>(
-        value: _stripes > maxStripes ? 0 : _stripes,
+        value: clampedStripes,
         isExpanded: true,
-        icon: Icon(LucideIcons.chevronDown, color: AppTheme.textSecondary, size: 20),
+        icon: Icon(LucideIcons.chevronDown,
+            color: AppTheme.textSecondary, size: 20),
         decoration: InputDecoration(
           labelText: 'Graus',
-          prefixIcon: Icon(LucideIcons.hash, size: 20, color: AppTheme.textSecondary),
+          prefixIcon:
+              Icon(LucideIcons.hash, size: 20, color: AppTheme.textSecondary),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         ),
         items: List.generate(maxStripes + 1, (i) {
           return DropdownMenuItem(
@@ -921,13 +1255,17 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
                   ),
                 ),
                 if (i > 0) const SizedBox(width: 6),
-                Text('$i grau${i != 1 ? 's' : ''}', style: AppTheme.bodyMedium),
+                Text('$i grau${i != 1 ? 's' : ''}',
+                    style: AppTheme.bodyMedium),
               ],
             ),
           );
         }).toList(),
-        onChanged: (value) {
-          if (value != null) setState(() => _stripes = value);
+        onChanged: (v) {
+          if (v == null) return;
+          setState(() {
+            _grades[sport] = (belt: entry.belt, stripes: v);
+          });
         },
         dropdownColor: AppTheme.surface,
       ),
@@ -996,8 +1334,10 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   // SAVE STUDENT
   // ============================================
   Future<void> _saveStudent() async {
-    if (!_formKey.currentState!.validate()) {
-      // Find first tab with errors
+    final isFormValid = _formKey.currentState!.validate();
+    final hasNoSport = _grades.isEmpty;
+
+    if (!isFormValid || hasNoSport) {
       _updateTabErrors();
       final errorTab = _tabErrors.entries.firstWhere(
         (e) => e.value,
@@ -1006,8 +1346,11 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
       if (errorTab.value) {
         setState(() => _activeTab = errorTab.key);
       }
-
-      context.showError('Corrija os erros no formulário');
+      context.showError(
+        hasNoSport
+            ? 'Selecione pelo menos uma modalidade'
+            : 'Corrija os erros no formulário',
+      );
       return;
     }
 
@@ -1016,6 +1359,16 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     try {
       final academyId = FirebaseService.academyId;
       final studentService = StudentService(academyId);
+
+      final primarySport = _primarySport ?? _grades.keys.first;
+      final primaryGrade = _grades[primarySport]!;
+      final sportData = <String, dynamic>{};
+      for (final entry in _grades.entries) {
+        sportData[entry.key.value] = {
+          'currentGrade': entry.value.belt,
+          'currentStripes': entry.value.stripes,
+        };
+      }
 
       final data = <String, dynamic>{
         'fullName': _fullNameController.text.trim(),
@@ -1026,8 +1379,15 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         'birthDate': _birthDate != null ? Timestamp.fromDate(_birthDate!) : null,
         'category': _category.value,
         'startDate': Timestamp.fromDate(_startDate),
-        'currentBelt': _belt,
-        'currentStripes': _stripes,
+        // Legacy fields — kept synced to the primary sport so single-sport
+        // (BJJ) reads in older code paths still work.
+        'currentBelt': primaryGrade.belt,
+        'currentStripes': primaryGrade.stripes,
+        // Multi-sport fields. `sports` is the modality list, `sportData` holds
+        // grade+stripes per sport, `primarySport` is the displayed default.
+        'sports': _grades.keys.map((s) => s.value).toList(),
+        'sportData': sportData,
+        'primarySport': primarySport.value,
         'status': _status.value,
         'tuitionValue': _tuitionValueController.text.trim().isEmpty 
             ? 0.0 
@@ -1108,9 +1468,8 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   }
 
   void _updateTabErrors() {
-    // Check each tab for validation errors
     _tabErrors['personal'] = _fullNameController.text.isEmpty ||
         (_category == StudentCategory.kids && _guardianNameController.text.isEmpty);
-    // Add more checks as needed
+    _tabErrors['academy'] = _grades.isEmpty;
   }
 }

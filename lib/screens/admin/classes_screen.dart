@@ -9,6 +9,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
+import '../../widgets/cached_image.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/sport_chip.dart';
 
@@ -40,10 +41,10 @@ class _ScheduleEntry {
   });
 
   Map<String, dynamic> toMap() => {
-        'dayOfWeek': dayOfWeek,
-        'startTime': startTime,
-        'endTime': endTime,
-      };
+    'dayOfWeek': dayOfWeek,
+    'startTime': startTime,
+    'endTime': endTime,
+  };
 }
 
 /// Admin Classes Screen - Fintech style matching webapp
@@ -61,7 +62,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
   StudentCategory? _selectedCategory;
 
   // Stats carousel
-  final PageController _statsPageController = PageController(viewportFraction: 0.85);
+  final PageController _statsPageController = PageController(
+    viewportFraction: 0.85,
+  );
   int _currentStatsPage = 0;
 
   @override
@@ -103,12 +106,16 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
 
     if (_searchQuery.isNotEmpty) {
       filtered = filtered
-          .where((c) => c.name.toLowerCase().contains(_searchQuery.toLowerCase()))
+          .where(
+            (c) => c.name.toLowerCase().contains(_searchQuery.toLowerCase()),
+          )
           .toList();
     }
 
     if (_selectedCategory != null) {
-      filtered = filtered.where((c) => c.category == _selectedCategory).toList();
+      filtered = filtered
+          .where((c) => c.category == _selectedCategory)
+          .toList();
     }
 
     return filtered;
@@ -140,27 +147,24 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                     child: Center(child: CircularProgressIndicator()),
                   )
                 : _filteredClasses.isEmpty
-                    ? SliverFillRemaining(child: _buildEmptyState())
-                    : SliverPadding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        sliver: SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              final cls = _filteredClasses[index];
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: _ClassCard(
-                                  bjjClass: cls,
-                                  onTap: () => _showClassDetails(cls),
-                                  onEdit: () => _showEditClassSheet(cls),
-                                  onDelete: () => _showDeleteConfirmation(cls),
-                                ),
-                              );
-                            },
-                            childCount: _filteredClasses.length,
+                ? SliverFillRemaining(child: _buildEmptyState())
+                : SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate((context, index) {
+                        final cls = _filteredClasses[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _ClassCard(
+                            bjjClass: cls,
+                            onTap: () => _showClassDetails(cls),
+                            onEdit: () => _showEditClassSheet(cls),
+                            onDelete: () => _showDeleteConfirmation(cls),
                           ),
-                        ),
-                      ),
+                        );
+                      }, childCount: _filteredClasses.length),
+                    ),
+                  ),
 
             // Bottom padding
             const SliverToBoxAdapter(child: SizedBox(height: 100)),
@@ -212,7 +216,10 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
 
   Widget _buildStatsCards() {
     final totalClasses = _classes.length;
-    final totalStudents = _classes.fold<int>(0, (sum, c) => sum + c.studentIds.length);
+    final totalStudents = _classes.fold<int>(
+      0,
+      (sum, c) => sum + c.studentIds.length,
+    );
     final withSchedule = _classes.where((c) => c.schedule.isNotEmpty).length;
 
     return Column(
@@ -266,23 +273,20 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
         // Dot indicators
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(
-            3,
-            (index) {
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                width: _currentStatsPage == index ? 20 : 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _currentStatsPage == index
-                      ? AppTheme.textPrimary
-                      : AppTheme.divider,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              );
-            },
-          ),
+          children: List.generate(3, (index) {
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              width: _currentStatsPage == index ? 20 : 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: _currentStatsPage == index
+                    ? AppTheme.textPrimary
+                    : AppTheme.divider,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            );
+          }),
         ),
       ],
     );
@@ -316,15 +320,13 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                 ),
               ),
             ),
-            Container(
-              width: 1,
-              height: 24,
-              color: AppTheme.divider,
-            ),
+            Container(width: 1, height: 24, color: AppTheme.divider),
             IconButton(
               icon: Icon(
                 LucideIcons.slidersHorizontal,
-                color: _selectedCategory != null ? AppTheme.primary : AppTheme.textSecondary,
+                color: _selectedCategory != null
+                    ? AppTheme.primary
+                    : AppTheme.textSecondary,
                 size: 20,
               ),
               onPressed: _showFilterSheet,
@@ -349,14 +351,16 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
             onTap: () => setState(() => _selectedCategory = null),
           ),
           const SizedBox(width: 8),
-          ...StudentCategory.values.map((cat) => Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: _FilterChip(
-                  label: cat.label,
-                  isSelected: _selectedCategory == cat,
-                  onTap: () => setState(() => _selectedCategory = cat),
-                ),
-              )),
+          ...StudentCategory.values.map(
+            (cat) => Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: _FilterChip(
+                label: cat.label,
+                isSelected: _selectedCategory == cat,
+                onTap: () => setState(() => _selectedCategory = cat),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -374,25 +378,17 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
               color: AppTheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Icon(
-              LucideIcons.users,
-              size: 40,
-              color: AppTheme.primary,
-            ),
+            child: Icon(LucideIcons.users, size: 40, color: AppTheme.primary),
           ),
           const SizedBox(height: 16),
           Text(
             'Nenhuma turma encontrada',
-            style: AppTheme.titleMedium.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
           Text(
             'Crie uma nova turma para comecar',
-            style: AppTheme.bodySmall.copyWith(
-              color: AppTheme.textSecondary,
-            ),
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
           ),
         ],
       ),
@@ -430,21 +426,31 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
               style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
-            ...StudentCategory.values.map((cat) => ListTile(
-                  leading: Icon(
-                    _selectedCategory == cat ? LucideIcons.checkCircle2 : LucideIcons.circle,
-                    color: _selectedCategory == cat ? AppTheme.primary : AppTheme.textSecondary,
-                  ),
-                  title: Text(cat.label),
-                  onTap: () {
-                    setState(() => _selectedCategory = cat);
-                    Navigator.pop(context);
-                  },
-                )),
+            ...StudentCategory.values.map(
+              (cat) => ListTile(
+                leading: Icon(
+                  _selectedCategory == cat
+                      ? LucideIcons.checkCircle2
+                      : LucideIcons.circle,
+                  color: _selectedCategory == cat
+                      ? AppTheme.primary
+                      : AppTheme.textSecondary,
+                ),
+                title: Text(cat.label),
+                onTap: () {
+                  setState(() => _selectedCategory = cat);
+                  Navigator.pop(context);
+                },
+              ),
+            ),
             ListTile(
               leading: Icon(
-                _selectedCategory == null ? LucideIcons.checkCircle2 : LucideIcons.circle,
-                color: _selectedCategory == null ? AppTheme.primary : AppTheme.textSecondary,
+                _selectedCategory == null
+                    ? LucideIcons.checkCircle2
+                    : LucideIcons.circle,
+                color: _selectedCategory == null
+                    ? AppTheme.primary
+                    : AppTheme.textSecondary,
               ),
               title: const Text('Todas'),
               onTap: () {
@@ -514,12 +520,17 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                   alignment: Alignment.center,
                   child: Text(
                     schedule.startTime,
-                    style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
+                    style: AppTheme.bodySmall.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
             ),
-            Text(' - ', style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary)),
+            Text(
+              ' - ',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
             Expanded(
               flex: 1,
               child: GestureDetector(
@@ -538,7 +549,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                   alignment: Alignment.center,
                   child: Text(
                     schedule.endTime,
-                    style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
+                    style: AppTheme.bodySmall.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -567,7 +580,8 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
     bool isSaving = false;
     // useClassWeights is observed from the academy settings provider — when
     // the toggle is off in Settings, we never even render the weight field.
-    final useClassWeights = ref.read(academySettingsProvider).valueOrNull?.useClassWeights ?? false;
+    final useClassWeights =
+        ref.read(academySettingsProvider).valueOrNull?.useClassWeights ?? false;
     List<_ScheduleEntry> scheduleEntries = [
       _ScheduleEntry(dayOfWeek: 1, startTime: '19:00', endTime: '20:30'),
     ];
@@ -612,12 +626,18 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                         color: AppTheme.primary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Icon(LucideIcons.users, color: AppTheme.primary, size: 20),
+                      child: Icon(
+                        LucideIcons.users,
+                        color: AppTheme.primary,
+                        size: 20,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Text(
                       'Nova Turma',
-                      style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                      style: AppTheme.titleLarge.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
@@ -669,7 +689,10 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                             },
                             decoration: const InputDecoration(
                               border: InputBorder.none,
-                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
                             ),
                             dropdownColor: AppTheme.surface,
                             hint: const Text('Selecione a categoria'),
@@ -698,7 +721,11 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                                 value: sportId,
                                 child: Row(
                                   children: [
-                                    Icon(sport.icon, size: 18, color: sportChipColors[sportId]),
+                                    Icon(
+                                      sport.icon,
+                                      size: 18,
+                                      color: sportChipColors[sportId],
+                                    ),
                                     const SizedBox(width: 8),
                                     Text(sport.label),
                                   ],
@@ -706,11 +733,15 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                               );
                             }).toList(),
                             onChanged: (value) {
-                              if (value != null) setSheetState(() => selectedSport = value);
+                              if (value != null)
+                                setSheetState(() => selectedSport = value);
                             },
                             decoration: const InputDecoration(
                               border: InputBorder.none,
-                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
                             ),
                             dropdownColor: AppTheme.surface,
                           ),
@@ -743,7 +774,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                         const SizedBox(height: 24),
                         Text(
                           'Horarios',
-                          style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                          style: AppTheme.titleSmall.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         const SizedBox(height: 12),
                         ...scheduleEntries.asMap().entries.map((entry) {
@@ -754,7 +787,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                             canRemove: scheduleEntries.length > 1,
                             onChanged: () => setSheetState(() {}),
                             onRemove: () {
-                              setSheetState(() => scheduleEntries.removeAt(idx));
+                              setSheetState(
+                                () => scheduleEntries.removeAt(idx),
+                              );
                             },
                             dialogContext: context,
                           );
@@ -764,7 +799,11 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                           onPressed: () {
                             setSheetState(() {
                               scheduleEntries.add(
-                                _ScheduleEntry(dayOfWeek: 1, startTime: '19:00', endTime: '20:30'),
+                                _ScheduleEntry(
+                                  dayOfWeek: 1,
+                                  startTime: '19:00',
+                                  endTime: '20:30',
+                                ),
                               );
                             });
                           },
@@ -779,56 +818,67 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: isSaving ? null : () async {
-                      if (nameController.text.isEmpty) {
-                        sheetContext.showWarning('Nome e obrigatorio');
-                        return;
-                      }
+                    onPressed: isSaving
+                        ? null
+                        : () async {
+                            if (nameController.text.isEmpty) {
+                              sheetContext.showWarning('Nome e obrigatorio');
+                              return;
+                            }
 
-                      setSheetState(() => isSaving = true);
+                            setSheetState(() => isSaving = true);
 
-                      try {
-                        final currentUser = ref.read(currentUserProvider).valueOrNull;
-                        if (currentUser?.academyId == null) return;
+                            try {
+                              final currentUser = ref
+                                  .read(currentUserProvider)
+                                  .valueOrNull;
+                              if (currentUser?.academyId == null) return;
 
-                        final service = ClassService(currentUser!.academyId!);
-                        await service.create(
-                          name: nameController.text,
-                          description: descriptionController.text.isEmpty
-                              ? null
-                              : descriptionController.text,
-                          category: selectedCategory,
-                          sport: selectedSport.value,
-                          instructorName: instructorController.text.isEmpty
-                              ? null
-                              : instructorController.text,
-                          maxStudents: maxStudentsController.text.isEmpty
-                              ? null
-                              : int.tryParse(maxStudentsController.text),
-                          weight: useClassWeights
-                              ? double.tryParse(weightController.text)
-                              : null,
-                          schedule: scheduleEntries
-                              .map((e) => ClassSchedule(
-                                    dayOfWeek: e.dayOfWeek,
-                                    startTime: e.startTime,
-                                    endTime: e.endTime,
-                                  ))
-                              .toList(),
-                        );
+                              final service = ClassService(
+                                currentUser!.academyId!,
+                              );
+                              await service.create(
+                                name: nameController.text,
+                                description: descriptionController.text.isEmpty
+                                    ? null
+                                    : descriptionController.text,
+                                category: selectedCategory,
+                                sport: selectedSport.value,
+                                instructorName:
+                                    instructorController.text.isEmpty
+                                    ? null
+                                    : instructorController.text,
+                                maxStudents: maxStudentsController.text.isEmpty
+                                    ? null
+                                    : int.tryParse(maxStudentsController.text),
+                                weight: useClassWeights
+                                    ? double.tryParse(weightController.text)
+                                    : null,
+                                schedule: scheduleEntries
+                                    .map(
+                                      (e) => ClassSchedule(
+                                        dayOfWeek: e.dayOfWeek,
+                                        startTime: e.startTime,
+                                        endTime: e.endTime,
+                                      ),
+                                    )
+                                    .toList(),
+                              );
 
-                        if (mounted) {
-                          Navigator.pop(sheetContext);
-                          this.context.showSuccess('Turma criada com sucesso!');
-                          _loadClasses();
-                        }
-                      } catch (e) {
-                        setSheetState(() => isSaving = false);
-                        if (mounted) {
-                          this.context.showError('Erro: $e');
-                        }
-                      }
-                    },
+                              if (mounted) {
+                                Navigator.pop(sheetContext);
+                                this.context.showSuccess(
+                                  'Turma criada com sucesso!',
+                                );
+                                _loadClasses();
+                              }
+                            } catch (e) {
+                              setSheetState(() => isSaving = false);
+                              if (mounted) {
+                                this.context.showError('Erro: $e');
+                              }
+                            }
+                          },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.textPrimary,
                       foregroundColor: Colors.white,
@@ -866,24 +916,33 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
 
   void _showEditClassSheet(BJJClass cls) {
     final nameController = TextEditingController(text: cls.name);
-    final descriptionController = TextEditingController(text: cls.description ?? '');
-    final instructorController = TextEditingController(text: cls.instructorName ?? '');
-    final maxStudentsController = TextEditingController(text: cls.maxStudents?.toString() ?? '');
+    final descriptionController = TextEditingController(
+      text: cls.description ?? '',
+    );
+    final instructorController = TextEditingController(
+      text: cls.instructorName ?? '',
+    );
+    final maxStudentsController = TextEditingController(
+      text: cls.maxStudents?.toString() ?? '',
+    );
     final weightController = TextEditingController(
       text: (cls.weight ?? 1).toString(),
     );
-    final useClassWeights = ref.read(academySettingsProvider).valueOrNull?.useClassWeights ?? false;
+    final useClassWeights =
+        ref.read(academySettingsProvider).valueOrNull?.useClassWeights ?? false;
     StudentCategory? selectedCategory = cls.category;
     SportId selectedSport = cls.getSport();
     bool isSaving = false;
     List<_ScheduleEntry> scheduleEntries = cls.schedule.isNotEmpty
         ? cls.schedule
-            .map((s) => _ScheduleEntry(
+              .map(
+                (s) => _ScheduleEntry(
                   dayOfWeek: s.dayOfWeek,
                   startTime: s.startTime,
                   endTime: s.endTime,
-                ))
-            .toList()
+                ),
+              )
+              .toList()
         : [_ScheduleEntry(dayOfWeek: 1, startTime: '19:00', endTime: '20:30')];
 
     showModalBottomSheet(
@@ -926,12 +985,18 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                         color: AppTheme.primary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Icon(LucideIcons.pencil, color: AppTheme.primary, size: 20),
+                      child: Icon(
+                        LucideIcons.pencil,
+                        color: AppTheme.primary,
+                        size: 20,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Text(
                       'Editar Turma',
-                      style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                      style: AppTheme.titleLarge.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
@@ -983,7 +1048,10 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                             },
                             decoration: const InputDecoration(
                               border: InputBorder.none,
-                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
                             ),
                             dropdownColor: AppTheme.surface,
                           ),
@@ -1011,7 +1079,11 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                                 value: sportId,
                                 child: Row(
                                   children: [
-                                    Icon(sport.icon, size: 18, color: sportChipColors[sportId]),
+                                    Icon(
+                                      sport.icon,
+                                      size: 18,
+                                      color: sportChipColors[sportId],
+                                    ),
                                     const SizedBox(width: 8),
                                     Text(sport.label),
                                   ],
@@ -1019,11 +1091,15 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                               );
                             }).toList(),
                             onChanged: (value) {
-                              if (value != null) setSheetState(() => selectedSport = value);
+                              if (value != null)
+                                setSheetState(() => selectedSport = value);
                             },
                             decoration: const InputDecoration(
                               border: InputBorder.none,
-                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
                             ),
                             dropdownColor: AppTheme.surface,
                           ),
@@ -1056,7 +1132,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                         const SizedBox(height: 24),
                         Text(
                           'Horarios',
-                          style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                          style: AppTheme.titleSmall.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         const SizedBox(height: 12),
                         ...scheduleEntries.asMap().entries.map((entry) {
@@ -1067,7 +1145,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                             canRemove: scheduleEntries.length > 1,
                             onChanged: () => setSheetState(() {}),
                             onRemove: () {
-                              setSheetState(() => scheduleEntries.removeAt(idx));
+                              setSheetState(
+                                () => scheduleEntries.removeAt(idx),
+                              );
                             },
                             dialogContext: context,
                           );
@@ -1077,7 +1157,11 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                           onPressed: () {
                             setSheetState(() {
                               scheduleEntries.add(
-                                _ScheduleEntry(dayOfWeek: 1, startTime: '19:00', endTime: '20:30'),
+                                _ScheduleEntry(
+                                  dayOfWeek: 1,
+                                  startTime: '19:00',
+                                  endTime: '20:30',
+                                ),
                               );
                             });
                           },
@@ -1092,54 +1176,67 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: isSaving ? null : () async {
-                      if (nameController.text.isEmpty) {
-                        sheetContext.showWarning('Nome e obrigatorio');
-                        return;
-                      }
+                    onPressed: isSaving
+                        ? null
+                        : () async {
+                            if (nameController.text.isEmpty) {
+                              sheetContext.showWarning('Nome e obrigatorio');
+                              return;
+                            }
 
-                      setSheetState(() => isSaving = true);
+                            setSheetState(() => isSaving = true);
 
-                      try {
-                        final currentUser = ref.read(currentUserProvider).valueOrNull;
-                        if (currentUser?.academyId == null) return;
+                            try {
+                              final currentUser = ref
+                                  .read(currentUserProvider)
+                                  .valueOrNull;
+                              if (currentUser?.academyId == null) return;
 
-                        final service = ClassService(currentUser!.academyId!);
-                        await service.update(cls.id, {
-                          'name': nameController.text,
-                          if (descriptionController.text.isNotEmpty)
-                            'description': descriptionController.text,
-                          if (selectedCategory != null) 'category': selectedCategory!.value,
-                          'sport': selectedSport.value,
-                          'instructorName': instructorController.text.isEmpty
-                              ? null
-                              : instructorController.text,
-                          'maxStudents': maxStudentsController.text.isEmpty
-                              ? null
-                              : int.tryParse(maxStudentsController.text),
-                          // Only persist weight when the feature is on (the field
-                          // is hidden otherwise). 1.0 means "default" so we strip
-                          // it to keep the doc shape consistent with legacy ones.
-                          if (useClassWeights)
-                            'weight':
-                                (double.tryParse(weightController.text) ?? 1.0) == 1.0
+                              final service = ClassService(
+                                currentUser!.academyId!,
+                              );
+                              await service.update(cls.id, {
+                                'name': nameController.text,
+                                if (descriptionController.text.isNotEmpty)
+                                  'description': descriptionController.text,
+                                if (selectedCategory != null)
+                                  'category': selectedCategory!.value,
+                                'sport': selectedSport.value,
+                                'instructorName':
+                                    instructorController.text.isEmpty
                                     ? null
-                                    : double.tryParse(weightController.text),
-                          'schedule': scheduleEntries.map((s) => s.toMap()).toList(),
-                        });
+                                    : instructorController.text,
+                                'maxStudents':
+                                    maxStudentsController.text.isEmpty
+                                    ? null
+                                    : int.tryParse(maxStudentsController.text),
+                                // Only persist weight when the feature is on (the field
+                                // is hidden otherwise). 1.0 means "default" so we strip
+                                // it to keep the doc shape consistent with legacy ones.
+                                if (useClassWeights)
+                                  'weight':
+                                      (double.tryParse(weightController.text) ??
+                                              1.0) ==
+                                          1.0
+                                      ? null
+                                      : double.tryParse(weightController.text),
+                                'schedule': scheduleEntries
+                                    .map((s) => s.toMap())
+                                    .toList(),
+                              });
 
-                        if (mounted) {
-                          Navigator.pop(sheetContext);
-                          this.context.showSuccess('Turma atualizada!');
-                          _loadClasses();
-                        }
-                      } catch (e) {
-                        setSheetState(() => isSaving = false);
-                        if (mounted) {
-                          this.context.showError('Erro: $e');
-                        }
-                      }
-                    },
+                              if (mounted) {
+                                Navigator.pop(sheetContext);
+                                this.context.showSuccess('Turma atualizada!');
+                                _loadClasses();
+                              }
+                            } catch (e) {
+                              setSheetState(() => isSaving = false);
+                              if (mounted) {
+                                this.context.showError('Erro: $e');
+                              }
+                            }
+                          },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.textPrimary,
                       foregroundColor: Colors.white,
@@ -1210,7 +1307,11 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                     color: AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(LucideIcons.users, color: AppTheme.primary, size: 24),
+                  child: Icon(
+                    LucideIcons.users,
+                    color: AppTheme.primary,
+                    size: 24,
+                  ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -1219,12 +1320,16 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                     children: [
                       Text(
                         cls.name,
-                        style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                        style: AppTheme.titleLarge.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       if (cls.category != null)
                         Text(
                           cls.category!.label,
-                          style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
                         ),
                     ],
                   ),
@@ -1235,7 +1340,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
               const SizedBox(height: 16),
               Text(
                 cls.description!,
-                style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ],
             const SizedBox(height: 20),
@@ -1281,29 +1388,37 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
               const SizedBox(height: 16),
               Text(
                 'Horarios',
-                style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                style: AppTheme.titleSmall.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 8),
-              ...cls.schedule.map((s) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surfaceVariant,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(LucideIcons.calendar, size: 16, color: AppTheme.textSecondary),
-                          const SizedBox(width: 8),
-                          Text(
-                            '${_getDayLabel(s.dayOfWeek)}: ${s.startTime} - ${s.endTime}',
-                            style: AppTheme.bodySmall,
-                          ),
-                        ],
-                      ),
+              ...cls.schedule.map(
+                (s) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceVariant,
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                  )),
+                    child: Row(
+                      children: [
+                        Icon(
+                          LucideIcons.calendar,
+                          size: 16,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${_getDayLabel(s.dayOfWeek)}: ${s.startTime} - ${s.endTime}',
+                          style: AppTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ],
             const SizedBox(height: 20),
             SizedBox(
@@ -1370,7 +1485,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       foregroundColor: AppTheme.error,
-                      side: BorderSide(color: AppTheme.error.withValues(alpha: 0.3)),
+                      side: BorderSide(
+                        color: AppTheme.error.withValues(alpha: 0.3),
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -1399,10 +1516,8 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => _ManageStudentsSheet(
-        bjjClass: cls,
-        onChanged: _loadClasses,
-      ),
+      builder: (sheetCtx) =>
+          _ManageStudentsSheet(bjjClass: cls, onChanged: _loadClasses),
     );
   }
 
@@ -1437,7 +1552,11 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                 color: AppTheme.error.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: Icon(LucideIcons.alertTriangle, color: AppTheme.error, size: 28),
+              child: Icon(
+                LucideIcons.alertTriangle,
+                color: AppTheme.error,
+                size: 28,
+              ),
             ),
             const SizedBox(height: 16),
             Text(
@@ -1448,7 +1567,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
             Text(
               'Deseja excluir a turma "${cls.name}"? Esta acao nao pode ser desfeita.',
               textAlign: TextAlign.center,
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
             const SizedBox(height: 24),
             Row(
@@ -1471,7 +1592,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                   child: ElevatedButton(
                     onPressed: () async {
                       try {
-                        final currentUser = ref.read(currentUserProvider).valueOrNull;
+                        final currentUser = ref
+                            .read(currentUserProvider)
+                            .valueOrNull;
                         if (currentUser?.academyId == null) return;
 
                         final service = ClassService(currentUser!.academyId!);
@@ -1660,7 +1783,11 @@ class _ClassCard extends StatelessWidget {
                     color: AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(LucideIcons.users, color: AppTheme.primary, size: 22),
+                  child: Icon(
+                    LucideIcons.users,
+                    color: AppTheme.primary,
+                    size: 22,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1678,7 +1805,10 @@ class _ClassCard extends StatelessWidget {
                           if (bjjClass.category != null)
                             Container(
                               margin: const EdgeInsets.only(top: 4, right: 6),
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppTheme.primary.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(6),
@@ -1701,7 +1831,11 @@ class _ClassCard extends StatelessWidget {
                   ),
                 ),
                 PopupMenuButton<String>(
-                  icon: Icon(LucideIcons.moreVertical, color: AppTheme.textSecondary, size: 20),
+                  icon: Icon(
+                    LucideIcons.moreVertical,
+                    color: AppTheme.textSecondary,
+                    size: 20,
+                  ),
                   onSelected: (value) {
                     if (value == 'edit') onEdit();
                     if (value == 'delete') onDelete();
@@ -1711,7 +1845,11 @@ class _ClassCard extends StatelessWidget {
                       value: 'edit',
                       child: Row(
                         children: [
-                          Icon(LucideIcons.pencil, size: 18, color: AppTheme.textSecondary),
+                          Icon(
+                            LucideIcons.pencil,
+                            size: 18,
+                            color: AppTheme.textSecondary,
+                          ),
                           const SizedBox(width: 8),
                           const Text('Editar'),
                         ],
@@ -1721,9 +1859,16 @@ class _ClassCard extends StatelessWidget {
                       value: 'delete',
                       child: Row(
                         children: [
-                          Icon(LucideIcons.trash2, size: 18, color: AppTheme.error),
+                          Icon(
+                            LucideIcons.trash2,
+                            size: 18,
+                            color: AppTheme.error,
+                          ),
                           const SizedBox(width: 8),
-                          Text('Excluir', style: TextStyle(color: AppTheme.error)),
+                          Text(
+                            'Excluir',
+                            style: TextStyle(color: AppTheme.error),
+                          ),
                         ],
                       ),
                     ),
@@ -1746,7 +1891,8 @@ class _ClassCard extends StatelessWidget {
                   icon: LucideIcons.clock,
                   label: '${bjjClass.schedule.length} horarios',
                 ),
-                if (bjjClass.instructorName != null && bjjClass.instructorName!.isNotEmpty)
+                if (bjjClass.instructorName != null &&
+                    bjjClass.instructorName!.isNotEmpty)
                   _InfoBadge(
                     icon: LucideIcons.userCircle,
                     label: bjjClass.instructorName!,
@@ -1892,10 +2038,7 @@ class _ManageStudentsSheet extends ConsumerStatefulWidget {
   final BJJClass bjjClass;
   final VoidCallback onChanged;
 
-  const _ManageStudentsSheet({
-    required this.bjjClass,
-    required this.onChanged,
-  });
+  const _ManageStudentsSheet({required this.bjjClass, required this.onChanged});
 
   @override
   ConsumerState<_ManageStudentsSheet> createState() =>
@@ -1957,9 +2100,11 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
     }
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
-      base = base.where((s) =>
-          s.fullName.toLowerCase().contains(q) ||
-          (s.nickname?.toLowerCase().contains(q) ?? false));
+      base = base.where(
+        (s) =>
+            s.fullName.toLowerCase().contains(q) ||
+            (s.nickname?.toLowerCase().contains(q) ?? false),
+      );
     }
     return base.toList();
   }
@@ -2010,8 +2155,8 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
     final classSport = cls.getSport();
     final sportDef = sports[classSport]!;
     final accent = sportChipColors[classSport] ?? AppTheme.primary;
-    final maxedOut = cls.maxStudents != null &&
-        _enrolledIds.length >= cls.maxStudents!;
+    final maxedOut =
+        cls.maxStudents != null && _enrolledIds.length >= cls.maxStudents!;
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.92,
@@ -2057,8 +2202,9 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
                   children: [
                     Text(
                       cls.name,
-                      style: AppTheme.titleMedium
-                          .copyWith(fontWeight: FontWeight.w700),
+                      style: AppTheme.titleMedium.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2068,8 +2214,9 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
                         const SizedBox(width: 8),
                         Text(
                           '${_enrolledIds.length}${cls.maxStudents != null ? '/${cls.maxStudents}' : ''} alunos',
-                          style: AppTheme.labelSmall
-                              .copyWith(color: AppTheme.textSecondary),
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
                         ),
                       ],
                     ),
@@ -2096,13 +2243,19 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
               onChanged: (v) => setState(() => _searchQuery = v),
               decoration: InputDecoration(
                 hintText: 'Buscar aluno...',
-                hintStyle: AppTheme.bodyMedium
-                    .copyWith(color: AppTheme.textDisabled),
-                prefixIcon: Icon(LucideIcons.search,
-                    color: AppTheme.textSecondary, size: 20),
+                hintStyle: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.textDisabled,
+                ),
+                prefixIcon: Icon(
+                  LucideIcons.search,
+                  color: AppTheme.textSecondary,
+                  size: 20,
+                ),
                 border: InputBorder.none,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 14,
+                ),
               ),
             ),
           ),
@@ -2124,7 +2277,9 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
               if (maxedOut)
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.warning.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(6),
@@ -2144,38 +2299,36 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _visibleStudents.isEmpty
-                    ? Center(
-                        child: Text(
-                          _showOnlyEnrolled
-                              ? 'Nenhum aluno matriculado'
-                              : 'Nenhum aluno encontrado',
-                          style: AppTheme.bodyMedium.copyWith(
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                      )
-                    : ListView.separated(
-                        itemCount: _visibleStudents.length,
-                        separatorBuilder: (_, _) =>
-                            const SizedBox(height: 8),
-                        itemBuilder: (_, i) {
-                          final s = _visibleStudents[i];
-                          final isEnrolled = _enrolledIds.contains(s.id);
-                          final isPending = _pendingIds.contains(s.id);
-                          final practicesSport =
-                              s.getSports().contains(classSport);
-                          final blockedByCap = !isEnrolled && maxedOut;
-                          return _StudentRow(
-                            student: s,
-                            classSport: classSport,
-                            enrolled: isEnrolled,
-                            pending: isPending,
-                            practicesSport: practicesSport,
-                            disabled: blockedByCap,
-                            onTap: blockedByCap ? null : () => _toggle(s),
-                          );
-                        },
+                ? Center(
+                    child: Text(
+                      _showOnlyEnrolled
+                          ? 'Nenhum aluno matriculado'
+                          : 'Nenhum aluno encontrado',
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.textSecondary,
                       ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: _visibleStudents.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (_, i) {
+                      final s = _visibleStudents[i];
+                      final isEnrolled = _enrolledIds.contains(s.id);
+                      final isPending = _pendingIds.contains(s.id);
+                      final practicesSport = s.getSports().contains(classSport);
+                      final blockedByCap = !isEnrolled && maxedOut;
+                      return _StudentRow(
+                        student: s,
+                        classSport: classSport,
+                        enrolled: isEnrolled,
+                        pending: isPending,
+                        practicesSport: practicesSport,
+                        disabled: blockedByCap,
+                        onTap: blockedByCap ? null : () => _toggle(s),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -2252,9 +2405,7 @@ class _StudentRow extends StatelessWidget {
           duration: const Duration(milliseconds: 160),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: enrolled
-                ? accent.withValues(alpha: 0.06)
-                : AppTheme.surface,
+            color: enrolled ? accent.withValues(alpha: 0.06) : AppTheme.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: enrolled ? accent : AppTheme.divider,
@@ -2271,10 +2422,12 @@ class _StudentRow extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: student.photoUrl != null
-                    ? ClipRRect(
+                    ? AppCachedImage(
+                        imageUrl: student.photoUrl,
+                        width: 40,
+                        height: 40,
+                        fit: BoxFit.cover,
                         borderRadius: BorderRadius.circular(10),
-                        child: Image.network(student.photoUrl!,
-                            fit: BoxFit.cover),
                       )
                     : Center(
                         child: Text(
@@ -2294,8 +2447,9 @@ class _StudentRow extends StatelessWidget {
                   children: [
                     Text(
                       student.fullName,
-                      style: AppTheme.bodyMedium
-                          .copyWith(fontWeight: FontWeight.w600),
+                      style: AppTheme.bodyMedium.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2344,4 +2498,3 @@ class _StudentRow extends StatelessWidget {
     );
   }
 }
-

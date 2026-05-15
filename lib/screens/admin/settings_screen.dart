@@ -18,6 +18,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
+import '../../widgets/cached_image.dart';
 import '../../widgets/common/delete_account_helper.dart';
 import 'team_tab_content.dart';
 
@@ -26,7 +27,8 @@ class AdminSettingsScreen extends ConsumerStatefulWidget {
   const AdminSettingsScreen({super.key});
 
   @override
-  ConsumerState<AdminSettingsScreen> createState() => _AdminSettingsScreenState();
+  ConsumerState<AdminSettingsScreen> createState() =>
+      _AdminSettingsScreenState();
 }
 
 class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
@@ -61,7 +63,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   // Auto-graduation + class weights
   bool _autoGraduationEnabled = false;
   bool _useClassWeights = false;
-  final _autoGraduationAttendancesController = TextEditingController(text: '70');
+  final _autoGraduationAttendancesController = TextEditingController(
+    text: '70',
+  );
 
   // Monitors
   List<String> _monitorIds = [];
@@ -73,7 +77,13 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   String? _kycOnboardingUrl;
   bool _isCheckingKyc = false;
 
-  final _tabs = ['Academia', 'Financeiro', 'Monitores', 'Funcionalidades', 'Equipe'];
+  final _tabs = [
+    'Academia',
+    'Financeiro',
+    'Monitores',
+    'Funcionalidades',
+    'Equipe',
+  ];
 
   @override
   void initState() {
@@ -134,8 +144,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _autoGraduationEnabled = settings.autoGraduationEnabled;
           _useClassWeights = settings.useClassWeights;
           if (settings.autoGraduationAttendances != null) {
-            _autoGraduationAttendancesController.text =
-                settings.autoGraduationAttendances.toString();
+            _autoGraduationAttendancesController.text = settings
+                .autoGraduationAttendances
+                .toString();
           }
           _monitorIds = settings.monitorIds;
         });
@@ -162,12 +173,12 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
       // Filter students that have linkedUserId and are active
       final linked = allStudents
-          .where((s) => s.linkedUserId != null && s.status == StudentStatus.active)
-          .map((s) => {
-                'id': s.id,
-                'fullName': s.fullName,
-                'nickname': s.nickname,
-              })
+          .where(
+            (s) => s.linkedUserId != null && s.status == StudentStatus.active,
+          )
+          .map(
+            (s) => {'id': s.id, 'fullName': s.fullName, 'nickname': s.nickname},
+          )
           .toList();
 
       setState(() {
@@ -232,11 +243,17 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         cnpj: _cnpjController.text.isEmpty ? null : _cnpjController.text,
         email: _emailController.text.isEmpty ? null : _emailController.text,
         phone: _phoneController.text.isEmpty ? null : _phoneController.text,
-        address: _addressController.text.isEmpty ? null : _addressController.text,
+        address: _addressController.text.isEmpty
+            ? null
+            : _addressController.text,
         city: _cityController.text.isEmpty ? null : _cityController.text,
         state: _stateController.text.isEmpty ? null : _stateController.text,
-        zipCode: _zipCodeController.text.isEmpty ? null : _zipCodeController.text,
-        responsibleBirthDate: _birthDateController.text.isEmpty ? null : _birthDateController.text,
+        zipCode: _zipCodeController.text.isEmpty
+            ? null
+            : _zipCodeController.text,
+        responsibleBirthDate: _birthDateController.text.isEmpty
+            ? null
+            : _birthDateController.text,
       );
 
       // Save PIX info
@@ -246,7 +263,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
       // Save branding
       await service.updateBranding(
-        portalSlogan: _sloganController.text.isEmpty ? null : _sloganController.text,
+        portalSlogan: _sloganController.text.isEmpty
+            ? null
+            : _sloganController.text,
       );
 
       // Save store settings
@@ -270,8 +289,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       await service.toggleStudentCheckin(_studentCheckinEnabled);
 
       // Save auto-graduation settings
-      final attendancesValue =
-          int.tryParse(_autoGraduationAttendancesController.text);
+      final attendancesValue = int.tryParse(
+        _autoGraduationAttendancesController.text,
+      );
       await service.updateAutoGraduation(
         _autoGraduationEnabled,
         attendances: attendancesValue,
@@ -323,10 +343,12 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       final token = await user.getIdToken();
 
       final url = Uri.parse(
-          '${AppConstants.apiBaseUrl}/payments/onboard/documents?academyId=${FirebaseService.academyId}');
-      final response = await http.get(url, headers: {
-        'Authorization': 'Bearer $token',
-      });
+        '${AppConstants.apiBaseUrl}/payments/onboard/documents?academyId=${FirebaseService.academyId}',
+      );
+      final response = await http.get(
+        url,
+        headers: {'Authorization': 'Bearer $token'},
+      );
 
       final body = jsonDecode(response.body) as Map<String, dynamic>;
 
@@ -338,7 +360,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         });
       } else {
         if (mounted) {
-          context.showError(body['error'] as String? ?? 'Erro ao verificar documentos');
+          context.showError(
+            body['error'] as String? ?? 'Erro ao verificar documentos',
+          );
         }
       }
     } catch (e) {
@@ -451,14 +475,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                   ),
 
                   // Save button
-                  SliverToBoxAdapter(
-                    child: _buildSaveButton(),
-                  ),
+                  SliverToBoxAdapter(child: _buildSaveButton()),
 
                   // Bottom padding
-                  const SliverToBoxAdapter(
-                    child: SizedBox(height: 100),
-                  ),
+                  const SliverToBoxAdapter(child: SizedBox(height: 100)),
                 ],
               ),
             ),
@@ -579,13 +599,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                       color: AppTheme.surfaceVariant,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: AppTheme.divider, width: 2),
-                      image: (_settings?.logoUrl ?? '').isNotEmpty
-                          ? DecorationImage(
-                              image: NetworkImage(_settings!.logoUrl!),
-                              fit: BoxFit.cover,
-                            )
-                          : null,
                     ),
+                    clipBehavior: Clip.antiAlias,
                     child: (_settings?.logoUrl ?? '').isEmpty
                         ? Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -607,6 +622,14 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                         : Stack(
                             alignment: Alignment.bottomRight,
                             children: [
+                              Positioned.fill(
+                                child: AppCachedImage(
+                                  imageUrl: _settings!.logoUrl,
+                                  width: 100,
+                                  height: 100,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
                               Container(
                                 padding: const EdgeInsets.all(6),
                                 decoration: BoxDecoration(
@@ -873,7 +896,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             ? const SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
               )
             : const Icon(LucideIcons.fileSearch, size: 18),
         label: Text(_isCheckingKyc ? 'Verificando...' : 'Verificar Documentos'),
@@ -903,7 +929,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             color: AppTheme.info,
             icon: LucideIcons.clock,
             title: 'Documentos em Analise',
-            message: 'Seus documentos estao sendo verificados. A aprovacao pode levar ate 48 horas.',
+            message:
+                'Seus documentos estao sendo verificados. A aprovacao pode levar ate 48 horas.',
           ),
           const SizedBox(height: 12),
           OutlinedButton.icon(
@@ -917,7 +944,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 : const Icon(LucideIcons.refreshCw, size: 16),
             label: Text(_isCheckingKyc ? 'Atualizando...' : 'Atualizar Status'),
             style: OutlinedButton.styleFrom(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
           ),
         ],
@@ -949,12 +978,16 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 }
               },
               icon: const Icon(LucideIcons.externalLink, size: 18),
-              label: Text(isRejected ? 'Reenviar Documentos' : 'Iniciar Verificacao'),
+              label: Text(
+                isRejected ? 'Reenviar Documentos' : 'Iniciar Verificacao',
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.textPrimary,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             ),
           )
@@ -977,7 +1010,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
               : const Icon(LucideIcons.refreshCw, size: 16),
           label: Text(_isCheckingKyc ? 'Atualizando...' : 'Atualizar Status'),
           style: OutlinedButton.styleFrom(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
           ),
         ),
       ],
@@ -1017,14 +1052,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            message,
-            style: AppTheme.bodySmall.copyWith(color: color),
-          ),
-          if (action != null) ...[
-            const SizedBox(height: 12),
-            action,
-          ],
+          Text(message, style: AppTheme.bodySmall.copyWith(color: color)),
+          if (action != null) ...[const SizedBox(height: 12), action],
         ],
       ),
     );
@@ -1072,7 +1101,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                     ),
                     child: Row(
                       children: [
-                        Icon(LucideIcons.info, color: AppTheme.textSecondary, size: 20),
+                        Icon(
+                          LucideIcons.info,
+                          color: AppTheme.textSecondary,
+                          size: 20,
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
@@ -1118,8 +1151,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                             },
                       decoration: const InputDecoration(
                         border: InputBorder.none,
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                       ),
                       dropdownColor: AppTheme.surface,
                     ),
@@ -1207,7 +1242,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                             IconButton(
                               onPressed: _isLoadingMonitors
                                   ? null
-                                  : () => _removeMonitor(monitor['id'] as String),
+                                  : () =>
+                                        _removeMonitor(monitor['id'] as String),
                               icon: Icon(
                                 LucideIcons.x,
                                 color: AppTheme.error,
@@ -1229,9 +1265,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             decoration: BoxDecoration(
               color: Colors.blue.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.blue.withValues(alpha: 0.2),
-              ),
+              border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1313,7 +1347,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                       color: AppTheme.info.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: AppTheme.info.withValues(alpha: 0.3)),
+                        color: AppTheme.info.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1323,8 +1358,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                         Expanded(
                           child: Text(
                             'Alunos serao destacados na lista quando atingirem o numero configurado. A graduacao em si precisa ser confirmada por um admin.',
-                            style: AppTheme.labelSmall
-                                .copyWith(color: AppTheme.info),
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.info,
+                            ),
                           ),
                         ),
                       ],
@@ -1350,19 +1386,24 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                         color: AppTheme.warning.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                            color: AppTheme.warning.withValues(alpha: 0.3)),
+                          color: AppTheme.warning.withValues(alpha: 0.3),
+                        ),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(LucideIcons.info,
-                              size: 18, color: AppTheme.warning),
+                          Icon(
+                            LucideIcons.info,
+                            size: 18,
+                            color: AppTheme.warning,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               'Defina o peso de cada turma na tela de Turmas. Turmas sem peso configurado contam como 1.',
-                              style: AppTheme.labelSmall
-                                  .copyWith(color: AppTheme.warning),
+                              style: AppTheme.labelSmall.copyWith(
+                                color: AppTheme.warning,
+                              ),
                             ),
                           ),
                         ],
@@ -1399,7 +1440,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                     decoration: BoxDecoration(
                       color: AppTheme.info.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.info.withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: AppTheme.info.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1409,7 +1452,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                         Expanded(
                           child: Text(
                             'Alunos podem fazer check-in de 30 min antes ate 1h apos o fim da aula. O professor confirma as presencas na tela de chamada.',
-                            style: AppTheme.labelSmall.copyWith(color: AppTheme.info),
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.info,
+                            ),
                           ),
                         ),
                       ],
@@ -1464,7 +1509,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                     label: 'Pedido Minimo (R\$)',
                     hint: '0.00',
                     icon: LucideIcons.dollarSign,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   _ModernSwitch(
@@ -1520,7 +1567,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                   title: 'Excluir minha conta',
                   subtitle: 'Remover permanentemente seus dados',
                   isDestructive: true,
-                  onTap: () => DeleteAccountHelper.showConfirmation(context, ref),
+                  onTap: () =>
+                      DeleteAccountHelper.showConfirmation(context, ref),
                 ),
               ],
             ),
@@ -1775,10 +1823,14 @@ class _ModernSwitch extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: value && !disabled ? effectiveColor.withValues(alpha: 0.05) : AppTheme.surfaceVariant,
+          color: value && !disabled
+              ? effectiveColor.withValues(alpha: 0.05)
+              : AppTheme.surfaceVariant,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: value && !disabled ? effectiveColor.withValues(alpha: 0.2) : AppTheme.divider,
+            color: value && !disabled
+                ? effectiveColor.withValues(alpha: 0.2)
+                : AppTheme.divider,
           ),
         ),
         child: Row(
@@ -1787,7 +1839,9 @@ class _ModernSwitch extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: effectiveColor.withValues(alpha: value && !disabled ? 0.2 : 0.1),
+                color: effectiveColor.withValues(
+                  alpha: value && !disabled ? 0.2 : 0.1,
+                ),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(icon, color: effectiveColor, size: 20),
@@ -1803,13 +1857,18 @@ class _ModernSwitch extends StatelessWidget {
                         title,
                         style: AppTheme.bodyMedium.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: disabled ? AppTheme.textSecondary : AppTheme.textPrimary,
+                          color: disabled
+                              ? AppTheme.textSecondary
+                              : AppTheme.textPrimary,
                         ),
                       ),
                       if (disabled) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: AppTheme.warning.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(4),
@@ -1930,4 +1989,3 @@ class _AccountActionTile extends StatelessWidget {
     );
   }
 }
-

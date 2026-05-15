@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -11,9 +12,12 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../models/user.dart';
 import '../../providers/providers.dart';
+import '../../widgets/cached_image.dart';
 import '../../widgets/common/delete_account_helper.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/profile_photo_picker.dart';
+import '../../widgets/loading_button.dart';
+import '../../widgets/skeletons/skeletons.dart';
 
 /// Profile Screen - Redesigned with hero header, stats, and collapsed sections
 class ProfileScreen extends ConsumerWidget {
@@ -29,13 +33,17 @@ class ProfileScreen extends ConsumerWidget {
           return _buildEmptyState();
         }
 
-        final attendanceCountAsync = ref.watch(studentAttendanceCountProvider(student.id));
+        final attendanceCountAsync = ref.watch(
+          studentAttendanceCountProvider(student.id),
+        );
         final plansAsync = ref.watch(studentPlansProvider(student.id));
         final startDate = student.jiujitsuStartDate ?? student.startDate;
         final trainingTime = _formatTrainingTime(startDate);
 
         return RefreshIndicator(
+          color: Theme.of(context).colorScheme.primary,
           onRefresh: () async {
+            HapticFeedback.mediumImpact();
             ref.invalidate(currentStudentProvider);
             ref.invalidate(studentAttendanceCountProvider(student.id));
           },
@@ -72,7 +80,8 @@ class ProfileScreen extends ConsumerWidget {
                 // Quick Actions
                 _QuickActions(
                   onTimeline: () => context.go('/portal/linha-do-tempo'),
-                  onEdit: () => _showEditPersonalDataSheet(context, ref, student),
+                  onEdit: () =>
+                      _showEditPersonalDataSheet(context, ref, student),
                 ),
 
                 const SizedBox(height: 24),
@@ -96,8 +105,11 @@ class ProfileScreen extends ConsumerWidget {
                     ),
                     if ((plansAsync.valueOrNull ?? []).isNotEmpty)
                       _InfoRow(
-                        label: 'Plano${(plansAsync.valueOrNull ?? []).length > 1 ? 's' : ''}',
-                        value: (plansAsync.valueOrNull ?? []).map((p) => p.name).join(', '),
+                        label:
+                            'Plano${(plansAsync.valueOrNull ?? []).length > 1 ? 's' : ''}',
+                        value: (plansAsync.valueOrNull ?? [])
+                            .map((p) => p.name)
+                            .join(', '),
                       ),
                   ],
                 ),
@@ -117,21 +129,30 @@ class ProfileScreen extends ConsumerWidget {
                       title: 'Dados Pessoais',
                       subtitle: _getPersonalDataSummary(student),
                       isSubtitleEmpty: _isPersonalDataEmpty(student),
-                      onTap: () => _showEditPersonalDataSheet(context, ref, student),
+                      onTap: () =>
+                          _showEditPersonalDataSheet(context, ref, student),
                     ),
                     _DataTile(
                       icon: LucideIcons.mapPin,
                       title: 'Endereco',
                       subtitle: _getAddressSummary(student),
-                      isSubtitleEmpty: student.address == null || !_hasAddress(student.address!),
+                      isSubtitleEmpty:
+                          student.address == null ||
+                          !_hasAddress(student.address!),
                       onTap: () => _showEditAddressSheet(context, ref, student),
                     ),
                     _DataTile(
                       icon: LucideIcons.heartPulse,
                       title: 'Saude e Emergencia',
                       subtitle: _getHealthEmergencySummary(student),
-                      isSubtitleEmpty: _isHealthDataEmpty(student) && student.emergencyContact == null,
-                      onTap: () => _showEditHealthAndEmergencySheet(context, ref, student),
+                      isSubtitleEmpty:
+                          _isHealthDataEmpty(student) &&
+                          student.emergencyContact == null,
+                      onTap: () => _showEditHealthAndEmergencySheet(
+                        context,
+                        ref,
+                        student,
+                      ),
                     ),
                   ],
                 ),
@@ -146,7 +167,8 @@ class ProfileScreen extends ConsumerWidget {
                 const SizedBox(height: 8),
                 _PrivacyToggle(
                   value: student.isProfilePublic,
-                  onChanged: (value) => _updatePrivacy(context, ref, student, value),
+                  onChanged: (value) =>
+                      _updatePrivacy(context, ref, student, value),
                 ),
 
                 const SizedBox(height: 24),
@@ -196,9 +218,12 @@ class ProfileScreen extends ConsumerWidget {
 
   String _getPersonalDataSummary(Student student) {
     final parts = <String>[];
-    if (student.phone != null && student.phone!.isNotEmpty) parts.add(student.phone!);
-    if (student.email != null && student.email!.isNotEmpty) parts.add(student.email!);
-    if (student.nickname != null && student.nickname!.isNotEmpty) parts.add(student.nickname!);
+    if (student.phone != null && student.phone!.isNotEmpty)
+      parts.add(student.phone!);
+    if (student.email != null && student.email!.isNotEmpty)
+      parts.add(student.email!);
+    if (student.nickname != null && student.nickname!.isNotEmpty)
+      parts.add(student.nickname!);
     if (parts.isEmpty) return 'Nenhum dado';
     return parts.join(', ');
   }
@@ -221,7 +246,8 @@ class ProfileScreen extends ConsumerWidget {
     if (student.bloodType != null && student.bloodType!.isNotEmpty) {
       parts.add('Tipo ${student.bloodType}');
     }
-    if (student.emergencyContact != null && student.emergencyContact!.name.isNotEmpty) {
+    if (student.emergencyContact != null &&
+        student.emergencyContact!.name.isNotEmpty) {
       parts.add(student.emergencyContact!.name);
     }
     if (parts.isEmpty) return 'Nenhum dado';
@@ -266,7 +292,9 @@ class ProfileScreen extends ConsumerWidget {
       ref.invalidate(currentStudentProvider);
 
       if (context.mounted) {
-        context.showSuccess(value ? 'Perfil agora e publico' : 'Perfil agora e privado');
+        context.showSuccess(
+          value ? 'Perfil agora e publico' : 'Perfil agora e privado',
+        );
       }
     } catch (e) {
       if (context.mounted) {
@@ -275,7 +303,11 @@ class ProfileScreen extends ConsumerWidget {
     }
   }
 
-  void _showEditPersonalDataSheet(BuildContext context, WidgetRef ref, Student student) {
+  void _showEditPersonalDataSheet(
+    BuildContext context,
+    WidgetRef ref,
+    Student student,
+  ) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -292,7 +324,11 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  void _showEditAddressSheet(BuildContext context, WidgetRef ref, Student student) {
+  void _showEditAddressSheet(
+    BuildContext context,
+    WidgetRef ref,
+    Student student,
+  ) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -309,7 +345,11 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  void _showEditHealthAndEmergencySheet(BuildContext context, WidgetRef ref, Student student) {
+  void _showEditHealthAndEmergencySheet(
+    BuildContext context,
+    WidgetRef ref,
+    Student student,
+  ) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -334,71 +374,22 @@ class ProfileScreen extends ConsumerWidget {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
-        children: [
-          const SizedBox(height: 16),
+        children: const [
+          SizedBox(height: 16),
           // Avatar shimmer
-          Container(
-            width: 88,
-            height: 88,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Name shimmer
-          Container(
-            height: 20,
-            width: 160,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-          const SizedBox(height: 8),
-          // Belt shimmer
-          Container(
-            height: 28,
-            width: 140,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-          const SizedBox(height: 20),
+          SkeletonAvatar(size: 88),
+          SizedBox(height: 20),
           // Stats shimmer
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Container(
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
+          SkeletonStats(count: 2, height: 80),
+          SizedBox(height: 24),
           // Card shimmer
-          Container(
+          SkeletonCard(
             height: 150,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(12),
-            ),
+            showAvatar: false,
+            padding: EdgeInsets.all(16),
           ),
+          SizedBox(height: 12),
+          SkeletonCard(height: 80, showAvatar: true),
         ],
       ),
     );
@@ -529,12 +520,16 @@ class _StatCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               value,
-              style: AppTheme.headlineMedium.copyWith(fontWeight: FontWeight.w600),
+              style: AppTheme.headlineMedium.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 2),
             Text(
               label,
-              style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.labelSmall.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -603,7 +598,9 @@ class _QuickActionChip extends StatelessWidget {
             Flexible(
               child: Text(
                 label,
-                style: AppTheme.labelMedium.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.labelMedium.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -656,13 +653,17 @@ class _DataTile extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
                     style: AppTheme.labelSmall.copyWith(
-                      color: isSubtitleEmpty ? AppTheme.textDisabled : AppTheme.textSecondary,
+                      color: isSubtitleEmpty
+                          ? AppTheme.textDisabled
+                          : AppTheme.textSecondary,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -672,7 +673,11 @@ class _DataTile extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             // Trailing chevron
-            Icon(LucideIcons.chevronRight, size: 16, color: AppTheme.textSecondary),
+            Icon(
+              LucideIcons.chevronRight,
+              size: 16,
+              color: AppTheme.textSecondary,
+            ),
           ],
         ),
       ),
@@ -716,11 +721,17 @@ class _SectionHeader extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(LucideIcons.pencil, size: 12, color: AppTheme.textSecondary),
+                  Icon(
+                    LucideIcons.pencil,
+                    size: 12,
+                    color: AppTheme.textSecondary,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     'Editar',
-                    style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -765,11 +776,7 @@ class _InfoRow extends StatelessWidget {
   final String value;
   final Color? valueColor;
 
-  const _InfoRow({
-    required this.label,
-    required this.value,
-    this.valueColor,
-  });
+  const _InfoRow({required this.label, required this.value, this.valueColor});
 
   @override
   Widget build(BuildContext context) {
@@ -839,11 +846,15 @@ class _PrivacyToggle extends StatelessWidget {
               children: [
                 Text(
                   'Perfil publico',
-                  style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 Text(
                   'Outros alunos podem ver seu perfil',
-                  style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
               ],
             ),
@@ -892,7 +903,9 @@ class _EditPersonalDataSheetState extends State<_EditPersonalDataSheet> {
     _emailController = TextEditingController(text: widget.student.email);
     _cpfController = TextEditingController(text: widget.student.cpf);
     _rgController = TextEditingController(text: widget.student.rg);
-    _weightController = TextEditingController(text: widget.student.weight?.toString());
+    _weightController = TextEditingController(
+      text: widget.student.weight?.toString(),
+    );
     _birthDate = widget.student.birthDate;
   }
 
@@ -911,12 +924,24 @@ class _EditPersonalDataSheetState extends State<_EditPersonalDataSheet> {
     setState(() => _isSaving = true);
     try {
       await widget.onSave({
-        'nickname': _nicknameController.text.trim().isEmpty ? null : _nicknameController.text.trim(),
-        'phone': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
-        'email': _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
-        'cpf': _cpfController.text.trim().isEmpty ? null : _cpfController.text.trim(),
-        'rg': _rgController.text.trim().isEmpty ? null : _rgController.text.trim(),
-        'weight': _weightController.text.trim().isEmpty ? null : double.tryParse(_weightController.text.trim()),
+        'nickname': _nicknameController.text.trim().isEmpty
+            ? null
+            : _nicknameController.text.trim(),
+        'phone': _phoneController.text.trim().isEmpty
+            ? null
+            : _phoneController.text.trim(),
+        'email': _emailController.text.trim().isEmpty
+            ? null
+            : _emailController.text.trim(),
+        'cpf': _cpfController.text.trim().isEmpty
+            ? null
+            : _cpfController.text.trim(),
+        'rg': _rgController.text.trim().isEmpty
+            ? null
+            : _rgController.text.trim(),
+        'weight': _weightController.text.trim().isEmpty
+            ? null
+            : double.tryParse(_weightController.text.trim()),
         'birthDate': _birthDate,
       });
       if (mounted) {
@@ -937,17 +962,45 @@ class _EditPersonalDataSheetState extends State<_EditPersonalDataSheet> {
       isSaving: _isSaving,
       onSave: _save,
       children: [
-        _SheetTextField(label: 'Apelido', controller: _nicknameController, hint: 'Como gostaria de ser chamado'),
+        _SheetTextField(
+          label: 'Apelido',
+          controller: _nicknameController,
+          hint: 'Como gostaria de ser chamado',
+        ),
         _SheetDateField(
           label: 'Data de nascimento',
           value: _birthDate,
           onChanged: (d) => setState(() => _birthDate = d),
         ),
-        _SheetTextField(label: 'Telefone', controller: _phoneController, hint: '(00) 00000-0000', keyboardType: TextInputType.phone),
-        _SheetTextField(label: 'Email', controller: _emailController, hint: 'seu@email.com', keyboardType: TextInputType.emailAddress),
-        _SheetTextField(label: 'CPF', controller: _cpfController, hint: '000.000.000-00', keyboardType: TextInputType.number),
-        _SheetTextField(label: 'RG', controller: _rgController, hint: 'Numero do RG'),
-        _SheetTextField(label: 'Peso (kg)', controller: _weightController, hint: 'Ex: 75.5', keyboardType: const TextInputType.numberWithOptions(decimal: true)),
+        _SheetTextField(
+          label: 'Telefone',
+          controller: _phoneController,
+          hint: '(00) 00000-0000',
+          keyboardType: TextInputType.phone,
+        ),
+        _SheetTextField(
+          label: 'Email',
+          controller: _emailController,
+          hint: 'seu@email.com',
+          keyboardType: TextInputType.emailAddress,
+        ),
+        _SheetTextField(
+          label: 'CPF',
+          controller: _cpfController,
+          hint: '000.000.000-00',
+          keyboardType: TextInputType.number,
+        ),
+        _SheetTextField(
+          label: 'RG',
+          controller: _rgController,
+          hint: 'Numero do RG',
+        ),
+        _SheetTextField(
+          label: 'Peso (kg)',
+          controller: _weightController,
+          hint: 'Ex: 75.5',
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        ),
       ],
     );
   }
@@ -982,7 +1035,9 @@ class _EditAddressSheetState extends State<_EditAddressSheet> {
     _streetController = TextEditingController(text: address?.street);
     _numberController = TextEditingController(text: address?.number);
     _complementController = TextEditingController(text: address?.complement);
-    _neighborhoodController = TextEditingController(text: address?.neighborhood);
+    _neighborhoodController = TextEditingController(
+      text: address?.neighborhood,
+    );
     _cityController = TextEditingController(text: address?.city);
     _stateController = TextEditingController(text: address?.state);
   }
@@ -1002,14 +1057,18 @@ class _EditAddressSheetState extends State<_EditAddressSheet> {
   Future<void> _save() async {
     setState(() => _isSaving = true);
     try {
-      final hasData = _streetController.text.trim().isNotEmpty || _cityController.text.trim().isNotEmpty;
+      final hasData =
+          _streetController.text.trim().isNotEmpty ||
+          _cityController.text.trim().isNotEmpty;
       await widget.onSave({
         'address': hasData
             ? {
                 'zipCode': _zipCodeController.text.trim(),
                 'street': _streetController.text.trim(),
                 'number': _numberController.text.trim(),
-                'complement': _complementController.text.trim().isEmpty ? null : _complementController.text.trim(),
+                'complement': _complementController.text.trim().isEmpty
+                    ? null
+                    : _complementController.text.trim(),
                 'neighborhood': _neighborhoodController.text.trim(),
                 'city': _cityController.text.trim(),
                 'state': _stateController.text.trim(),
@@ -1034,13 +1093,43 @@ class _EditAddressSheetState extends State<_EditAddressSheet> {
       isSaving: _isSaving,
       onSave: _save,
       children: [
-        _SheetTextField(label: 'CEP', controller: _zipCodeController, hint: '00000-000', keyboardType: TextInputType.number),
-        _SheetTextField(label: 'Rua', controller: _streetController, hint: 'Nome da rua'),
-        _SheetTextField(label: 'Numero', controller: _numberController, hint: '123', keyboardType: TextInputType.number),
-        _SheetTextField(label: 'Complemento', controller: _complementController, hint: 'Apto, bloco...'),
-        _SheetTextField(label: 'Bairro', controller: _neighborhoodController, hint: 'Nome do bairro'),
-        _SheetTextField(label: 'Cidade', controller: _cityController, hint: 'Nome da cidade'),
-        _SheetTextField(label: 'Estado', controller: _stateController, hint: 'UF'),
+        _SheetTextField(
+          label: 'CEP',
+          controller: _zipCodeController,
+          hint: '00000-000',
+          keyboardType: TextInputType.number,
+        ),
+        _SheetTextField(
+          label: 'Rua',
+          controller: _streetController,
+          hint: 'Nome da rua',
+        ),
+        _SheetTextField(
+          label: 'Numero',
+          controller: _numberController,
+          hint: '123',
+          keyboardType: TextInputType.number,
+        ),
+        _SheetTextField(
+          label: 'Complemento',
+          controller: _complementController,
+          hint: 'Apto, bloco...',
+        ),
+        _SheetTextField(
+          label: 'Bairro',
+          controller: _neighborhoodController,
+          hint: 'Nome do bairro',
+        ),
+        _SheetTextField(
+          label: 'Cidade',
+          controller: _cityController,
+          hint: 'Nome da cidade',
+        ),
+        _SheetTextField(
+          label: 'Estado',
+          controller: _stateController,
+          hint: 'UF',
+        ),
       ],
     );
   }
@@ -1051,13 +1140,18 @@ class _EditHealthAndEmergencySheet extends StatefulWidget {
   final Student student;
   final Future<void> Function(Map<String, dynamic>) onSave;
 
-  const _EditHealthAndEmergencySheet({required this.student, required this.onSave});
+  const _EditHealthAndEmergencySheet({
+    required this.student,
+    required this.onSave,
+  });
 
   @override
-  State<_EditHealthAndEmergencySheet> createState() => _EditHealthAndEmergencySheetState();
+  State<_EditHealthAndEmergencySheet> createState() =>
+      _EditHealthAndEmergencySheetState();
 }
 
-class _EditHealthAndEmergencySheetState extends State<_EditHealthAndEmergencySheet> {
+class _EditHealthAndEmergencySheetState
+    extends State<_EditHealthAndEmergencySheet> {
   // Health controllers
   late final TextEditingController _bloodTypeController;
   late final TextEditingController _allergiesController;
@@ -1071,12 +1165,24 @@ class _EditHealthAndEmergencySheetState extends State<_EditHealthAndEmergencyShe
   @override
   void initState() {
     super.initState();
-    _bloodTypeController = TextEditingController(text: widget.student.bloodType);
-    _allergiesController = TextEditingController(text: widget.student.allergies?.join(', '));
-    _healthNotesController = TextEditingController(text: widget.student.healthNotes);
-    _emergencyNameController = TextEditingController(text: widget.student.emergencyContact?.name);
-    _emergencyPhoneController = TextEditingController(text: widget.student.emergencyContact?.phone);
-    _emergencyRelationshipController = TextEditingController(text: widget.student.emergencyContact?.relationship);
+    _bloodTypeController = TextEditingController(
+      text: widget.student.bloodType,
+    );
+    _allergiesController = TextEditingController(
+      text: widget.student.allergies?.join(', '),
+    );
+    _healthNotesController = TextEditingController(
+      text: widget.student.healthNotes,
+    );
+    _emergencyNameController = TextEditingController(
+      text: widget.student.emergencyContact?.name,
+    );
+    _emergencyPhoneController = TextEditingController(
+      text: widget.student.emergencyContact?.phone,
+    );
+    _emergencyRelationshipController = TextEditingController(
+      text: widget.student.emergencyContact?.relationship,
+    );
   }
 
   @override
@@ -1094,15 +1200,24 @@ class _EditHealthAndEmergencySheetState extends State<_EditHealthAndEmergencyShe
     setState(() => _isSaving = true);
     try {
       final allergiesText = _allergiesController.text.trim();
-      final hasEmergencyData = _emergencyNameController.text.trim().isNotEmpty ||
+      final hasEmergencyData =
+          _emergencyNameController.text.trim().isNotEmpty ||
           _emergencyPhoneController.text.trim().isNotEmpty;
 
       await widget.onSave({
-        'bloodType': _bloodTypeController.text.trim().isEmpty ? null : _bloodTypeController.text.trim(),
+        'bloodType': _bloodTypeController.text.trim().isEmpty
+            ? null
+            : _bloodTypeController.text.trim(),
         'allergies': allergiesText.isEmpty
             ? null
-            : allergiesText.split(',').map((a) => a.trim()).where((a) => a.isNotEmpty).toList(),
-        'healthNotes': _healthNotesController.text.trim().isEmpty ? null : _healthNotesController.text.trim(),
+            : allergiesText
+                  .split(',')
+                  .map((a) => a.trim())
+                  .where((a) => a.isNotEmpty)
+                  .toList(),
+        'healthNotes': _healthNotesController.text.trim().isEmpty
+            ? null
+            : _healthNotesController.text.trim(),
         'emergencyContact': hasEmergencyData
             ? {
                 'name': _emergencyNameController.text.trim(),
@@ -1141,9 +1256,22 @@ class _EditHealthAndEmergencySheetState extends State<_EditHealthAndEmergencyShe
             ),
           ),
         ),
-        _SheetTextField(label: 'Tipo sanguineo', controller: _bloodTypeController, hint: 'Ex: A+, O-, AB+'),
-        _SheetTextField(label: 'Alergias', controller: _allergiesController, hint: 'Separe por virgula'),
-        _SheetTextField(label: 'Observacoes', controller: _healthNotesController, hint: 'Lesoes, medicamentos...', maxLines: 3),
+        _SheetTextField(
+          label: 'Tipo sanguineo',
+          controller: _bloodTypeController,
+          hint: 'Ex: A+, O-, AB+',
+        ),
+        _SheetTextField(
+          label: 'Alergias',
+          controller: _allergiesController,
+          hint: 'Separe por virgula',
+        ),
+        _SheetTextField(
+          label: 'Observacoes',
+          controller: _healthNotesController,
+          hint: 'Lesoes, medicamentos...',
+          maxLines: 3,
+        ),
         // Emergency section label
         Padding(
           padding: const EdgeInsets.only(top: 8, bottom: 12),
@@ -1156,9 +1284,22 @@ class _EditHealthAndEmergencySheetState extends State<_EditHealthAndEmergencyShe
             ),
           ),
         ),
-        _SheetTextField(label: 'Nome', controller: _emergencyNameController, hint: 'Nome do contato'),
-        _SheetTextField(label: 'Telefone', controller: _emergencyPhoneController, hint: '(00) 00000-0000', keyboardType: TextInputType.phone),
-        _SheetTextField(label: 'Parentesco', controller: _emergencyRelationshipController, hint: 'Ex: Mae, Pai, Conjuge'),
+        _SheetTextField(
+          label: 'Nome',
+          controller: _emergencyNameController,
+          hint: 'Nome do contato',
+        ),
+        _SheetTextField(
+          label: 'Telefone',
+          controller: _emergencyPhoneController,
+          hint: '(00) 00000-0000',
+          keyboardType: TextInputType.phone,
+        ),
+        _SheetTextField(
+          label: 'Parentesco',
+          controller: _emergencyRelationshipController,
+          hint: 'Ex: Mae, Pai, Conjuge',
+        ),
       ],
     );
   }
@@ -1212,7 +1353,12 @@ class _EditSheet extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(title, style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600)),
+                    child: Text(
+                      title,
+                      style: AppTheme.titleLarge.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
@@ -1243,17 +1389,24 @@ class _EditSheet extends StatelessWidget {
               child: SafeArea(
                 child: SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: isSaving ? null : onSave,
+                  child: LoadingButton(
+                    isLoading: isSaving,
+                    onPressed: () {
+                      HapticFeedback.selectionClick();
+                      onSave();
+                    },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
-                    child: isSaving
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('Salvar', style: TextStyle(fontWeight: FontWeight.w600)),
+                    child: const Text(
+                      'Salvar',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
                   ),
                 ),
               ),
@@ -1288,7 +1441,10 @@ class _SheetTextField extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: AppTheme.labelMedium.copyWith(color: AppTheme.textSecondary)),
+          Text(
+            label,
+            style: AppTheme.labelMedium.copyWith(color: AppTheme.textSecondary),
+          ),
           const SizedBox(height: 8),
           TextFormField(
             controller: controller,
@@ -1297,11 +1453,19 @@ class _SheetTextField extends StatelessWidget {
             style: AppTheme.bodyMedium,
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.textDisabled),
+              hintStyle: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textDisabled,
+              ),
               filled: true,
               fillColor: AppTheme.surfaceVariant.withValues(alpha: 0.5),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 14,
+              ),
             ),
           ),
         ],
@@ -1329,13 +1493,18 @@ class _SheetDateField extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: AppTheme.labelMedium.copyWith(color: AppTheme.textSecondary)),
+          Text(
+            label,
+            style: AppTheme.labelMedium.copyWith(color: AppTheme.textSecondary),
+          ),
           const SizedBox(height: 8),
           InkWell(
             onTap: () async {
               final picked = await showDatePicker(
                 context: context,
-                initialDate: value ?? DateTime.now().subtract(const Duration(days: 365 * 20)),
+                initialDate:
+                    value ??
+                    DateTime.now().subtract(const Duration(days: 365 * 20)),
                 firstDate: DateTime(1940),
                 lastDate: DateTime.now(),
               );
@@ -1353,13 +1522,21 @@ class _SheetDateField extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      value != null ? DateFormat('dd/MM/yyyy').format(value!) : 'Selecionar data',
+                      value != null
+                          ? DateFormat('dd/MM/yyyy').format(value!)
+                          : 'Selecionar data',
                       style: AppTheme.bodyMedium.copyWith(
-                        color: value != null ? AppTheme.textPrimary : AppTheme.textDisabled,
+                        color: value != null
+                            ? AppTheme.textPrimary
+                            : AppTheme.textDisabled,
                       ),
                     ),
                   ),
-                  Icon(LucideIcons.calendar, size: 18, color: AppTheme.textSecondary),
+                  Icon(
+                    LucideIcons.calendar,
+                    size: 18,
+                    color: AppTheme.textSecondary,
+                  ),
                 ],
               ),
             ),
@@ -1396,7 +1573,9 @@ class _AcademiesSection extends ConsumerWidget {
           children: [
             _SectionHeader(
               title: 'MINHAS ACADEMIAS',
-              onEdit: hasMultiple ? () => context.push('/portal/academias') : null,
+              onEdit: hasMultiple
+                  ? () => context.push('/portal/academias')
+                  : null,
             ),
             const SizedBox(height: 8),
             Container(
@@ -1413,7 +1592,9 @@ class _AcademiesSection extends ConsumerWidget {
                       isSelected: academies[i].id == selectedId,
                       isPrimary: academies[i].id == primaryId,
                       onTap: hasMultiple
-                          ? () => ref.read(selectedAcademyProvider.notifier).selectAcademy(academies[i].id)
+                          ? () => ref
+                                .read(selectedAcademyProvider.notifier)
+                                .selectAcademy(academies[i].id)
                           : null,
                     ),
                     if (i < academies.length - 1) const Divider(height: 1),
@@ -1426,7 +1607,10 @@ class _AcademiesSection extends ConsumerWidget {
               GestureDetector(
                 onTap: () => context.push('/portal/academias'),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.surfaceVariant,
                     borderRadius: BorderRadius.circular(8),
@@ -1434,14 +1618,24 @@ class _AcademiesSection extends ConsumerWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(LucideIcons.settings, size: 14, color: AppTheme.textSecondary),
+                      const Icon(
+                        LucideIcons.settings,
+                        size: 14,
+                        color: AppTheme.textSecondary,
+                      ),
                       const SizedBox(width: 8),
                       Text(
                         'Gerenciar academias',
-                        style: AppTheme.labelMedium.copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.labelMedium.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                       const SizedBox(width: 4),
-                      const Icon(LucideIcons.chevronRight, size: 14, color: AppTheme.textSecondary),
+                      const Icon(
+                        LucideIcons.chevronRight,
+                        size: 14,
+                        color: AppTheme.textSecondary,
+                      ),
                     ],
                   ),
                 ),
@@ -1488,10 +1682,12 @@ class _AcademyTile extends StatelessWidget {
               ),
               clipBehavior: Clip.antiAlias,
               child: academy.logoUrl != null
-                  ? Image.network(
-                      academy.logoUrl!,
+                  ? AppCachedImage(
+                      imageUrl: academy.logoUrl,
+                      width: 40,
+                      height: 40,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _buildDefaultLogo(),
+                      errorIcon: _buildDefaultLogo(),
                     )
                   : _buildDefaultLogo(),
             ),
@@ -1507,7 +1703,9 @@ class _AcademyTile extends StatelessWidget {
                         child: Text(
                           academy.name,
                           style: AppTheme.bodyMedium.copyWith(
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.w500,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1515,7 +1713,10 @@ class _AcademyTile extends StatelessWidget {
                       if (isPrimary) ...[
                         const SizedBox(width: 6),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: AppTheme.primary,
                             borderRadius: BorderRadius.circular(4),
@@ -1535,7 +1736,9 @@ class _AcademyTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     academy.role.label,
-                    style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -1683,7 +1886,7 @@ class _AccountSection extends ConsumerWidget {
 /// `requires-recent-login`, etc.) are surfaced inline.
 class _ChangePasswordDialog extends StatefulWidget {
   final Future<void> Function(String currentPassword, String newPassword)
-      onSubmit;
+  onSubmit;
 
   const _ChangePasswordDialog({required this.onSubmit});
 
@@ -1719,7 +1922,9 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
       return;
     }
     if (next.length < 6) {
-      setState(() => _error = 'A nova senha precisa ter pelo menos 6 caracteres.');
+      setState(
+        () => _error = 'A nova senha precisa ter pelo menos 6 caracteres.',
+      );
       return;
     }
     if (next != conf) {
@@ -1770,7 +1975,11 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(LucideIcons.checkCircle, color: AppTheme.success, size: 36),
+                Icon(
+                  LucideIcons.checkCircle,
+                  color: AppTheme.success,
+                  size: 36,
+                ),
                 const SizedBox(height: 12),
                 Text(
                   'Sua senha foi alterada com sucesso.',
@@ -1832,7 +2041,9 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
                     const SizedBox(height: 12),
                     Text(
                       _error!,
-                      style: AppTheme.labelSmall.copyWith(color: AppTheme.error),
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.error,
+                      ),
                     ),
                   ],
                 ],
@@ -1847,8 +2058,7 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
             ]
           : [
               TextButton(
-                onPressed:
-                    _saving ? null : () => Navigator.of(context).pop(),
+                onPressed: _saving ? null : () => Navigator.of(context).pop(),
                 child: const Text('Cancelar'),
               ),
               ElevatedButton(
@@ -1859,8 +2069,9 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
                         height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
                         ),
                       )
                     : const Text('Salvar'),
@@ -1905,7 +2116,9 @@ class _AccountTile extends StatelessWidget {
             Icon(
               LucideIcons.chevronRight,
               size: 16,
-              color: isDestructive ? AppTheme.error.withValues(alpha: 0.5) : AppTheme.textSecondary,
+              color: isDestructive
+                  ? AppTheme.error.withValues(alpha: 0.5)
+                  : AppTheme.textSecondary,
             ),
           ],
         ),

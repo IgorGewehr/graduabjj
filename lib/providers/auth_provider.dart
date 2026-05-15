@@ -7,6 +7,7 @@ import '../models/user.dart';
 import '../services/firebase_service.dart';
 import '../services/global_user_service.dart';
 import '../services/push_notification_service.dart';
+import 'selected_academy_provider.dart';
 
 /// Firebase Auth instance provider
 final firebaseAuthProvider = Provider<FirebaseAuth>((ref) {
@@ -42,7 +43,9 @@ final globalUserProvider = FutureProvider<GlobalUser?>((ref) async {
 });
 
 /// User academy mapping provider - fetches from userAcademyMapping collection
-final userAcademyMappingProvider = FutureProvider<UserAcademyMapping?>((ref) async {
+final userAcademyMappingProvider = FutureProvider<UserAcademyMapping?>((
+  ref,
+) async {
   final authState = ref.watch(authStateProvider);
   final firebaseUser = authState.valueOrNull;
 
@@ -57,10 +60,21 @@ final isFreeUserProvider = Provider<bool>((ref) {
   return globalUser?.accountType == AccountType.free;
 });
 
-/// Current user provider with robust fallback logic
+/// Current user provider with robust fallback logic.
+///
+/// Watches [selectedAcademyIdProvider] via `.select` so that switching the
+/// active academy automatically rebuilds this provider — no manual
+/// `ref.invalidate(currentUserProvider)` needed in the academy switcher.
 final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   final authState = ref.watch(authStateProvider);
   final firebaseUser = authState.valueOrNull;
+
+  // Subscribe to id changes only — passing through `.select` so unrelated
+  // changes to the SelectedAcademy state (cache writes, loading flag) do not
+  // re-fetch the user document.
+  final selectedAcademyId = ref.watch(
+    selectedAcademyIdProvider.select((id) => id),
+  );
 
   if (firebaseUser == null) {
     print('[AUTH] No firebase user');
@@ -71,7 +85,9 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   final firestore = ref.watch(firestoreProvider);
 
   // Step 1: Get or create global user
-  GlobalUser? globalUser = await globalUserService.getGlobalUser(firebaseUser.uid);
+  GlobalUser? globalUser = await globalUserService.getGlobalUser(
+    firebaseUser.uid,
+  );
 
   if (globalUser == null) {
     print('[AUTH] Creating new global user...');
@@ -85,12 +101,21 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   }
 
   // Step 2: Get academy mapping
-  final mapping = await globalUserService.getUserAcademyMapping(firebaseUser.uid);
+  final mapping = await globalUserService.getUserAcademyMapping(
+    firebaseUser.uid,
+  );
   String? academyId;
 
   if (mapping != null && mapping.academyIds.isNotEmpty) {
-    // User is linked to academy(ies)
-    academyId = mapping.primaryAcademyId ?? mapping.academyIds.first;
+    // Prefer the explicit `selectedAcademyId` (set by selectAcademy) —
+    // falls back to the user's primary academy on first boot when the
+    // SelectedAcademyNotifier has not finished `_initialize()` yet.
+    if (selectedAcademyId != null &&
+        mapping.academyIds.contains(selectedAcademyId)) {
+      academyId = selectedAcademyId;
+    } else {
+      academyId = mapping.primaryAcademyId ?? mapping.academyIds.first;
+    }
     print('[AUTH] User is linked to academy: $academyId');
   } else {
     print('[AUTH] User is a free user (not linked to any academy)');
@@ -126,13 +151,17 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
 
   if (userDoc.exists) {
     final userData = userDoc.data()!;
-    print('[AUTH] Found user in academy subcollection: role=${userData['role']}');
+    print(
+      '[AUTH] Found user in academy subcollection: role=${userData['role']}',
+    );
 
     // Combine global user data with academy-specific data
     return AppUser.fromGlobalAndAcademy(
       globalUser: globalUser,
       academyId: academyId,
-      role: academyDetails?.role ?? UserRoleExtension.fromString(userData['role'] ?? 'student'),
+      role:
+          academyDetails?.role ??
+          UserRoleExtension.fromString(userData['role'] ?? 'student'),
       studentId: academyDetails?.studentId ?? userData['studentId'],
       linkedStudentIds: userData['linkedStudentIds'] != null
           ? List<String>.from(userData['linkedStudentIds'])
@@ -274,10 +303,10 @@ class AuthService {
                 .collection('academies/$academyId/students')
                 .doc(academyDetail!.studentId)
                 .update({
-              'status': 'deleted',
-              'deletedAt': FieldValue.serverTimestamp(),
-              'deletedByUser': true,
-            });
+                  'status': 'deleted',
+                  'deletedAt': FieldValue.serverTimestamp(),
+                  'deletedByUser': true,
+                });
           }
         }
       }
@@ -293,7 +322,9 @@ class AuthService {
     } catch (e) {
       // If requires recent login, throw specific error
       if (e.toString().contains('requires-recent-login')) {
-        throw Exception('Por seguranca, faca login novamente antes de excluir sua conta');
+        throw Exception(
+          'Por seguranca, faca login novamente antes de excluir sua conta',
+        );
       }
       rethrow;
     }
@@ -429,9 +460,9 @@ class AuthService {
           .collection('students')
           .doc(studentId)
           .update({
-        'linkedUserId': FieldValue.delete(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+            'linkedUserId': FieldValue.delete(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
     }
 
     // Remove academy user document
@@ -508,10 +539,7 @@ class AuthService {
       'ownerId': credential.user!.uid,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
-      'settings': {
-        'allowStudentRegistration': true,
-        'requireApproval': false,
-      },
+      'settings': {'allowStudentRegistration': true, 'requireApproval': false},
       'subscription': {
         'plan': 'free',
         'status': 'active',
@@ -526,7 +554,8 @@ class AuthService {
 
     // Add document info if provided
     if (documentType != null) academyData['ownerDocumentType'] = documentType;
-    if (documentNumber != null) academyData['ownerDocumentNumber'] = documentNumber;
+    if (documentNumber != null)
+      academyData['ownerDocumentNumber'] = documentNumber;
 
     await academyRef.set(academyData);
 
@@ -653,7 +682,9 @@ class AuthService {
           // On final attempt failure, log error but continue
           // User can still login, but profile linking might fail
           debugPrint('CRITICAL: Failed to update student after 3 attempts');
-          throw Exception('Falha ao vincular perfil do aluno. Tente novamente.');
+          throw Exception(
+            'Falha ao vincular perfil do aluno. Tente novamente.',
+          );
         }
       }
     }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -12,13 +13,7 @@ import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 
 /// Timeline event types
-enum TimelineEventType {
-  graduation,
-  stripe,
-  competition,
-  milestone,
-  start,
-}
+enum TimelineEventType { graduation, stripe, competition, milestone, start }
 
 /// Timeline event model
 class _TimelineEvent {
@@ -46,13 +41,17 @@ class _TimelineEvent {
 }
 
 /// Belt progressions provider for timeline
-final studentBeltProgressionsProvider = FutureProvider.family<List<BeltProgression>, String>((ref, studentId) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser?.academyId == null) return [];
+final studentBeltProgressionsProvider =
+    FutureProvider.family<List<BeltProgression>, String>((
+      ref,
+      studentId,
+    ) async {
+      final currentUser = await ref.watch(currentUserProvider.future);
+      if (currentUser?.academyId == null) return [];
 
-  final service = BeltProgressionService(currentUser!.academyId!);
-  return await service.getByStudent(studentId);
-});
+      final service = BeltProgressionService(currentUser!.academyId!);
+      return await service.getByStudent(studentId);
+    });
 
 /// Timeline Screen - Linha do Tempo with enhanced design
 class TimelineScreen extends ConsumerWidget {
@@ -65,18 +64,33 @@ class TimelineScreen extends ConsumerWidget {
     return studentAsync.when(
       data: (student) {
         if (student == null) {
-          return _buildEmptyState('Perfil nao vinculado', 'Sua conta nao esta vinculada a um aluno');
+          return _buildEmptyState(
+            'Perfil nao vinculado',
+            'Sua conta nao esta vinculada a um aluno',
+          );
         }
 
-        final achievementsAsync = ref.watch(studentAchievementsProvider(student.id));
-        final progressionsAsync = ref.watch(studentBeltProgressionsProvider(student.id));
-        final attendanceCountAsync = ref.watch(studentAttendanceCountProvider(student.id));
-        final medalCountAsync = ref.watch(studentMedalCountProvider(student.id));
-        final competitionsAsync = ref.watch(studentCompetitionResultsProvider(student.id));
+        final achievementsAsync = ref.watch(
+          studentAchievementsProvider(student.id),
+        );
+        final progressionsAsync = ref.watch(
+          studentBeltProgressionsProvider(student.id),
+        );
+        final attendanceCountAsync = ref.watch(
+          studentAttendanceCountProvider(student.id),
+        );
+        final medalCountAsync = ref.watch(
+          studentMedalCountProvider(student.id),
+        );
+        final competitionsAsync = ref.watch(
+          studentCompetitionResultsProvider(student.id),
+        );
         final academyInfo = ref.watch(currentAcademyInfoProvider);
 
         return RefreshIndicator(
+          color: Theme.of(context).colorScheme.primary,
           onRefresh: () async {
+            HapticFeedback.mediumImpact();
             ref.invalidate(currentStudentProvider);
             ref.invalidate(studentAchievementsProvider(student.id));
             ref.invalidate(studentBeltProgressionsProvider(student.id));
@@ -87,9 +101,7 @@ class TimelineScreen extends ConsumerWidget {
           child: CustomScrollView(
             slivers: [
               // Academy indicator for multi-academy users
-              const SliverToBoxAdapter(
-                child: _AcademyIndicator(),
-              ),
+              const SliverToBoxAdapter(child: _AcademyIndicator()),
 
               // Header
               const SliverToBoxAdapter(child: SizedBox(height: 12)),
@@ -129,7 +141,10 @@ class TimelineScreen extends ConsumerWidget {
         );
       },
       loading: () => _buildLoadingState(),
-      error: (_, __) => _buildEmptyState('Erro ao carregar', 'Nao foi possivel carregar sua linha do tempo'),
+      error: (_, __) => _buildEmptyState(
+        'Erro ao carregar',
+        'Nao foi possivel carregar sua linha do tempo',
+      ),
     );
   }
 
@@ -146,46 +161,55 @@ class TimelineScreen extends ConsumerWidget {
     final events = <_TimelineEvent>[];
 
     // Add start event
-    events.add(_TimelineEvent(
-      id: 'start',
-      date: student.jiujitsuStartDate ?? student.startDate,
-      type: TimelineEventType.start,
-      title: 'Inicio da Jornada',
-      description: 'Primeiro treino na academia',
-      belt: 'white',
-      academyName: academyName,
-    ));
+    events.add(
+      _TimelineEvent(
+        id: 'start',
+        date: student.jiujitsuStartDate ?? student.startDate,
+        type: TimelineEventType.start,
+        title: 'Inicio da Jornada',
+        description: 'Primeiro treino na academia',
+        belt: 'white',
+        academyName: academyName,
+      ),
+    );
 
     // Add belt progressions
     for (final p in progressions) {
-      events.add(_TimelineEvent(
-        id: 'progression_${p.id}',
-        date: p.promotionDate,
-        type: p.isBeltChange ? TimelineEventType.graduation : TimelineEventType.stripe,
-        title: p.isBeltChange
-            ? 'Faixa ${getGradeLabel(p.getSport(), p.newBelt)}'
-            : '${p.newStripes}o Grau',
-        description: p.notes,
-        belt: p.newBelt,
-        stripes: p.newStripes,
-        academyName: academyName,
-      ));
+      events.add(
+        _TimelineEvent(
+          id: 'progression_${p.id}',
+          date: p.promotionDate,
+          type: p.isBeltChange
+              ? TimelineEventType.graduation
+              : TimelineEventType.stripe,
+          title: p.isBeltChange
+              ? 'Faixa ${getGradeLabel(p.getSport(), p.newBelt)}'
+              : '${p.newStripes}o Grau',
+          description: p.notes,
+          belt: p.newBelt,
+          stripes: p.newStripes,
+          academyName: academyName,
+        ),
+      );
     }
 
     // Add achievements (only competitions and milestones, since graduations come from progressions)
     for (final a in achievements) {
-      if (a.type == AchievementType.competition || a.type == AchievementType.milestone) {
-        events.add(_TimelineEvent(
-          id: 'achievement_${a.id}',
-          date: a.date,
-          type: a.type == AchievementType.competition
-              ? TimelineEventType.competition
-              : TimelineEventType.milestone,
-          title: a.title,
-          description: a.description,
-          position: a.position?.value,
-          academyName: academyName,
-        ));
+      if (a.type == AchievementType.competition ||
+          a.type == AchievementType.milestone) {
+        events.add(
+          _TimelineEvent(
+            id: 'achievement_${a.id}',
+            date: a.date,
+            type: a.type == AchievementType.competition
+                ? TimelineEventType.competition
+                : TimelineEventType.milestone,
+            title: a.title,
+            description: a.description,
+            position: a.position?.value,
+            academyName: academyName,
+          ),
+        );
       }
     }
 
@@ -204,19 +228,14 @@ class TimelineScreen extends ConsumerWidget {
       children: [
         Text(
           'Sua Jornada',
-          style: AppTheme.headlineMedium.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
+          style: AppTheme.headlineMedium.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 20),
         ...reversedEvents.asMap().entries.map((entry) {
           final index = entry.key;
           final event = entry.value;
           final isLast = index == reversedEvents.length - 1;
-          return _TimelineItem(
-            event: event,
-            isLast: isLast,
-          );
+          return _TimelineItem(event: event, isLast: isLast);
         }),
       ],
     );
@@ -245,46 +264,49 @@ class TimelineScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 24),
-          ...List.generate(3, (index) => Padding(
-            padding: const EdgeInsets.only(bottom: 20),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Column(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: AppTheme.surfaceVariant,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    if (index < 2)
+          ...List.generate(
+            3,
+            (index) => Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Column(
+                    children: [
                       Container(
-                        width: 3,
-                        height: 60,
-                        margin: const EdgeInsets.only(top: 8),
+                        width: 44,
+                        height: 44,
                         decoration: BoxDecoration(
                           color: AppTheme.surfaceVariant,
-                          borderRadius: BorderRadius.circular(2),
+                          shape: BoxShape.circle,
                         ),
                       ),
-                  ],
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Container(
-                    height: 100,
-                    decoration: BoxDecoration(
-                      color: AppTheme.surfaceVariant,
-                      borderRadius: BorderRadius.circular(12),
+                      if (index < 2)
+                        Container(
+                          width: 3,
+                          height: 60,
+                          margin: const EdgeInsets.only(top: 8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.surfaceVariant,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Container(
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceVariant,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          )),
+          ),
         ],
       ),
     );
@@ -328,7 +350,9 @@ class TimelineScreen extends ConsumerWidget {
             const SizedBox(height: 16),
             Text(
               'Sua linha do tempo esta vazia',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
             const SizedBox(height: 4),
             Text(
@@ -408,7 +432,9 @@ class _JourneyCardState extends State<_JourneyCard> {
   @override
   Widget build(BuildContext context) {
     final attendanceCount = widget.attendanceCountAsync.valueOrNull ?? 0;
-    final medalStats = widget.medalCountAsync.valueOrNull ?? {'gold': 0, 'silver': 0, 'bronze': 0, 'total': 0};
+    final medalStats =
+        widget.medalCountAsync.valueOrNull ??
+        {'gold': 0, 'silver': 0, 'bronze': 0, 'total': 0};
     final competitions = widget.competitionsAsync.valueOrNull ?? [];
     final beltColor = _getBeltDisplayColor(widget.student.currentBelt);
 
@@ -426,7 +452,10 @@ class _JourneyCardState extends State<_JourneyCard> {
                 icon: LucideIcons.award,
                 iconColor: beltColor,
                 iconBgColor: beltColor.withValues(alpha: 0.15),
-                value: getGradeLabel(widget.student.getPrimarySport(), widget.student.currentBelt),
+                value: getGradeLabel(
+                  widget.student.getPrimarySport(),
+                  widget.student.currentBelt,
+                ),
                 label: widget.student.currentStripes > 0
                     ? '${widget.student.currentStripes} grau${widget.student.currentStripes > 1 ? 's' : ''}'
                     : 'Faixa Atual',
@@ -442,7 +471,9 @@ class _JourneyCardState extends State<_JourneyCard> {
                 icon: LucideIcons.clock,
                 iconColor: const Color(0xFF2563EB),
                 iconBgColor: const Color(0xFFEFF6FF),
-                value: _formatTrainingTime(widget.student.jiujitsuStartDate ?? widget.student.startDate),
+                value: _formatTrainingTime(
+                  widget.student.jiujitsuStartDate ?? widget.student.startDate,
+                ),
                 label: 'Tempo de Tatame',
               ),
               _JourneyCarouselCard(
@@ -467,7 +498,9 @@ class _JourneyCardState extends State<_JourneyCard> {
               width: _currentPage == index ? 20 : 8,
               height: 8,
               decoration: BoxDecoration(
-                color: _currentPage == index ? AppTheme.textPrimary : AppTheme.divider,
+                color: _currentPage == index
+                    ? AppTheme.textPrimary
+                    : AppTheme.divider,
                 borderRadius: BorderRadius.circular(4),
               ),
             );
@@ -499,11 +532,23 @@ class _JourneyCardState extends State<_JourneyCard> {
                 Row(
                   children: [
                     if ((medalStats['gold'] ?? 0) > 0)
-                      _MedalBadge(emoji: '🥇', count: medalStats['gold']!, label: 'Ouro'),
+                      _MedalBadge(
+                        emoji: '🥇',
+                        count: medalStats['gold']!,
+                        label: 'Ouro',
+                      ),
                     if ((medalStats['silver'] ?? 0) > 0)
-                      _MedalBadge(emoji: '🥈', count: medalStats['silver']!, label: 'Prata'),
+                      _MedalBadge(
+                        emoji: '🥈',
+                        count: medalStats['silver']!,
+                        label: 'Prata',
+                      ),
                     if ((medalStats['bronze'] ?? 0) > 0)
-                      _MedalBadge(emoji: '🥉', count: medalStats['bronze']!, label: 'Bronze'),
+                      _MedalBadge(
+                        emoji: '🥉',
+                        count: medalStats['bronze']!,
+                        label: 'Bronze',
+                      ),
                   ],
                 ),
               ],
@@ -609,11 +654,15 @@ class _MedalBadge extends StatelessWidget {
             children: [
               Text(
                 count.toString(),
-                style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               Text(
                 label,
-                style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ],
           ),
@@ -628,10 +677,7 @@ class _TimelineItem extends StatelessWidget {
   final _TimelineEvent event;
   final bool isLast;
 
-  const _TimelineItem({
-    required this.event,
-    required this.isLast,
-  });
+  const _TimelineItem({required this.event, required this.isLast});
 
   Color _getBeltColor(String belt) {
     const colors = {
@@ -769,7 +815,8 @@ class _TimelineItem extends StatelessWidget {
                   ),
 
                   // Description
-                  if (event.description != null && event.description!.isNotEmpty) ...[
+                  if (event.description != null &&
+                      event.description!.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     Text(
                       event.description!,
@@ -780,19 +827,22 @@ class _TimelineItem extends StatelessWidget {
                   ],
 
                   // Belt indicator for graduations
-                  if (event.type == TimelineEventType.graduation && event.belt != null) ...[
+                  if (event.type == TimelineEventType.graduation &&
+                      event.belt != null) ...[
                     const SizedBox(height: 12),
                     _BeltIndicator(belt: event.belt!),
                   ],
 
                   // Position badge for competitions
-                  if (event.type == TimelineEventType.competition && event.position != null) ...[
+                  if (event.type == TimelineEventType.competition &&
+                      event.position != null) ...[
                     const SizedBox(height: 12),
                     _PositionBadge(position: event.position!),
                   ],
 
                   // Academy badge for competitions (shows which academy they represented)
-                  if (event.type == TimelineEventType.competition && event.academyName != null) ...[
+                  if (event.type == TimelineEventType.competition &&
+                      event.academyName != null) ...[
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -823,7 +873,10 @@ class _TimelineItem extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        DateFormat("d 'de' MMMM 'de' yyyy", 'pt_BR').format(event.date),
+                        DateFormat(
+                          "d 'de' MMMM 'de' yyyy",
+                          'pt_BR',
+                        ).format(event.date),
                         style: AppTheme.labelSmall.copyWith(
                           color: AppTheme.textSecondary,
                         ),
@@ -1047,17 +1100,11 @@ class _AcademyIndicator extends ConsumerWidget {
       decoration: BoxDecoration(
         color: AppTheme.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: AppTheme.primary.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
-          Icon(
-            LucideIcons.clock,
-            size: 16,
-            color: AppTheme.primary,
-          ),
+          Icon(LucideIcons.clock, size: 16, color: AppTheme.primary),
           const SizedBox(width: 8),
           Expanded(
             child: Column(

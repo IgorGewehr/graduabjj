@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -82,6 +83,7 @@ class NotificationsScreen extends ConsumerWidget {
           if (notificationsAsync.valueOrNull?.any((n) => !n.read) == true)
             TextButton(
               onPressed: () async {
+                HapticFeedback.selectionClick();
                 final currentUser = ref.read(currentUserProvider).valueOrNull;
                 if (currentUser != null && notificationService != null) {
                   await notificationService.markAllAsRead(currentUser.id);
@@ -104,7 +106,11 @@ class NotificationsScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(LucideIcons.alertCircle, size: 48, color: AppTheme.textSecondary),
+              Icon(
+                LucideIcons.alertCircle,
+                size: 48,
+                color: AppTheme.textSecondary,
+              ),
               const SizedBox(height: 12),
               Text('Erro ao carregar notificacoes', style: AppTheme.bodyMedium),
             ],
@@ -116,16 +122,24 @@ class NotificationsScreen extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(LucideIcons.bellOff, size: 48, color: AppTheme.textSecondary),
+                  Icon(
+                    LucideIcons.bellOff,
+                    size: 48,
+                    color: AppTheme.textSecondary,
+                  ),
                   const SizedBox(height: 12),
                   Text(
                     'Nenhuma notificacao',
-                    style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.bodyMedium.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'Voce sera notificado sobre pagamentos e novidades',
-                    style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                 ],
@@ -133,97 +147,143 @@ class NotificationsScreen extends ConsumerWidget {
             );
           }
 
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: notifications.length,
-            separatorBuilder: (_, __) => const Divider(height: 1, indent: 68),
-            itemBuilder: (context, index) {
-              final notification = notifications[index];
-              final icon = _getIconForType(notification.type);
-              final color = _getColorForPriority(notification.priority);
-
-              return Dismissible(
-                key: Key(notification.id),
-                direction: DismissDirection.endToStart,
-                background: Container(
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.only(right: 20),
-                  color: Colors.red.withValues(alpha: 0.1),
-                  child: const Icon(LucideIcons.trash2, color: Colors.red, size: 20),
-                ),
-                onDismissed: (_) {
-                  notificationService?.delete(notification.id);
-                },
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: notification.read
-                          ? AppTheme.divider
-                          : color.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      icon,
-                      size: 18,
-                      color: notification.read ? AppTheme.textSecondary : color,
-                    ),
-                  ),
-                  title: Text(
-                    notification.title,
-                    style: AppTheme.bodyMedium.copyWith(
-                      fontWeight: notification.read ? FontWeight.w400 : FontWeight.w600,
-                      color: notification.read ? AppTheme.textSecondary : AppTheme.textPrimary,
-                    ),
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 2),
-                      Text(
-                        notification.message,
-                        style: AppTheme.labelSmall.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _formatTimeAgo(notification.createdAt),
-                        style: AppTheme.labelSmall.copyWith(
-                          fontSize: 10,
-                          color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                        ),
-                      ),
-                    ],
-                  ),
-                  trailing: !notification.read
-                      ? Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                            color: AppTheme.primary,
-                            shape: BoxShape.circle,
-                          ),
-                        )
-                      : null,
-                  onTap: () async {
-                    if (!notification.read) {
-                      await notificationService?.markAsRead(notification.id);
-                    }
-                    if (notification.actionUrl != null && context.mounted) {
-                      context.push(notification.actionUrl!);
-                    }
-                  },
-                ),
-              );
-            },
+          // Wrap the whole list in an AnimatedSwitcher keyed by the unread
+          // count so a "marcar todas lidas" change cross-fades the row
+          // styles instead of repainting them in place.
+          return AnimatedSwitcher(
+            duration: const Duration(milliseconds: 250),
+            child: _NotificationListBody(
+              key: ValueKey(
+                'notifications-${notifications.length}-${notifications.where((n) => !n.read).length}',
+              ),
+              notifications: notifications,
+              notificationService: notificationService,
+              getIconForType: _getIconForType,
+              getColorForPriority: _getColorForPriority,
+            ),
           );
         },
       ),
+    );
+  }
+}
+
+/// Extracted notification list body so the AnimatedSwitcher above can swap it
+/// when the read/unread count changes. Keeps the animation cheap (one widget
+/// fade) instead of re-running through every item's transition machinery.
+class _NotificationListBody extends StatelessWidget {
+  final List<AppNotification> notifications;
+  final NotificationService? notificationService;
+  final IconData Function(NotificationType type) getIconForType;
+  final Color Function(NotificationPriority priority) getColorForPriority;
+
+  const _NotificationListBody({
+    super.key,
+    required this.notifications,
+    required this.notificationService,
+    required this.getIconForType,
+    required this.getColorForPriority,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: notifications.length,
+      separatorBuilder: (_, __) => const Divider(height: 1, indent: 68),
+      itemBuilder: (context, index) {
+        final notification = notifications[index];
+        final icon = getIconForType(notification.type);
+        final color = getColorForPriority(notification.priority);
+
+        return Dismissible(
+          key: Key(notification.id),
+          direction: DismissDirection.endToStart,
+          background: Container(
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 20),
+            color: Colors.red.withValues(alpha: 0.1),
+            child: const Icon(LucideIcons.trash2, color: Colors.red, size: 20),
+          ),
+          onDismissed: (_) {
+            // Sprint 6 — light haptic confirms the swipe-to-delete.
+            HapticFeedback.lightImpact();
+            notificationService?.delete(notification.id);
+          },
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 4,
+            ),
+            leading: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: notification.read
+                    ? AppTheme.divider
+                    : color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                icon,
+                size: 18,
+                color: notification.read ? AppTheme.textSecondary : color,
+              ),
+            ),
+            title: Text(
+              notification.title,
+              style: AppTheme.bodyMedium.copyWith(
+                fontWeight: notification.read
+                    ? FontWeight.w400
+                    : FontWeight.w600,
+                color: notification.read
+                    ? AppTheme.textSecondary
+                    : AppTheme.textPrimary,
+              ),
+            ),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 2),
+                Text(
+                  notification.message,
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _formatTimeAgo(notification.createdAt),
+                  style: AppTheme.labelSmall.copyWith(
+                    fontSize: 10,
+                    color: AppTheme.textSecondary.withValues(alpha: 0.7),
+                  ),
+                ),
+              ],
+            ),
+            trailing: !notification.read
+                ? Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: AppTheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                  )
+                : null,
+            onTap: () async {
+              if (!notification.read) {
+                await notificationService?.markAsRead(notification.id);
+              }
+              if (notification.actionUrl != null && context.mounted) {
+                context.push(notification.actionUrl!);
+              }
+            },
+          ),
+        );
+      },
     );
   }
 }

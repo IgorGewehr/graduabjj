@@ -9,6 +9,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/instructor_link_code_service.dart';
 import '../../services/student_service.dart';
+import '../../widgets/cached_image.dart';
 
 /// Team management tab for academy admins.
 ///
@@ -111,7 +112,9 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
               decoration: BoxDecoration(
                 color: AppTheme.infoLight,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.info.withValues(alpha: 0.25)),
+                border: Border.all(
+                  color: AppTheme.info.withValues(alpha: 0.25),
+                ),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -121,9 +124,7 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
                   Expanded(
                     child: Text(
                       'Gere um código de 8 caracteres valido por 30 minutos. O professor digita esse codigo na tela inicial do app/web e vira instrutor automaticamente com as permissoes que voce marcar.',
-                      style: AppTheme.bodySmall.copyWith(
-                        color: AppTheme.info,
-                      ),
+                      style: AppTheme.bodySmall.copyWith(color: AppTheme.info),
                     ),
                   ),
                 ],
@@ -167,7 +168,10 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
             else if (_codes.isEmpty)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 32,
+                  horizontal: 16,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.surfaceVariant,
                   borderRadius: BorderRadius.circular(12),
@@ -239,7 +243,11 @@ class _CodeRow extends StatelessWidget {
                 ),
               ),
               IconButton(
-                icon: Icon(LucideIcons.copy, size: 16, color: AppTheme.textSecondary),
+                icon: Icon(
+                  LucideIcons.copy,
+                  size: 16,
+                  color: AppTheme.textSecondary,
+                ),
                 onPressed: onCopy,
                 tooltip: 'Copiar codigo',
               ),
@@ -256,7 +264,9 @@ class _CodeRow extends StatelessWidget {
               const SizedBox(width: 4),
               Text(
                 _remainingLabel(),
-                style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ],
           ),
@@ -270,7 +280,10 @@ class _CodeRow extends StatelessWidget {
                     .where((g) => g.permission == p)
                     .firstOrNull;
                 return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.surfaceVariant,
                     borderRadius: BorderRadius.circular(999),
@@ -429,8 +442,12 @@ class _InviteDialogState extends State<_InviteDialog> {
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 8),
-                    Text(_error!,
-                        style: AppTheme.labelSmall.copyWith(color: AppTheme.error)),
+                    Text(
+                      _error!,
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.error,
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -444,7 +461,9 @@ class _InviteDialogState extends State<_InviteDialog> {
             ]
           : [
               TextButton(
-                onPressed: _generating ? null : () => Navigator.of(context).pop(),
+                onPressed: _generating
+                    ? null
+                    : () => Navigator.of(context).pop(),
                 child: const Text('Cancelar'),
               ),
               ElevatedButton(
@@ -455,8 +474,9 @@ class _InviteDialogState extends State<_InviteDialog> {
                         height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
                         ),
                       )
                     : const Text('Gerar codigo'),
@@ -502,8 +522,9 @@ class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
       final all = await svc.listAll();
       if (!mounted) return;
       setState(() {
-        _candidates =
-            all.where((s) => (s.linkedUserId ?? '').isNotEmpty).toList();
+        _candidates = all
+            .where((s) => (s.linkedUserId ?? '').isNotEmpty)
+            .toList();
         _loading = false;
       });
     } catch (_) {
@@ -560,8 +581,9 @@ class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
                 children: [
                   Text(
                     'O aluno mantem o acesso ao portal de aluno, mas passa a ver os recursos de instrutor com as permissoes selecionadas.',
-                    style: AppTheme.bodySmall
-                        .copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Flexible(
@@ -586,13 +608,17 @@ class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
                                           }
                                         });
                                       },
-                                title: Text(def.label,
-                                    style: AppTheme.bodyMedium.copyWith(
-                                        fontWeight: FontWeight.w500)),
+                                title: Text(
+                                  def.label,
+                                  style: AppTheme.bodyMedium.copyWith(
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
                                 subtitle: Text(
                                   def.description,
                                   style: AppTheme.labelSmall.copyWith(
-                                      color: AppTheme.textSecondary),
+                                    color: AppTheme.textSecondary,
+                                  ),
                                 ),
                               ),
                             )
@@ -607,8 +633,9 @@ class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
                 children: [
                   Text(
                     'Apenas alunos com conta criada aparecem na lista.',
-                    style: AppTheme.bodySmall
-                        .copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -624,43 +651,41 @@ class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
                     child: _loading
                         ? const Center(child: CircularProgressIndicator())
                         : _filtered.isEmpty
-                            ? Center(
-                                child: Text(
-                                  'Nenhum aluno encontrado.',
-                                  style: AppTheme.bodyMedium.copyWith(
-                                      color: AppTheme.textSecondary),
-                                ),
-                              )
-                            : ListView.separated(
-                                shrinkWrap: true,
-                                itemCount: _filtered.length,
-                                separatorBuilder: (_, __) =>
-                                    const Divider(height: 1),
-                                itemBuilder: (_, i) {
-                                  final s = _filtered[i];
-                                  return ListTile(
-                                    leading: CircleAvatar(
-                                      radius: 16,
-                                      backgroundImage: (s.photoUrl ?? '')
-                                              .isNotEmpty
-                                          ? NetworkImage(s.photoUrl!)
-                                          : null,
-                                      child: (s.photoUrl ?? '').isEmpty
-                                          ? Text(
-                                              s.fullName
-                                                  .substring(0, 1)
-                                                  .toUpperCase(),
-                                            )
-                                          : null,
-                                    ),
-                                    title: Text(s.fullName),
-                                    subtitle: Text(s.email ?? '—'),
-                                    onTap: () => setState(() {
-                                      _selected = s;
-                                    }),
-                                  );
-                                },
+                        ? Center(
+                            child: Text(
+                              'Nenhum aluno encontrado.',
+                              style: AppTheme.bodyMedium.copyWith(
+                                color: AppTheme.textSecondary,
                               ),
+                            ),
+                          )
+                        : ListView.separated(
+                            shrinkWrap: true,
+                            itemCount: _filtered.length,
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
+                            itemBuilder: (_, i) {
+                              final s = _filtered[i];
+                              return ListTile(
+                                leading: AppCachedAvatar(
+                                  imageUrl: s.photoUrl,
+                                  radius: 16,
+                                  child: (s.photoUrl ?? '').isEmpty
+                                      ? Text(
+                                          s.fullName
+                                              .substring(0, 1)
+                                              .toUpperCase(),
+                                        )
+                                      : null,
+                                ),
+                                title: Text(s.fullName),
+                                subtitle: Text(s.email ?? '—'),
+                                onTap: () => setState(() {
+                                  _selected = s;
+                                }),
+                              );
+                            },
+                          ),
                   ),
                 ],
               ),
@@ -668,8 +693,9 @@ class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
       actions: _selected != null
           ? [
               TextButton(
-                onPressed:
-                    _submitting ? null : () => setState(() => _selected = null),
+                onPressed: _submitting
+                    ? null
+                    : () => setState(() => _selected = null),
                 child: const Text('Voltar'),
               ),
               ElevatedButton(
@@ -680,8 +706,9 @@ class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
                         height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
                         ),
                       )
                     : const Text('Promover a instrutor'),

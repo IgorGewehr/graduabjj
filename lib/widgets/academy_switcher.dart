@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../core/theme.dart';
 import '../models/user.dart';
 import '../providers/providers.dart';
+import 'cached_image.dart';
 
 /// Academy Switcher Widget for AppBar
 /// Shows current academy with dropdown to switch when user has multiple academies
@@ -14,7 +15,12 @@ class AcademySwitcher extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final hasMultiple = ref.watch(hasMultipleAcademiesProvider);
-    final selectedState = ref.watch(selectedAcademyProvider);
+    // Watch only the loading flag (a bool) rather than the full state object —
+    // avoids rebuilding the AppBar widget every time the academy info cache
+    // gets a new entry.
+    final isLoadingSwitch = ref.watch(
+      selectedAcademyProvider.select((s) => s.isLoading),
+    );
     final settingsAsync = ref.watch(academySettingsProvider);
 
     return settingsAsync.when(
@@ -40,7 +46,7 @@ class AcademySwitcher extends ConsumerWidget {
           name: name,
           slogan: slogan,
           logoUrl: logoUrl,
-          isLoading: selectedState.isLoading,
+          isLoading: isLoadingSwitch,
         );
       },
       loading: () => _buildLoadingState(),
@@ -165,10 +171,12 @@ class AcademySwitcher extends ConsumerWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: logoUrl != null
-          ? Image.network(
-              logoUrl,
+          ? AppCachedImage(
+              imageUrl: logoUrl,
+              width: 36,
+              height: 36,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _buildDefaultLogo(name),
+              errorIcon: _buildDefaultLogo(name),
             )
           : _buildDefaultLogo(name),
     );
@@ -271,10 +279,7 @@ class _AcademySelectorSheet extends ConsumerWidget {
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  Text(
-                    'Minhas Academias',
-                    style: AppTheme.headlineSmall,
-                  ),
+                  Text('Minhas Academias', style: AppTheme.headlineSmall),
                   const Spacer(),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
@@ -370,10 +375,12 @@ class _AcademySelectorSheet extends ConsumerWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: academy.logoUrl != null
-            ? Image.network(
-                academy.logoUrl!,
+            ? AppCachedImage(
+                imageUrl: academy.logoUrl,
+                width: 40,
+                height: 40,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _buildDefaultLogo(academy.name),
+                errorIcon: _buildDefaultLogo(academy.name),
               )
             : _buildDefaultLogo(academy.name),
       ),
@@ -407,22 +414,13 @@ class _AcademySelectorSheet extends ConsumerWidget {
           ],
         ],
       ),
-      subtitle: Text(
-        academy.role.label,
-        style: AppTheme.bodySmall,
-      ),
+      subtitle: Text(academy.role.label, style: AppTheme.bodySmall),
       trailing: isSelected
-          ? const Icon(
-              LucideIcons.check,
-              color: AppTheme.success,
-              size: 20,
-            )
+          ? const Icon(LucideIcons.check, color: AppTheme.success, size: 20)
           : null,
       selected: isSelected,
       selectedTileColor: AppTheme.surfaceVariant,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     );
   }

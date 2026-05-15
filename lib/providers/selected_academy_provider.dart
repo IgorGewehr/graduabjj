@@ -3,34 +3,39 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user.dart';
 import '../services/firebase_service.dart';
 import 'auth_provider.dart';
-import 'portal_providers.dart';
-import 'student_provider.dart';
 
-/// State for the selected academy
+/// Source of truth for the currently selected academy id.
+///
+/// This is intentionally a `StateProvider<String?>` so that flipping the id is
+/// cheap (no Firebase queries) and any provider that watches it via
+/// `ref.watch(selectedAcademyIdProvider.select((id) => id))` will automatically
+/// rebuild on change — eliminating the previous `ref.invalidate` cascade in
+/// `selectAcademy()`.
+///
+/// Initialised by [SelectedAcademyNotifier] from `userAcademyMappingProvider`,
+/// or set by `selectAcademy(id)` when the user switches academies.
+final selectedAcademyIdProvider = StateProvider<String?>((ref) => null);
+
+/// State for the selected academy (kept for backwards compatibility — exposes
+/// the cache + loading flag the UI uses for the multi-academy switcher).
 class SelectedAcademyState {
-  final String? selectedAcademyId;
   final Map<String, AcademyInfo> academyInfoCache;
   final bool isLoading;
 
   const SelectedAcademyState({
-    this.selectedAcademyId,
     this.academyInfoCache = const {},
     this.isLoading = false,
   });
 
   SelectedAcademyState copyWith({
-    String? selectedAcademyId,
     Map<String, AcademyInfo>? academyInfoCache,
     bool? isLoading,
   }) {
     return SelectedAcademyState(
-      selectedAcademyId: selectedAcademyId ?? this.selectedAcademyId,
       academyInfoCache: academyInfoCache ?? this.academyInfoCache,
       isLoading: isLoading ?? this.isLoading,
     );
   }
-
-  bool get hasSelectedAcademy => selectedAcademyId != null;
 }
 
 /// Basic academy info for display
@@ -50,7 +55,10 @@ class AcademyInfo {
   });
 }
 
-/// StateNotifier for managing selected academy
+/// StateNotifier for managing the academy info cache + bootstrap of the
+/// initial selected academy. Mutations to the selected id go through
+/// [selectedAcademyIdProvider] (no manual invalidations of dependent
+/// providers — they auto-react via `.select` on the id).
 class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
   final Ref _ref;
 
@@ -67,9 +75,12 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
     }
   }
 
-  /// Select a different academy
+  /// Select a different academy. Only mutates [selectedAcademyIdProvider] +
+  /// the local cache; downstream providers (currentUser/currentStudent/etc)
+  /// rebuild automatically because they watch the id provider with `.select`.
   Future<void> selectAcademy(String academyId) async {
-    if (state.selectedAcademyId == academyId) return;
+    final currentId = _ref.read(selectedAcademyIdProvider);
+    if (currentId == academyId) return;
 
     state = state.copyWith(isLoading: true);
 
@@ -80,9 +91,6 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
       }
 
       await _selectAcademyInternal(academyId, mapping);
-
-      // Invalidate providers that depend on academy context
-      _invalidateDependentProviders();
     } catch (e) {
       print('[SelectedAcademy] Error selecting academy: $e');
       state = state.copyWith(isLoading: false);
@@ -106,11 +114,15 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
       }
     }
 
-    state = SelectedAcademyState(
-      selectedAcademyId: academyId,
-      academyInfoCache: newCache,
-      isLoading: false,
-    );
+    // Flip the cache + loading flag first so the cache lookup below
+    // (used by `currentAcademyInfoProvider`) is consistent when listeners
+    // rebuild.
+    state = SelectedAcademyState(academyInfoCache: newCache, isLoading: false);
+
+    // This is the cheap operation that triggers the rebuild cascade for
+    // currentUserProvider, currentStudentProvider, academySettingsProvider
+    // (each one watches selectedAcademyIdProvider with `.select`).
+    _ref.read(selectedAcademyIdProvider.notifier).state = academyId;
   }
 
   Future<AcademyInfo?> _loadAcademyInfo(
@@ -142,24 +154,16 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
     }
   }
 
-  /// Invalidate providers that depend on the selected academy
-  void _invalidateDependentProviders() {
-    // These providers will re-fetch data for the new academy
-    _ref.invalidate(currentUserProvider);
-    _ref.invalidate(academySettingsProvider);
-    _ref.invalidate(currentStudentProvider);
-  }
-
   /// Get current student ID for the selected academy
   String? getCurrentStudentId() {
-    final academyId = state.selectedAcademyId;
+    final academyId = _ref.read(selectedAcademyIdProvider);
     if (academyId == null) return null;
     return state.academyInfoCache[academyId]?.studentId;
   }
 
   /// Get academy details for the selected academy
   AcademyInfo? getCurrentAcademyInfo() {
-    final academyId = state.selectedAcademyId;
+    final academyId = _ref.read(selectedAcademyIdProvider);
     if (academyId == null) return null;
     return state.academyInfoCache[academyId];
   }
@@ -199,22 +203,22 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
   }
 }
 
-/// Provider for selected academy state
+/// Provider for selected academy state (cache + loading flag).
 final selectedAcademyProvider =
     StateNotifierProvider<SelectedAcademyNotifier, SelectedAcademyState>((ref) {
-  return SelectedAcademyNotifier(ref);
-});
+      return SelectedAcademyNotifier(ref);
+    });
 
-/// Provider for the currently selected academy ID
-final selectedAcademyIdProvider = Provider<String?>((ref) {
-  return ref.watch(selectedAcademyProvider).selectedAcademyId;
-});
-
-/// Provider for current academy info
+/// Provider for current academy info — reads cache by current id.
+/// Cheap rebuild: only fires when id or cache entry for that id change.
 final currentAcademyInfoProvider = Provider<AcademyInfo?>((ref) {
-  final state = ref.watch(selectedAcademyProvider);
-  if (state.selectedAcademyId == null) return null;
-  return state.academyInfoCache[state.selectedAcademyId];
+  final id = ref.watch(selectedAcademyIdProvider);
+  if (id == null) return null;
+  // Watch only the cache map identity (changes on cache writes).
+  final cache = ref.watch(
+    selectedAcademyProvider.select((s) => s.academyInfoCache),
+  );
+  return cache[id];
 });
 
 /// Provider to check if user has multiple academies
@@ -224,7 +228,9 @@ final hasMultipleAcademiesProvider = Provider<bool>((ref) {
 });
 
 /// Provider for list of user's academies with info
-final userAcademiesInfoProvider = FutureProvider<List<AcademyInfo>>((ref) async {
+final userAcademiesInfoProvider = FutureProvider<List<AcademyInfo>>((
+  ref,
+) async {
   final mapping = await ref.watch(userAcademyMappingProvider.future);
   if (mapping == null || mapping.academyIds.isEmpty) return [];
 
@@ -239,4 +245,18 @@ final userAcademiesInfoProvider = FutureProvider<List<AcademyInfo>>((ref) async 
   }
 
   return academies;
+});
+
+/// Academy data fetched on demand for the currently selected academy.
+///
+/// Exposes the academy document data (name/logo/etc) keyed by the selected
+/// id. Listeners only re-fetch when the id actually changes (no cascade from
+/// unrelated state in [selectedAcademyProvider]).
+final currentAcademyDataProvider = FutureProvider<AcademyInfo?>((ref) async {
+  final id = ref.watch(selectedAcademyIdProvider);
+  if (id == null) return null;
+
+  // Reuse the cache + loader on the notifier so we don't re-fetch the same
+  // academy document twice.
+  return ref.read(selectedAcademyProvider.notifier).getAcademyInfo(id);
 });

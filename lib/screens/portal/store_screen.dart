@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -8,6 +11,8 @@ import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/selected_academy_provider.dart';
+import '../../widgets/cached_image.dart';
+import '../../widgets/skeletons/skeletons.dart';
 
 /// Portal Store Screen - Product Catalog for Students
 class PortalStoreScreen extends ConsumerStatefulWidget {
@@ -20,6 +25,27 @@ class PortalStoreScreen extends ConsumerStatefulWidget {
 class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
   String _searchQuery = '';
   StoreProductCategory? _categoryFilter;
+
+  /// 300ms debounce timer for the product search input. Without this, every
+  /// keystroke triggered a full sliver rebuild + filter pass — typing "joao"
+  /// caused 4 setStates. Now we batch into a single setState 300ms after the
+  /// user stops typing.
+  Timer? _searchDebounce;
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      if (_searchQuery == value) return;
+      setState(() => _searchQuery = value);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +87,9 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
                 const SizedBox(height: 8),
                 Text(
                   'A loja da academia esta temporariamente fechada.',
-                  style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -74,15 +102,15 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: RefreshIndicator(
+        color: Theme.of(context).colorScheme.primary,
         onRefresh: () async {
+          HapticFeedback.mediumImpact();
           ref.invalidate(activeProductsProvider);
         },
         child: CustomScrollView(
           slivers: [
             // Academy indicator for multi-academy users
-            const SliverToBoxAdapter(
-              child: _AcademyIndicator(),
-            ),
+            const SliverToBoxAdapter(child: _AcademyIndicator()),
 
             // Header
             SliverToBoxAdapter(
@@ -116,7 +144,8 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
                       clipBehavior: Clip.none,
                       children: [
                         IconButton(
-                          onPressed: () => context.push('/portal/loja/carrinho'),
+                          onPressed: () =>
+                              context.push('/portal/loja/carrinho'),
                           icon: const Icon(LucideIcons.shoppingCart),
                           style: IconButton.styleFrom(
                             backgroundColor: AppTheme.surfaceVariant,
@@ -172,9 +201,7 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
                       vertical: 12,
                     ),
                   ),
-                  onChanged: (value) {
-                    setState(() => _searchQuery = value);
-                  },
+                  onChanged: _onSearchChanged,
                 ),
               ),
             ),
@@ -192,14 +219,16 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
                         isSelected: _categoryFilter == null,
                         onTap: () => setState(() => _categoryFilter = null),
                       ),
-                      ...StoreProductCategory.values.map((cat) => Padding(
-                            padding: const EdgeInsets.only(left: 8),
-                            child: _FilterChip(
-                              label: cat.label,
-                              isSelected: _categoryFilter == cat,
-                              onTap: () => setState(() => _categoryFilter = cat),
-                            ),
-                          )),
+                      ...StoreProductCategory.values.map(
+                        (cat) => Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: _FilterChip(
+                            label: cat.label,
+                            isSelected: _categoryFilter == cat,
+                            onTap: () => setState(() => _categoryFilter = cat),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -214,14 +243,21 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
                 // Apply search
                 if (_searchQuery.isNotEmpty) {
                   filtered = filtered.where((p) {
-                    return p.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-                        (p.description?.toLowerCase().contains(_searchQuery.toLowerCase()) ?? false);
+                    return p.name.toLowerCase().contains(
+                          _searchQuery.toLowerCase(),
+                        ) ||
+                        (p.description?.toLowerCase().contains(
+                              _searchQuery.toLowerCase(),
+                            ) ??
+                            false);
                   }).toList();
                 }
 
                 // Apply category filter
                 if (_categoryFilter != null) {
-                  filtered = filtered.where((p) => p.category == _categoryFilter).toList();
+                  filtered = filtered
+                      .where((p) => p.category == _categoryFilter)
+                      .toList();
                 }
 
                 if (filtered.isEmpty) {
@@ -256,12 +292,13 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
                 return SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   sliver: SliverGrid(
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      childAspectRatio: 0.75,
-                    ),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: 0.75,
+                        ),
                     delegate: SliverChildBuilderDelegate(
                       (context, index) => _ProductCard(
                         product: filtered[index],
@@ -272,19 +309,11 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
                   ),
                 );
               },
-              loading: () => SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    childAspectRatio: 0.75,
-                  ),
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) => const _ProductCardSkeleton(),
-                    childCount: 4,
-                  ),
+              loading: () => SliverToBoxAdapter(
+                child: SkeletonGrid(
+                  itemCount: 6,
+                  scrollable: false,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
                 ),
               ),
               error: (error, _) => SliverFillRemaining(
@@ -293,9 +322,16 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(LucideIcons.alertCircle, size: 48, color: AppTheme.error),
+                      const Icon(
+                        LucideIcons.alertCircle,
+                        size: 48,
+                        color: AppTheme.error,
+                      ),
                       const SizedBox(height: 16),
-                      Text('Erro ao carregar produtos', style: AppTheme.titleMedium),
+                      Text(
+                        'Erro ao carregar produtos',
+                        style: AppTheme.titleMedium,
+                      ),
                       const SizedBox(height: 8),
                       TextButton(
                         onPressed: () => ref.invalidate(activeProductsProvider),
@@ -308,24 +344,33 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
             ),
 
             // Bottom padding for cart FAB
-            const SliverToBoxAdapter(
-              child: SizedBox(height: 100),
-            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 100)),
           ],
         ),
       ),
-      // Floating cart button
-      floatingActionButton: cart.isNotEmpty
-          ? FloatingActionButton.extended(
-              onPressed: () => context.push('/portal/loja/carrinho'),
-              icon: const Icon(LucideIcons.shoppingCart),
-              label: Text(
-                'Carrinho (${ref.read(cartProvider.notifier).itemCount})',
+      // Floating cart button — animate the show/hide and count changes so
+      // adding/removing items feels reactive instead of a flicker swap.
+      floatingActionButton: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        transitionBuilder: (child, animation) => ScaleTransition(
+          scale: animation,
+          child: FadeTransition(opacity: animation, child: child),
+        ),
+        child: cart.isEmpty
+            ? const SizedBox.shrink(key: ValueKey('cart-empty'))
+            : FloatingActionButton.extended(
+                key: ValueKey(
+                  'cart-${ref.read(cartProvider.notifier).itemCount}',
+                ),
+                onPressed: () => context.push('/portal/loja/carrinho'),
+                icon: const Icon(LucideIcons.shoppingCart),
+                label: Text(
+                  'Carrinho (${ref.read(cartProvider.notifier).itemCount})',
+                ),
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
               ),
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-            )
-          : null,
+      ),
     );
   }
 
@@ -400,14 +445,12 @@ class _ProductCard extends StatelessWidget {
   final StoreProduct product;
   final VoidCallback onTap;
 
-  const _ProductCard({
-    required this.product,
-    required this.onTap,
-  });
+  const _ProductCard({required this.product, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final isOutOfStock = product.stockType == StoreStockType.inStock &&
+    final isOutOfStock =
+        product.stockType == StoreStockType.inStock &&
         (product.stockQuantity ?? 0) == 0;
 
     return Container(
@@ -438,10 +481,10 @@ class _ProductCard extends StatelessWidget {
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: product.mainImageUrl != null
-                          ? Image.network(
-                              product.mainImageUrl!,
+                          ? AppCachedImage(
+                              imageUrl: product.mainImageUrl,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => const Center(
+                              errorIcon: const Center(
                                 child: Icon(
                                   LucideIcons.package,
                                   size: 40,
@@ -508,7 +551,8 @@ class _ProductCard extends StatelessWidget {
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        if (product.stockType == StoreStockType.inStock && !isOutOfStock)
+                        if (product.stockType == StoreStockType.inStock &&
+                            !isOutOfStock)
                           Text(
                             '${product.stockQuantity} disp.',
                             style: AppTheme.labelSmall.copyWith(
@@ -526,61 +570,6 @@ class _ProductCard extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _ProductCardSkeleton extends StatelessWidget {
-  const _ProductCardSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(16),
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: double.infinity,
-                  height: 14,
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  width: 60,
-                  height: 18,
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -616,13 +605,15 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
   @override
   Widget build(BuildContext context) {
     final product = widget.product;
-    final hasVariants = (product.sizes?.isNotEmpty ?? false) ||
+    final hasVariants =
+        (product.sizes?.isNotEmpty ?? false) ||
         (product.colors?.isNotEmpty ?? false);
     final maxQuantity = product.stockType == StoreStockType.inStock
         ? (product.stockQuantity ?? 0)
         : 99;
 
-    final canAddToCart = !hasVariants ||
+    final canAddToCart =
+        !hasVariants ||
         ((product.sizes?.isEmpty ?? true) || _selectedSize != null) &&
             ((product.colors?.isEmpty ?? true) || _selectedColor != null);
 
@@ -673,10 +664,10 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                               itemCount: product.imageUrls.length,
                               onPageChanged: (index) =>
                                   setState(() => _currentImageIndex = index),
-                              itemBuilder: (_, index) => Image.network(
-                                product.imageUrls[index],
+                              itemBuilder: (_, index) => AppCachedImage(
+                                imageUrl: product.imageUrls[index],
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => const Center(
+                                errorIcon: const Center(
                                   child: Icon(
                                     LucideIcons.package,
                                     size: 64,
@@ -695,18 +686,19 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                                   children: List.generate(
                                     product.imageUrls.length,
                                     (i) => AnimatedContainer(
-                                      duration:
-                                          const Duration(milliseconds: 200),
+                                      duration: const Duration(
+                                        milliseconds: 200,
+                                      ),
                                       margin: const EdgeInsets.symmetric(
-                                          horizontal: 3),
+                                        horizontal: 3,
+                                      ),
                                       width: i == _currentImageIndex ? 16 : 6,
                                       height: 6,
                                       decoration: BoxDecoration(
                                         color: i == _currentImageIndex
                                             ? Colors.white
                                             : Colors.white54,
-                                        borderRadius:
-                                            BorderRadius.circular(3),
+                                        borderRadius: BorderRadius.circular(3),
                                       ),
                                     ),
                                   ),
@@ -721,10 +713,7 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            product.name,
-                            style: AppTheme.headlineSmall,
-                          ),
+                          Text(product.name, style: AppTheme.headlineSmall),
                           const SizedBox(height: 8),
                           Text(
                             product.formattedPrice,
@@ -829,15 +818,19 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                             Wrap(
                               spacing: 8,
                               children: product.sizes!
-                                  .map((size) => ChoiceChip(
-                                        label: Text(size),
-                                        selected: _selectedSize == size,
-                                        onSelected: (selected) {
-                                          setState(() {
-                                            _selectedSize = selected ? size : null;
-                                          });
-                                        },
-                                      ))
+                                  .map(
+                                    (size) => ChoiceChip(
+                                      label: Text(size),
+                                      selected: _selectedSize == size,
+                                      onSelected: (selected) {
+                                        setState(() {
+                                          _selectedSize = selected
+                                              ? size
+                                              : null;
+                                        });
+                                      },
+                                    ),
+                                  )
                                   .toList(),
                             ),
                           ],
@@ -849,15 +842,19 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                             Wrap(
                               spacing: 8,
                               children: product.colors!
-                                  .map((color) => ChoiceChip(
-                                        label: Text(color),
-                                        selected: _selectedColor == color,
-                                        onSelected: (selected) {
-                                          setState(() {
-                                            _selectedColor = selected ? color : null;
-                                          });
-                                        },
-                                      ))
+                                  .map(
+                                    (color) => ChoiceChip(
+                                      label: Text(color),
+                                      selected: _selectedColor == color,
+                                      onSelected: (selected) {
+                                        setState(() {
+                                          _selectedColor = selected
+                                              ? color
+                                              : null;
+                                        });
+                                      },
+                                    ),
+                                  )
                                   .toList(),
                             ),
                           ],
@@ -878,11 +875,16 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                                       onPressed: _quantity > 1
                                           ? () => setState(() => _quantity--)
                                           : null,
-                                      icon: const Icon(LucideIcons.minus, size: 18),
+                                      icon: const Icon(
+                                        LucideIcons.minus,
+                                        size: 18,
+                                      ),
                                       visualDensity: VisualDensity.compact,
                                     ),
                                     Container(
-                                      constraints: const BoxConstraints(minWidth: 40),
+                                      constraints: const BoxConstraints(
+                                        minWidth: 40,
+                                      ),
                                       alignment: Alignment.center,
                                       child: Text(
                                         '$_quantity',
@@ -895,7 +897,10 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                                       onPressed: _quantity < maxQuantity
                                           ? () => setState(() => _quantity++)
                                           : null,
-                                      icon: const Icon(LucideIcons.plus, size: 18),
+                                      icon: const Icon(
+                                        LucideIcons.plus,
+                                        size: 18,
+                                      ),
                                       visualDensity: VisualDensity.compact,
                                     ),
                                   ],
@@ -924,14 +929,16 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                   child: ElevatedButton.icon(
                     onPressed: canAddToCart
                         ? () {
-                            widget.onAddToCart(StoreOrderItem(
-                              productId: product.id,
-                              productName: product.name,
-                              price: product.price,
-                              quantity: _quantity,
-                              size: _selectedSize,
-                              color: _selectedColor,
-                            ));
+                            widget.onAddToCart(
+                              StoreOrderItem(
+                                productId: product.id,
+                                productName: product.name,
+                                price: product.price,
+                                quantity: _quantity,
+                                size: _selectedSize,
+                                color: _selectedColor,
+                              ),
+                            );
                           }
                         : null,
                     icon: const Icon(LucideIcons.shoppingCart),
@@ -975,17 +982,11 @@ class _AcademyIndicator extends ConsumerWidget {
       decoration: BoxDecoration(
         color: AppTheme.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: AppTheme.primary.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
-          Icon(
-            LucideIcons.store,
-            size: 16,
-            color: AppTheme.primary,
-          ),
+          Icon(LucideIcons.store, size: 16, color: AppTheme.primary),
           const SizedBox(width: 8),
           Expanded(
             child: Column(

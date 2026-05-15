@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:graduabjj/models/competition_photo.dart';
+import 'package:graduabjj/widgets/cached_image.dart';
 import 'package:intl/intl.dart';
 
 class PhotoFullscreenViewer extends StatefulWidget {
@@ -103,30 +104,19 @@ class _PhotoFullscreenViewerState extends State<PhotoFullscreenViewer> {
               final photo = widget.photos[index];
               return InteractiveViewer(
                 child: Center(
-                  child: Image.network(
-                    photo.url,
+                  child: AppCachedImage(
+                    imageUrl: photo.url,
                     fit: BoxFit.contain,
-                    loadingBuilder: (context, child, loadingProgress) {
-                      if (loadingProgress == null) return child;
-                      return Center(
-                        child: CircularProgressIndicator(
-                          value: loadingProgress.expectedTotalBytes != null
-                              ? loadingProgress.cumulativeBytesLoaded /
-                                  loadingProgress.expectedTotalBytes!
-                              : null,
-                          color: Colors.white,
-                        ),
-                      );
-                    },
-                    errorBuilder: (context, error, stackTrace) {
-                      return const Center(
-                        child: Icon(
-                          Icons.broken_image,
-                          size: 64,
-                          color: Colors.white,
-                        ),
-                      );
-                    },
+                    placeholder: const Center(
+                      child: CircularProgressIndicator(color: Colors.white),
+                    ),
+                    errorIcon: const Center(
+                      child: Icon(
+                        Icons.broken_image,
+                        size: 64,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                 ),
               );
@@ -143,10 +133,7 @@ class _PhotoFullscreenViewerState extends State<PhotoFullscreenViewer> {
                 gradient: LinearGradient(
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
-                  colors: [
-                    Colors.black.withOpacity(0.8),
-                    Colors.transparent,
-                  ],
+                  colors: [Colors.black.withOpacity(0.8), Colors.transparent],
                 ),
               ),
               padding: const EdgeInsets.all(20),
@@ -165,8 +152,10 @@ class _PhotoFullscreenViewerState extends State<PhotoFullscreenViewer> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      DateFormat("d 'de' MMMM 'de' yyyy 'às' HH:mm", 'pt_BR')
-                          .format(_currentPhoto.createdAt),
+                      DateFormat(
+                        "d 'de' MMMM 'de' yyyy 'às' HH:mm",
+                        'pt_BR',
+                      ).format(_currentPhoto.createdAt),
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 12,

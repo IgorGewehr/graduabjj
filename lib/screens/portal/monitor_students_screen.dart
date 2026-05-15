@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -6,7 +9,9 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
+import '../../widgets/cached_image.dart';
 import '../../widgets/common/belt_badge.dart';
+import '../../widgets/skeletons/skeletons.dart';
 
 /// Monitor Students Screen - For monitors to view and manage students
 /// Note: Monitors cannot access financial information
@@ -14,7 +19,8 @@ class MonitorStudentsScreen extends ConsumerStatefulWidget {
   const MonitorStudentsScreen({super.key});
 
   @override
-  ConsumerState<MonitorStudentsScreen> createState() => _MonitorStudentsScreenState();
+  ConsumerState<MonitorStudentsScreen> createState() =>
+      _MonitorStudentsScreenState();
 }
 
 class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
@@ -31,6 +37,11 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
 
   final _searchController = TextEditingController();
 
+  /// Debounce timer for the student search input. Stops `_applyFilters`
+  /// (which iterates the full student list + setState) from firing on every
+  /// keystroke — only fires 300ms after the user pauses typing.
+  Timer? _searchDebounce;
+
   @override
   void initState() {
     super.initState();
@@ -40,6 +51,7 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
   }
 
@@ -65,11 +77,14 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
     // Search filter
     if (_searchQuery.isNotEmpty) {
       final query = _searchQuery.toLowerCase();
-      filtered = filtered.where((s) =>
-          s.fullName.toLowerCase().contains(query) ||
-          (s.nickname?.toLowerCase().contains(query) ?? false) ||
-          (s.email?.toLowerCase().contains(query) ?? false)
-      ).toList();
+      filtered = filtered
+          .where(
+            (s) =>
+                s.fullName.toLowerCase().contains(query) ||
+                (s.nickname?.toLowerCase().contains(query) ?? false) ||
+                (s.email?.toLowerCase().contains(query) ?? false),
+          )
+          .toList();
     }
 
     // Status filter
@@ -93,7 +108,9 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
         filtered.sort((a, b) => a.fullName.compareTo(b.fullName));
         break;
       case 'attendance':
-        filtered.sort((a, b) => b.totalAttendanceCount.compareTo(a.totalAttendanceCount));
+        filtered.sort(
+          (a, b) => b.totalAttendanceCount.compareTo(a.totalAttendanceCount),
+        );
         break;
       case 'belt':
         const beltOrder = ['white', 'blue', 'purple', 'brown', 'black'];
@@ -110,7 +127,9 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
   }
 
   bool _hasActiveFilters() {
-    return _statusFilter != null || _categoryFilter != null || _beltFilter != null;
+    return _statusFilter != null ||
+        _categoryFilter != null ||
+        _beltFilter != null;
   }
 
   void _clearFilters() {
@@ -127,38 +146,38 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: RefreshIndicator(
-        onRefresh: _loadStudents,
+        color: Theme.of(context).colorScheme.primary,
+        onRefresh: () async {
+          HapticFeedback.mediumImpact();
+          await _loadStudents();
+        },
         child: CustomScrollView(
           slivers: [
             // Header
-            SliverToBoxAdapter(
-              child: _buildHeader(),
-            ),
+            SliverToBoxAdapter(child: _buildHeader()),
 
             // Search and filters
-            SliverToBoxAdapter(
-              child: _buildSearchAndFilters(),
-            ),
+            SliverToBoxAdapter(child: _buildSearchAndFilters()),
 
             // Active filter chips
             if (_hasActiveFilters())
-              SliverToBoxAdapter(
-                child: _buildActiveFilterChips(),
-              ),
+              SliverToBoxAdapter(child: _buildActiveFilterChips()),
 
             // Student list
             _isLoading
-                ? const SliverFillRemaining(
-                    child: Center(child: CircularProgressIndicator()),
+                ? const SliverToBoxAdapter(
+                    child: SkeletonList(
+                      itemCount: 8,
+                      scrollable: false,
+                      itemHeight: 88,
+                    ),
                   )
                 : _filteredStudents.isEmpty
-                    ? SliverFillRemaining(child: _buildEmptyState())
-                    : _buildStudentSliverList(),
+                ? SliverFillRemaining(child: _buildEmptyState())
+                : _buildStudentSliverList(),
 
             // Bottom padding
-            const SliverToBoxAdapter(
-              child: SizedBox(height: 100),
-            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 100)),
           ],
         ),
       ),
@@ -220,12 +239,23 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
                 controller: _searchController,
                 decoration: InputDecoration(
                   hintText: 'Buscar aluno...',
-                  hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.textDisabled),
-                  prefixIcon: Icon(LucideIcons.search, color: AppTheme.textSecondary, size: 20),
+                  hintStyle: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textDisabled,
+                  ),
+                  prefixIcon: Icon(
+                    LucideIcons.search,
+                    color: AppTheme.textSecondary,
+                    size: 20,
+                  ),
                   suffixIcon: _searchQuery.isNotEmpty
                       ? IconButton(
-                          icon: Icon(LucideIcons.x, color: AppTheme.textSecondary, size: 18),
+                          icon: Icon(
+                            LucideIcons.x,
+                            color: AppTheme.textSecondary,
+                            size: 18,
+                          ),
                           onPressed: () {
+                            _searchDebounce?.cancel();
                             _searchController.clear();
                             setState(() {
                               _searchQuery = '';
@@ -235,13 +265,24 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
                         )
                       : null,
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                 ),
                 onChanged: (value) {
-                  setState(() {
-                    _searchQuery = value;
-                    _applyFilters();
-                  });
+                  _searchDebounce?.cancel();
+                  _searchDebounce = Timer(
+                    const Duration(milliseconds: 300),
+                    () {
+                      if (!mounted) return;
+                      if (_searchQuery == value) return;
+                      setState(() {
+                        _searchQuery = value;
+                        _applyFilters();
+                      });
+                    },
+                  );
                 },
               ),
             ),
@@ -254,16 +295,22 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: _hasActiveFilters() ? AppTheme.primary : AppTheme.surface,
+                color: _hasActiveFilters()
+                    ? AppTheme.primary
+                    : AppTheme.surface,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: _hasActiveFilters() ? AppTheme.primary : AppTheme.divider,
+                  color: _hasActiveFilters()
+                      ? AppTheme.primary
+                      : AppTheme.divider,
                 ),
               ),
               child: Icon(
                 LucideIcons.sliders,
                 size: 20,
-                color: _hasActiveFilters() ? Colors.white : AppTheme.textSecondary,
+                color: _hasActiveFilters()
+                    ? Colors.white
+                    : AppTheme.textSecondary,
               ),
             ),
           ),
@@ -330,16 +377,13 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       sliver: SliverList(
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            final student = _filteredStudents[index];
-            return _StudentCard(
-              student: student,
-              onTap: () => context.push('/portal/alunos/${student.id}'),
-            );
-          },
-          childCount: _filteredStudents.length,
-        ),
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final student = _filteredStudents[index];
+          return _StudentCard(
+            student: student,
+            onTap: () => context.push('/portal/alunos/${student.id}'),
+          );
+        }, childCount: _filteredStudents.length),
       ),
     );
   }
@@ -409,7 +453,9 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            _hasActiveFilters() ? 'Nenhum aluno encontrado' : 'Nenhum aluno cadastrado',
+            _hasActiveFilters()
+                ? 'Nenhum aluno encontrado'
+                : 'Nenhum aluno cadastrado',
             style: AppTheme.titleMedium.copyWith(
               color: AppTheme.textPrimary,
               fontWeight: FontWeight.w600,
@@ -420,9 +466,7 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
             _hasActiveFilters()
                 ? 'Tente ajustar os filtros'
                 : 'Adicione o primeiro aluno da academia',
-            style: AppTheme.bodyMedium.copyWith(
-              color: AppTheme.textSecondary,
-            ),
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
           ),
           if (!_hasActiveFilters()) ...[
             const SizedBox(height: 24),
@@ -433,7 +477,10 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.textPrimary,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
               ),
             ),
           ],
@@ -448,10 +495,7 @@ class _FilterChip extends StatelessWidget {
   final String label;
   final VoidCallback onRemove;
 
-  const _FilterChip({
-    required this.label,
-    required this.onRemove,
-  });
+  const _FilterChip({required this.label, required this.onRemove});
 
   @override
   Widget build(BuildContext context) {
@@ -476,11 +520,7 @@ class _FilterChip extends StatelessWidget {
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onRemove,
-            child: Icon(
-              LucideIcons.x,
-              size: 14,
-              color: AppTheme.primary,
-            ),
+            child: Icon(LucideIcons.x, size: 14, color: AppTheme.primary),
           ),
         ],
       ),
@@ -493,10 +533,7 @@ class _StudentCard extends StatelessWidget {
   final Student student;
   final VoidCallback? onTap;
 
-  const _StudentCard({
-    required this.student,
-    this.onTap,
-  });
+  const _StudentCard({required this.student, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -588,31 +625,36 @@ class _StudentCard extends StatelessWidget {
   }
 
   Widget _buildAvatar() {
-    return Container(
-      width: 48,
-      height: 48,
-      decoration: BoxDecoration(
-        color: _getBeltColor(student.currentBelt),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: student.photoUrl != null
-          ? ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                student.photoUrl!,
+    return Hero(
+      tag: 'student-avatar-${student.id}',
+      child: Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: _getBeltColor(student.currentBelt),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: student.photoUrl != null
+            ? AppCachedImage(
+                imageUrl: student.photoUrl,
+                width: 48,
+                height: 48,
                 fit: BoxFit.cover,
-              ),
-            )
-          : Center(
-              child: Text(
-                student.displayName[0].toUpperCase(),
-                style: TextStyle(
-                  color: student.currentBelt == 'white' ? Colors.black87 : Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 18,
+                borderRadius: BorderRadius.circular(12),
+              )
+            : Center(
+                child: Text(
+                  student.displayName[0].toUpperCase(),
+                  style: TextStyle(
+                    color: student.currentBelt == 'white'
+                        ? Colors.black87
+                        : Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 18,
+                  ),
                 ),
               ),
-            ),
+      ),
     );
   }
 
@@ -731,9 +773,7 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
             // Title
             Text(
               'Filtros',
-              style: AppTheme.titleLarge.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+              style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 24),
 
@@ -745,7 +785,8 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
               children: StudentStatus.values.map((status) {
                 final isSelected = _status == status;
                 return GestureDetector(
-                  onTap: () => setState(() => _status = isSelected ? null : status),
+                  onTap: () =>
+                      setState(() => _status = isSelected ? null : status),
                   child: _buildChip(status.label, isSelected),
                 );
               }).toList(),
@@ -760,7 +801,8 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
               children: StudentCategory.values.map((category) {
                 final isSelected = _category == category;
                 return GestureDetector(
-                  onTap: () => setState(() => _category = isSelected ? null : category),
+                  onTap: () =>
+                      setState(() => _category = isSelected ? null : category),
                   child: _buildChip(category.label, isSelected),
                 );
               }).toList(),
@@ -772,7 +814,9 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: ['white', 'blue', 'purple', 'brown', 'black'].map((belt) {
+              children: ['white', 'blue', 'purple', 'brown', 'black'].map((
+                belt,
+              ) {
                 final isSelected = _belt == belt;
                 return GestureDetector(
                   onTap: () => setState(() => _belt = isSelected ? null : belt),
@@ -787,17 +831,18 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: [
-                ('name', 'Nome'),
-                ('attendance', 'Presencas'),
-                ('belt', 'Faixa'),
-              ].map((item) {
-                final isSelected = _sort == item.$1;
-                return GestureDetector(
-                  onTap: () => setState(() => _sort = item.$1),
-                  child: _buildChip(item.$2, isSelected),
-                );
-              }).toList(),
+              children:
+                  [
+                    ('name', 'Nome'),
+                    ('attendance', 'Presencas'),
+                    ('belt', 'Faixa'),
+                  ].map((item) {
+                    final isSelected = _sort == item.$1;
+                    return GestureDetector(
+                      onTap: () => setState(() => _sort = item.$1),
+                      child: _buildChip(item.$2, isSelected),
+                    );
+                  }).toList(),
             ),
             const SizedBox(height: 32),
 
@@ -826,7 +871,8 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () => widget.onApply(_status, _category, _belt, _sort),
+                    onPressed: () =>
+                        widget.onApply(_status, _category, _belt, _sort),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.textPrimary,
                       foregroundColor: Colors.white,

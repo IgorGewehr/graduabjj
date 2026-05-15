@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
@@ -13,9 +14,18 @@ class BehaviorScreen extends ConsumerWidget {
 
   // Assessment categories
   static const List<_AssessmentCategoryData> _categories = [
-    _AssessmentCategoryData(key: AssessmentCategory.respeito, label: 'Respeito'),
-    _AssessmentCategoryData(key: AssessmentCategory.disciplina, label: 'Disciplina'),
-    _AssessmentCategoryData(key: AssessmentCategory.pontualidade, label: 'Pontualidade'),
+    _AssessmentCategoryData(
+      key: AssessmentCategory.respeito,
+      label: 'Respeito',
+    ),
+    _AssessmentCategoryData(
+      key: AssessmentCategory.disciplina,
+      label: 'Disciplina',
+    ),
+    _AssessmentCategoryData(
+      key: AssessmentCategory.pontualidade,
+      label: 'Pontualidade',
+    ),
     _AssessmentCategoryData(key: AssessmentCategory.tecnica, label: 'Tecnica'),
     _AssessmentCategoryData(key: AssessmentCategory.esforco, label: 'Esforco'),
   ];
@@ -30,26 +40,35 @@ class BehaviorScreen extends ConsumerWidget {
           return _buildNoStudentState();
         }
 
-        final assessmentsAsync = ref.watch(studentAssessmentsProvider(student.id));
+        final assessmentsAsync = ref.watch(
+          studentAssessmentsProvider(student.id),
+        );
         final averagesAsync = ref.watch(assessmentAveragesProvider(student.id));
         final latestAsync = ref.watch(latestAssessmentProvider(student.id));
 
         return RefreshIndicator(
+          color: Theme.of(context).colorScheme.primary,
           onRefresh: () async {
+            HapticFeedback.mediumImpact();
             ref.invalidate(studentAssessmentsProvider(student.id));
             ref.invalidate(assessmentAveragesProvider(student.id));
             ref.invalidate(latestAssessmentProvider(student.id));
           },
           child: assessmentsAsync.when(
             data: (assessments) {
-              print('[BEHAVIOR] Loaded ${assessments.length} assessments for student ${student.id}');
+              print(
+                '[BEHAVIOR] Loaded ${assessments.length} assessments for student ${student.id}',
+              );
               final averages = averagesAsync.valueOrNull ?? {};
               final latest = latestAsync.valueOrNull;
 
               // Calculate overall average
               double? overallAverage;
               if (averages.isNotEmpty) {
-                final total = averages.values.fold<double>(0.0, (sum, v) => sum + v);
+                final total = averages.values.fold<double>(
+                  0.0,
+                  (sum, v) => sum + v,
+                );
                 overallAverage = total / averages.length;
               }
 
@@ -80,7 +99,9 @@ class BehaviorScreen extends ConsumerWidget {
                               iconBgColor: AppTheme.infoLight,
                               label: 'Media Geral',
                               value: overallAverage.toStringAsFixed(1),
-                              valueColor: _getPerformanceLevel(overallAverage).color,
+                              valueColor: _getPerformanceLevel(
+                                overallAverage,
+                              ).color,
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -109,13 +130,15 @@ class BehaviorScreen extends ConsumerWidget {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      ...assessments.map((assessment) => Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _AssessmentHistoryCard(
-                              assessment: assessment,
-                              categories: _categories,
-                            ),
-                          )),
+                      ...assessments.map(
+                        (assessment) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _AssessmentHistoryCard(
+                            assessment: assessment,
+                            categories: _categories,
+                          ),
+                        ),
+                      ),
                     ],
 
                     const SizedBox(height: 80),
@@ -140,10 +163,14 @@ class BehaviorScreen extends ConsumerWidget {
   }
 
   _PerformanceLevel _getPerformanceLevel(double score) {
-    if (score >= 4.5) return _PerformanceLevel(label: 'Excelente', color: AppTheme.success);
-    if (score >= 4.0) return _PerformanceLevel(label: 'Muito Bom', color: AppTheme.success);
-    if (score >= 3.0) return _PerformanceLevel(label: 'Bom', color: AppTheme.warning);
-    if (score >= 2.0) return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
+    if (score >= 4.5)
+      return _PerformanceLevel(label: 'Excelente', color: AppTheme.success);
+    if (score >= 4.0)
+      return _PerformanceLevel(label: 'Muito Bom', color: AppTheme.success);
+    if (score >= 3.0)
+      return _PerformanceLevel(label: 'Bom', color: AppTheme.warning);
+    if (score >= 2.0)
+      return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
     return _PerformanceLevel(label: 'Precisa Melhorar', color: AppTheme.error);
   }
 
@@ -158,12 +185,16 @@ class BehaviorScreen extends ConsumerWidget {
             const SizedBox(height: 16),
             Text(
               'Conta nao vinculada',
-              style: AppTheme.titleLarge.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.titleLarge.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               'Vincule sua conta a um aluno para ver as avaliacoes.',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
               textAlign: TextAlign.center,
             ),
           ],
@@ -224,7 +255,9 @@ class BehaviorScreen extends ConsumerWidget {
             const SizedBox(height: 16),
             Text(
               'Erro ao carregar dados',
-              style: AppTheme.titleLarge.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.titleLarge.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -248,7 +281,9 @@ class BehaviorScreen extends ConsumerWidget {
             const SizedBox(height: 16),
             Text(
               'Nenhuma avaliacao registrada ainda',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -272,10 +307,14 @@ class _LatestAssessmentCard extends StatelessWidget {
   }
 
   _PerformanceLevel _getPerformanceLevel(double score) {
-    if (score >= 4.5) return _PerformanceLevel(label: 'Excelente', color: AppTheme.success);
-    if (score >= 4.0) return _PerformanceLevel(label: 'Muito Bom', color: AppTheme.success);
-    if (score >= 3.0) return _PerformanceLevel(label: 'Bom', color: AppTheme.warning);
-    if (score >= 2.0) return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
+    if (score >= 4.5)
+      return _PerformanceLevel(label: 'Excelente', color: AppTheme.success);
+    if (score >= 4.0)
+      return _PerformanceLevel(label: 'Muito Bom', color: AppTheme.success);
+    if (score >= 3.0)
+      return _PerformanceLevel(label: 'Bom', color: AppTheme.warning);
+    if (score >= 2.0)
+      return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
     return _PerformanceLevel(label: 'Precisa Melhorar', color: AppTheme.error);
   }
 
@@ -300,16 +339,25 @@ class _LatestAssessmentCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(LucideIcons.star, size: 20, color: AppTheme.warning),
+                  const Icon(
+                    LucideIcons.star,
+                    size: 20,
+                    color: AppTheme.warning,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     'Ultima Avaliacao',
-                    style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                    style: AppTheme.titleSmall.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: performance.color,
                   borderRadius: BorderRadius.circular(12),
@@ -329,11 +377,20 @@ class _LatestAssessmentCard extends StatelessWidget {
           // Date
           Row(
             children: [
-              const Icon(LucideIcons.calendar, size: 14, color: AppTheme.textSecondary),
+              const Icon(
+                LucideIcons.calendar,
+                size: 14,
+                color: AppTheme.textSecondary,
+              ),
               const SizedBox(width: 8),
               Text(
-                DateFormat("d 'de' MMMM 'de' yyyy", 'pt_BR').format(assessment.date),
-                style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                DateFormat(
+                  "d 'de' MMMM 'de' yyyy",
+                  'pt_BR',
+                ).format(assessment.date),
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ],
           ),
@@ -357,11 +414,17 @@ class _LatestAssessmentCard extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(LucideIcons.star, size: 14, color: AppTheme.warning),
+                            const Icon(
+                              LucideIcons.star,
+                              size: 14,
+                              color: AppTheme.warning,
+                            ),
                             const SizedBox(width: 4),
                             Text(
                               catScore.toString(),
-                              style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w700),
+                              style: AppTheme.bodyMedium.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ],
                         ),
@@ -444,7 +507,9 @@ class _StatCard extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 label,
-                style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ],
           ),
@@ -477,10 +542,14 @@ class _AssessmentHistoryCard extends StatelessWidget {
   }
 
   _PerformanceLevel _getPerformanceLevel(double score) {
-    if (score >= 4.5) return _PerformanceLevel(label: 'Excelente', color: AppTheme.success);
-    if (score >= 4.0) return _PerformanceLevel(label: 'Muito Bom', color: AppTheme.success);
-    if (score >= 3.0) return _PerformanceLevel(label: 'Bom', color: AppTheme.warning);
-    if (score >= 2.0) return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
+    if (score >= 4.5)
+      return _PerformanceLevel(label: 'Excelente', color: AppTheme.success);
+    if (score >= 4.0)
+      return _PerformanceLevel(label: 'Muito Bom', color: AppTheme.success);
+    if (score >= 3.0)
+      return _PerformanceLevel(label: 'Bom', color: AppTheme.warning);
+    if (score >= 2.0)
+      return _PerformanceLevel(label: 'Regular', color: AppTheme.warning);
     return _PerformanceLevel(label: 'Precisa Melhorar', color: AppTheme.error);
   }
 
@@ -505,25 +574,40 @@ class _AssessmentHistoryCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(LucideIcons.calendar, size: 14, color: AppTheme.textSecondary),
+                  const Icon(
+                    LucideIcons.calendar,
+                    size: 14,
+                    color: AppTheme.textSecondary,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     DateFormat("d 'de' MMMM", 'pt_BR').format(assessment.date),
-                    style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ],
               ),
               Row(
                 children: [
-                  const Icon(LucideIcons.star, size: 14, color: AppTheme.warning),
+                  const Icon(
+                    LucideIcons.star,
+                    size: 14,
+                    color: AppTheme.warning,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     score.toStringAsFixed(1),
-                    style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w700),
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: performance.color,
                       borderRadius: BorderRadius.circular(10),
@@ -551,7 +635,9 @@ class _AssessmentHistoryCard extends StatelessWidget {
               final catScore = assessment.getScoreForCategory(cat.key) ?? 0;
               return Text(
                 '${cat.label}: $catScore',
-                style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               );
             }).toList(),
           ),

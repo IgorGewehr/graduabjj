@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +11,7 @@ import '../../providers/selected_academy_provider.dart';
 import '../../services/checkin_service.dart';
 import '../../core/sports.dart';
 import '../../widgets/common/grade_display.dart';
+import '../../widgets/skeletons/skeletons.dart';
 
 /// Home Screen - Portal do Aluno (New Layout)
 class HomeScreen extends ConsumerStatefulWidget {
@@ -20,7 +22,9 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  final PageController _statsPageController = PageController(viewportFraction: 0.85);
+  final PageController _statsPageController = PageController(
+    viewportFraction: 0.85,
+  );
   int _currentStatsPage = 0;
 
   @override
@@ -37,7 +41,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final studentId = student.valueOrNull?.id;
 
     return RefreshIndicator(
+      color: Theme.of(context).colorScheme.primary,
       onRefresh: () async {
+        // Sprint 6 — tactile pulse so the user feels the pull-to-refresh
+        // before async work begins.
+        HapticFeedback.mediumImpact();
         ref.invalidate(currentUserProvider);
         ref.invalidate(currentStudentProvider);
         ref.invalidate(upcomingCompetitionsProvider);
@@ -110,7 +118,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   onTap: (path) => context.go(path),
                 );
               },
-              loading: () => const SizedBox.shrink(),
+              loading: () => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  SkeletonCard(height: 96, showAvatar: true),
+                  SizedBox(height: 12),
+                  SkeletonStats(count: 2, height: 96),
+                  SizedBox(height: 12),
+                  SkeletonCard(height: 80, showAvatar: true),
+                ],
+              ),
               error: (_, __) => const SizedBox.shrink(),
             ),
 
@@ -122,13 +139,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildStatsLoading() {
-    return Container(
-      height: 140,
-      decoration: BoxDecoration(
-        color: AppTheme.surfaceVariant,
-        borderRadius: BorderRadius.circular(16),
-      ),
-    );
+    return const SkeletonStats(count: 2, height: 140);
   }
 }
 
@@ -152,15 +163,11 @@ class _WelcomeHeader extends StatelessWidget {
       children: [
         Text(
           '$_greeting,',
-          style: AppTheme.bodyLarge.copyWith(
-            color: AppTheme.textSecondary,
-          ),
+          style: AppTheme.bodyLarge.copyWith(color: AppTheme.textSecondary),
         ),
         Text(
           userName.split(' ').first,
-          style: AppTheme.displaySmall.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
+          style: AppTheme.displaySmall.copyWith(fontWeight: FontWeight.w700),
         ),
       ],
     );
@@ -193,9 +200,7 @@ class _WelcomeHeaderWithBelt extends StatelessWidget {
       children: [
         Text(
           '$_greeting,',
-          style: AppTheme.bodyLarge.copyWith(
-            color: AppTheme.textSecondary,
-          ),
+          style: AppTheme.bodyLarge.copyWith(color: AppTheme.textSecondary),
         ),
         const SizedBox(height: 4),
         Row(
@@ -239,13 +244,16 @@ class _StatsCarousel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final attendanceCountAsync = ref.watch(studentAttendanceCountProvider(student.id));
+    final attendanceCountAsync = ref.watch(
+      studentAttendanceCountProvider(student.id),
+    );
     final medalCountAsync = ref.watch(studentMedalCountProvider(student.id));
 
     // Calculate months on the mat
     final startDate = student.jiujitsuStartDate ?? student.startDate;
     final now = DateTime.now();
-    final monthsOnMat = (now.year - startDate.year) * 12 + (now.month - startDate.month);
+    final monthsOnMat =
+        (now.year - startDate.year) * 12 + (now.month - startDate.month);
 
     return Column(
       children: [
@@ -379,10 +387,7 @@ class _StatCarouselCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Center(
-              child: Text(
-                emoji,
-                style: const TextStyle(fontSize: 28),
-              ),
+              child: Text(emoji, style: const TextStyle(fontSize: 28)),
             ),
           ),
           const SizedBox(width: 16),
@@ -423,20 +428,23 @@ class _DynamicCardsSection extends ConsumerWidget {
   final String studentId;
   final void Function(String path) onTap;
 
-  const _DynamicCardsSection({
-    required this.studentId,
-    required this.onTap,
-  });
+  const _DynamicCardsSection({required this.studentId, required this.onTap});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final nextClassAsync = ref.watch(studentNextClassProvider(studentId));
     final streakAsync = ref.watch(studentStreakProvider(studentId));
-    final monthlyAttendanceAsync = ref.watch(studentMonthlyAttendanceProvider(studentId));
+    final monthlyAttendanceAsync = ref.watch(
+      studentMonthlyAttendanceProvider(studentId),
+    );
     final upcomingCompetitionsAsync = ref.watch(upcomingCompetitionsProvider);
-    final settingsAsync = ref.watch(academySettingsProvider);
-
-    final checkinEnabled = settingsAsync.valueOrNull?.studentCheckinEnabled ?? false;
+    // Only depend on the single boolean we actually consume — avoids
+    // rebuilding when other settings fields change.
+    final checkinEnabled = ref.watch(
+      academySettingsProvider.select(
+        (s) => s.valueOrNull?.studentCheckinEnabled ?? false,
+      ),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -456,7 +464,8 @@ class _DynamicCardsSection extends ConsumerWidget {
             }
 
             // Check if within check-in window
-            final canCheckin = checkinEnabled &&
+            final canCheckin =
+                checkinEnabled &&
                 data.nextDate != null &&
                 data.schedule != null &&
                 isInCheckinWindow(
@@ -607,7 +616,9 @@ class _NextClassCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasClass = className != null && !isLoading;
     // Use success color when check-in is available
-    final cardColor = canCheckin ? AppTheme.success : (hasClass ? AppTheme.textPrimary : AppTheme.surface);
+    final cardColor = canCheckin
+        ? AppTheme.success
+        : (hasClass ? AppTheme.textPrimary : AppTheme.surface);
 
     return Material(
       color: cardColor,
@@ -689,7 +700,10 @@ class _NextClassCard extends StatelessWidget {
               ),
               if (canCheckin)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(20),
@@ -717,7 +731,9 @@ class _NextClassCard extends StatelessWidget {
                 Icon(
                   LucideIcons.chevronRight,
                   size: 20,
-                  color: hasClass ? Colors.white.withValues(alpha: 0.5) : AppTheme.textSecondary,
+                  color: hasClass
+                      ? Colors.white.withValues(alpha: 0.5)
+                      : AppTheme.textSecondary,
                 ),
             ],
           ),
@@ -767,7 +783,10 @@ class _StreakCard extends StatelessWidget {
                   const Spacer(),
                   if (hasStreak)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: AppTheme.warning.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(12),
@@ -848,13 +867,13 @@ class _MonthlyCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Text(
-                    '📅',
-                    style: TextStyle(fontSize: 24),
-                  ),
+                  const Text('📅', style: TextStyle(fontSize: 24)),
                   const Spacer(),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: AppTheme.info.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(12),
@@ -996,7 +1015,10 @@ class _NextCompetitionCard extends StatelessWidget {
               ),
               if (hasCompetition)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.purple.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
@@ -1030,10 +1052,14 @@ class _AcademyIndicator extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final hasMultiple = ref.watch(hasMultipleAcademiesProvider);
-    final academyInfo = ref.watch(currentAcademyInfoProvider);
+    // Only watch the academy name (not the whole AcademyInfo object) so this
+    // widget rebuilds solely when the displayed name actually changes.
+    final academyName = ref.watch(
+      currentAcademyInfoProvider.select((info) => info?.name),
+    );
 
     // Only show if user has multiple academies
-    if (!hasMultiple || academyInfo == null) {
+    if (!hasMultiple || academyName == null) {
       return const SizedBox.shrink();
     }
 
@@ -1047,14 +1073,12 @@ class _AcademyIndicator extends ConsumerWidget {
           decoration: BoxDecoration(
             color: AppTheme.primary.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: AppTheme.primary.withValues(alpha: 0.2),
-            ),
+            border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
+              const Icon(
                 LucideIcons.building2,
                 size: 16,
                 color: AppTheme.primary,
@@ -1062,7 +1086,7 @@ class _AcademyIndicator extends ConsumerWidget {
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
-                  academyInfo.name,
+                  academyName,
                   style: AppTheme.bodySmall.copyWith(
                     fontWeight: FontWeight.w600,
                     color: AppTheme.primary,

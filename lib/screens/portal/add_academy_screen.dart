@@ -9,6 +9,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
 import '../../services/firebase_service.dart';
+import '../../widgets/cached_image.dart';
 
 /// Add Academy Screen
 /// Allows user to link to a new academy using a 6-digit code
@@ -53,16 +54,10 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
           onPressed: () => context.pop(),
           icon: const Icon(LucideIcons.arrowLeft, size: 20),
         ),
-        title: Text(
-          'Adicionar Academia',
-          style: AppTheme.headlineSmall,
-        ),
+        title: Text('Adicionar Academia', style: AppTheme.headlineSmall),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(
-            height: 1,
-            color: AppTheme.divider,
-          ),
+          child: Container(height: 1, color: AppTheme.divider),
         ),
       ),
       body: SingleChildScrollView(
@@ -116,10 +111,7 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
 
               // Code input section
               if (_academyId == null) ...[
-                Text(
-                  'Digite o codigo',
-                  style: AppTheme.titleMedium,
-                ),
+                Text('Digite o codigo', style: AppTheme.titleMedium),
                 const SizedBox(height: 8),
 
                 // Code input
@@ -152,9 +144,7 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
                             child: SizedBox(
                               width: 24,
                               height: 24,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                              ),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             ),
                           )
                         : null,
@@ -200,9 +190,7 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
               ],
 
               // Academy confirmation section
-              if (_academyId != null) ...[
-                _buildAcademyConfirmation(),
-              ],
+              if (_academyId != null) ...[_buildAcademyConfirmation()],
             ],
           ),
         ),
@@ -232,12 +220,7 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
         ),
         const SizedBox(height: 16),
 
-        Center(
-          child: Text(
-            'Codigo Valido!',
-            style: AppTheme.headlineSmall,
-          ),
-        ),
+        Center(child: Text('Codigo Valido!', style: AppTheme.headlineSmall)),
         const SizedBox(height: 24),
 
         // Academy card
@@ -260,10 +243,12 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: _academyLogoUrl != null
-                    ? Image.network(
-                        _academyLogoUrl!,
+                    ? AppCachedImage(
+                        imageUrl: _academyLogoUrl,
+                        width: 56,
+                        height: 56,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _buildDefaultLogo(),
+                        errorIcon: _buildDefaultLogo(),
                       )
                     : _buildDefaultLogo(),
               ),
@@ -282,10 +267,7 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
                     ),
                     if (_studentName != null) ...[
                       const SizedBox(height: 4),
-                      Text(
-                        'Aluno: $_studentName',
-                        style: AppTheme.bodySmall,
-                      ),
+                      Text('Aluno: $_studentName', style: AppTheme.bodySmall),
                     ],
                   ],
                 ),
@@ -315,9 +297,7 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
               Expanded(
                 child: Text(
                   'Ao confirmar, voce tera acesso aos dados desta academia e podera alternar entre suas academias.',
-                  style: AppTheme.bodySmall.copyWith(
-                    color: AppTheme.warning,
-                  ),
+                  style: AppTheme.bodySmall.copyWith(color: AppTheme.warning),
                 ),
               ),
             ],
@@ -447,8 +427,10 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
       }
 
       // Get academy info
-      final academyDoc =
-          await firestore.collection('academies').doc(foundAcademyId).get();
+      final academyDoc = await firestore
+          .collection('academies')
+          .doc(foundAcademyId)
+          .get();
       final academyData = academyDoc.data();
 
       // Get student info if available

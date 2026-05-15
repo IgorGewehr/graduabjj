@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
@@ -6,6 +7,8 @@ import 'package:intl/intl.dart';
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
+import '../../widgets/cached_image.dart';
+import '../../widgets/skeletons/skeletons.dart';
 
 /// Attendance Screen - Minhas Presencas
 class AttendanceScreen extends ConsumerWidget {
@@ -21,11 +24,17 @@ class AttendanceScreen extends ConsumerWidget {
           return _buildNoStudentState();
         }
 
-        final attendanceAsync = ref.watch(studentAttendanceProvider(student.id));
-        final countAsync = ref.watch(studentAttendanceCountProvider(student.id));
+        final attendanceAsync = ref.watch(
+          studentAttendanceProvider(student.id),
+        );
+        final countAsync = ref.watch(
+          studentAttendanceCountProvider(student.id),
+        );
 
         return RefreshIndicator(
+          color: Theme.of(context).colorScheme.primary,
           onRefresh: () async {
+            HapticFeedback.mediumImpact();
             ref.invalidate(studentAttendanceProvider(student.id));
             ref.invalidate(studentAttendanceCountProvider(student.id));
           },
@@ -67,7 +76,10 @@ class AttendanceScreen extends ConsumerWidget {
                     // Calendar View
                     _CalendarView(
                       days: calendarDays,
-                      monthLabel: DateFormat('MMMM yyyy', 'pt_BR').format(DateTime.now()),
+                      monthLabel: DateFormat(
+                        'MMMM yyyy',
+                        'pt_BR',
+                      ).format(DateTime.now()),
                     ),
                     const SizedBox(height: 24),
 
@@ -82,13 +94,42 @@ class AttendanceScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    if (records.isEmpty)
-                      _buildEmptyState()
-                    else
-                      ...records.take(15).map((record) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: _AttendanceListItem(record: record),
-                      )),
+                    // Wrap the recent list in an AnimatedSwitcher keyed by
+                    // the count so a new check-in slides in instead of
+                    // popping. Cheap visual cue with no layout cost.
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(
+                          position: Tween<Offset>(
+                            begin: const Offset(0, -0.1),
+                            end: Offset.zero,
+                          ).animate(animation),
+                          child: child,
+                        ),
+                      ),
+                      child: records.isEmpty
+                          ? KeyedSubtree(
+                              key: const ValueKey('attendance-empty'),
+                              child: _buildEmptyState(),
+                            )
+                          : Column(
+                              key: ValueKey('attendance-${records.length}'),
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: records
+                                  .take(15)
+                                  .map(
+                                    (record) => Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: _AttendanceListItem(
+                                        record: record,
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                    ),
 
                     const SizedBox(height: 80),
                   ],
@@ -107,7 +148,9 @@ class AttendanceScreen extends ConsumerWidget {
 
   int _getThisMonthCount(List<Attendance> records) {
     final now = DateTime.now();
-    return records.where((r) => r.date.month == now.month && r.date.year == now.year).length;
+    return records
+        .where((r) => r.date.month == now.month && r.date.year == now.year)
+        .length;
   }
 
   List<CalendarDay> _getCalendarDays(List<Attendance> records) {
@@ -116,11 +159,17 @@ class AttendanceScreen extends ConsumerWidget {
     final lastDayOfMonth = DateTime(now.year, now.month + 1, 0);
 
     final days = <CalendarDay>[];
-    for (var day = firstDayOfMonth;
-        day.isBefore(lastDayOfMonth.add(const Duration(days: 1)));
-        day = day.add(const Duration(days: 1))) {
-      final hasAttendance = records.any((r) =>
-          r.date.year == day.year && r.date.month == day.month && r.date.day == day.day);
+    for (
+      var day = firstDayOfMonth;
+      day.isBefore(lastDayOfMonth.add(const Duration(days: 1)));
+      day = day.add(const Duration(days: 1))
+    ) {
+      final hasAttendance = records.any(
+        (r) =>
+            r.date.year == day.year &&
+            r.date.month == day.month &&
+            r.date.day == day.day,
+      );
       days.add(CalendarDay(date: day, hasAttendance: hasAttendance));
     }
     return days;
@@ -133,16 +182,24 @@ class AttendanceScreen extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(LucideIcons.clipboardCheck, size: 64, color: AppTheme.textDisabled),
+            Icon(
+              LucideIcons.clipboardCheck,
+              size: 64,
+              color: AppTheme.textDisabled,
+            ),
             const SizedBox(height: 16),
             Text(
               'Conta nao vinculada',
-              style: AppTheme.titleLarge.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.titleLarge.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               'Vincule sua conta a um aluno para ver as presencas.',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
               textAlign: TextAlign.center,
             ),
           ],
@@ -156,55 +213,19 @@ class AttendanceScreen extends ConsumerWidget {
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 200,
-            height: 24,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            width: 150,
-            height: 16,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  height: 72,
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Container(
-                  height: 72,
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Container(
+        children: const [
+          SkeletonStats(count: 2, height: 72),
+          SizedBox(height: 24),
+          SkeletonCard(
             height: 280,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(8),
-            ),
+            showAvatar: false,
+            padding: EdgeInsets.zero,
+          ),
+          SizedBox(height: 24),
+          SkeletonList(
+            itemCount: 6,
+            scrollable: false,
+            padding: EdgeInsets.zero,
           ),
         ],
       ),
@@ -222,7 +243,9 @@ class AttendanceScreen extends ConsumerWidget {
             const SizedBox(height: 16),
             Text(
               'Erro ao carregar dados',
-              style: AppTheme.titleLarge.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.titleLarge.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -253,10 +276,7 @@ class _StatCard extends StatelessWidget {
   final String value;
   final String label;
 
-  const _StatCard({
-    required this.value,
-    required this.label,
-  });
+  const _StatCard({required this.value, required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -290,10 +310,7 @@ class _CalendarView extends StatelessWidget {
   final List<CalendarDay> days;
   final String monthLabel;
 
-  const _CalendarView({
-    required this.days,
-    required this.monthLabel,
-  });
+  const _CalendarView({required this.days, required this.monthLabel});
 
   @override
   Widget build(BuildContext context) {
@@ -313,7 +330,11 @@ class _CalendarView extends StatelessWidget {
           // Month label
           Row(
             children: [
-              const Icon(LucideIcons.calendar, size: 16, color: AppTheme.textSecondary),
+              const Icon(
+                LucideIcons.calendar,
+                size: 16,
+                color: AppTheme.textSecondary,
+              ),
               const SizedBox(width: 8),
               Text(
                 monthLabel,
@@ -329,17 +350,19 @@ class _CalendarView extends StatelessWidget {
           // Week days header
           Row(
             children: ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
-                .map((day) => Expanded(
-                      child: Center(
-                        child: Text(
-                          day,
-                          style: AppTheme.labelSmall.copyWith(
-                            color: AppTheme.textSecondary,
-                            fontWeight: FontWeight.w500,
-                          ),
+                .map(
+                  (day) => Expanded(
+                    child: Center(
+                      child: Text(
+                        day,
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
-                    ))
+                    ),
+                  ),
+                )
                 .toList(),
           ),
           const SizedBox(height: 8),
@@ -364,7 +387,9 @@ class _CalendarView extends StatelessWidget {
 
               return Container(
                 decoration: BoxDecoration(
-                  color: day.hasAttendance ? AppTheme.primary : Colors.transparent,
+                  color: day.hasAttendance
+                      ? AppTheme.primary
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(6),
                   border: isToday && !day.hasAttendance
                       ? Border.all(color: AppTheme.primary, width: 2)
@@ -377,10 +402,11 @@ class _CalendarView extends StatelessWidget {
                       color: day.hasAttendance
                           ? Colors.white
                           : isFuture
-                              ? AppTheme.textDisabled
-                              : AppTheme.textPrimary,
-                      fontWeight:
-                          day.hasAttendance || isToday ? FontWeight.w600 : FontWeight.w400,
+                          ? AppTheme.textDisabled
+                          : AppTheme.textPrimary,
+                      fontWeight: day.hasAttendance || isToday
+                          ? FontWeight.w600
+                          : FontWeight.w400,
                     ),
                   ),
                 ),
@@ -434,11 +460,15 @@ class _AttendanceListItem extends StatelessWidget {
               children: [
                 Text(
                   DateFormat("d 'de' MMMM", 'pt_BR').format(record.date),
-                  style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 Text(
                   record.className.isNotEmpty ? record.className : 'Treino',
-                  style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
               ],
             ),
@@ -488,10 +518,12 @@ class _AcademyIndicator extends ConsumerWidget {
               ),
               clipBehavior: Clip.antiAlias,
               child: academyInfo.logoUrl != null
-                  ? Image.network(
-                      academyInfo.logoUrl!,
+                  ? AppCachedImage(
+                      imageUrl: academyInfo.logoUrl,
+                      width: 28,
+                      height: 28,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _buildDefaultLogo(academyInfo.name),
+                      errorIcon: _buildDefaultLogo(academyInfo.name),
                     )
                   : _buildDefaultLogo(academyInfo.name),
             ),
@@ -525,7 +557,11 @@ class _AcademyIndicator extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(width: 4),
-                    const Icon(LucideIcons.chevronDown, size: 12, color: AppTheme.info),
+                    const Icon(
+                      LucideIcons.chevronDown,
+                      size: 12,
+                      color: AppTheme.info,
+                    ),
                   ],
                 ),
               ),
@@ -583,7 +619,9 @@ class _AcademyIndicator extends ConsumerWidget {
                 padding: const EdgeInsets.all(16),
                 child: Text(
                   'Ver presencas de',
-                  style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+                  style: AppTheme.titleMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               const Divider(height: 1),
@@ -598,32 +636,44 @@ class _AcademyIndicator extends ConsumerWidget {
                     return ListTile(
                       onTap: () {
                         Navigator.pop(sheetContext);
-                        ref.read(selectedAcademyProvider.notifier).selectAcademy(academy.id);
+                        ref
+                            .read(selectedAcademyProvider.notifier)
+                            .selectAcademy(academy.id);
                       },
                       leading: Container(
                         width: 36,
                         height: 36,
                         decoration: BoxDecoration(
-                          color: academy.logoUrl == null ? AppTheme.primary : null,
+                          color: academy.logoUrl == null
+                              ? AppTheme.primary
+                              : null,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         clipBehavior: Clip.antiAlias,
                         child: academy.logoUrl != null
-                            ? Image.network(
-                                academy.logoUrl!,
+                            ? AppCachedImage(
+                                imageUrl: academy.logoUrl,
+                                width: 36,
+                                height: 36,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => _buildDefaultLogo(academy.name),
+                                errorIcon: _buildDefaultLogo(academy.name),
                               )
                             : _buildDefaultLogo(academy.name),
                       ),
                       title: Text(
                         academy.name,
                         style: AppTheme.bodyMedium.copyWith(
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
                         ),
                       ),
                       trailing: isSelected
-                          ? const Icon(LucideIcons.check, color: AppTheme.success, size: 20)
+                          ? const Icon(
+                              LucideIcons.check,
+                              color: AppTheme.success,
+                              size: 20,
+                            )
                           : null,
                     );
                   },

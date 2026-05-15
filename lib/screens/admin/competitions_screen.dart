@@ -18,10 +18,12 @@ class AdminCompetitionsScreen extends ConsumerStatefulWidget {
   const AdminCompetitionsScreen({super.key});
 
   @override
-  ConsumerState<AdminCompetitionsScreen> createState() => _AdminCompetitionsScreenState();
+  ConsumerState<AdminCompetitionsScreen> createState() =>
+      _AdminCompetitionsScreenState();
 }
 
-class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScreen> {
+class _AdminCompetitionsScreenState
+    extends ConsumerState<AdminCompetitionsScreen> {
   List<Competition> _upcomingCompetitions = [];
   List<Competition> _pastCompetitions = [];
   bool _isLoading = true;
@@ -44,7 +46,8 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
 
   void _loadCompetitionsIfReady() {
     final currentUser = ref.read(currentUserProvider).valueOrNull;
-    if (currentUser?.academyId != null && _academyId != currentUser!.academyId) {
+    if (currentUser?.academyId != null &&
+        _academyId != currentUser!.academyId) {
       _academyId = currentUser.academyId;
       _loadCompetitions();
     }
@@ -58,8 +61,13 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
 
     try {
       final service = CompetitionService(academyId);
-      final upcoming = await service.getUpcoming();
-      final all = await service.list();
+      // Sprint 5 — fetch upcoming + full list in parallel.
+      final results = await Future.wait([
+        service.getUpcoming(),
+        service.list(),
+      ]);
+      final upcoming = results[0];
+      final all = results[1];
       final now = DateTime.now();
       final past = all.where((c) => c.date.isBefore(now)).toList();
 
@@ -80,7 +88,8 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
   Widget build(BuildContext context) {
     // Watch user provider to trigger loading when user data is available
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
-    if (currentUser?.academyId != null && _academyId != currentUser!.academyId) {
+    if (currentUser?.academyId != null &&
+        _academyId != currentUser!.academyId) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _academyId = currentUser.academyId;
@@ -110,28 +119,28 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                     child: Center(child: CircularProgressIndicator()),
                   )
                 : _currentList.isEmpty
-                    ? SliverFillRemaining(child: _buildEmptyState())
-                    : SliverPadding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        sliver: SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              final competition = _currentList[index];
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: _CompetitionCard(
-                                  competition: competition,
-                                  onTap: () => _showCompetitionDetails(competition),
-                                  onEdit: () => _showEditCompetitionSheet(competition),
-                                  onDelete: () => _showDeleteConfirmation(competition),
-                                  onManageEnrollments: () => _showEnrollmentsSheet(competition),
-                                ),
-                              );
-                            },
-                            childCount: _currentList.length,
+                ? SliverFillRemaining(child: _buildEmptyState())
+                : SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate((context, index) {
+                        final competition = _currentList[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _CompetitionCard(
+                            competition: competition,
+                            onTap: () => _showCompetitionDetails(competition),
+                            onEdit: () =>
+                                _showEditCompetitionSheet(competition),
+                            onDelete: () =>
+                                _showDeleteConfirmation(competition),
+                            onManageEnrollments: () =>
+                                _showEnrollmentsSheet(competition),
                           ),
-                        ),
-                      ),
+                        );
+                      }, childCount: _currentList.length),
+                    ),
+                  ),
 
             // Bottom padding
             const SliverToBoxAdapter(child: SizedBox(height: 100)),
@@ -183,7 +192,9 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
 
   Widget _buildTrophyShowcase() {
     final allCompetitions = [..._upcomingCompetitions, ..._pastCompetitions];
-    final trophyCompetitions = allCompetitions.where((c) => c.teamPosition != null).toList();
+    final trophyCompetitions = allCompetitions
+        .where((c) => c.teamPosition != null)
+        .toList();
 
     const config = {
       'gold': {
@@ -241,8 +252,13 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                   label: const Text('Galeria'),
                   style: TextButton.styleFrom(
                     foregroundColor: AppTheme.primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    textStyle: AppTheme.labelSmall.copyWith(fontWeight: FontWeight.w600),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    textStyle: AppTheme.labelSmall.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -313,11 +329,17 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
               Center(
                 child: Column(
                   children: [
-                    Icon(LucideIcons.trophy, size: 32, color: AppTheme.textDisabled),
+                    Icon(
+                      LucideIcons.trophy,
+                      size: 32,
+                      color: AppTheme.textDisabled,
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       'Registre o primeiro trofeu da academia!',
-                      style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                   ],
                 ),
@@ -339,7 +361,9 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
         itemCount: _tabs.length,
         itemBuilder: (context, index) {
           final isSelected = _selectedTabIndex == index;
-          final count = index == 0 ? _upcomingCompetitions.length : _pastCompetitions.length;
+          final count = index == 0
+              ? _upcomingCompetitions.length
+              : _pastCompetitions.length;
           return GestureDetector(
             onTap: () => setState(() => _selectedTabIndex = index),
             child: AnimatedContainer(
@@ -381,27 +405,19 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
               color: AppTheme.warning.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Icon(
-              LucideIcons.trophy,
-              size: 40,
-              color: AppTheme.warning,
-            ),
+            child: Icon(LucideIcons.trophy, size: 40, color: AppTheme.warning),
           ),
           const SizedBox(height: 16),
           Text(
             _selectedTabIndex == 0
                 ? 'Nenhum campeonato agendado'
                 : 'Nenhum campeonato passado',
-            style: AppTheme.titleMedium.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
           Text(
             'Adicione novos campeonatos para comecar',
-            style: AppTheme.bodySmall.copyWith(
-              color: AppTheme.textSecondary,
-            ),
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
           ),
         ],
       ),
@@ -457,12 +473,18 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           color: AppTheme.warning.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: Icon(LucideIcons.trophy, color: AppTheme.warning, size: 20),
+                        child: Icon(
+                          LucideIcons.trophy,
+                          color: AppTheme.warning,
+                          size: 20,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Text(
                         'Novo Campeonato',
-                        style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                        style: AppTheme.titleLarge.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
@@ -503,7 +525,11 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                       ),
                       child: Row(
                         children: [
-                          Icon(LucideIcons.calendar, color: AppTheme.textSecondary, size: 20),
+                          Icon(
+                            LucideIcons.calendar,
+                            color: AppTheme.textSecondary,
+                            size: 20,
+                          ),
                           const SizedBox(width: 12),
                           Text(
                             selectedDate != null
@@ -519,24 +545,36 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                       ),
                     ),
                   ),
-                  if (selectedDate != null && selectedDate!.isBefore(DateTime.now()))
+                  if (selectedDate != null &&
+                      selectedDate!.isBefore(DateTime.now()))
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: AppTheme.warning.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppTheme.warning.withValues(alpha: 0.3)),
+                          border: Border.all(
+                            color: AppTheme.warning.withValues(alpha: 0.3),
+                          ),
                         ),
                         child: Row(
                           children: [
-                            Icon(LucideIcons.checkCircle, color: AppTheme.warning, size: 16),
+                            Icon(
+                              LucideIcons.checkCircle,
+                              color: AppTheme.warning,
+                              size: 16,
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 'Sera criado como concluido. Alunos poderao adicionar seus resultados e fotos.',
-                                style: AppTheme.labelSmall.copyWith(color: AppTheme.warning),
+                                style: AppTheme.labelSmall.copyWith(
+                                  color: AppTheme.warning,
+                                ),
                               ),
                             ),
                           ],
@@ -562,46 +600,62 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: isSaving ? null : () async {
-                        if (nameController.text.isEmpty || selectedDate == null) {
-                          sheetContext.showWarning('Preencha nome e data');
-                          return;
-                        }
+                      onPressed: isSaving
+                          ? null
+                          : () async {
+                              if (nameController.text.isEmpty ||
+                                  selectedDate == null) {
+                                sheetContext.showWarning(
+                                  'Preencha nome e data',
+                                );
+                                return;
+                              }
 
-                        setSheetState(() => isSaving = true);
+                              setSheetState(() => isSaving = true);
 
-                        try {
-                          if (_academyId == null) {
-                            setSheetState(() => isSaving = false);
-                            sheetContext.showError('Academia nao encontrada');
-                            return;
-                          }
-                          final isPast = selectedDate!.isBefore(DateTime.now());
-                          final service = CompetitionService(_academyId!);
-                          await service.create(
-                            name: nameController.text,
-                            date: selectedDate!,
-                            location: locationController.text.isEmpty
-                                ? null
-                                : locationController.text,
-                            description: descriptionController.text.isEmpty
-                                ? null
-                                : descriptionController.text,
-                            status: isPast ? CompetitionStatus.completed : CompetitionStatus.upcoming,
-                          );
+                              try {
+                                if (_academyId == null) {
+                                  setSheetState(() => isSaving = false);
+                                  sheetContext.showError(
+                                    'Academia nao encontrada',
+                                  );
+                                  return;
+                                }
+                                final isPast = selectedDate!.isBefore(
+                                  DateTime.now(),
+                                );
+                                final service = CompetitionService(_academyId!);
+                                await service.create(
+                                  name: nameController.text,
+                                  date: selectedDate!,
+                                  location: locationController.text.isEmpty
+                                      ? null
+                                      : locationController.text,
+                                  description:
+                                      descriptionController.text.isEmpty
+                                      ? null
+                                      : descriptionController.text,
+                                  status: isPast
+                                      ? CompetitionStatus.completed
+                                      : CompetitionStatus.upcoming,
+                                );
 
-                          if (mounted) {
-                            Navigator.pop(sheetContext);
-                            this.context.showSuccess(isPast ? 'Campeonato concluido criado!' : 'Campeonato criado!');
-                            _loadCompetitions();
-                          }
-                        } catch (e) {
-                          setSheetState(() => isSaving = false);
-                          if (mounted) {
-                            this.context.showError('Erro: $e');
-                          }
-                        }
-                      },
+                                if (mounted) {
+                                  Navigator.pop(sheetContext);
+                                  this.context.showSuccess(
+                                    isPast
+                                        ? 'Campeonato concluido criado!'
+                                        : 'Campeonato criado!',
+                                  );
+                                  _loadCompetitions();
+                                }
+                              } catch (e) {
+                                setSheetState(() => isSaving = false);
+                                if (mounted) {
+                                  this.context.showError('Erro: $e');
+                                }
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.textPrimary,
                         foregroundColor: Colors.white,
@@ -622,9 +676,20 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           : Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(selectedDate != null && selectedDate!.isBefore(DateTime.now()) ? LucideIcons.checkCircle : LucideIcons.plus, size: 20),
+                                Icon(
+                                  selectedDate != null &&
+                                          selectedDate!.isBefore(DateTime.now())
+                                      ? LucideIcons.checkCircle
+                                      : LucideIcons.plus,
+                                  size: 20,
+                                ),
                                 const SizedBox(width: 8),
-                                Text(selectedDate != null && selectedDate!.isBefore(DateTime.now()) ? 'Criar como Concluido' : 'Criar Campeonato'),
+                                Text(
+                                  selectedDate != null &&
+                                          selectedDate!.isBefore(DateTime.now())
+                                      ? 'Criar como Concluido'
+                                      : 'Criar Campeonato',
+                                ),
                               ],
                             ),
                     ),
@@ -641,8 +706,12 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
   void _showEditCompetitionSheet(Competition competition) {
     bool isSaving = false;
     final nameController = TextEditingController(text: competition.name);
-    final locationController = TextEditingController(text: competition.location ?? '');
-    final descriptionController = TextEditingController(text: competition.description ?? '');
+    final locationController = TextEditingController(
+      text: competition.location ?? '',
+    );
+    final descriptionController = TextEditingController(
+      text: competition.description ?? '',
+    );
     DateTime selectedDate = competition.date;
 
     showModalBottomSheet(
@@ -687,12 +756,18 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           color: AppTheme.warning.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: Icon(LucideIcons.pencil, color: AppTheme.warning, size: 20),
+                        child: Icon(
+                          LucideIcons.pencil,
+                          color: AppTheme.warning,
+                          size: 20,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Text(
                         'Editar Campeonato',
-                        style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                        style: AppTheme.titleLarge.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
@@ -733,7 +808,11 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                       ),
                       child: Row(
                         children: [
-                          Icon(LucideIcons.calendar, color: AppTheme.textSecondary, size: 20),
+                          Icon(
+                            LucideIcons.calendar,
+                            color: AppTheme.textSecondary,
+                            size: 20,
+                          ),
                           const SizedBox(width: 12),
                           Text(
                             DateFormat('dd/MM/yyyy').format(selectedDate),
@@ -762,44 +841,51 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: isSaving ? null : () async {
-                        if (nameController.text.isEmpty) {
-                          sheetContext.showWarning('Nome e obrigatorio');
-                          return;
-                        }
+                      onPressed: isSaving
+                          ? null
+                          : () async {
+                              if (nameController.text.isEmpty) {
+                                sheetContext.showWarning('Nome e obrigatorio');
+                                return;
+                              }
 
-                        setSheetState(() => isSaving = true);
+                              setSheetState(() => isSaving = true);
 
-                        try {
-                          if (_academyId == null) {
-                            setSheetState(() => isSaving = false);
-                            sheetContext.showError('Academia nao encontrada');
-                            return;
-                          }
-                          final service = CompetitionService(_academyId!);
-                          await service.update(competition.id, {
-                            'name': nameController.text,
-                            'date': selectedDate,
-                            'location': locationController.text.isEmpty
-                                ? null
-                                : locationController.text,
-                            'description': descriptionController.text.isEmpty
-                                ? null
-                                : descriptionController.text,
-                          });
+                              try {
+                                if (_academyId == null) {
+                                  setSheetState(() => isSaving = false);
+                                  sheetContext.showError(
+                                    'Academia nao encontrada',
+                                  );
+                                  return;
+                                }
+                                final service = CompetitionService(_academyId!);
+                                await service.update(competition.id, {
+                                  'name': nameController.text,
+                                  'date': selectedDate,
+                                  'location': locationController.text.isEmpty
+                                      ? null
+                                      : locationController.text,
+                                  'description':
+                                      descriptionController.text.isEmpty
+                                      ? null
+                                      : descriptionController.text,
+                                });
 
-                          if (mounted) {
-                            Navigator.pop(sheetContext);
-                            this.context.showSuccess('Campeonato atualizado!');
-                            _loadCompetitions();
-                          }
-                        } catch (e) {
-                          setSheetState(() => isSaving = false);
-                          if (mounted) {
-                            this.context.showError('Erro: $e');
-                          }
-                        }
-                      },
+                                if (mounted) {
+                                  Navigator.pop(sheetContext);
+                                  this.context.showSuccess(
+                                    'Campeonato atualizado!',
+                                  );
+                                  _loadCompetitions();
+                                }
+                              } catch (e) {
+                                setSheetState(() => isSaving = false);
+                                if (mounted) {
+                                  this.context.showError('Erro: $e');
+                                }
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.textPrimary,
                         foregroundColor: Colors.white,
@@ -837,21 +923,25 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
   }
 
   void _showCompetitionDetails(Competition competition) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => CompetitionDetailScreen(
-          competitionId: competition.id,
-          isAdmin: true,
-        ),
-      ),
-    ).then((_) => _loadCompetitions());
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (context) => CompetitionDetailScreen(
+              competitionId: competition.id,
+              isAdmin: true,
+            ),
+          ),
+        )
+        .then((_) => _loadCompetitions());
   }
 
   void _showCompetitionGallery(Competition competition) async {
     if (_academyId == null) return;
 
     final enrollmentService = CompetitionEnrollmentService(_academyId!);
-    final enrollments = await enrollmentService.getByCompetition(competition.id);
+    final enrollments = await enrollmentService.getByCompetition(
+      competition.id,
+    );
 
     if (!mounted) return;
 
@@ -882,7 +972,9 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
   void _showEnrollmentsSheet(Competition competition) async {
     if (_academyId == null) return;
     final enrollmentService = CompetitionEnrollmentService(_academyId!);
-    final enrollments = await enrollmentService.getByCompetition(competition.id);
+    final enrollments = await enrollmentService.getByCompetition(
+      competition.id,
+    );
 
     if (!mounted) return;
 
@@ -923,7 +1015,11 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                             color: AppTheme.primary.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Icon(LucideIcons.users, color: AppTheme.primary, size: 20),
+                          child: Icon(
+                            LucideIcons.users,
+                            color: AppTheme.primary,
+                            size: 20,
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -932,7 +1028,9 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                             children: [
                               Text(
                                 'Inscricoes',
-                                style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                                style: AppTheme.titleLarge.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                               Text(
                                 competition.name,
@@ -948,9 +1046,14 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                             Navigator.pop(context);
                             _showAddEnrollmentSheet(competition);
                           },
-                          icon: Icon(LucideIcons.userPlus, color: AppTheme.primary),
+                          icon: Icon(
+                            LucideIcons.userPlus,
+                            color: AppTheme.primary,
+                          ),
                           style: IconButton.styleFrom(
-                            backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
+                            backgroundColor: AppTheme.primary.withValues(
+                              alpha: 0.1,
+                            ),
                           ),
                         ),
                       ],
@@ -1004,7 +1107,9 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                                   ),
                                   child: Center(
                                     child: Text(
-                                      enrollment.studentName.substring(0, 1).toUpperCase(),
+                                      enrollment.studentName
+                                          .substring(0, 1)
+                                          .toUpperCase(),
                                       style: const TextStyle(
                                         color: Colors.white,
                                         fontWeight: FontWeight.w600,
@@ -1015,7 +1120,8 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         enrollment.studentName,
@@ -1038,7 +1144,9 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                                     vertical: 4,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: AppTheme.primary.withValues(alpha: 0.1),
+                                    color: AppTheme.primary.withValues(
+                                      alpha: 0.1,
+                                    ),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Text(
@@ -1114,12 +1222,18 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                           color: AppTheme.success.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: Icon(LucideIcons.userPlus, color: AppTheme.success, size: 20),
+                        child: Icon(
+                          LucideIcons.userPlus,
+                          color: AppTheme.success,
+                          size: 20,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Text(
                         'Nova Inscricao',
-                        style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                        style: AppTheme.titleLarge.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
@@ -1151,7 +1265,10 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                       },
                       decoration: const InputDecoration(
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                       ),
                       dropdownColor: AppTheme.surface,
                       hint: const Text('Selecione o aluno'),
@@ -1186,7 +1303,9 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                             sheetContext.showError('Academia nao encontrada');
                             return;
                           }
-                          final service = CompetitionEnrollmentService(_academyId!);
+                          final service = CompetitionEnrollmentService(
+                            _academyId!,
+                          );
                           await service.enroll(
                             competitionId: competition.id,
                             competitionName: competition.name,
@@ -1269,7 +1388,11 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
                 color: AppTheme.error.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: Icon(LucideIcons.alertTriangle, color: AppTheme.error, size: 28),
+              child: Icon(
+                LucideIcons.alertTriangle,
+                color: AppTheme.error,
+                size: 28,
+              ),
             ),
             const SizedBox(height: 16),
             Text(
@@ -1280,7 +1403,9 @@ class _AdminCompetitionsScreenState extends ConsumerState<AdminCompetitionsScree
             Text(
               'Deseja excluir "${competition.name}"? Esta acao tambem removera todas as inscricoes.',
               textAlign: TextAlign.center,
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
             const SizedBox(height: 24),
             Row(
@@ -1386,7 +1511,11 @@ class _CompetitionCard extends StatelessWidget {
                     color: AppTheme.warning.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(LucideIcons.trophy, color: AppTheme.warning, size: 24),
+                  child: Icon(
+                    LucideIcons.trophy,
+                    color: AppTheme.warning,
+                    size: 24,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1410,7 +1539,11 @@ class _CompetitionCard extends StatelessWidget {
                   ),
                 ),
                 PopupMenuButton<String>(
-                  icon: Icon(LucideIcons.moreVertical, color: AppTheme.textSecondary, size: 20),
+                  icon: Icon(
+                    LucideIcons.moreVertical,
+                    color: AppTheme.textSecondary,
+                    size: 20,
+                  ),
                   onSelected: (value) {
                     if (value == 'enrollments') onManageEnrollments();
                     if (value == 'edit') onEdit();
@@ -1421,7 +1554,11 @@ class _CompetitionCard extends StatelessWidget {
                       value: 'enrollments',
                       child: Row(
                         children: [
-                          Icon(LucideIcons.users, size: 18, color: AppTheme.textSecondary),
+                          Icon(
+                            LucideIcons.users,
+                            size: 18,
+                            color: AppTheme.textSecondary,
+                          ),
                           const SizedBox(width: 8),
                           const Text('Inscricoes'),
                         ],
@@ -1431,7 +1568,11 @@ class _CompetitionCard extends StatelessWidget {
                       value: 'edit',
                       child: Row(
                         children: [
-                          Icon(LucideIcons.pencil, size: 18, color: AppTheme.textSecondary),
+                          Icon(
+                            LucideIcons.pencil,
+                            size: 18,
+                            color: AppTheme.textSecondary,
+                          ),
                           const SizedBox(width: 8),
                           const Text('Editar'),
                         ],
@@ -1441,9 +1582,16 @@ class _CompetitionCard extends StatelessWidget {
                       value: 'delete',
                       child: Row(
                         children: [
-                          Icon(LucideIcons.trash2, size: 18, color: AppTheme.error),
+                          Icon(
+                            LucideIcons.trash2,
+                            size: 18,
+                            color: AppTheme.error,
+                          ),
                           const SizedBox(width: 8),
-                          Text('Excluir', style: TextStyle(color: AppTheme.error)),
+                          Text(
+                            'Excluir',
+                            style: TextStyle(color: AppTheme.error),
+                          ),
                         ],
                       ),
                     ),
@@ -1466,7 +1614,10 @@ class _CompetitionCard extends StatelessWidget {
                 const Spacer(),
                 if (isUpcoming && daysUntil <= 30)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
                     decoration: BoxDecoration(
                       color: daysUntil <= 7 ? AppTheme.error : AppTheme.warning,
                       borderRadius: BorderRadius.circular(10),
@@ -1475,8 +1626,8 @@ class _CompetitionCard extends StatelessWidget {
                       daysUntil == 0
                           ? 'Hoje!'
                           : daysUntil == 1
-                              ? 'Amanha'
-                              : 'Em $daysUntil dias',
+                          ? 'Amanha'
+                          : 'Em $daysUntil dias',
                       style: AppTheme.labelSmall.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.w600,

@@ -26,7 +26,8 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
     final studentId = currentUser?.studentId;
-    final isAdminOrInstructor = currentUser?.isAdmin == true || currentUser?.isInstructor == true;
+    final isAdminOrInstructor =
+        currentUser?.isAdmin == true || currentUser?.isInstructor == true;
 
     // For students without studentId, show error
     // For admin/instructor, show all orders
@@ -63,12 +64,16 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
         : ref.watch(studentOrdersProvider(studentId!));
 
     final title = isAdminOrInstructor ? 'Pedidos da Loja' : 'Meus Pedidos';
-    final subtitle = isAdminOrInstructor ? 'Gerencie os pedidos recebidos' : 'Acompanhe seus pedidos';
+    final subtitle = isAdminOrInstructor
+        ? 'Gerencie os pedidos recebidos'
+        : 'Acompanhe seus pedidos';
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: RefreshIndicator(
+        color: Theme.of(context).colorScheme.primary,
         onRefresh: () async {
+          HapticFeedback.mediumImpact();
           if (isAdminOrInstructor) {
             ref.invalidate(ordersProvider);
           } else {
@@ -134,7 +139,11 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                         padding: const EdgeInsets.only(bottom: 12),
                         child: _OrderCard(
                           order: orders[index],
-                          onTap: () => _showOrderDetails(context, orders[index], isAdminView: isAdminOrInstructor),
+                          onTap: () => _showOrderDetails(
+                            context,
+                            orders[index],
+                            isAdminView: isAdminOrInstructor,
+                          ),
                           showStudentName: isAdminOrInstructor,
                         ),
                       ),
@@ -161,10 +170,16 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(LucideIcons.alertCircle,
-                          size: 48, color: AppTheme.error),
+                      const Icon(
+                        LucideIcons.alertCircle,
+                        size: 48,
+                        color: AppTheme.error,
+                      ),
                       const SizedBox(height: 16),
-                      Text('Erro ao carregar pedidos', style: AppTheme.titleMedium),
+                      Text(
+                        'Erro ao carregar pedidos',
+                        style: AppTheme.titleMedium,
+                      ),
                       const SizedBox(height: 8),
                       TextButton(
                         onPressed: () {
@@ -183,21 +198,24 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
             ),
 
             // Bottom padding
-            const SliverToBoxAdapter(
-              child: SizedBox(height: 20),
-            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 20)),
           ],
         ),
       ),
     );
   }
 
-  void _showOrderDetails(BuildContext context, StoreOrder order, {bool isAdminView = false}) {
+  void _showOrderDetails(
+    BuildContext context,
+    StoreOrder order, {
+    bool isAdminView = false,
+  }) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _OrderDetailsSheet(order: order, isAdminView: isAdminView),
+      builder: (context) =>
+          _OrderDetailsSheet(order: order, isAdminView: isAdminView),
     );
   }
 }
@@ -235,7 +253,9 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               'Seus pedidos aparecerao aqui',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -343,22 +363,31 @@ class _OrderCard extends StatelessWidget {
                             ),
                             const SizedBox(width: 8),
                             Flexible(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: statusColor.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  order.status.label,
-                                  style: AppTheme.labelSmall.copyWith(
-                                    color: statusColor,
-                                    fontWeight: FontWeight.w600,
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 200),
+                                transitionBuilder: (child, animation) =>
+                                    FadeTransition(
+                                      opacity: animation,
+                                      child: child,
+                                    ),
+                                child: Container(
+                                  key: ValueKey(order.status),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
                                   ),
-                                  overflow: TextOverflow.ellipsis,
+                                  decoration: BoxDecoration(
+                                    color: statusColor.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    order.status.label,
+                                    style: AppTheme.labelSmall.copyWith(
+                                      color: statusColor,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               ),
                             ),
@@ -408,7 +437,9 @@ class _OrderCard extends StatelessWidget {
               // Items Preview
               const SizedBox(height: 12),
               Text(
-                order.items.map((i) => '${i.quantity}x ${i.productName}').join(', '),
+                order.items
+                    .map((i) => '${i.quantity}x ${i.productName}')
+                    .join(', '),
                 style: AppTheme.bodySmall.copyWith(
                   color: AppTheme.textSecondary,
                 ),
@@ -604,7 +635,8 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
           orderId: widget.order.id,
           studentId: currentUser.studentId ?? '',
           studentName: currentUser.displayName,
-          description: 'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}',
+          description:
+              'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}',
         );
       } else {
         final service = AbacatePayService(academyId);
@@ -613,7 +645,8 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
           orderId: widget.order.id,
           studentId: currentUser.studentId ?? '',
           studentName: currentUser.displayName,
-          description: 'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}',
+          description:
+              'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}',
         );
       }
 
@@ -635,7 +668,8 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
   }
 
   void _showPixPaymentSheet(BuildContext context, PaymentLink paymentLink) {
-    final studentId = ref.read(currentUserProvider).valueOrNull?.studentId ?? '';
+    final studentId =
+        ref.read(currentUserProvider).valueOrNull?.studentId ?? '';
 
     showModalBottomSheet(
       context: context,
@@ -759,28 +793,35 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                           style: AppTheme.headlineSmall,
                         ),
                         const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: statusColor.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            order.status.label,
-                            style: AppTheme.labelMedium.copyWith(
-                              color: statusColor,
-                              fontWeight: FontWeight.w600,
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 200),
+                          transitionBuilder: (child, animation) =>
+                              FadeTransition(opacity: animation, child: child),
+                          child: Container(
+                            key: ValueKey(order.status),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: statusColor.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              order.status.label,
+                              style: AppTheme.labelMedium.copyWith(
+                                color: statusColor,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           dateFormat.format(order.createdAt),
-                          style: AppTheme.bodySmall
-                              .copyWith(color: AppTheme.textSecondary),
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
                         ),
                       ],
                     ),
@@ -812,66 +853,69 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    ...order.items.map((item) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 48,
-                                height: 48,
-                                decoration: BoxDecoration(
-                                  color: AppTheme.surfaceVariant,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(
-                                  LucideIcons.package,
-                                  size: 20,
-                                  color: AppTheme.textSecondary,
-                                ),
+                    ...order.items.map(
+                      (item) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: AppTheme.surfaceVariant,
+                                borderRadius: BorderRadius.circular(8),
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      item.productName,
-                                      style: AppTheme.bodyMedium.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    if (item.size != null || item.color != null)
-                                      Text(
-                                        [item.size, item.color]
-                                            .whereType<String>()
-                                            .join(' - '),
-                                        style: AppTheme.bodySmall.copyWith(
-                                          color: AppTheme.textSecondary,
-                                        ),
-                                      ),
-                                  ],
-                                ),
+                              child: const Icon(
+                                LucideIcons.package,
+                                size: 20,
+                                color: AppTheme.textSecondary,
                               ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    item.formattedSubtotal,
+                                    item.productName,
                                     style: AppTheme.bodyMedium.copyWith(
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                  Text(
-                                    '${item.quantity}x ${item.formattedPrice}',
-                                    style: AppTheme.labelSmall.copyWith(
-                                      color: AppTheme.textSecondary,
+                                  if (item.size != null || item.color != null)
+                                    Text(
+                                      [
+                                        item.size,
+                                        item.color,
+                                      ].whereType<String>().join(' - '),
+                                      style: AppTheme.bodySmall.copyWith(
+                                        color: AppTheme.textSecondary,
+                                      ),
                                     ),
-                                  ),
                                 ],
                               ),
-                            ],
-                          ),
-                        )),
+                            ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  item.formattedSubtotal,
+                                  style: AppTheme.bodyMedium.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  '${item.quantity}x ${item.formattedPrice}',
+                                  style: AppTheme.labelSmall.copyWith(
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                     const Divider(height: 32),
                     // Total
                     Row(
@@ -978,28 +1022,32 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                             label: 'Marcar como Pago',
                             icon: LucideIcons.checkCircle,
                             color: Colors.green,
-                            onPressed: () => _updateStatus(StoreOrderStatus.paid),
+                            onPressed: () =>
+                                _updateStatus(StoreOrderStatus.paid),
                           ),
                         if (order.status == StoreOrderStatus.paid)
                           _buildAdminActionButton(
                             label: 'Iniciar Preparo',
                             icon: LucideIcons.package,
                             color: Colors.purple,
-                            onPressed: () => _updateStatus(StoreOrderStatus.preparing),
+                            onPressed: () =>
+                                _updateStatus(StoreOrderStatus.preparing),
                           ),
                         if (order.status == StoreOrderStatus.preparing)
                           _buildAdminActionButton(
                             label: 'Marcar como Pronto',
                             icon: LucideIcons.packageCheck,
                             color: Colors.green,
-                            onPressed: () => _updateStatus(StoreOrderStatus.ready),
+                            onPressed: () =>
+                                _updateStatus(StoreOrderStatus.ready),
                           ),
                         if (order.status == StoreOrderStatus.ready)
                           _buildAdminActionButton(
                             label: 'Marcar como Entregue',
                             icon: LucideIcons.truck,
                             color: Colors.blue,
-                            onPressed: () => _updateStatus(StoreOrderStatus.delivered),
+                            onPressed: () =>
+                                _updateStatus(StoreOrderStatus.delivered),
                           ),
 
                         const SizedBox(height: 12),
@@ -1013,9 +1061,9 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                         ),
                       ],
                     ]
-
                     // STUDENT VIEW: Payment Buttons for pending orders
-                    else if (order.status == StoreOrderStatus.pendingPayment) ...[
+                    else if (order.status ==
+                        StoreOrderStatus.pendingPayment) ...[
                       const SizedBox(height: 24),
                       Text(
                         'Formas de Pagamento',
@@ -1028,7 +1076,9 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton.icon(
-                          onPressed: _isLoadingPayment ? null : _handlePixPayment,
+                          onPressed: _isLoadingPayment
+                              ? null
+                              : _handlePixPayment,
                           icon: _isLoadingPayment
                               ? const SizedBox(
                                   width: 20,
@@ -1039,7 +1089,11 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                                   ),
                                 )
                               : const Icon(LucideIcons.qrCode),
-                          label: Text(_isLoadingPayment ? 'Gerando PIX...' : 'Pagar com PIX'),
+                          label: Text(
+                            _isLoadingPayment
+                                ? 'Gerando PIX...'
+                                : 'Pagar com PIX',
+                          ),
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             backgroundColor: AppTheme.primary,
@@ -1087,7 +1141,8 @@ class _StatusTimeline extends StatelessWidget {
       _TimelineStep(
         label: 'Preparando',
         status: StoreOrderStatus.preparing,
-        isCompleted: order.status == StoreOrderStatus.preparing ||
+        isCompleted:
+            order.status == StoreOrderStatus.preparing ||
             order.status == StoreOrderStatus.ready ||
             order.status == StoreOrderStatus.delivered,
         isActive: order.status == StoreOrderStatus.preparing,
@@ -1096,7 +1151,8 @@ class _StatusTimeline extends StatelessWidget {
         label: 'Pronto',
         status: StoreOrderStatus.ready,
         isCompleted:
-            order.status == StoreOrderStatus.ready || order.status == StoreOrderStatus.delivered,
+            order.status == StoreOrderStatus.ready ||
+            order.status == StoreOrderStatus.delivered,
         isActive: order.status == StoreOrderStatus.ready,
       ),
       _TimelineStep(
@@ -1155,14 +1211,14 @@ class _StatusTimeline extends StatelessWidget {
                               color: Colors.white,
                             )
                           : step.isActive
-                              ? Container(
-                                  margin: const EdgeInsets.all(6),
-                                  decoration: const BoxDecoration(
-                                    color: Colors.white,
-                                    shape: BoxShape.circle,
-                                  ),
-                                )
-                              : null,
+                          ? Container(
+                              margin: const EdgeInsets.all(6),
+                              decoration: const BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                              ),
+                            )
+                          : null,
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -1171,7 +1227,9 @@ class _StatusTimeline extends StatelessWidget {
                         color: step.isCompleted || step.isActive
                             ? AppTheme.textPrimary
                             : AppTheme.textSecondary,
-                        fontWeight: step.isActive ? FontWeight.w600 : FontWeight.w500,
+                        fontWeight: step.isActive
+                            ? FontWeight.w600
+                            : FontWeight.w500,
                         fontSize: 9,
                       ),
                       textAlign: TextAlign.center,
@@ -1259,21 +1317,21 @@ class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
         .doc(widget.orderId)
         .snapshots()
         .listen((snapshot) {
-      if (!mounted) return;
+          if (!mounted) return;
 
-      final data = snapshot.data();
-      if (data != null && data['status'] == 'paid' && !_paymentConfirmed) {
-        setState(() {
-          _paymentConfirmed = true;
+          final data = snapshot.data();
+          if (data != null && data['status'] == 'paid' && !_paymentConfirmed) {
+            setState(() {
+              _paymentConfirmed = true;
+            });
+
+            // Show success feedback
+            _showPaymentConfirmedDialog();
+
+            // Notify parent
+            widget.onPaymentConfirmed?.call();
+          }
         });
-
-        // Show success feedback
-        _showPaymentConfirmedDialog();
-
-        // Notify parent
-        widget.onPaymentConfirmed?.call();
-      }
-    });
   }
 
   void _showPaymentConfirmedDialog() {
@@ -1302,9 +1360,7 @@ class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
             const SizedBox(height: 24),
             Text(
               'Pagamento Confirmado!',
-              style: AppTheme.titleLarge.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+              style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
@@ -1487,7 +1543,9 @@ class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
                   const SizedBox(width: 8),
                   TextButton.icon(
                     onPressed: () {
-                      Clipboard.setData(ClipboardData(text: widget.paymentLink.pixCode));
+                      Clipboard.setData(
+                        ClipboardData(text: widget.paymentLink.pixCode),
+                      );
                       context.showSuccess('Codigo PIX copiado!');
                     },
                     icon: const Icon(LucideIcons.copy, size: 16),
@@ -1611,9 +1669,7 @@ class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
         Expanded(
           child: Text(
             text,
-            style: AppTheme.bodyMedium.copyWith(
-              color: AppTheme.textPrimary,
-            ),
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textPrimary),
           ),
         ),
       ],
@@ -1638,7 +1694,8 @@ class _CardPaymentBottomSheet extends StatefulWidget {
   });
 
   @override
-  State<_CardPaymentBottomSheet> createState() => _CardPaymentBottomSheetState();
+  State<_CardPaymentBottomSheet> createState() =>
+      _CardPaymentBottomSheetState();
 }
 
 class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
@@ -1724,7 +1781,8 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
           studentId: widget.studentId,
           studentName: widget.studentName,
           cardData: cardData,
-          description: 'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}',
+          description:
+              'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}',
         );
       } else {
         final service = AbacatePayService(academyId);
@@ -1734,7 +1792,8 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
           studentId: widget.studentId,
           studentName: widget.studentName,
           cardData: cardData,
-          description: 'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}',
+          description:
+              'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}',
         );
       }
 
@@ -1845,13 +1904,18 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(LucideIcons.alertCircle,
-                          color: AppTheme.error, size: 20),
+                      const Icon(
+                        LucideIcons.alertCircle,
+                        color: AppTheme.error,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMessage!,
-                          style: AppTheme.bodySmall.copyWith(color: AppTheme.error),
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.error,
+                          ),
                         ),
                       ),
                     ],
@@ -1874,7 +1938,9 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
                   if (formatted != value) {
                     _cardNumberController.value = TextEditingValue(
                       text: formatted,
-                      selection: TextSelection.collapsed(offset: formatted.length),
+                      selection: TextSelection.collapsed(
+                        offset: formatted.length,
+                      ),
                     );
                   }
                 },
@@ -1922,13 +1988,16 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
                         if (formatted != value) {
                           _expirationController.value = TextEditingValue(
                             text: formatted,
-                            selection:
-                                TextSelection.collapsed(offset: formatted.length),
+                            selection: TextSelection.collapsed(
+                              offset: formatted.length,
+                            ),
                           );
                         }
                       },
                       validator: (value) {
-                        if (value == null || !value.contains('/') || value.length < 5) {
+                        if (value == null ||
+                            !value.contains('/') ||
+                            value.length < 5) {
                           return 'Invalido';
                         }
                         return null;
@@ -1973,12 +2042,15 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
                   if (formatted != value) {
                     _cpfController.value = TextEditingValue(
                       text: formatted,
-                      selection: TextSelection.collapsed(offset: formatted.length),
+                      selection: TextSelection.collapsed(
+                        offset: formatted.length,
+                      ),
                     );
                   }
                 },
                 validator: (value) {
-                  if (value == null || value.replaceAll(RegExp(r'\D'), '').length < 11) {
+                  if (value == null ||
+                      value.replaceAll(RegExp(r'\D'), '').length < 11) {
                     return 'CPF invalido';
                   }
                   return null;
@@ -2018,11 +2090,17 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(LucideIcons.shield, size: 16, color: AppTheme.textSecondary),
+                  const Icon(
+                    LucideIcons.shield,
+                    size: 16,
+                    color: AppTheme.textSecondary,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     'Pagamento seguro',
-                    style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),

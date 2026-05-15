@@ -13,6 +13,7 @@ import '../../core/theme.dart';
 import '../../services/services.dart';
 import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
+import '../../widgets/cached_image.dart';
 
 /// Admin Store Screen - Product Management
 class AdminStoreScreen extends ConsumerStatefulWidget {
@@ -61,7 +62,10 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
                 child: Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         color: AppTheme.surfaceVariant,
                         borderRadius: BorderRadius.circular(20),
@@ -90,9 +94,24 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
               child: statsAsync.when(
                 data: (stats) {
                   final statsList = [
-                    (LucideIcons.package, 'Produtos', productsAsync.valueOrNull?.length.toString() ?? '0', AppTheme.primary),
-                    (LucideIcons.clock, 'Pendentes', '${stats['pending'] ?? 0}', Colors.orange),
-                    (LucideIcons.dollarSign, 'Receita', 'R\$ ${((stats['totalRevenue'] ?? 0) as double).toStringAsFixed(0)}', Colors.green),
+                    (
+                      LucideIcons.package,
+                      'Produtos',
+                      productsAsync.valueOrNull?.length.toString() ?? '0',
+                      AppTheme.primary,
+                    ),
+                    (
+                      LucideIcons.clock,
+                      'Pendentes',
+                      '${stats['pending'] ?? 0}',
+                      Colors.orange,
+                    ),
+                    (
+                      LucideIcons.dollarSign,
+                      'Receita',
+                      'R\$ ${((stats['totalRevenue'] ?? 0) as double).toStringAsFixed(0)}',
+                      Colors.green,
+                    ),
                   ];
                   return SizedBox(
                     height: 64,
@@ -168,14 +187,17 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
                             isSelected: _categoryFilter == null,
                             onTap: () => setState(() => _categoryFilter = null),
                           ),
-                          ...StoreProductCategory.values.map((cat) => Padding(
-                                padding: const EdgeInsets.only(left: 8),
-                                child: _FilterChip(
-                                  label: cat.label,
-                                  isSelected: _categoryFilter == cat,
-                                  onTap: () => setState(() => _categoryFilter = cat),
-                                ),
-                              )),
+                          ...StoreProductCategory.values.map(
+                            (cat) => Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: _FilterChip(
+                                label: cat.label,
+                                isSelected: _categoryFilter == cat,
+                                onTap: () =>
+                                    setState(() => _categoryFilter = cat),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -192,22 +214,27 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
                 // Apply search
                 if (_searchQuery.isNotEmpty) {
                   filtered = filtered.where((p) {
-                    return p.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-                        (p.description?.toLowerCase().contains(_searchQuery.toLowerCase()) ?? false);
+                    return p.name.toLowerCase().contains(
+                          _searchQuery.toLowerCase(),
+                        ) ||
+                        (p.description?.toLowerCase().contains(
+                              _searchQuery.toLowerCase(),
+                            ) ??
+                            false);
                   }).toList();
                 }
 
                 // Apply category filter
                 if (_categoryFilter != null) {
-                  filtered = filtered.where((p) => p.category == _categoryFilter).toList();
+                  filtered = filtered
+                      .where((p) => p.category == _categoryFilter)
+                      .toList();
                 }
 
                 if (filtered.isEmpty) {
                   return SliverFillRemaining(
                     hasScrollBody: false,
-                    child: _EmptyState(
-                      onAdd: () => _showProductForm(),
-                    ),
+                    child: _EmptyState(onAdd: () => _showProductForm()),
                   );
                 }
 
@@ -219,8 +246,10 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
                         padding: const EdgeInsets.only(bottom: 12),
                         child: _ProductCard(
                           product: filtered[index],
-                          onTap: () => _showProductForm(product: filtered[index]),
-                          onToggleActive: () => _toggleProductActive(filtered[index]),
+                          onTap: () =>
+                              _showProductForm(product: filtered[index]),
+                          onToggleActive: () =>
+                              _toggleProductActive(filtered[index]),
                           onDelete: () => _deleteProduct(filtered[index]),
                         ),
                       ),
@@ -247,9 +276,16 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(LucideIcons.alertCircle, size: 48, color: AppTheme.error),
+                      const Icon(
+                        LucideIcons.alertCircle,
+                        size: 48,
+                        color: AppTheme.error,
+                      ),
                       const SizedBox(height: 16),
-                      Text('Erro ao carregar produtos', style: AppTheme.titleMedium),
+                      Text(
+                        'Erro ao carregar produtos',
+                        style: AppTheme.titleMedium,
+                      ),
                       const SizedBox(height: 8),
                       TextButton(
                         onPressed: () => ref.invalidate(productsProvider),
@@ -262,9 +298,7 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
             ),
 
             // Bottom padding
-            const SliverToBoxAdapter(
-              child: SizedBox(height: 100),
-            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 100)),
           ],
         ),
       ),
@@ -295,7 +329,9 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
               name: data['name'],
               description: data['description'],
               price: data['price'],
-              category: StoreProductCategoryExtension.fromString(data['category']),
+              category: StoreProductCategoryExtension.fromString(
+                data['category'],
+              ),
               imageUrls: data['images'],
               stockType: StoreStockTypeExtension.fromString(data['stockType']),
               stockQuantity: data['stockQuantity'],
@@ -384,7 +420,9 @@ class _StatCard extends StatelessWidget {
               children: [
                 Text(
                   value,
-                  style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w700),
+                  style: AppTheme.titleSmall.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
@@ -539,10 +577,12 @@ class _ProductCard extends StatelessWidget {
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: product.mainImageUrl != null
-                    ? Image.network(
-                        product.mainImageUrl!,
+                    ? AppCachedImage(
+                        imageUrl: product.mainImageUrl,
+                        width: 64,
+                        height: 64,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(
+                        errorIcon: const Icon(
                           LucideIcons.package,
                           color: AppTheme.textSecondary,
                         ),
@@ -690,7 +730,9 @@ class _ProductCard extends StatelessWidget {
                     child: Row(
                       children: [
                         Icon(
-                          product.isActive ? LucideIcons.eyeOff : LucideIcons.eye,
+                          product.isActive
+                              ? LucideIcons.eyeOff
+                              : LucideIcons.eye,
                           size: 18,
                         ),
                         const SizedBox(width: 12),
@@ -702,9 +744,16 @@ class _ProductCard extends StatelessWidget {
                     value: 'delete',
                     child: Row(
                       children: [
-                        Icon(LucideIcons.trash2, size: 18, color: AppTheme.error),
+                        Icon(
+                          LucideIcons.trash2,
+                          size: 18,
+                          color: AppTheme.error,
+                        ),
                         SizedBox(width: 12),
-                        Text('Excluir', style: TextStyle(color: AppTheme.error)),
+                        Text(
+                          'Excluir',
+                          style: TextStyle(color: AppTheme.error),
+                        ),
                       ],
                     ),
                   ),
@@ -828,7 +877,9 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               'Adicione produtos para sua loja',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -849,10 +900,7 @@ class _ProductFormSheet extends StatefulWidget {
   final StoreProduct? product;
   final Future<void> Function(Map<String, dynamic>) onSave;
 
-  const _ProductFormSheet({
-    this.product,
-    required this.onSave,
-  });
+  const _ProductFormSheet({this.product, required this.onSave});
 
   @override
   State<_ProductFormSheet> createState() => _ProductFormSheetState();
@@ -877,7 +925,9 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.product?.name);
-    _descriptionController = TextEditingController(text: widget.product?.description);
+    _descriptionController = TextEditingController(
+      text: widget.product?.description,
+    );
     _priceController = TextEditingController(
       text: widget.product?.price.toStringAsFixed(2),
     );
@@ -1014,7 +1064,6 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
         'images': _imageUrls,
       };
 
-
       await widget.onSave(data);
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -1057,7 +1106,9 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
                 children: [
                   Expanded(
                     child: Text(
-                      widget.product != null ? 'Editar Produto' : 'Novo Produto',
+                      widget.product != null
+                          ? 'Editar Produto'
+                          : 'Novo Produto',
                       style: AppTheme.headlineSmall,
                     ),
                   ),
@@ -1098,13 +1149,17 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
                                       height: 100,
                                       decoration: BoxDecoration(
                                         borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: AppTheme.divider),
+                                        border: Border.all(
+                                          color: AppTheme.divider,
+                                        ),
                                       ),
                                       clipBehavior: Clip.antiAlias,
-                                      child: Image.network(
-                                        entry.value,
+                                      child: AppCachedImage(
+                                        imageUrl: entry.value,
+                                        width: 100,
+                                        height: 100,
                                         fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => const Icon(
+                                        errorIcon: const Icon(
                                           LucideIcons.imageOff,
                                           color: AppTheme.textSecondary,
                                         ),
@@ -1140,7 +1195,9 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
                                           ),
                                           decoration: BoxDecoration(
                                             color: AppTheme.primary,
-                                            borderRadius: BorderRadius.circular(4),
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
                                           ),
                                           child: Text(
                                             'Principal',
@@ -1157,7 +1214,9 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
                             }),
                             // Add button
                             GestureDetector(
-                              onTap: _isUploadingImage ? null : _pickAndUploadImage,
+                              onTap: _isUploadingImage
+                                  ? null
+                                  : _pickAndUploadImage,
                               child: Container(
                                 width: 100,
                                 height: 100,
@@ -1174,11 +1233,14 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
                                         child: SizedBox(
                                           width: 24,
                                           height: 24,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
                                         ),
                                       )
                                     : Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
                                         children: [
                                           Icon(
                                             LucideIcons.imagePlus,
@@ -1219,10 +1281,13 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
                       _ModernTextField(
                         controller: _priceController,
                         label: 'Preco (R\$)',
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
                         validator: (v) {
                           if (v?.isEmpty == true) return 'Campo obrigatorio';
-                          if (double.tryParse(v!.replaceAll(',', '.')) == null) {
+                          if (double.tryParse(v!.replaceAll(',', '.')) ==
+                              null) {
                             return 'Valor invalido';
                           }
                           return null;
@@ -1312,7 +1377,9 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : Text(widget.product != null ? 'Salvar' : 'Criar Produto'),
+                        : Text(
+                            widget.product != null ? 'Salvar' : 'Criar Produto',
+                          ),
                   ),
                 ),
               ),

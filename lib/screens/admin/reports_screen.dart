@@ -80,8 +80,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   List<FinancialRecommendationData> _recommendations = [];
   bool _isExporting = false;
 
-  final _currencyFormat =
-      NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+  final _currencyFormat = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
 
   // Student data
   int _totalStudents = 0;
@@ -98,7 +97,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   RetentionMetrics? _retentionMetrics;
   bool _isRetentionLoading = true;
   RiskLevel? _selectedRetentionFilter;
-  final PageController _retentionPageController = PageController(viewportFraction: 0.92);
+  final PageController _retentionPageController = PageController(
+    viewportFraction: 0.92,
+  );
   int _retentionCurrentPage = 0;
 
   @override
@@ -152,7 +153,10 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
       final now = DateTime.now();
       final thirtyDaysAgo = now.subtract(const Duration(days: 30));
       final attendanceSnapshot = await collections.attendance
-          .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(thirtyDaysAgo))
+          .where(
+            'date',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(thirtyDaysAgo),
+          )
           .get();
 
       final attendanceMap = <String, List<Map<String, dynamic>>>{};
@@ -279,7 +283,10 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
 
   void _changeMonth(int delta) {
     setState(() {
-      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + delta);
+      _selectedMonth = DateTime(
+        _selectedMonth.year,
+        _selectedMonth.month + delta,
+      );
     });
     _loadAllData();
   }
@@ -320,10 +327,14 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                       ),
                       Text(
                         '$tempYear',
-                        style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                        style: AppTheme.titleMedium.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                       IconButton(
-                        onPressed: tempYear < now.year ? () => setSheetState(() => tempYear++) : null,
+                        onPressed: tempYear < now.year
+                            ? () => setSheetState(() => tempYear++)
+                            : null,
                         icon: const Icon(LucideIcons.chevronRight, size: 20),
                       ),
                     ],
@@ -340,39 +351,62 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                       crossAxisSpacing: 8,
                       children: List.generate(12, (index) {
                         final month = index + 1;
-                        final isSelected = tempYear == _selectedMonth.year && month == _selectedMonth.month;
-                        final isFuture = DateTime(tempYear, month).isAfter(DateTime(now.year, now.month));
+                        final isSelected =
+                            tempYear == _selectedMonth.year &&
+                            month == _selectedMonth.month;
+                        final isFuture = DateTime(
+                          tempYear,
+                          month,
+                        ).isAfter(DateTime(now.year, now.month));
                         final monthNames = [
-                          'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-                          'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
+                          'Jan',
+                          'Fev',
+                          'Mar',
+                          'Abr',
+                          'Mai',
+                          'Jun',
+                          'Jul',
+                          'Ago',
+                          'Set',
+                          'Out',
+                          'Nov',
+                          'Dez',
                         ];
                         return GestureDetector(
-                          onTap: isFuture ? null : () {
-                            Navigator.pop(context);
-                            setState(() {
-                              _selectedMonth = DateTime(tempYear, month);
-                            });
-                            _loadAllData();
-                          },
+                          onTap: isFuture
+                              ? null
+                              : () {
+                                  Navigator.pop(context);
+                                  setState(() {
+                                    _selectedMonth = DateTime(tempYear, month);
+                                  });
+                                  _loadAllData();
+                                },
                           child: Container(
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
                               color: isSelected
                                   ? AppTheme.textPrimary
                                   : isFuture
-                                      ? AppTheme.surfaceVariant.withValues(alpha: 0.5)
-                                      : AppTheme.surfaceVariant,
+                                  ? AppTheme.surfaceVariant.withValues(
+                                      alpha: 0.5,
+                                    )
+                                  : AppTheme.surfaceVariant,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
                               monthNames[index],
                               style: AppTheme.bodySmall.copyWith(
-                                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                fontWeight: isSelected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
                                 color: isSelected
                                     ? Colors.white
                                     : isFuture
-                                        ? AppTheme.textSecondary.withValues(alpha: 0.4)
-                                        : AppTheme.textPrimary,
+                                    ? AppTheme.textSecondary.withValues(
+                                        alpha: 0.4,
+                                      )
+                                    : AppTheme.textPrimary,
                               ),
                             ),
                           ),
@@ -398,12 +432,29 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     final attendanceService = AttendanceService(academyId);
 
     final startOfMonth = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
-    final endOfMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0);
-    final startOfLastMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1, 1);
-    final endOfLastMonth = DateTime(_selectedMonth.year, _selectedMonth.month, 0);
+    final endOfMonth = DateTime(
+      _selectedMonth.year,
+      _selectedMonth.month + 1,
+      0,
+    );
+    final startOfLastMonth = DateTime(
+      _selectedMonth.year,
+      _selectedMonth.month - 1,
+      1,
+    );
+    final endOfLastMonth = DateTime(
+      _selectedMonth.year,
+      _selectedMonth.month,
+      0,
+    );
 
-    final attendances = await attendanceService.getByDateRange(startOfMonth, endOfMonth);
-    final lastMonthAttendances = await attendanceService.getByDateRange(startOfLastMonth, endOfLastMonth);
+    // Sprint 5 — fetch current and previous month attendance in parallel.
+    final ranges = await Future.wait([
+      attendanceService.getByDateRange(startOfMonth, endOfMonth),
+      attendanceService.getByDateRange(startOfLastMonth, endOfLastMonth),
+    ]);
+    final attendances = ranges[0];
+    final lastMonthAttendances = ranges[1];
 
     final byDay = <String, int>{};
     for (final a in attendances) {
@@ -423,7 +474,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
 
     // Calculate average per training day (weekdays with classes)
     final daysWithClasses = byDay.values.where((v) => v > 0).length;
-    final average = daysWithClasses > 0 ? attendances.length / daysWithClasses : 0.0;
+    final average = daysWithClasses > 0
+        ? attendances.length / daysWithClasses
+        : 0.0;
 
     setState(() {
       _attendanceByDay = byDay;
@@ -443,22 +496,36 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     final paymentService = PaymentService(academyId);
 
     final currentMonth = DateFormat('yyyy-MM').format(_selectedMonth);
-    final lastMonth = DateFormat('yyyy-MM').format(
-      DateTime(_selectedMonth.year, _selectedMonth.month - 1),
-    );
+    final lastMonth = DateFormat(
+      'yyyy-MM',
+    ).format(DateTime(_selectedMonth.year, _selectedMonth.month - 1));
 
-    final summary = await paymentService.getMonthlySummary(currentMonth);
-    final lastMonthSummary = await paymentService.getMonthlySummary(lastMonth);
+    // Sprint 5 — three independent reads in parallel (current summary,
+    // last-month summary, current month payments).
+    final results = await Future.wait<dynamic>([
+      paymentService.getMonthlySummary(currentMonth),
+      paymentService.getMonthlySummary(lastMonth),
+      paymentService.getByMonth(currentMonth),
+    ]);
+    final summary = results[0] as Map<String, dynamic>;
+    final lastMonthSummary = results[1] as Map<String, dynamic>;
 
     // Get payments for the selected month
-    final monthPayments = await paymentService.getByMonth(currentMonth);
-    final paidInMonth = monthPayments.where((p) => p.status.value == 'paid').toList();
-    final pendingInMonth = monthPayments.where((p) => p.status.value == 'pending').toList();
-    final overdueInMonth = monthPayments.where((p) => p.status.value == 'overdue').toList();
+    final monthPayments = results[2] as List<Payment>;
+    final paidInMonth = monthPayments
+        .where((p) => p.status.value == 'paid')
+        .toList();
+    final pendingInMonth = monthPayments
+        .where((p) => p.status.value == 'pending')
+        .toList();
+    final overdueInMonth = monthPayments
+        .where((p) => p.status.value == 'overdue')
+        .toList();
 
     // Calculate average ticket
     final avgTicket = paidInMonth.isNotEmpty
-        ? paidInMonth.map((p) => p.value).reduce((a, b) => a + b) / paidInMonth.length
+        ? paidInMonth.map((p) => p.value).reduce((a, b) => a + b) /
+              paidInMonth.length
         : 0.0;
 
     // Calculate overdue total
@@ -489,12 +556,19 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
 
     // Filter orders by selected month
     final startOfMonth = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
-    final endOfMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0, 23, 59, 59);
+    final endOfMonth = DateTime(
+      _selectedMonth.year,
+      _selectedMonth.month + 1,
+      0,
+      23,
+      59,
+      59,
+    );
 
     final monthOrders = orders.where((o) {
       final date = o.paidAt ?? o.createdAt;
       return date.isAfter(startOfMonth.subtract(const Duration(seconds: 1))) &&
-             date.isBefore(endOfMonth.add(const Duration(seconds: 1)));
+          date.isBefore(endOfMonth.add(const Duration(seconds: 1)));
     }).toList();
 
     double revenue = 0;
@@ -530,8 +604,12 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     final students = await studentService.getAll();
 
     // Separate by category
-    final kids = students.where((s) => s.category == StudentCategory.kids).toList();
-    final adults = students.where((s) => s.category == StudentCategory.adult).toList();
+    final kids = students
+        .where((s) => s.category == StudentCategory.kids)
+        .toList();
+    final adults = students
+        .where((s) => s.category == StudentCategory.adult)
+        .toList();
 
     // Kids belt distribution
     final kidsDistribution = <String, int>{};
@@ -548,18 +626,28 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     for (final belt in adultBeltOrder) {
       adultsDistribution[belt] = 0;
     }
-    for (final student in adults.where((s) => s.status == StudentStatus.active)) {
+    for (final student in adults.where(
+      (s) => s.status == StudentStatus.active,
+    )) {
       final belt = student.currentBelt;
       adultsDistribution[belt] = (adultsDistribution[belt] ?? 0) + 1;
     }
 
     setState(() {
       _totalStudents = students.length;
-      _activeStudents = students.where((s) => s.status == StudentStatus.active).length;
-      _inactiveStudents = students.where((s) => s.status == StudentStatus.inactive).length;
-      _injuredStudents = students.where((s) => s.status == StudentStatus.injured).length;
+      _activeStudents = students
+          .where((s) => s.status == StudentStatus.active)
+          .length;
+      _inactiveStudents = students
+          .where((s) => s.status == StudentStatus.inactive)
+          .length;
+      _injuredStudents = students
+          .where((s) => s.status == StudentStatus.injured)
+          .length;
       _kidsCount = kids.where((s) => s.status == StudentStatus.active).length;
-      _adultsCount = adults.where((s) => s.status == StudentStatus.active).length;
+      _adultsCount = adults
+          .where((s) => s.status == StudentStatus.active)
+          .length;
       _kidsBeltDistribution = kidsDistribution;
       _adultBeltDistribution = adultsDistribution;
     });
@@ -584,8 +672,10 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
         orElse: () => service.generateMonthlyReport(monthKey),
       );
 
-      final recommendations =
-          service.generateRecommendations(report, historical);
+      final recommendations = service.generateRecommendations(
+        report,
+        historical,
+      );
 
       setState(() {
         _monthlyReport = report;
@@ -614,11 +704,13 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text(
-                'Relatorio copiado para a area de transferencia!'),
+              'Relatorio copiado para a area de transferencia!',
+            ),
             backgroundColor: AppTheme.success,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+              borderRadius: BorderRadius.circular(12),
+            ),
             margin: const EdgeInsets.all(16),
           ),
         );
@@ -698,7 +790,8 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
       );
     }
 
-    final isCurrentMonth = _selectedMonth.year == DateTime.now().year &&
+    final isCurrentMonth =
+        _selectedMonth.year == DateTime.now().year &&
         _selectedMonth.month == DateTime.now().month;
 
     return Container(
@@ -715,7 +808,11 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                 color: AppTheme.surfaceVariant,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(LucideIcons.chevronLeft, size: 16, color: AppTheme.textSecondary),
+              child: const Icon(
+                LucideIcons.chevronLeft,
+                size: 16,
+                color: AppTheme.textSecondary,
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -731,17 +828,28 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(LucideIcons.calendar, size: 14, color: AppTheme.textSecondary),
+                  const Icon(
+                    LucideIcons.calendar,
+                    size: 14,
+                    color: AppTheme.textSecondary,
+                  ),
                   const SizedBox(width: 6),
                   Text(
-                    DateFormat("MMMM 'de' yyyy", 'pt_BR').format(_selectedMonth),
+                    DateFormat(
+                      "MMMM 'de' yyyy",
+                      'pt_BR',
+                    ).format(_selectedMonth),
                     style: AppTheme.labelMedium.copyWith(
                       color: AppTheme.textSecondary,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                   const SizedBox(width: 4),
-                  const Icon(LucideIcons.chevronDown, size: 12, color: AppTheme.textSecondary),
+                  const Icon(
+                    LucideIcons.chevronDown,
+                    size: 12,
+                    color: AppTheme.textSecondary,
+                  ),
                 ],
               ),
             ),
@@ -798,7 +906,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
         labelColor: Colors.white,
         unselectedLabelColor: AppTheme.textSecondary,
         labelStyle: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
-        unselectedLabelStyle: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w500),
+        unselectedLabelStyle: AppTheme.bodySmall.copyWith(
+          fontWeight: FontWeight.w500,
+        ),
         dividerColor: Colors.transparent,
         isScrollable: true,
         tabAlignment: TabAlignment.start,
@@ -815,7 +925,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   Widget _buildAttendanceTab() {
     // Calculate month-over-month change
     final change = _totalAttendanceLastMonth > 0
-        ? ((_totalAttendanceThisMonth - _totalAttendanceLastMonth) / _totalAttendanceLastMonth * 100)
+        ? ((_totalAttendanceThisMonth - _totalAttendanceLastMonth) /
+              _totalAttendanceLastMonth *
+              100)
         : 0.0;
     final isPositive = change >= 0;
 
@@ -866,74 +978,82 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
             title: 'Presencas por Dia',
             icon: LucideIcons.barChart3,
             child: Column(
-              children: [
-                'segunda-feira',
-                'terca-feira',
-                'quarta-feira',
-                'quinta-feira',
-                'sexta-feira',
-                'sabado'
-              ].map((day) {
-                final value = _attendanceByDay[day] ?? 0;
-                final maxValue = _attendanceByDay.values.fold(1, (a, b) => a > b ? a : b);
-                final percentage = value / maxValue;
+              children:
+                  [
+                    'segunda-feira',
+                    'terca-feira',
+                    'quarta-feira',
+                    'quinta-feira',
+                    'sexta-feira',
+                    'sabado',
+                  ].map((day) {
+                    final value = _attendanceByDay[day] ?? 0;
+                    final maxValue = _attendanceByDay.values.fold(
+                      1,
+                      (a, b) => a > b ? a : b,
+                    );
+                    final percentage = value / maxValue;
 
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 40,
-                        child: Text(
-                          _shortDayName(day),
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.textSecondary,
-                            fontWeight: FontWeight.w500,
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 40,
+                            child: Text(
+                              _shortDayName(day),
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.textSecondary,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Stack(
-                          children: [
-                            Container(
-                              height: 28,
-                              decoration: BoxDecoration(
-                                color: AppTheme.surfaceVariant,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                            ),
-                            FractionallySizedBox(
-                              widthFactor: percentage,
-                              child: Container(
-                                height: 28,
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      AppTheme.primary,
-                                      AppTheme.primary.withValues(alpha: 0.7),
-                                    ],
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Stack(
+                              children: [
+                                Container(
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.surfaceVariant,
+                                    borderRadius: BorderRadius.circular(6),
                                   ),
-                                  borderRadius: BorderRadius.circular(6),
                                 ),
-                              ),
+                                FractionallySizedBox(
+                                  widthFactor: percentage,
+                                  child: Container(
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          AppTheme.primary,
+                                          AppTheme.primary.withValues(
+                                            alpha: 0.7,
+                                          ),
+                                        ],
+                                      ),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 32,
+                            child: Text(
+                              value.toString(),
+                              style: AppTheme.bodySmall.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                              textAlign: TextAlign.right,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      SizedBox(
-                        width: 32,
-                        child: Text(
-                          value.toString(),
-                          style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w700),
-                          textAlign: TextAlign.right,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
+                    );
+                  }).toList(),
             ),
           ),
         ],
@@ -943,11 +1063,14 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
 
   Widget _buildFinancialTab() {
     final tuitionTotal = _totalRevenue + _totalPending + _totalOverdue;
-    final tuitionRevenueRate = tuitionTotal > 0 ? _totalRevenue / tuitionTotal : 0.0;
+    final tuitionRevenueRate = tuitionTotal > 0
+        ? _totalRevenue / tuitionTotal
+        : 0.0;
     final revenueChange = _lastMonthRevenue > 0
         ? ((_totalRevenue - _lastMonthRevenue) / _lastMonthRevenue * 100)
         : 0.0;
-    final hasStore = _storeRevenue > 0 || _storeOrderCount > 0 || _storePendingCount > 0;
+    final hasStore =
+        _storeRevenue > 0 || _storeOrderCount > 0 || _storePendingCount > 0;
 
     final settings = ref.watch(academySettingsProvider).valueOrNull;
     final isStorePublished = settings?.storePublished ?? false;
@@ -1050,7 +1173,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                   value: '${(tuitionRevenueRate * 100).toStringAsFixed(0)}%',
                   color: tuitionRevenueRate > 0.8
                       ? AppTheme.success
-                      : (tuitionRevenueRate > 0.5 ? AppTheme.warning : AppTheme.error),
+                      : (tuitionRevenueRate > 0.5
+                            ? AppTheme.warning
+                            : AppTheme.error),
                 ),
               ),
             ],
@@ -1067,21 +1192,27 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                 _ProgressRow(
                   label: 'Recebido',
                   value: 'R\$ ${_formatCurrency(_totalRevenue)}',
-                  percentage: tuitionTotal > 0 ? _totalRevenue / tuitionTotal : 0,
+                  percentage: tuitionTotal > 0
+                      ? _totalRevenue / tuitionTotal
+                      : 0,
                   color: AppTheme.success,
                 ),
                 const SizedBox(height: 16),
                 _ProgressRow(
                   label: 'Pendente',
                   value: 'R\$ ${_formatCurrency(_totalPending)}',
-                  percentage: tuitionTotal > 0 ? _totalPending / tuitionTotal : 0,
+                  percentage: tuitionTotal > 0
+                      ? _totalPending / tuitionTotal
+                      : 0,
                   color: AppTheme.warning,
                 ),
                 const SizedBox(height: 16),
                 _ProgressRow(
                   label: 'Atrasado',
                   value: 'R\$ ${_formatCurrency(_totalOverdue)}',
-                  percentage: tuitionTotal > 0 ? _totalOverdue / tuitionTotal : 0,
+                  percentage: tuitionTotal > 0
+                      ? _totalOverdue / tuitionTotal
+                      : 0,
                   color: AppTheme.error,
                 ),
               ],
@@ -1145,11 +1276,17 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                 ),
                 child: Column(
                   children: [
-                    Icon(LucideIcons.shoppingBag, size: 32, color: AppTheme.textSecondary.withValues(alpha: 0.5)),
+                    Icon(
+                      LucideIcons.shoppingBag,
+                      size: 32,
+                      color: AppTheme.textSecondary.withValues(alpha: 0.5),
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       'Nenhuma venda neste mes',
-                      style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                   ],
                 ),
@@ -1212,7 +1349,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                           const SizedBox(width: 8),
                           Text(
                             'Mensalidades',
-                            style: AppTheme.bodySmall.copyWith(color: Colors.white70),
+                            style: AppTheme.bodySmall.copyWith(
+                              color: Colors.white70,
+                            ),
                           ),
                         ],
                       ),
@@ -1242,7 +1381,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                           const SizedBox(width: 8),
                           Text(
                             'Vendas da Loja',
-                            style: AppTheme.bodySmall.copyWith(color: Colors.white70),
+                            style: AppTheme.bodySmall.copyWith(
+                              color: Colors.white70,
+                            ),
                           ),
                         ],
                       ),
@@ -1263,7 +1404,10 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
           // =============================================
           // SECTION: Analise Avancada
           // =============================================
-          if (_historicalData.isNotEmpty || _revenueByPlan.isNotEmpty || _projections.isNotEmpty || _recommendations.isNotEmpty) ...[
+          if (_historicalData.isNotEmpty ||
+              _revenueByPlan.isNotEmpty ||
+              _projections.isNotEmpty ||
+              _recommendations.isNotEmpty) ...[
             const SizedBox(height: 32),
             _buildSectionHeader(
               title: 'Analise Avancada',
@@ -1291,17 +1435,13 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
           ],
 
           // Recommendations
-          if (_recommendations.isNotEmpty)
-            _buildRecommendations(),
+          if (_recommendations.isNotEmpty) _buildRecommendations(),
         ],
       ),
     );
   }
 
-  Widget _buildSectionHeader({
-    required String title,
-    required IconData icon,
-  }) {
+  Widget _buildSectionHeader({required String title, required IconData icon}) {
     return Row(
       children: [
         Container(
@@ -1319,9 +1459,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
           style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(width: 12),
-        Expanded(
-          child: Container(height: 1, color: AppTheme.divider),
-        ),
+        Expanded(child: Container(height: 1, color: AppTheme.divider)),
       ],
     );
   }
@@ -1334,8 +1472,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     if (_monthlyReport == null) return const SizedBox.shrink();
 
     final report = _monthlyReport!;
-    final nextMonthProjection =
-        _projections.isNotEmpty ? _projections.first.projected : 0.0;
+    final nextMonthProjection = _projections.isNotEmpty
+        ? _projections.first.projected
+        : 0.0;
 
     return SizedBox(
       height: 100,
@@ -1487,10 +1626,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
         children: [
           Icon(icon, size: 20, color: color),
           const SizedBox(height: 6),
-          Text(
-            label,
-            style: AppTheme.labelSmall.copyWith(color: color),
-          ),
+          Text(label, style: AppTheme.labelSmall.copyWith(color: color)),
           const SizedBox(height: 4),
           Text(
             _currencyFormat.format(amount),
@@ -1534,12 +1670,16 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                           .map((d) => d.totalExpected)
                           .fold<double>(0, (a, b) => a > b ? a : b);
                       final barHeight = maxExpected > 0
-                          ? (data.confirmedRevenue / maxExpected * 120)
-                              .clamp(4.0, 120.0)
+                          ? (data.confirmedRevenue / maxExpected * 120).clamp(
+                              4.0,
+                              120.0,
+                            )
                           : 4.0;
                       final expectedHeight = maxExpected > 0
-                          ? (data.totalExpected / maxExpected * 120)
-                              .clamp(4.0, 120.0)
+                          ? (data.totalExpected / maxExpected * 120).clamp(
+                              4.0,
+                              120.0,
+                            )
                           : 4.0;
 
                       final monthLabel = data.month.length >= 7
@@ -1576,7 +1716,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                               const SizedBox(height: 6),
                               Text(
                                 monthLabel,
-                                style: AppTheme.labelSmall.copyWith(fontSize: 9),
+                                style: AppTheme.labelSmall.copyWith(
+                                  fontSize: 9,
+                                ),
                               ),
                             ],
                           ),
@@ -1652,8 +1794,8 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                             color: data.collectionRate >= 80
                                 ? AppTheme.success
                                 : data.collectionRate >= 50
-                                    ? AppTheme.warning
-                                    : AppTheme.error,
+                                ? AppTheme.warning
+                                : AppTheme.error,
                           ),
                         ),
                       ],
@@ -1691,21 +1833,27 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                       ),
                       Expanded(
                         flex: 1,
-                        child: Text('Alunos',
-                            style: AppTheme.labelMedium,
-                            textAlign: TextAlign.center),
+                        child: Text(
+                          'Alunos',
+                          style: AppTheme.labelMedium,
+                          textAlign: TextAlign.center,
+                        ),
                       ),
                       Expanded(
                         flex: 3,
-                        child: Text('Receita',
-                            style: AppTheme.labelMedium,
-                            textAlign: TextAlign.right),
+                        child: Text(
+                          'Receita',
+                          style: AppTheme.labelMedium,
+                          textAlign: TextAlign.right,
+                        ),
                       ),
                       Expanded(
                         flex: 1,
-                        child: Text('%',
-                            style: AppTheme.labelMedium,
-                            textAlign: TextAlign.right),
+                        child: Text(
+                          '%',
+                          style: AppTheme.labelMedium,
+                          textAlign: TextAlign.right,
+                        ),
                       ),
                     ],
                   ),
@@ -1781,8 +1929,11 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Row(
                     children: [
-                      const Icon(LucideIcons.target,
-                          size: 16, color: Color(0xFF7C3AED)),
+                      const Icon(
+                        LucideIcons.target,
+                        size: 16,
+                        color: Color(0xFF7C3AED),
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -1799,7 +1950,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                       const SizedBox(width: 12),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: confidenceColor.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(8),
@@ -2023,7 +2176,11 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
               title: 'Faixas Infantil',
               icon: LucideIcons.award,
               badge: '$activeKids alunos',
-              child: _buildBeltChart(_kidsBeltDistribution, kidsBeltOrder, true),
+              child: _buildBeltChart(
+                _kidsBeltDistribution,
+                kidsBeltOrder,
+                true,
+              ),
             ),
             const SizedBox(height: 16),
           ],
@@ -2034,14 +2191,22 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
               title: 'Faixas Adulto',
               icon: LucideIcons.award,
               badge: '$activeAdults alunos',
-              child: _buildBeltChart(_adultBeltDistribution, adultBeltOrder, false),
+              child: _buildBeltChart(
+                _adultBeltDistribution,
+                adultBeltOrder,
+                false,
+              ),
             ),
         ],
       ),
     );
   }
 
-  Widget _buildBeltChart(Map<String, int> distribution, List<String> order, bool isKids) {
+  Widget _buildBeltChart(
+    Map<String, int> distribution,
+    List<String> order,
+    bool isKids,
+  ) {
     final total = distribution.values.fold(0, (a, b) => a + b);
     if (total == 0) {
       return const Center(
@@ -2053,7 +2218,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     }
 
     // Filter out belts with 0 students
-    final activeBelts = order.where((belt) => (distribution[belt] ?? 0) > 0).toList();
+    final activeBelts = order
+        .where((belt) => (distribution[belt] ?? 0) > 0)
+        .toList();
 
     return Column(
       children: activeBelts.map((belt) {
@@ -2088,7 +2255,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                 width: 70,
                 child: Text(
                   _getBeltLabel(belt, isKids),
-                  style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w500),
+                  style: AppTheme.bodySmall.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
               Expanded(
@@ -2119,7 +2288,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                 width: 50,
                 child: Text(
                   '$count (${(percentage * 100).toStringAsFixed(0)}%)',
-                  style: AppTheme.labelSmall.copyWith(fontWeight: FontWeight.w600),
+                  style: AppTheme.labelSmall.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                   textAlign: TextAlign.right,
                 ),
               ),
@@ -2164,16 +2335,22 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
               children: [
                 Text(
                   title,
-                  style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   value,
-                  style: AppTheme.headlineMedium.copyWith(fontWeight: FontWeight.w700),
+                  style: AppTheme.headlineMedium.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 Text(
                   subtitle,
-                  style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
               ],
             ),
@@ -2191,15 +2368,21 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    (isPositive ?? false) ? LucideIcons.trendingUp : LucideIcons.trendingDown,
+                    (isPositive ?? false)
+                        ? LucideIcons.trendingUp
+                        : LucideIcons.trendingDown,
                     size: 14,
-                    color: (isPositive ?? false) ? AppTheme.success : AppTheme.error,
+                    color: (isPositive ?? false)
+                        ? AppTheme.success
+                        : AppTheme.error,
                   ),
                   const SizedBox(width: 4),
                   Text(
                     '${change.abs().toStringAsFixed(0)}%',
                     style: AppTheme.labelSmall.copyWith(
-                      color: (isPositive ?? false) ? AppTheme.success : AppTheme.error,
+                      color: (isPositive ?? false)
+                          ? AppTheme.success
+                          : AppTheme.error,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -2347,8 +2530,11 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(LucideIcons.shieldCheck,
-                        size: 64, color: AppTheme.success.withOpacity(0.5)),
+                    Icon(
+                      LucideIcons.shieldCheck,
+                      size: 64,
+                      color: AppTheme.success.withOpacity(0.5),
+                    ),
                     const SizedBox(height: 16),
                     Text(
                       _selectedRetentionFilter != null
@@ -2361,14 +2547,18 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                       _selectedRetentionFilter != null
                           ? 'Tente outro filtro'
                           : 'Otimo trabalho!',
-                      style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                   ],
                 ),
               ),
             )
           else
-            ...filtered.map((riskScore) => _buildRetentionStudentItem(riskScore)),
+            ...filtered.map(
+              (riskScore) => _buildRetentionStudentItem(riskScore),
+            ),
         ],
       ),
     );
@@ -2410,7 +2600,8 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
           _RetentionKpiTile(
             icon: LucideIcons.checkCircle,
             label: 'Adimplencia',
-            value: '${_retentionMetrics!.paymentComplianceRate.toStringAsFixed(0)}%',
+            value:
+                '${_retentionMetrics!.paymentComplianceRate.toStringAsFixed(0)}%',
             subtitle: 'em dia',
           ),
         ],
@@ -2419,9 +2610,15 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
       _RetentionCarouselPage(
         children: [
           _RetentionDistTile(label: 'Baixo', count: dist[RiskLevel.low] ?? 0),
-          _RetentionDistTile(label: 'Medio', count: dist[RiskLevel.medium] ?? 0),
+          _RetentionDistTile(
+            label: 'Medio',
+            count: dist[RiskLevel.medium] ?? 0,
+          ),
           _RetentionDistTile(label: 'Alto', count: dist[RiskLevel.high] ?? 0),
-          _RetentionDistTile(label: 'Critico', count: dist[RiskLevel.critical] ?? 0),
+          _RetentionDistTile(
+            label: 'Critico',
+            count: dist[RiskLevel.critical] ?? 0,
+          ),
         ],
       ),
     ];
@@ -2436,14 +2633,20 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
             onPageChanged: (i) => setState(() => _retentionCurrentPage = i),
             itemBuilder: (context, index) {
               return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 4,
+                  vertical: 12,
+                ),
                 child: Container(
                   decoration: BoxDecoration(
                     color: AppTheme.surface,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: AppTheme.divider),
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
                   child: pages[index],
                 ),
               );
@@ -2484,10 +2687,13 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
             ChoiceChip(
               label: const Text('Todos'),
               selected: _selectedRetentionFilter == null,
-              onSelected: (_) => setState(() => _selectedRetentionFilter = null),
+              onSelected: (_) =>
+                  setState(() => _selectedRetentionFilter = null),
               selectedColor: AppTheme.primary,
               labelStyle: TextStyle(
-                color: _selectedRetentionFilter == null ? Colors.white : AppTheme.textPrimary,
+                color: _selectedRetentionFilter == null
+                    ? Colors.white
+                    : AppTheme.textPrimary,
               ),
             ),
             const SizedBox(width: 8),
@@ -2498,8 +2704,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                 child: ChoiceChip(
                   label: Text(level.label),
                   selected: isSelected,
-                  onSelected: (_) =>
-                      setState(() => _selectedRetentionFilter = isSelected ? null : level),
+                  onSelected: (_) => setState(
+                    () => _selectedRetentionFilter = isSelected ? null : level,
+                  ),
                   selectedColor: _riskColor(level),
                   labelStyle: TextStyle(
                     color: isSelected ? Colors.white : AppTheme.textPrimary,
@@ -2521,7 +2728,10 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
       child: Card(
         margin: const EdgeInsets.only(bottom: 8),
         child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 8,
+          ),
           onTap: () => _showRetentionDetailBottomSheet(riskScore),
           leading: Container(
             decoration: BoxDecoration(
@@ -2534,17 +2744,11 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                 riskScore.studentName.isNotEmpty
                     ? riskScore.studentName[0].toUpperCase()
                     : '?',
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(color: color, fontWeight: FontWeight.w600),
               ),
             ),
           ),
-          title: Text(
-            riskScore.studentName,
-            style: AppTheme.titleMedium,
-          ),
+          title: Text(riskScore.studentName, style: AppTheme.titleMedium),
           subtitle: Text(
             'Score: ${riskScore.score} | '
             'Ultima presenca: ${riskScore.daysSinceLastAttendance} dias atras | '
@@ -2619,13 +2823,18 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(riskScore.studentName, style: AppTheme.headlineSmall),
+                            Text(
+                              riskScore.studentName,
+                              style: AppTheme.headlineSmall,
+                            ),
                             const SizedBox(height: 4),
                             Row(
                               children: [
                                 Text(
                                   'Score: ${riskScore.score}',
-                                  style: AppTheme.titleMedium.copyWith(color: color),
+                                  style: AppTheme.titleMedium.copyWith(
+                                    color: color,
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
                                 Chip(
@@ -2638,7 +2847,8 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                                   ),
                                   backgroundColor: color,
                                   padding: EdgeInsets.zero,
-                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  materialTapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
                                   visualDensity: VisualDensity.compact,
                                 ),
                               ],
@@ -2666,11 +2876,17 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                       ),
                       child: Row(
                         children: [
-                          Icon(LucideIcons.checkCircle, color: AppTheme.success, size: 20),
+                          Icon(
+                            LucideIcons.checkCircle,
+                            color: AppTheme.success,
+                            size: 20,
+                          ),
                           const SizedBox(width: 12),
                           Text(
                             'Nenhum fator de risco identificado',
-                            style: AppTheme.bodyMedium.copyWith(color: AppTheme.success),
+                            style: AppTheme.bodyMedium.copyWith(
+                              color: AppTheme.success,
+                            ),
                           ),
                         ],
                       ),
@@ -2697,7 +2913,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                               child: Center(
                                 child: Text(
                                   '${factor.score}',
-                                  style: AppTheme.titleMedium.copyWith(color: color),
+                                  style: AppTheme.titleMedium.copyWith(
+                                    color: color,
+                                  ),
                                 ),
                               ),
                             ),
@@ -2708,11 +2926,17 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                                 children: [
                                   Text(factor.name, style: AppTheme.titleSmall),
                                   const SizedBox(height: 2),
-                                  Text(factor.details, style: AppTheme.bodySmall),
+                                  Text(
+                                    factor.details,
+                                    style: AppTheme.bodySmall,
+                                  ),
                                 ],
                               ),
                             ),
-                            Text('Peso: ${factor.weight}', style: AppTheme.labelSmall),
+                            Text(
+                              'Peso: ${factor.weight}',
+                              style: AppTheme.labelSmall,
+                            ),
                           ],
                         ),
                       );
@@ -2808,7 +3032,9 @@ class _MiniStatCard extends StatelessWidget {
               children: [
                 Text(
                   value,
-                  style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w700),
+                  style: AppTheme.titleSmall.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
@@ -2869,12 +3095,17 @@ class _ReportCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                  style: AppTheme.titleSmall.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               if (badge != null)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.surfaceVariant,
                     borderRadius: BorderRadius.circular(12),
@@ -2973,11 +3204,7 @@ class _RetentionCarouselPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: children
-          .expand((w) => [Expanded(child: w)])
-          .toList(),
-    );
+    return Row(children: children.expand((w) => [Expanded(child: w)]).toList());
   }
 }
 
@@ -3028,9 +3255,7 @@ class _RetentionKpiTile extends StatelessWidget {
         const SizedBox(height: 2),
         Text(
           subtitle,
-          style: AppTheme.labelSmall.copyWith(
-            color: AppTheme.textDisabled,
-          ),
+          style: AppTheme.labelSmall.copyWith(color: AppTheme.textDisabled),
         ),
       ],
     );
@@ -3059,9 +3284,7 @@ class _RetentionDistTile extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           label,
-          style: AppTheme.labelSmall.copyWith(
-            color: AppTheme.textSecondary,
-          ),
+          style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
           textAlign: TextAlign.center,
         ),
       ],

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -9,6 +10,7 @@ import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 import '../../widgets/competitions/team_gallery_view.dart';
+import '../../widgets/skeletons/skeletons.dart';
 
 /// Competitions Screen - Competicoes (with Tabs)
 class CompetitionsScreen extends ConsumerStatefulWidget {
@@ -53,13 +55,17 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
                 .toList();
 
             final pastCompetitions = competitions
-                .where((c) =>
-                    c.status == CompetitionStatus.completed ||
-                    c.status == CompetitionStatus.cancelled)
+                .where(
+                  (c) =>
+                      c.status == CompetitionStatus.completed ||
+                      c.status == CompetitionStatus.cancelled,
+                )
                 .toList();
 
             // Get student enrollments
-            final enrollmentsAsync = ref.watch(studentEnrollmentsProvider(student.id));
+            final enrollmentsAsync = ref.watch(
+              studentEnrollmentsProvider(student.id),
+            );
             final enrollments = enrollmentsAsync.valueOrNull ?? [];
 
             // Filter for enrolled upcoming competitions
@@ -68,7 +74,9 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
             }).toList();
 
             return RefreshIndicator(
+              color: Theme.of(context).colorScheme.primary,
               onRefresh: () async {
+                HapticFeedback.mediumImpact();
                 ref.invalidate(competitionsProvider);
                 ref.invalidate(currentStudentProvider);
                 ref.invalidate(studentEnrollmentsProvider(student.id));
@@ -132,7 +140,8 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
                           student: student,
                           isUpcoming: true,
                           showEnrolledBadge: true,
-                          emptyMessage: 'Voce nao esta inscrito em nenhuma competicao',
+                          emptyMessage:
+                              'Voce nao esta inscrito em nenhuma competicao',
                         ),
 
                         // Historico Tab
@@ -163,37 +172,18 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 150,
-            height: 24,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Container(
+        children: const [
+          SkeletonCard(
             height: 100,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(8),
-            ),
+            showAvatar: false,
+            padding: EdgeInsets.all(16),
           ),
-          const SizedBox(height: 24),
-          ...List.generate(
-            3,
-            (index) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Container(
-                height: 140,
-                decoration: BoxDecoration(
-                  color: AppTheme.surfaceVariant,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            ),
-          ),
+          SizedBox(height: 24),
+          SkeletonCard(height: 140, showAvatar: true),
+          SizedBox(height: 12),
+          SkeletonCard(height: 140, showAvatar: true),
+          SizedBox(height: 12),
+          SkeletonCard(height: 140, showAvatar: true),
         ],
       ),
     );
@@ -210,7 +200,9 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
             const SizedBox(height: 16),
             Text(
               'Erro ao carregar dados',
-              style: AppTheme.titleLarge.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.titleLarge.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -229,7 +221,9 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
             const SizedBox(height: 16),
             Text(
               message,
-              style: AppTheme.titleLarge.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.titleLarge.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -310,12 +304,10 @@ class _ConquistasCard extends ConsumerWidget {
           ),
         );
       },
-      loading: () => Container(
+      loading: () => const SkeletonCard(
         height: 100,
-        decoration: BoxDecoration(
-          color: AppTheme.surfaceVariant,
-          borderRadius: BorderRadius.circular(12),
-        ),
+        showAvatar: false,
+        padding: EdgeInsets.all(16),
       ),
       error: (_, __) => Container(
         padding: const EdgeInsets.all(16),
@@ -357,22 +349,15 @@ class _MedalColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(
-          emoji,
-          style: const TextStyle(fontSize: 28),
-        ),
+        Text(emoji, style: const TextStyle(fontSize: 28)),
         const SizedBox(height: 4),
         Text(
           count.toString(),
-          style: AppTheme.titleLarge.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
+          style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w700),
         ),
         Text(
           label,
-          style: AppTheme.labelSmall.copyWith(
-            color: AppTheme.textSecondary,
-          ),
+          style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
           textAlign: TextAlign.center,
         ),
       ],
@@ -405,11 +390,7 @@ class _CompetitionsList extends ConsumerWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                LucideIcons.trophy,
-                size: 48,
-                color: AppTheme.textDisabled,
-              ),
+              Icon(LucideIcons.trophy, size: 48, color: AppTheme.textDisabled),
               const SizedBox(height: 16),
               Text(
                 emptyMessage,
@@ -541,7 +522,9 @@ class _CompetitionCard extends ConsumerWidget {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: isUpcoming ? AppTheme.warningLight : AppTheme.surfaceVariant,
+                  color: isUpcoming
+                      ? AppTheme.warningLight
+                      : AppTheme.surfaceVariant,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
@@ -586,7 +569,10 @@ class _CompetitionCard extends ConsumerWidget {
               ),
               if (isEnrolled)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.successLight,
                     borderRadius: BorderRadius.circular(12),
@@ -600,7 +586,11 @@ class _CompetitionCard extends ConsumerWidget {
                   ),
                 ),
               const SizedBox(width: 4),
-              Icon(LucideIcons.chevronRight, size: 16, color: AppTheme.textSecondary),
+              Icon(
+                LucideIcons.chevronRight,
+                size: 16,
+                color: AppTheme.textSecondary,
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -624,7 +614,10 @@ class _CompetitionCard extends ConsumerWidget {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        DateFormat("d 'de' MMM", 'pt_BR').format(competition.date),
+                        DateFormat(
+                          "d 'de' MMM",
+                          'pt_BR',
+                        ).format(competition.date),
                         style: AppTheme.bodySmall.copyWith(
                           fontWeight: FontWeight.w500,
                         ),
@@ -634,7 +627,10 @@ class _CompetitionCard extends ConsumerWidget {
                 ),
                 if (isUpcoming && daysUntil >= 0)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: isSoon ? AppTheme.warning : AppTheme.info,
                       borderRadius: BorderRadius.circular(12),
@@ -643,8 +639,8 @@ class _CompetitionCard extends ConsumerWidget {
                       daysUntil == 0
                           ? 'Hoje!'
                           : daysUntil == 1
-                              ? 'Amanha!'
-                              : 'Em $daysUntil dias',
+                          ? 'Amanha!'
+                          : 'Em $daysUntil dias',
                       style: AppTheme.labelSmall.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
@@ -683,9 +679,7 @@ class _CompetitionCard extends ConsumerWidget {
             const Divider(height: 24),
             Text(
               competition.description!,
-              style: AppTheme.bodySmall.copyWith(
-                color: AppTheme.textSecondary,
-              ),
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -696,16 +690,30 @@ class _CompetitionCard extends ConsumerWidget {
             const Divider(height: 24),
             ...competitionResults.map((result) {
               final positionConfig = {
-                'gold': (icon: LucideIcons.medal, label: 'Ouro', color: const Color(0xFFD4AF37)),
-                'silver': (icon: LucideIcons.medal, label: 'Prata', color: const Color(0xFF9CA3AF)),
-                'bronze': (icon: LucideIcons.medal, label: 'Bronze', color: const Color(0xFFCD7F32)),
+                'gold': (
+                  icon: LucideIcons.medal,
+                  label: 'Ouro',
+                  color: const Color(0xFFD4AF37),
+                ),
+                'silver': (
+                  icon: LucideIcons.medal,
+                  label: 'Prata',
+                  color: const Color(0xFF9CA3AF),
+                ),
+                'bronze': (
+                  icon: LucideIcons.medal,
+                  label: 'Bronze',
+                  color: const Color(0xFFCD7F32),
+                ),
               };
               final config = positionConfig[result.position];
               final categoryParts = <String>[
                 if (result.ageCategory != null) result.ageCategory!,
                 if (result.weightCategory != null) result.weightCategory!,
               ];
-              final categoryText = categoryParts.isNotEmpty ? categoryParts.join(' / ') : null;
+              final categoryText = categoryParts.isNotEmpty
+                  ? categoryParts.join(' / ')
+                  : null;
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 4),
@@ -722,7 +730,11 @@ class _CompetitionCard extends ConsumerWidget {
                         ),
                       ),
                     ] else ...[
-                      Icon(LucideIcons.user, size: 16, color: AppTheme.textSecondary),
+                      Icon(
+                        LucideIcons.user,
+                        size: 16,
+                        color: AppTheme.textSecondary,
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         'Participante',
@@ -776,17 +788,11 @@ class _AcademyIndicator extends ConsumerWidget {
       decoration: BoxDecoration(
         color: AppTheme.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: AppTheme.primary.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
-          Icon(
-            LucideIcons.trophy,
-            size: 16,
-            color: AppTheme.primary,
-          ),
+          Icon(LucideIcons.trophy, size: 16, color: AppTheme.primary),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -834,8 +840,9 @@ class _TrophyShowcase extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final trophyCompetitions =
-        competitions.where((c) => c.teamPosition != null).toList();
+    final trophyCompetitions = competitions
+        .where((c) => c.teamPosition != null)
+        .toList();
 
     if (trophyCompetitions.isEmpty) return const SizedBox.shrink();
 
@@ -879,17 +886,20 @@ class _TrophyShowcase extends StatelessWidget {
               TextButton.icon(
                 onPressed: () {
                   Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const TeamGalleryView(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const TeamGalleryView()),
                   );
                 },
                 icon: const Icon(LucideIcons.image, size: 14),
                 label: const Text('Galeria'),
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.primary,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  textStyle: AppTheme.labelSmall.copyWith(fontWeight: FontWeight.w600),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  textStyle: AppTheme.labelSmall.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],

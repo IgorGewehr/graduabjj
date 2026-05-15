@@ -9,9 +9,10 @@ const Map<SportId, ({Color bg, Color text})> _sportChipColorMap = {
   SportId.bjj: (bg: Color(0x221E40AF), text: Color(0xFF1E40AF)),
   SportId.muaythai: (bg: Color(0x22DC2626), text: Color(0xFFDC2626)),
   SportId.karate: (bg: Color(0x227C3AED), text: Color(0xFF7C3AED)),
-  SportId.judo: (bg: Color(0x22EA580C), text: Color(0xFFEA580C)),
-  SportId.kickboxing: (bg: Color(0x2216A34A), text: Color(0xFF16A34A)),
+  SportId.judo: (bg: Color(0x2216A34A), text: Color(0xFF16A34A)),
+  SportId.kickboxing: (bg: Color(0x22EA580C), text: Color(0xFFEA580C)),
   SportId.boxing: (bg: Color(0x22171717), text: Color(0xFF374151)),
+  SportId.lutalivre: (bg: Color(0x220891B2), text: Color(0xFF0891B2)),
 };
 
 // ============================================
@@ -39,7 +40,8 @@ class SportChip extends StatelessWidget {
     final sport = sports[sportId];
     if (sport == null) return const SizedBox.shrink();
 
-    final colors = _sportChipColorMap[sportId]!;
+    final colors = _sportChipColorMap[sportId] ??
+        (bg: const Color(0x22737373), text: const Color(0xFF374151));
     final label = variant == SportChipVariant.short
         ? sport.labelShort
         : sport.label;

@@ -41,8 +41,12 @@ import 'screens/splash_screen.dart';
 // Admin screens
 import 'screens/admin/admin_screens.dart';
 
-/// No transition - for instant tab switching (bottom nav)
-CustomTransitionPage<T> _buildPageInstant<T>({
+/// Smooth fade for tab/main routes — 150ms ease-in-out.
+///
+/// Replaces the previous `_buildPageInstant` (Duration.zero) so root tab
+/// switches no longer flash. The duration is short enough to feel snappy
+/// inside a bottom-nav shell, but long enough to give visual continuity.
+CustomTransitionPage<T> _buildPageWithFade<T>({
   required BuildContext context,
   required GoRouterState state,
   required Widget child,
@@ -50,13 +54,18 @@ CustomTransitionPage<T> _buildPageInstant<T>({
   return CustomTransitionPage<T>(
     key: state.pageKey,
     child: child,
-    transitionDuration: Duration.zero,
-    reverseTransitionDuration: Duration.zero,
-    transitionsBuilder: (context, animation, secondaryAnimation, child) => child,
+    transitionDuration: const Duration(milliseconds: 150),
+    reverseTransitionDuration: const Duration(milliseconds: 150),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      return FadeTransition(
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeInOut),
+        child: child,
+      );
+    },
   );
 }
 
-/// Quick crossfade for tab switching - subtle and fast
+/// Quick crossfade for tab switching - subtle and fast (150ms)
 CustomTransitionPage<T> _buildPageWithCrossfade<T>({
   required BuildContext context,
   required GoRouterState state,
@@ -66,20 +75,17 @@ CustomTransitionPage<T> _buildPageWithCrossfade<T>({
     key: state.pageKey,
     child: child,
     transitionDuration: const Duration(milliseconds: 150),
-    reverseTransitionDuration: const Duration(milliseconds: 100),
+    reverseTransitionDuration: const Duration(milliseconds: 150),
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
       return FadeTransition(
-        opacity: CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOut,
-        ),
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeInOut),
         child: child,
       );
     },
   );
 }
 
-/// iOS-style push transition - slide from right with parallax
+/// iOS-style push transition - slide from right with parallax (250ms)
 CustomTransitionPage<T> _buildPageWithPushTransition<T>({
   required BuildContext context,
   required GoRouterState state,
@@ -88,7 +94,7 @@ CustomTransitionPage<T> _buildPageWithPushTransition<T>({
   return CustomTransitionPage<T>(
     key: state.pageKey,
     child: child,
-    transitionDuration: const Duration(milliseconds: 300),
+    transitionDuration: const Duration(milliseconds: 250),
     reverseTransitionDuration: const Duration(milliseconds: 250),
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
       // Primary animation - incoming page slides from right
@@ -135,10 +141,7 @@ CustomTransitionPage<T> _buildPageWithFadeTransition<T>({
     reverseTransitionDuration: const Duration(milliseconds: 200),
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
       return FadeTransition(
-        opacity: CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOut,
-        ),
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
         child: child,
       );
     },
@@ -165,16 +168,13 @@ class GraduaBJJApp extends ConsumerWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [
-        Locale('pt', 'BR'),
-        Locale('en', 'US'),
-      ],
+      supportedLocales: const [Locale('pt', 'BR'), Locale('en', 'US')],
       locale: const Locale('pt', 'BR'),
       builder: (context, child) {
         return MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            textScaler: TextScaler.noScaling,
-          ),
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: TextScaler.noScaling),
           child: Stack(
             children: [
               child!,
@@ -208,37 +208,38 @@ class _AccountCreationOverlay extends StatelessWidget {
               children: [
                 // Animated loading icon
                 Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      SizedBox(
-                        width: 100,
-                        height: 100,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 3,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            AppTheme.primary.withValues(alpha: 0.3),
-                          ),
-                        ),
-                      )
-                          .animate(onPlay: (c) => c.repeat())
-                          .rotate(duration: 2000.ms),
-                      const Icon(
-                        LucideIcons.userPlus,
-                        size: 48,
-                        color: AppTheme.primary,
+                      width: 120,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
                       ),
-                    ],
-                  ),
-                ).animate().fadeIn(duration: 300.ms).scale(
-                      begin: const Offset(0.8, 0.8),
-                    ),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          SizedBox(
+                                width: 100,
+                                height: 100,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 3,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    AppTheme.primary.withValues(alpha: 0.3),
+                                  ),
+                                ),
+                              )
+                              .animate(onPlay: (c) => c.repeat())
+                              .rotate(duration: 2000.ms),
+                          const Icon(
+                            LucideIcons.userPlus,
+                            size: 48,
+                            color: AppTheme.primary,
+                          ),
+                        ],
+                      ),
+                    )
+                    .animate()
+                    .fadeIn(duration: 300.ms)
+                    .scale(begin: const Offset(0.8, 0.8)),
 
                 const SizedBox(height: 40),
 
@@ -297,12 +298,18 @@ class _AccountCreationOverlay extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      const Icon(LucideIcons.info, color: AppTheme.primary, size: 20),
+                      const Icon(
+                        LucideIcons.info,
+                        color: AppTheme.primary,
+                        size: 20,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           'Aguarde enquanto preparamos tudo para voce...',
-                          style: AppTheme.bodySmall.copyWith(color: AppTheme.primary),
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.primary,
+                          ),
                         ),
                       ),
                     ],
@@ -341,15 +348,15 @@ class _OverlayProgressStep extends StatelessWidget {
             color: isCompleted
                 ? AppTheme.success.withValues(alpha: 0.1)
                 : isActive
-                    ? AppTheme.primary.withValues(alpha: 0.1)
-                    : AppTheme.surface,
+                ? AppTheme.primary.withValues(alpha: 0.1)
+                : AppTheme.surface,
             shape: BoxShape.circle,
             border: Border.all(
               color: isCompleted
                   ? AppTheme.success
                   : isActive
-                      ? AppTheme.primary
-                      : AppTheme.divider,
+                  ? AppTheme.primary
+                  : AppTheme.divider,
               width: 2,
             ),
           ),
@@ -360,7 +367,9 @@ class _OverlayProgressStep extends StatelessWidget {
                   child: Center(
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        AppTheme.primary,
+                      ),
                     ),
                   ),
                 )
@@ -370,8 +379,8 @@ class _OverlayProgressStep extends StatelessWidget {
                   color: isCompleted
                       ? AppTheme.success
                       : isActive
-                          ? AppTheme.primary
-                          : AppTheme.textDisabled,
+                      ? AppTheme.primary
+                      : AppTheme.textDisabled,
                 ),
         ),
         const SizedBox(width: 12),
@@ -412,7 +421,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isCreatingAcademy = state.matchedLocation == '/criar-academia';
       final isSplash = state.matchedLocation == '/';
 
-      print('[ROUTER] matchedLocation: ${state.matchedLocation}, isLoggedIn: $isLoggedIn, authLoading: ${authState.isLoading}, userLoading: ${currentUser.isLoading}, isCreatingAccount: $isCreatingAccount');
+      print(
+        '[ROUTER] matchedLocation: ${state.matchedLocation}, isLoggedIn: $isLoggedIn, authLoading: ${authState.isLoading}, userLoading: ${currentUser.isLoading}, isCreatingAccount: $isCreatingAccount',
+      );
 
       // Don't redirect while account creation is in progress
       if (isCreatingAccount) {
@@ -440,7 +451,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
 
       final user = currentUser.valueOrNull;
-      print('[ROUTER] User loaded: ${user?.displayName}, role: ${user?.role}, isAdmin: ${user?.isAdmin}, isInstructor: ${user?.isInstructor}');
+      print(
+        '[ROUTER] User loaded: ${user?.displayName}, role: ${user?.role}, isAdmin: ${user?.isAdmin}, isInstructor: ${user?.isInstructor}',
+      );
 
       // Inform notification service of user role for correct routing
       if (user != null) {
@@ -450,7 +463,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
 
       // If logged in and on auth pages, redirect based on role
-      if (isLoggingIn || isRegistering || isLinkCode || isCreatingAcademy || isSplash) {
+      if (isLoggingIn ||
+          isRegistering ||
+          isLinkCode ||
+          isCreatingAcademy ||
+          isSplash) {
         if (user != null && (user.isAdmin || user.isInstructor)) {
           print('[ROUTER] Redirecting admin/instructor to /admin');
           return '/admin';
@@ -463,10 +480,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       // Splash Screen
-      GoRoute(
-        path: '/',
-        builder: (context, state) => const SplashScreen(),
-      ),
+      GoRoute(path: '/', builder: (context, state) => const SplashScreen()),
 
       // Auth Routes
       GoRoute(
@@ -517,7 +531,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           // Main tab routes - instant/crossfade transitions
           GoRoute(
             path: '/portal',
-            pageBuilder: (context, state) => _buildPageInstant(
+            pageBuilder: (context, state) => _buildPageWithFade(
               context: context,
               state: state,
               child: const HomeScreen(),
@@ -706,7 +720,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           // Main tab routes - instant/crossfade transitions
           GoRoute(
             path: '/admin',
-            pageBuilder: (context, state) => _buildPageInstant(
+            pageBuilder: (context, state) => _buildPageWithFade(
               context: context,
               state: state,
               child: const AdminDashboardScreen(),
@@ -881,20 +895,15 @@ final routerProvider = Provider<GoRouter>((ref) {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.error_outline,
-              size: 64,
-              color: AppTheme.error,
-            ),
+            const Icon(Icons.error_outline, size: 64, color: AppTheme.error),
             const SizedBox(height: 16),
-            Text(
-              'Pagina nao encontrada',
-              style: AppTheme.headlineSmall,
-            ),
+            Text('Pagina nao encontrada', style: AppTheme.headlineSmall),
             const SizedBox(height: 8),
             Text(
               state.matchedLocation,
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
             const SizedBox(height: 24),
             ElevatedButton(

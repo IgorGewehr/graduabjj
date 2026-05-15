@@ -6,6 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
+import '../../widgets/cached_image.dart';
 import '../../widgets/common/more_menu_sheet.dart';
 import '../../widgets/common/back_button_handler.dart';
 
@@ -29,80 +30,80 @@ class AdminShell extends ConsumerWidget {
       isRootRoute: isRootRoute,
       exitMessage: 'Pressione voltar novamente para sair',
       child: Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: MediaQuery.of(context).size.width < 768
-          ? AppBar(
-              backgroundColor: AppTheme.surface,
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              title: Row(
-                children: [
-                  // Logo
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: (settings?.logoUrl ?? '').isEmpty ? AppTheme.textPrimary : null,
-                      borderRadius: BorderRadius.circular(6),
-                      image: (settings?.logoUrl ?? '').isNotEmpty
-                          ? DecorationImage(
-                              image: NetworkImage(settings!.logoUrl!),
-                              fit: BoxFit.cover,
-                            )
-                          : null,
-                    ),
-                    child: (settings?.logoUrl ?? '').isEmpty
-                        ? Center(
-                            child: Text(
-                              settings?.name.isNotEmpty == true
-                                  ? settings!.name[0].toUpperCase()
-                                  : 'A',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 16,
+        backgroundColor: AppTheme.background,
+        appBar: MediaQuery.of(context).size.width < 768
+            ? AppBar(
+                backgroundColor: AppTheme.surface,
+                elevation: 0,
+                scrolledUnderElevation: 0,
+                title: Row(
+                  children: [
+                    // Logo
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: (settings?.logoUrl ?? '').isEmpty
+                            ? AppTheme.textPrimary
+                            : null,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: (settings?.logoUrl ?? '').isEmpty
+                          ? Center(
+                              child: Text(
+                                settings?.name.isNotEmpty == true
+                                    ? settings!.name[0].toUpperCase()
+                                    : 'A',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                ),
                               ),
+                            )
+                          : AppCachedImage(
+                              imageUrl: settings!.logoUrl,
+                              width: 32,
+                              height: 32,
+                              fit: BoxFit.cover,
                             ),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(width: 10),
-                  // Academy name and slogan
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          settings?.name ?? 'Minha Academia',
-                          style: AppTheme.bodyMedium.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (settings?.portalSlogan != null && settings!.portalSlogan!.isNotEmpty)
+                    ),
+                    const SizedBox(width: 10),
+                    // Academy name and slogan
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
                           Text(
-                            settings.portalSlogan!,
-                            style: AppTheme.labelSmall.copyWith(
-                              color: AppTheme.textSecondary,
+                            settings?.name ?? 'Minha Academia',
+                            style: AppTheme.bodyMedium.copyWith(
+                              fontWeight: FontWeight.w600,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
-                      ],
+                          if (settings?.portalSlogan != null &&
+                              settings!.portalSlogan!.isNotEmpty)
+                            Text(
+                              settings.portalSlogan!,
+                              style: AppTheme.labelSmall.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              actions: [
-                _AdminNotificationBell(),
-                const SizedBox(width: 8),
-              ],
-              bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(1),
-                child: Container(height: 1, color: AppTheme.divider),
-              ),
-            )
-          : null,
+                  ],
+                ),
+                actions: [_AdminNotificationBell(), const SizedBox(width: 8)],
+                bottom: PreferredSize(
+                  preferredSize: const Size.fromHeight(1),
+                  child: Container(height: 1, color: AppTheme.divider),
+                ),
+              )
+            : null,
         body: Row(
           children: [
             // Sidebar for larger screens
@@ -148,15 +149,12 @@ class AdminSidebar extends ConsumerWidget {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: (settings?.logoUrl ?? '').isEmpty ? AppTheme.primary : null,
-                    borderRadius: BorderRadius.circular(8),
-                    image: (settings?.logoUrl ?? '').isNotEmpty
-                        ? DecorationImage(
-                            image: NetworkImage(settings!.logoUrl!),
-                            fit: BoxFit.cover,
-                          )
+                    color: (settings?.logoUrl ?? '').isEmpty
+                        ? AppTheme.primary
                         : null,
+                    borderRadius: BorderRadius.circular(8),
                   ),
+                  clipBehavior: Clip.antiAlias,
                   child: (settings?.logoUrl ?? '').isEmpty
                       ? Center(
                           child: Text(
@@ -170,7 +168,12 @@ class AdminSidebar extends ConsumerWidget {
                             ),
                           ),
                         )
-                      : null,
+                      : AppCachedImage(
+                          imageUrl: settings!.logoUrl,
+                          width: 40,
+                          height: 40,
+                          fit: BoxFit.cover,
+                        ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -208,18 +211,14 @@ class AdminSidebar extends ConsumerWidget {
                   path: '/admin/alunos',
                   currentPath: currentPath,
                 ),
+                // 'Chamada' abre a chamada normal. O FAB 'Chamada por QR'
+                // dentro da propria tela leva pra projecao — sem precisar
+                // de duas entradas na sidebar.
                 _NavItem(
                   icon: Icons.check_circle_outline,
                   activeIcon: Icons.check_circle,
                   label: 'Chamada',
                   path: '/admin/chamada',
-                  currentPath: currentPath,
-                ),
-                _NavItem(
-                  icon: Icons.qr_code_2_outlined,
-                  activeIcon: Icons.qr_code_2,
-                  label: 'Chamada QR',
-                  path: '/admin/chamada/qr',
                   currentPath: currentPath,
                 ),
                 _NavItem(
@@ -433,11 +432,7 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       icon: LucideIcons.barChart3,
       path: '/admin/relatorios',
     ),
-    _AdminNavItem(
-      label: 'Loja',
-      icon: LucideIcons.store,
-      path: '/admin/loja',
-    ),
+    _AdminNavItem(label: 'Loja', icon: LucideIcons.store, path: '/admin/loja'),
     _AdminNavItem(
       label: 'Carteira',
       icon: LucideIcons.wallet,
@@ -489,7 +484,9 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     // Get academy settings to check if store/abacatepay is enabled
     final settings = ref.read(academySettingsProvider).valueOrNull;
     final isStoreEnabled = settings?.storeEnabled ?? false;
-    final isPaymentEnabled = (settings?.abacatePayEnabled ?? false) || (settings?.asaasEnabled ?? false);
+    final isPaymentEnabled =
+        (settings?.abacatePayEnabled ?? false) ||
+        (settings?.asaasEnabled ?? false);
 
     // Filter menu items based on conditions
     final filteredItems = _moreMenuItems.where((item) {
@@ -510,12 +507,14 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => MoreMenuSheet(
         items: filteredItems
-            .map((item) => MoreMenuItem(
-                  label: item.label,
-                  icon: item.icon,
-                  path: item.path,
-                  isActive: currentLocation == item.path,
-                ))
+            .map(
+              (item) => MoreMenuItem(
+                label: item.label,
+                icon: item.icon,
+                path: item.path,
+                isActive: currentLocation == item.path,
+              ),
+            )
             .toList(),
         onLogout: () async {
           Navigator.pop(sheetContext);
@@ -600,7 +599,10 @@ class _AdminBottomNavItem extends StatelessWidget {
               // Icon with pill background when selected
               AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: isSelected ? AppTheme.textPrimary : Colors.transparent,
                   borderRadius: BorderRadius.circular(16),
@@ -618,7 +620,9 @@ class _AdminBottomNavItem extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isSelected ? AppTheme.textPrimary : AppTheme.textSecondary,
+                  color: isSelected
+                      ? AppTheme.textPrimary
+                      : AppTheme.textSecondary,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -635,7 +639,8 @@ class _AdminBottomNavItem extends StatelessWidget {
 class _AdminNotificationBell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final unreadCount = ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
+    final unreadCount =
+        ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
 
     return IconButton(
       icon: Stack(

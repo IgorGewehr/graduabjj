@@ -25,10 +25,12 @@ class AdminStudentDetailScreen extends ConsumerStatefulWidget {
   const AdminStudentDetailScreen({super.key, required this.studentId});
 
   @override
-  ConsumerState<AdminStudentDetailScreen> createState() => _AdminStudentDetailScreenState();
+  ConsumerState<AdminStudentDetailScreen> createState() =>
+      _AdminStudentDetailScreenState();
 }
 
-class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScreen>
+class _AdminStudentDetailScreenState
+    extends ConsumerState<AdminStudentDetailScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   Student? _student;
@@ -71,14 +73,28 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       final assessmentService = AssessmentService(academyId);
       final planService = PlanService(academyId);
 
-      final student = await studentService.getById(widget.studentId);
-      final attendances = await attendanceService.getByStudent(widget.studentId);
-      final payments = await paymentService.getByStudent(widget.studentId);
-      final storeOrders = await storeService.getOrdersByStudent(widget.studentId);
-      final progressions = await beltService.getByStudent(widget.studentId);
-      final achievements = await achievementService.getForStudent(widget.studentId);
-      final assessments = await assessmentService.getByStudent(widget.studentId);
-      final studentPlans = await planService.getPlansForStudent(widget.studentId);
+      // Sprint 5 — fan out the eight independent reads with `Future.wait`.
+      // None of these depend on each other (auto-graduation eligibility does
+      // depend on `student`, so it stays sequential after this batch).
+      final futures = await Future.wait<dynamic>([
+        studentService.getById(widget.studentId),
+        attendanceService.getByStudent(widget.studentId),
+        paymentService.getByStudent(widget.studentId),
+        storeService.getOrdersByStudent(widget.studentId),
+        beltService.getByStudent(widget.studentId),
+        achievementService.getForStudent(widget.studentId),
+        assessmentService.getByStudent(widget.studentId),
+        planService.getPlansForStudent(widget.studentId),
+      ]);
+
+      final student = futures[0] as Student?;
+      final attendances = futures[1] as List<Attendance>;
+      final payments = futures[2] as List<Payment>;
+      final storeOrders = futures[3] as List<StoreOrder>;
+      final progressions = futures[4] as List<BeltProgression>;
+      final achievements = futures[5] as List<Achievement>;
+      final assessments = futures[6] as List<Assessment>;
+      final studentPlans = futures[7] as List<Plan>;
 
       // Auto-graduation eligibility — only computed when the academy has
       // the feature on (cheap settings doc read first, then the actual math).
@@ -116,101 +132,95 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _student == null
-              ? const Center(child: Text('Aluno não encontrado'))
-              : NestedScrollView(
-                  headerSliverBuilder: (context, innerBoxIsScrolled) => [
-                    _buildSliverAppBar(),
-                  ],
-                  body: Column(
-                    children: [
-                      Container(
-                        decoration: BoxDecoration(
-                          color: AppTheme.surface,
-                          border: Border(
-                            bottom: BorderSide(
-                              color: AppTheme.divider,
-                              width: 1,
-                            ),
-                          ),
-                        ),
-                        child: TabBar(
-                          controller: _tabController,
-                          isScrollable: true,
-                          tabAlignment: TabAlignment.start,
-                          indicatorSize: TabBarIndicatorSize.label,
-                          indicator: BoxDecoration(
-                            border: Border(
-                              bottom: BorderSide(
-                                color: AppTheme.primary,
-                                width: 3,
-                              ),
-                            ),
-                          ),
-                          tabs: [
-                            Tab(
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(LucideIcons.info, size: 16),
-                                  const SizedBox(width: 6),
-                                  const Text('Info'),
-                                ],
-                              ),
-                            ),
-                            Tab(
-                              child: _TabWithBadge(
-                                icon: LucideIcons.clipboardCheck,
-                                label: 'Presenças',
-                                count: _attendances.length,
-                              ),
-                            ),
-                            Tab(
-                              child: _TabWithBadge(
-                                icon: LucideIcons.dollarSign,
-                                label: 'Financeiro',
-                                count: _payments.length + _storeOrders.length,
-                              ),
-                            ),
-                            Tab(
-                              child: _TabWithBadge(
-                                icon: LucideIcons.star,
-                                label: 'Comportamento',
-                                count: _assessments.length,
-                              ),
-                            ),
-                            Tab(
-                              child: _TabWithBadge(
-                                icon: LucideIcons.trophy,
-                                label: 'Conquistas',
-                                count: _achievements.length,
-                              ),
-                            ),
-                            Tab(
-                              child: _TabWithBadge(
-                                icon: LucideIcons.history,
-                                label: 'Histórico',
-                                count: _progressions.length + _achievements.length,
-                              ),
-                            ),
-                          ],
+          ? const Center(child: Text('Aluno não encontrado'))
+          : NestedScrollView(
+              headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                _buildSliverAppBar(),
+              ],
+              body: Column(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      border: Border(
+                        bottom: BorderSide(color: AppTheme.divider, width: 1),
+                      ),
+                    ),
+                    child: TabBar(
+                      controller: _tabController,
+                      isScrollable: true,
+                      tabAlignment: TabAlignment.start,
+                      indicatorSize: TabBarIndicatorSize.label,
+                      indicator: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: AppTheme.primary, width: 3),
                         ),
                       ),
-                      Expanded(
-                        child: TabBarView(
-                          controller: _tabController,
-                          children: [
-                            _buildInfoTab(),
-                            _buildAttendanceTab(),
-                            _buildFinancialTab(),
-                            _buildBehaviorTab(),
-                            _buildAchievementsTab(),
-                            _buildHistoryTab(),
-                          ],
+                      tabs: [
+                        Tab(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(LucideIcons.info, size: 16),
+                              const SizedBox(width: 6),
+                              const Text('Info'),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                        Tab(
+                          child: _TabWithBadge(
+                            icon: LucideIcons.clipboardCheck,
+                            label: 'Presenças',
+                            count: _attendances.length,
+                          ),
+                        ),
+                        Tab(
+                          child: _TabWithBadge(
+                            icon: LucideIcons.dollarSign,
+                            label: 'Financeiro',
+                            count: _payments.length + _storeOrders.length,
+                          ),
+                        ),
+                        Tab(
+                          child: _TabWithBadge(
+                            icon: LucideIcons.star,
+                            label: 'Comportamento',
+                            count: _assessments.length,
+                          ),
+                        ),
+                        Tab(
+                          child: _TabWithBadge(
+                            icon: LucideIcons.trophy,
+                            label: 'Conquistas',
+                            count: _achievements.length,
+                          ),
+                        ),
+                        Tab(
+                          child: _TabWithBadge(
+                            icon: LucideIcons.history,
+                            label: 'Histórico',
+                            count: _progressions.length + _achievements.length,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildInfoTab(),
+                        _buildAttendanceTab(),
+                        _buildFinancialTab(),
+                        _buildBehaviorTab(),
+                        _buildAchievementsTab(),
+                        _buildHistoryTab(),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 
@@ -222,7 +232,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
         IconButton(
           icon: const Icon(Icons.edit),
           onPressed: () async {
-            final result = await context.push('/admin/alunos/${widget.studentId}/editar');
+            final result = await context.push(
+              '/admin/alunos/${widget.studentId}/editar',
+            );
             if (result == true && mounted) {
               _loadData();
             }
@@ -250,13 +262,17 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
               value: 'toggle_status',
               child: Row(
                 children: [
-                  Icon(_student!.status == StudentStatus.active
-                      ? Icons.person_off
-                      : Icons.person),
+                  Icon(
+                    _student!.status == StudentStatus.active
+                        ? Icons.person_off
+                        : Icons.person,
+                  ),
                   const SizedBox(width: 8),
-                  Text(_student!.status == StudentStatus.active
-                      ? 'Desativar'
-                      : 'Ativar'),
+                  Text(
+                    _student!.status == StudentStatus.active
+                        ? 'Desativar'
+                        : 'Ativar',
+                  ),
                 ],
               ),
             ),
@@ -292,8 +308,14 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                getGradeColor(_student!.getPrimarySport(), _student!.currentBelt),
-                getGradeColor(_student!.getPrimarySport(), _student!.currentBelt).withValues(alpha: 0.7),
+                getGradeColor(
+                  _student!.getPrimarySport(),
+                  _student!.currentBelt,
+                ),
+                getGradeColor(
+                  _student!.getPrimarySport(),
+                  _student!.currentBelt,
+                ).withValues(alpha: 0.7),
               ],
             ),
           ),
@@ -329,7 +351,11 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                               style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color: (_student!.currentBelt == 'white' || _student!.currentBelt == 'yellow') ? Colors.black : Colors.white,
+                                color:
+                                    (_student!.currentBelt == 'white' ||
+                                        _student!.currentBelt == 'yellow')
+                                    ? Colors.black
+                                    : Colors.white,
                               ),
                             ),
                             const SizedBox(height: 4),
@@ -399,7 +425,10 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
               if (stripes > 0) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: gradeColor.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
@@ -423,13 +452,27 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
 
   Widget _buildStatusBadge() {
     final statusConfig = {
-      StudentStatus.active: {'color': Colors.green, 'icon': LucideIcons.checkCircle2},
-      StudentStatus.inactive: {'color': Colors.grey, 'icon': LucideIcons.pauseCircle},
-      StudentStatus.suspended: {'color': Colors.orange, 'icon': LucideIcons.alertCircle},
-      StudentStatus.injured: {'color': Colors.blue, 'icon': LucideIcons.heartPulse},
+      StudentStatus.active: {
+        'color': Colors.green,
+        'icon': LucideIcons.checkCircle2,
+      },
+      StudentStatus.inactive: {
+        'color': Colors.grey,
+        'icon': LucideIcons.pauseCircle,
+      },
+      StudentStatus.suspended: {
+        'color': Colors.orange,
+        'icon': LucideIcons.alertCircle,
+      },
+      StudentStatus.injured: {
+        'color': Colors.blue,
+        'icon': LucideIcons.heartPulse,
+      },
     };
 
-    final config = statusConfig[_student!.status] ?? {'color': Colors.grey, 'icon': LucideIcons.circle};
+    final config =
+        statusConfig[_student!.status] ??
+        {'color': Colors.grey, 'icon': LucideIcons.circle};
     final statusColor = config['color'] as Color;
     final statusIcon = config['icon'] as IconData;
 
@@ -449,11 +492,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            statusIcon,
-            size: 14,
-            color: statusColor,
-          ),
+          Icon(statusIcon, size: 14, color: statusColor),
           const SizedBox(width: 6),
           Text(
             _student!.status.label,
@@ -510,7 +549,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                     backgroundColor: color,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     textStyle: AppTheme.labelSmall.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -566,10 +607,14 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
               Expanded(
                 child: _StatCard(
                   label: 'Mês atual',
-                  value: _attendances.where((a) =>
-                    a.date.month == DateTime.now().month &&
-                    a.date.year == DateTime.now().year
-                  ).length.toString(),
+                  value: _attendances
+                      .where(
+                        (a) =>
+                            a.date.month == DateTime.now().month &&
+                            a.date.year == DateTime.now().year,
+                      )
+                      .length
+                      .toString(),
                   icon: Icons.calendar_today,
                 ),
               ),
@@ -629,9 +674,7 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
     return Card(
       elevation: 1,
       shadowColor: Colors.black.withValues(alpha: 0.05),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -726,11 +769,16 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 children: [
                   Text(
                     entry.key,
-                    style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.bold),
+                    style: AppTheme.titleSmall.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const Spacer(),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: AppTheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
@@ -743,21 +791,25 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 ],
               ),
             ),
-            ...entry.value.map((a) => Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Colors.green.shade100,
-                  child: const Icon(Icons.check, color: Colors.green),
-                ),
-                title: Text(a.className),
-                subtitle: Text(DateFormat('EEEE, d', 'pt_BR').format(a.date)),
-                trailing: Text(
-                  DateFormat('HH:mm').format(a.createdAt),
-                  style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ...entry.value.map(
+              (a) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.green.shade100,
+                    child: const Icon(Icons.check, color: Colors.green),
+                  ),
+                  title: Text(a.className),
+                  subtitle: Text(DateFormat('EEEE, d', 'pt_BR').format(a.date)),
+                  trailing: Text(
+                    DateFormat('HH:mm').format(a.createdAt),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
                 ),
               ),
-            )),
+            ),
             const SizedBox(height: 8),
           ],
         );
@@ -786,9 +838,13 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
           const SizedBox(height: 8),
           ..._studentPlans.map((plan) {
             final studentValue = plan.getStudentValue(widget.studentId);
-            final hasCustomValue = plan.customValues.containsKey(widget.studentId);
+            final hasCustomValue = plan.customValues.containsKey(
+              widget.studentId,
+            );
             final studentDueDay = plan.getStudentDueDay(widget.studentId);
-            final hasCustomDueDay = plan.customDueDays.containsKey(widget.studentId);
+            final hasCustomDueDay = plan.customDueDays.containsKey(
+              widget.studentId,
+            );
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(16),
@@ -812,7 +868,11 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                       ),
                       GestureDetector(
                         onTap: () => _showCustomValueDialog(plan),
-                        child: const Icon(LucideIcons.pencil, size: 18, color: AppTheme.textSecondary),
+                        child: const Icon(
+                          LucideIcons.pencil,
+                          size: 18,
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                     ],
                   ),
@@ -821,7 +881,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                     children: [
                       Text(
                         'Valor padrão: R\$ ${plan.monthlyValue.toStringAsFixed(2)}',
-                        style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                     ],
                   ),
@@ -832,13 +894,18 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                         'Valor do aluno: R\$ ${studentValue.toStringAsFixed(2)}',
                         style: AppTheme.bodyMedium.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: hasCustomValue ? AppTheme.success : AppTheme.textPrimary,
+                          color: hasCustomValue
+                              ? AppTheme.success
+                              : AppTheme.textPrimary,
                         ),
                       ),
                       if (hasCustomValue) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: AppTheme.successLight,
                             borderRadius: BorderRadius.circular(4),
@@ -862,13 +929,18 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                         'Vencimento: dia $studentDueDay',
                         style: AppTheme.bodyMedium.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: hasCustomDueDay ? AppTheme.success : AppTheme.textPrimary,
+                          color: hasCustomDueDay
+                              ? AppTheme.success
+                              : AppTheme.textPrimary,
                         ),
                       ),
                       if (hasCustomDueDay) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: AppTheme.successLight,
                             borderRadius: BorderRadius.circular(4),
@@ -924,10 +996,14 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
 
   void _showCustomValueDialog(Plan plan) {
     final studentValue = plan.getStudentValue(widget.studentId);
-    final controller = TextEditingController(text: studentValue.toStringAsFixed(2));
+    final controller = TextEditingController(
+      text: studentValue.toStringAsFixed(2),
+    );
     final hasCustomValue = plan.customValues.containsKey(widget.studentId);
     final studentDueDay = plan.getStudentDueDay(widget.studentId);
-    final dueDayController = TextEditingController(text: studentDueDay.toString());
+    final dueDayController = TextEditingController(
+      text: studentDueDay.toString(),
+    );
     final hasCustomDueDay = plan.customDueDays.containsKey(widget.studentId);
     final parentContext = context;
 
@@ -946,7 +1022,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
             const SizedBox(height: 16),
             TextField(
               controller: controller,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: const InputDecoration(
                 labelText: 'Valor do aluno',
                 prefixText: 'R\$ ',
@@ -959,8 +1037,14 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
                   final planService = PlanService(FirebaseService.academyId);
-                  await planService.removeCustomValue(plan.id, widget.studentId);
-                  if (mounted) parentContext.showSuccess('Valor restaurado ao padrão do plano');
+                  await planService.removeCustomValue(
+                    plan.id,
+                    widget.studentId,
+                  );
+                  if (mounted)
+                    parentContext.showSuccess(
+                      'Valor restaurado ao padrão do plano',
+                    );
                   _loadData();
                 },
                 icon: const Icon(LucideIcons.rotateCcw, size: 16),
@@ -988,8 +1072,14 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
                   final planService = PlanService(FirebaseService.academyId);
-                  await planService.removeCustomDueDay(plan.id, widget.studentId);
-                  if (mounted) parentContext.showSuccess('Vencimento restaurado ao padrão do plano');
+                  await planService.removeCustomDueDay(
+                    plan.id,
+                    widget.studentId,
+                  );
+                  if (mounted)
+                    parentContext.showSuccess(
+                      'Vencimento restaurado ao padrão do plano',
+                    );
                   _loadData();
                 },
                 icon: const Icon(LucideIcons.rotateCcw, size: 16),
@@ -1005,7 +1095,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
           ),
           FilledButton(
             onPressed: () async {
-              final value = double.tryParse(controller.text.replaceAll(',', '.'));
+              final value = double.tryParse(
+                controller.text.replaceAll(',', '.'),
+              );
               if (value == null || value <= 0) return;
               final dueDay = int.tryParse(dueDayController.text);
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;
@@ -1015,15 +1107,24 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
               if (value == plan.monthlyValue) {
                 await planService.removeCustomValue(plan.id, widget.studentId);
               } else {
-                await planService.setCustomValue(plan.id, widget.studentId, value);
+                await planService.setCustomValue(
+                  plan.id,
+                  widget.studentId,
+                  value,
+                );
               }
               // Save due day
               if (dueDay == plan.defaultDueDay) {
                 await planService.removeCustomDueDay(plan.id, widget.studentId);
               } else {
-                await planService.setCustomDueDay(plan.id, widget.studentId, dueDay);
+                await planService.setCustomDueDay(
+                  plan.id,
+                  widget.studentId,
+                  dueDay,
+                );
               }
-              if (mounted) parentContext.showSuccess('Valor e vencimento atualizados');
+              if (mounted)
+                parentContext.showSuccess('Valor e vencimento atualizados');
               _loadData();
             },
             child: const Text('Salvar'),
@@ -1091,7 +1192,8 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                   return _AchievementCard(
                     achievement: achievement,
                     onEdit: () => _showEditAchievementDialog(achievement),
-                    onDelete: () => _showDeleteAchievementConfirmation(achievement),
+                    onDelete: () =>
+                        _showDeleteAchievementConfirmation(achievement),
                   );
                 },
               ),
@@ -1103,7 +1205,10 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
             onPressed: _showAddAchievementDialog,
             backgroundColor: AppTheme.primary,
             icon: const Icon(Icons.add, color: Colors.white),
-            label: const Text('Adicionar', style: TextStyle(color: Colors.white)),
+            label: const Text(
+              'Adicionar',
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ),
       ],
@@ -1143,7 +1248,10 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                     value: selectedType,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                     ),
                     items: [
                       const DropdownMenuItem(
@@ -1173,13 +1281,22 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                       value: selectedBelt,
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         hintText: 'Selecione a faixa',
                       ),
-                      items: beltOptions.map((belt) => DropdownMenuItem(
-                        value: belt,
-                        child: Text(BeltConstants.beltLabels[belt] ?? belt),
-                      )).toList(),
+                      items: beltOptions
+                          .map(
+                            (belt) => DropdownMenuItem(
+                              value: belt,
+                              child: Text(
+                                BeltConstants.beltLabels[belt] ?? belt,
+                              ),
+                            ),
+                          )
+                          .toList(),
                       onChanged: (value) {
                         setDialogState(() => selectedBelt = value);
                       },
@@ -1195,12 +1312,19 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                       value: selectedStripes,
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                       ),
-                      items: [1, 2, 3, 4].map((s) => DropdownMenuItem(
-                        value: s,
-                        child: Text('$s grau(s)'),
-                      )).toList(),
+                      items: [1, 2, 3, 4]
+                          .map(
+                            (s) => DropdownMenuItem(
+                              value: s,
+                              child: Text('$s grau(s)'),
+                            ),
+                          )
+                          .toList(),
                       onChanged: (value) {
                         setDialogState(() => selectedStripes = value!);
                       },
@@ -1252,7 +1376,10 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                       }
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 16,
+                      ),
                       decoration: BoxDecoration(
                         border: Border.all(color: AppTheme.divider),
                         borderRadius: BorderRadius.circular(4),
@@ -1277,11 +1404,13 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
               FilledButton(
                 onPressed: () async {
                   // Validate
-                  if (selectedType == AchievementType.graduation && selectedBelt == null) {
+                  if (selectedType == AchievementType.graduation &&
+                      selectedBelt == null) {
                     parentContext.showError('Selecione a faixa');
                     return;
                   }
-                  if (selectedType == AchievementType.milestone && titleController.text.trim().isEmpty) {
+                  if (selectedType == AchievementType.milestone &&
+                      titleController.text.trim().isEmpty) {
                     parentContext.showError('Informe o título');
                     return;
                   }
@@ -1289,11 +1418,14 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                   Navigator.pop(dialogContext);
 
                   try {
-                    final service = AchievementService(FirebaseService.academyId);
+                    final service = AchievementService(
+                      FirebaseService.academyId,
+                    );
 
                     String title;
                     if (selectedType == AchievementType.graduation) {
-                      title = 'Graduação para Faixa ${getBeltName(selectedBelt!)}';
+                      title =
+                          'Graduação para Faixa ${getBeltName(selectedBelt!)}';
                     } else if (selectedType == AchievementType.stripe) {
                       title = 'Recebeu $selectedStripes grau(s)';
                     } else {
@@ -1309,8 +1441,12 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                           ? descriptionController.text.trim()
                           : null,
                       date: selectedDate,
-                      toBelt: selectedType == AchievementType.graduation ? selectedBelt : null,
-                      toStripes: selectedType == AchievementType.stripe ? selectedStripes : null,
+                      toBelt: selectedType == AchievementType.graduation
+                          ? selectedBelt
+                          : null,
+                      toStripes: selectedType == AchievementType.stripe
+                          ? selectedStripes
+                          : null,
                       createdBy: 'admin',
                     );
 
@@ -1351,13 +1487,17 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
               children: [
                 Text(
                   achievement.title,
-                  style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.bold),
+                  style: AppTheme.titleMedium.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 if (achievement.description != null) ...[
                   const SizedBox(height: 4),
                   Text(
                     achievement.description!,
-                    style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 24),
@@ -1377,7 +1517,10 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                     }
                   },
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
                     decoration: BoxDecoration(
                       border: Border.all(color: AppTheme.divider),
                       borderRadius: BorderRadius.circular(4),
@@ -1405,7 +1548,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                   Navigator.pop(dialogContext);
 
                   try {
-                    final service = AchievementService(FirebaseService.academyId);
+                    final service = AchievementService(
+                      FirebaseService.academyId,
+                    );
                     await service.update(achievement.id, {
                       'date': Timestamp.fromDate(selectedDate),
                     });
@@ -1480,16 +1625,24 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(LucideIcons.star, size: 64, color: AppTheme.textDisabled),
+                    Icon(
+                      LucideIcons.star,
+                      size: 64,
+                      color: AppTheme.textDisabled,
+                    ),
                     const SizedBox(height: 16),
                     Text(
                       'Nenhuma avaliação registrada',
-                      style: AppTheme.bodyLarge.copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodyLarge.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Adicione avaliações comportamentais\npara que os pais possam acompanhar',
-                      style: AppTheme.bodySmall.copyWith(color: AppTheme.textDisabled),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textDisabled,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -1503,7 +1656,8 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                   return _AssessmentCard(
                     assessment: assessment,
                     onEdit: () => _showEditAssessmentDialog(assessment),
-                    onDelete: () => _showDeleteAssessmentConfirmation(assessment),
+                    onDelete: () =>
+                        _showDeleteAssessmentConfirmation(assessment),
                   );
                 },
               ),
@@ -1537,7 +1691,8 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
-          double average = scores.values.fold<int>(0, (acc, v) => acc + v) / scores.length;
+          double average =
+              scores.values.fold<int>(0, (acc, v) => acc + v) / scores.length;
 
           return AlertDialog(
             title: const Text('Nova Avaliação'),
@@ -1563,7 +1718,10 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                       }
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
                       decoration: BoxDecoration(
                         border: Border.all(color: AppTheme.divider),
                         borderRadius: BorderRadius.circular(8),
@@ -1613,12 +1771,19 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(category.label, style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500)),
+                              Text(
+                                category.label,
+                                style: AppTheme.bodyMedium.copyWith(
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
                               Text(
                                 '${scores[category]}',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  color: _getScoreColor(scores[category]!.toDouble()),
+                                  color: _getScoreColor(
+                                    scores[category]!.toDouble(),
+                                  ),
                                 ),
                               ),
                             ],
@@ -1628,9 +1793,13 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                             min: 1,
                             max: 5,
                             divisions: 4,
-                            activeColor: _getScoreColor(scores[category]!.toDouble()),
+                            activeColor: _getScoreColor(
+                              scores[category]!.toDouble(),
+                            ),
                             onChanged: (value) {
-                              setDialogState(() => scores[category] = value.round());
+                              setDialogState(
+                                () => scores[category] = value.round(),
+                              );
                             },
                           ),
                         ],
@@ -1662,14 +1831,23 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                   Navigator.pop(dialogContext);
 
                   try {
-                    final currentUser = ref.read(currentUserProvider).valueOrNull;
-                    final service = AssessmentService(FirebaseService.academyId);
+                    final currentUser = ref
+                        .read(currentUserProvider)
+                        .valueOrNull;
+                    final service = AssessmentService(
+                      FirebaseService.academyId,
+                    );
                     await service.create(
                       studentId: _student!.id,
                       studentName: _student!.fullName,
-                      scores: scores.entries.map((e) =>
-                        AssessmentScore(category: e.key, score: e.value),
-                      ).toList(),
+                      scores: scores.entries
+                          .map(
+                            (e) => AssessmentScore(
+                              category: e.key,
+                              score: e.value,
+                            ),
+                          )
+                          .toList(),
                       assessedBy: currentUser?.id ?? 'admin',
                       assessedByName: currentUser?.displayName ?? 'Professor',
                       date: selectedDate,
@@ -1710,7 +1888,8 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
-          double average = scores.values.fold<int>(0, (acc, v) => acc + v) / scores.length;
+          double average =
+              scores.values.fold<int>(0, (acc, v) => acc + v) / scores.length;
 
           return AlertDialog(
             title: const Text('Editar Avaliação'),
@@ -1736,7 +1915,10 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                       }
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
                       decoration: BoxDecoration(
                         border: Border.all(color: AppTheme.divider),
                         borderRadius: BorderRadius.circular(8),
@@ -1786,12 +1968,19 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(category.label, style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500)),
+                              Text(
+                                category.label,
+                                style: AppTheme.bodyMedium.copyWith(
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
                               Text(
                                 '${scores[category]}',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  color: _getScoreColor(scores[category]!.toDouble()),
+                                  color: _getScoreColor(
+                                    scores[category]!.toDouble(),
+                                  ),
                                 ),
                               ),
                             ],
@@ -1801,9 +1990,13 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                             min: 1,
                             max: 5,
                             divisions: 4,
-                            activeColor: _getScoreColor(scores[category]!.toDouble()),
+                            activeColor: _getScoreColor(
+                              scores[category]!.toDouble(),
+                            ),
                             onChanged: (value) {
-                              setDialogState(() => scores[category] = value.round());
+                              setDialogState(
+                                () => scores[category] = value.round(),
+                              );
                             },
                           ),
                         ],
@@ -1835,7 +2028,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                   Navigator.pop(dialogContext);
 
                   try {
-                    final service = AssessmentService(FirebaseService.academyId);
+                    final service = AssessmentService(
+                      FirebaseService.academyId,
+                    );
                     final scoresMap = <String, int>{};
                     for (final e in scores.entries) {
                       scoresMap[e.key.value] = e.value;
@@ -1874,7 +2069,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Excluir Avaliação'),
-        content: Text('Deseja excluir a avaliação de ${DateFormat('dd/MM/yyyy').format(assessment.date)}?'),
+        content: Text(
+          'Deseja excluir a avaliação de ${DateFormat('dd/MM/yyyy').format(assessment.date)}?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
@@ -1927,24 +2124,28 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
 
     // Add progressions
     for (final p in _progressions) {
-      allHistory.add(_HistoryItem(
-        date: p.promotionDate,
-        title: p.isBeltChange ? 'Faixa ${p.newBelt}' : 'Grau ${p.newStripes}',
-        subtitle: p.notes,
-        icon: Icons.military_tech,
-        color: getGradeColor(p.getSport(), p.newBelt),
-      ));
+      allHistory.add(
+        _HistoryItem(
+          date: p.promotionDate,
+          title: p.isBeltChange ? 'Faixa ${p.newBelt}' : 'Grau ${p.newStripes}',
+          subtitle: p.notes,
+          icon: Icons.military_tech,
+          color: getGradeColor(p.getSport(), p.newBelt),
+        ),
+      );
     }
 
     // Add achievements
     for (final a in _achievements) {
-      allHistory.add(_HistoryItem(
-        date: a.date,
-        title: a.title,
-        subtitle: a.description,
-        icon: Icons.emoji_events,
-        color: Colors.amber,
-      ));
+      allHistory.add(
+        _HistoryItem(
+          date: a.date,
+          title: a.title,
+          subtitle: a.description,
+          icon: Icons.emoji_events,
+          color: Colors.amber,
+        ),
+      );
     }
 
     // Sort by date descending
@@ -1973,7 +2174,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 if (item.subtitle != null) Text(item.subtitle!),
                 Text(
                   DateFormat('dd/MM/yyyy').format(item.date),
-                  style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
               ],
             ),
@@ -2011,10 +2214,14 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                     value: selectedSport,
                     items: sports.map((s) {
                       final sport = getSport(s);
-                      return DropdownMenuItem(value: s, child: Text(sport.label));
+                      return DropdownMenuItem(
+                        value: s,
+                        child: Text(sport.label),
+                      );
                     }).toList(),
                     onChanged: (value) {
-                      if (value != null) setDialogState(() => selectedSport = value);
+                      if (value != null)
+                        setDialogState(() => selectedSport = value);
                     },
                     decoration: const InputDecoration(
                       labelText: 'Esporte',
@@ -2024,7 +2231,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                 ],
                 if (hasGrades) ...[
                   const SizedBox(height: 8),
-                  Text('Graduação atual: ${getGradeLabel(selectedSport, currentGrade)} - $currentStripes grau(s)'),
+                  Text(
+                    'Graduação atual: ${getGradeLabel(selectedSport, currentGrade)} - $currentStripes grau(s)',
+                  ),
                 ],
                 if (hasGrades && hasStripes) ...[
                   const SizedBox(height: 16),
@@ -2049,7 +2258,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
               FilledButton(
                 onPressed: () async {
                   try {
-                    final service = BeltProgressionService(FirebaseService.academyId);
+                    final service = BeltProgressionService(
+                      FirebaseService.academyId,
+                    );
 
                     if (isStripe && hasStripes) {
                       await service.addStripe(
@@ -2060,7 +2271,10 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
                         sportId: selectedSport,
                       );
                     } else if (hasGrades) {
-                      final nextGrade = _getNextGrade(selectedSport, currentGrade);
+                      final nextGrade = _getNextGrade(
+                        selectedSport,
+                        currentGrade,
+                      );
                       await service.changeBelt(
                         studentId: _student!.id,
                         studentName: _student!.fullName,
@@ -2073,7 +2287,9 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
 
                     if (mounted) {
                       Navigator.pop(context);
-                      this.context.showSuccess('Graduação realizada com sucesso!');
+                      this.context.showSuccess(
+                        'Graduação realizada com sucesso!',
+                      );
                       _loadData();
                     }
                   } catch (e) {
@@ -2238,7 +2454,6 @@ class _AdminStudentDetailScreenState extends ConsumerState<AdminStudentDetailScr
       ),
     );
   }
-
 }
 
 /// Stat Card Widget
@@ -2267,9 +2482,7 @@ class _StatCard extends StatelessWidget {
     return Card(
       elevation: 2,
       shadowColor: Colors.black.withValues(alpha: 0.08),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -2313,10 +2526,7 @@ class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoRow({
-    required this.label,
-    required this.value,
-  });
+  const _InfoRow({required this.label, required this.value});
 
   IconData _getDefaultIcon() {
     if (label.contains('Nome')) return LucideIcons.user;
@@ -2356,11 +2566,7 @@ class _InfoRow extends StatelessWidget {
               color: AppTheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(
-              displayIcon,
-              size: 16,
-              color: AppTheme.primary,
-            ),
+            child: Icon(displayIcon, size: 16, color: AppTheme.primary),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -2510,11 +2716,7 @@ class _AchievementCard extends StatelessWidget {
                   color: _getTypeColor().withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(
-                  _getTypeIcon(),
-                  color: _getTypeColor(),
-                  size: 24,
-                ),
+                child: Icon(_getTypeIcon(), color: _getTypeColor(), size: 24),
               ),
               const SizedBox(width: 12),
               // Content
@@ -2556,7 +2758,10 @@ class _AchievementCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 12),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: _getTypeColor().withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
@@ -2778,18 +2983,27 @@ class _AssessmentCard extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.calendar_today, size: 14, color: AppTheme.textSecondary),
+                      const Icon(
+                        Icons.calendar_today,
+                        size: 14,
+                        color: AppTheme.textSecondary,
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         DateFormat('dd/MM/yyyy').format(assessment.date),
-                        style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ],
                   ),
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: scoreColor,
                           borderRadius: BorderRadius.circular(12),
@@ -2804,7 +3018,11 @@ class _AssessmentCard extends StatelessWidget {
                         ),
                       ),
                       PopupMenuButton<String>(
-                        icon: Icon(Icons.more_vert, color: AppTheme.textSecondary, size: 20),
+                        icon: Icon(
+                          Icons.more_vert,
+                          color: AppTheme.textSecondary,
+                          size: 20,
+                        ),
                         onSelected: (value) {
                           if (value == 'edit') onEdit();
                           if (value == 'delete') onDelete();
@@ -2826,7 +3044,10 @@ class _AssessmentCard extends StatelessWidget {
                               children: [
                                 Icon(Icons.delete, size: 20, color: Colors.red),
                                 SizedBox(width: 8),
-                                Text('Excluir', style: TextStyle(color: Colors.red)),
+                                Text(
+                                  'Excluir',
+                                  style: TextStyle(color: Colors.red),
+                                ),
                               ],
                             ),
                           ),
@@ -2847,7 +3068,11 @@ class _AssessmentCard extends StatelessWidget {
                   return Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(LucideIcons.star, size: 12, color: _getScoreColor(score.toDouble())),
+                      Icon(
+                        LucideIcons.star,
+                        size: 12,
+                        color: _getScoreColor(score.toDouble()),
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         '${category.label}: $score',

@@ -15,6 +15,7 @@ class Attendance {
   final String verifiedBy;
   final String verifiedByName;
   final String? notes;
+
   /// Snapshot of Class.weight at the time the attendance was created. Null
   /// or 1 means "counts as one normal attendance". Kept immutable so old
   /// graduation math stays stable even if the class weight changes later.
@@ -65,18 +66,25 @@ class AttendanceService {
   CollectionReference get _attendanceRef => _collections.attendance;
 
   // Helper: Get start and end of day
-  DateTime _startOfDay(DateTime date) => DateTime(date.year, date.month, date.day);
-  DateTime _endOfDay(DateTime date) => DateTime(date.year, date.month, date.day, 23, 59, 59);
+  DateTime _startOfDay(DateTime date) =>
+      DateTime(date.year, date.month, date.day);
+  DateTime _endOfDay(DateTime date) =>
+      DateTime(date.year, date.month, date.day, 23, 59, 59);
 
   // ============================================
   // Get Attendance by Student
   // ============================================
-  Future<List<Attendance>> getByStudent(String studentId, {int limit = 50}) async {
+  Future<List<Attendance>> getByStudent(
+    String studentId, {
+    int limit = 50,
+  }) async {
     final query = await _attendanceRef
         .where('studentId', isEqualTo: studentId)
         .get();
 
-    var attendance = query.docs.map((doc) => Attendance.fromFirestore(doc)).toList();
+    var attendance = query.docs
+        .map((doc) => Attendance.fromFirestore(doc))
+        .toList();
 
     // Sort by date descending
     attendance.sort((a, b) => b.date.compareTo(a.date));
@@ -86,6 +94,39 @@ class AttendanceService {
     }
 
     return attendance;
+  }
+
+  // ============================================
+  // Get Attendance by Student — PAGINATED (Sprint 5)
+  //
+  // Server-side cursor pagination using `startAfterDocument`. Use this from
+  // any list UI that supports infinite scroll. Composite index required:
+  // `attendance` (studentId ASC, date DESC) — already declared in
+  // `firestore.indexes.json`.
+  //
+  // Returns the page of items together with the last `DocumentSnapshot`,
+  // which the caller passes back as `startAfter` to fetch the next page.
+  // When `lastDoc` is null, the end of the collection has been reached.
+  // ============================================
+  Future<({List<Attendance> items, DocumentSnapshot? lastDoc})>
+  getByStudentPaginated(
+    String studentId, {
+    int limit = 15,
+    DocumentSnapshot? startAfter,
+  }) async {
+    Query query = _attendanceRef
+        .where('studentId', isEqualTo: studentId)
+        .orderBy('date', descending: true)
+        .limit(limit);
+    if (startAfter != null) {
+      query = query.startAfterDocument(startAfter);
+    }
+
+    final snap = await query.get();
+    final items = snap.docs
+        .map((doc) => Attendance.fromFirestore(doc))
+        .toList();
+    return (items: items, lastDoc: snap.docs.isEmpty ? null : snap.docs.last);
   }
 
   // ============================================
@@ -108,16 +149,21 @@ class AttendanceService {
     String? studentId,
   }) async {
     final snapshot = await _attendanceRef.get();
-    var results = snapshot.docs.map((doc) => Attendance.fromFirestore(doc)).toList();
+    var results = snapshot.docs
+        .map((doc) => Attendance.fromFirestore(doc))
+        .toList();
 
     final start = _startOfDay(startDate);
     final end = _endOfDay(endDate);
 
     // Filter by date range
-    results = results.where((a) =>
-        a.date.isAfter(start.subtract(const Duration(seconds: 1))) &&
-        a.date.isBefore(end.add(const Duration(seconds: 1)))
-    ).toList();
+    results = results
+        .where(
+          (a) =>
+              a.date.isAfter(start.subtract(const Duration(seconds: 1))) &&
+              a.date.isBefore(end.add(const Duration(seconds: 1))),
+        )
+        .toList();
 
     // Apply additional filters
     if (classId != null) {
@@ -136,7 +182,10 @@ class AttendanceService {
   // ============================================
   // Get Attendance by Date and Class
   // ============================================
-  Future<List<Attendance>> getByDateAndClass(DateTime date, String classId) async {
+  Future<List<Attendance>> getByDateAndClass(
+    DateTime date,
+    String classId,
+  ) async {
     final query = await _attendanceRef
         .where('classId', isEqualTo: classId)
         .get();
@@ -146,9 +195,10 @@ class AttendanceService {
 
     final results = query.docs
         .map((doc) => Attendance.fromFirestore(doc))
-        .where((a) =>
-            a.date.isAfter(start.subtract(const Duration(seconds: 1))) &&
-            a.date.isBefore(end.add(const Duration(seconds: 1)))
+        .where(
+          (a) =>
+              a.date.isAfter(start.subtract(const Duration(seconds: 1))) &&
+              a.date.isBefore(end.add(const Duration(seconds: 1))),
         )
         .toList();
 
@@ -166,7 +216,11 @@ class AttendanceService {
   // ============================================
   // Check if Student is Present
   // ============================================
-  Future<bool> isStudentPresent(String studentId, String classId, DateTime date) async {
+  Future<bool> isStudentPresent(
+    String studentId,
+    String classId,
+    DateTime date,
+  ) async {
     final query = await _attendanceRef
         .where('studentId', isEqualTo: studentId)
         .get();
@@ -187,7 +241,10 @@ class AttendanceService {
   // ============================================
   // Get Present Student IDs for Class
   // ============================================
-  Future<Set<String>> getPresentStudentIds(String classId, {DateTime? date}) async {
+  Future<Set<String>> getPresentStudentIds(
+    String classId, {
+    DateTime? date,
+  }) async {
     final attendance = await getByDateAndClass(date ?? DateTime.now(), classId);
     return attendance.map((a) => a.studentId).toSet();
   }
@@ -206,7 +263,8 @@ class AttendanceService {
 
     for (final a in attendance) {
       uniqueStudents.add(a.studentId);
-      final day = '${a.date.year}-${a.date.month.toString().padLeft(2, '0')}-${a.date.day.toString().padLeft(2, '0')}';
+      final day =
+          '${a.date.year}-${a.date.month.toString().padLeft(2, '0')}-${a.date.day.toString().padLeft(2, '0')}';
       attendanceByDay[day] = (attendanceByDay[day] ?? 0) + 1;
     }
 
@@ -262,11 +320,12 @@ class AttendanceService {
     if (attendance.isEmpty) return 0;
 
     // Get unique dates and sort ascending
-    final dates = attendance
-        .map((a) => DateTime(a.date.year, a.date.month, a.date.day))
-        .toSet()
-        .toList()
-      ..sort((a, b) => b.compareTo(a));
+    final dates =
+        attendance
+            .map((a) => DateTime(a.date.year, a.date.month, a.date.day))
+            .toSet()
+            .toList()
+          ..sort((a, b) => b.compareTo(a));
 
     if (dates.isEmpty) return 0;
 
@@ -305,7 +364,11 @@ class AttendanceService {
     final attendanceDate = date ?? DateTime.now();
 
     // Check if already present
-    final alreadyPresent = await isStudentPresent(studentId, classId, attendanceDate);
+    final alreadyPresent = await isStudentPresent(
+      studentId,
+      classId,
+      attendanceDate,
+    );
     if (alreadyPresent) {
       throw Exception('Aluno já marcado como presente nesta aula');
     }
@@ -342,9 +405,15 @@ class AttendanceService {
   // ============================================
   // Unmark Student as Present
   // ============================================
-  Future<void> unmarkPresent(String studentId, String classId, DateTime date) async {
+  Future<void> unmarkPresent(
+    String studentId,
+    String classId,
+    DateTime date,
+  ) async {
     final attendance = await getByDateAndClass(date, classId);
-    final record = attendance.where((a) => a.studentId == studentId).firstOrNull;
+    final record = attendance
+        .where((a) => a.studentId == studentId)
+        .firstOrNull;
 
     if (record == null) {
       throw Exception('Registro de presença não encontrado');
@@ -384,10 +453,15 @@ class AttendanceService {
     final results = <Attendance>[];
 
     // Get already present students (single query)
-    final presentIds = await getPresentStudentIds(classId, date: attendanceDate);
+    final presentIds = await getPresentStudentIds(
+      classId,
+      date: attendanceDate,
+    );
 
     // Filter once
-    final toMark = students.where((s) => !presentIds.contains(s.studentId)).toList();
+    final toMark = students
+        .where((s) => !presentIds.contains(s.studentId))
+        .toList();
     if (toMark.isEmpty) return results;
 
     // Shard into batches of 240 students (≤ 480 writes, under Firestore's 500 cap)
@@ -424,18 +498,20 @@ class AttendanceService {
         });
 
         // Build result locally — no doc.get() needed
-        results.add(Attendance(
-          id: docRef.id,
-          studentId: student.studentId,
-          studentName: student.studentName,
-          classId: classId,
-          className: className,
-          date: attendanceDate,
-          verifiedBy: verifiedBy,
-          verifiedByName: verifiedByName,
-          weight: (weight != null && weight != 1.0) ? weight : null,
-          createdAt: now,
-        ));
+        results.add(
+          Attendance(
+            id: docRef.id,
+            studentId: student.studentId,
+            studentName: student.studentName,
+            classId: classId,
+            className: className,
+            date: attendanceDate,
+            verifiedBy: verifiedBy,
+            verifiedByName: verifiedByName,
+            weight: (weight != null && weight != 1.0) ? weight : null,
+            createdAt: now,
+          ),
+        );
       }
 
       await batch.commit();
@@ -534,7 +610,11 @@ class AttendanceService {
     double? weight,
   }) async {
     final attendanceDate = date ?? DateTime.now();
-    final isPresent = await isStudentPresent(studentId, classId, attendanceDate);
+    final isPresent = await isStudentPresent(
+      studentId,
+      classId,
+      attendanceDate,
+    );
 
     if (isPresent) {
       await unmarkPresent(studentId, classId, attendanceDate);
@@ -602,9 +682,11 @@ class AttendanceService {
       final achievementService = AchievementService(academyId);
       final existing = await achievementService.getByStudent(studentId);
 
-      final alreadyHas = existing.any((a) =>
-          a.type == AchievementType.milestone &&
-          a.milestone == 'attendance_$totalCount');
+      final alreadyHas = existing.any(
+        (a) =>
+            a.type == AchievementType.milestone &&
+            a.milestone == 'attendance_$totalCount',
+      );
 
       if (!alreadyHas) {
         // Find exact date
@@ -632,7 +714,10 @@ class AttendanceService {
   // ============================================
   // Helper: Update Student Attendance Count
   // ============================================
-  Future<void> _updateStudentAttendanceCount(String studentId, int delta) async {
+  Future<void> _updateStudentAttendanceCount(
+    String studentId,
+    int delta,
+  ) async {
     final studentRef = _collections.student(studentId);
     await studentRef.update({
       'attendanceCount': FieldValue.increment(delta),
@@ -651,4 +736,5 @@ AttendanceService createAttendanceService(String academyId) {
 // ============================================
 // Default Instance (uses current academy)
 // ============================================
-AttendanceService get attendanceService => AttendanceService(FirebaseService.academyId);
+AttendanceService get attendanceService =>
+    AttendanceService(FirebaseService.academyId);

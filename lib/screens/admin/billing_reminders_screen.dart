@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../core/feedback_utils.dart';
 import '../../services/firebase_service.dart';
 import '../../services/billing_reminder_service.dart';
+import '../../widgets/cached_image.dart';
 
 /// Admin Billing Reminders Screen
 /// Displays overdue payments organized by collection stages (D+1, D+3, D+7, D+15, D+30+)
@@ -25,6 +26,7 @@ class _AdminBillingRemindersScreenState
     with SingleTickerProviderStateMixin {
   // Data
   Map<BillingStage, List<Map<String, dynamic>>> _overdueStages = {
+    BillingStage.d0: [],
     BillingStage.d1: [],
     BillingStage.d3: [],
     BillingStage.d7: [],
@@ -41,14 +43,16 @@ class _AdminBillingRemindersScreenState
   late BillingReminderService _billingService;
   BillingNotificationService? _notificationService;
 
-  final _currencyFormat =
-      NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+  final _currencyFormat = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
   final _dateFormat = DateFormat('dd/MM/yyyy');
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(
+      length: BillingStage.values.length,
+      vsync: this,
+    );
     _billingService = BillingReminderService(FirebaseService.academyId);
     _loadData();
   }
@@ -78,8 +82,7 @@ class _AdminBillingRemindersScreenState
           .collection('academies')
           .doc(academyId)
           .get();
-      final academyName =
-          academyDoc.data()?['name'] as String? ?? 'Academia';
+      final academyName = academyDoc.data()?['name'] as String? ?? 'Academia';
 
       final notifSettings = results[3] as BillingNotificationSettings;
 
@@ -131,68 +134,72 @@ class _AdminBillingRemindersScreenState
       body: Stack(
         children: [
           _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadData,
-              child: Column(
-                children: [
-                  // Stats Header
-                  _buildStatsHeader(),
-                  const SizedBox(height: 8),
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                  onRefresh: _loadData,
+                  child: Column(
+                    children: [
+                      // Stats Header
+                      _buildStatsHeader(),
+                      const SizedBox(height: 8),
 
-                  // API Warning
-                  if (_notificationSettings != null &&
-                      !_notificationSettings!.hasWhatsAppApi &&
-                      !_notificationSettings!.hasEmailApi)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppTheme.warning.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: AppTheme.warning.withValues(alpha: 0.3),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(LucideIcons.alertTriangle,
-                                size: 16, color: AppTheme.warning),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Habilite os canais de cobranca (WhatsApp e/ou Email) nas configuracoes para enviar cobrancas automaticas.',
-                                style: AppTheme.bodySmall
-                                    .copyWith(color: AppTheme.warning),
+                      // API Warning
+                      if (_notificationSettings != null &&
+                          !_notificationSettings!.hasWhatsAppApi &&
+                          !_notificationSettings!.hasEmailApi)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.warning.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: AppTheme.warning.withValues(alpha: 0.3),
                               ),
                             ),
-                          ],
+                            child: Row(
+                              children: [
+                                Icon(
+                                  LucideIcons.alertTriangle,
+                                  size: 16,
+                                  color: AppTheme.warning,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Habilite os canais de cobranca (WhatsApp e/ou Email) nas configuracoes para enviar cobrancas automaticas.',
+                                    style: AppTheme.bodySmall.copyWith(
+                                      color: AppTheme.warning,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                      const SizedBox(height: 8),
+
+                      // Tab Bar
+                      _buildTabBar(),
+
+                      // Bulk action buttons
+                      _buildBulkActions(),
+
+                      // Tab Content
+                      Expanded(
+                        child: TabBarView(
+                          controller: _tabController,
+                          children: BillingStage.values
+                              .map((stage) => _buildStageList(stage))
+                              .toList(),
                         ),
                       ),
-                    ),
-
-                  const SizedBox(height: 8),
-
-                  // Tab Bar
-                  _buildTabBar(),
-
-                  // Bulk action buttons
-                  _buildBulkActions(),
-
-                  // Tab Content
-                  Expanded(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: BillingStage.values
-                          .map((stage) => _buildStageList(stage))
-                          .toList(),
-                    ),
+                    ],
                   ),
-                ],
-              ),
-            ),
+                ),
           // Loading overlay during bulk send
           if (_isSending)
             Container(
@@ -311,9 +318,7 @@ class _AdminBillingRemindersScreenState
   Widget _buildTabBar() {
     return Container(
       decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: AppTheme.divider, width: 1),
-        ),
+        border: Border(bottom: BorderSide(color: AppTheme.divider, width: 1)),
       ),
       child: TabBar(
         controller: _tabController,
@@ -335,8 +340,10 @@ class _AdminBillingRemindersScreenState
                 if (count > 0) ...[
                   const SizedBox(width: 6),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: _stageColor(stage),
                       borderRadius: BorderRadius.circular(10),
@@ -360,6 +367,8 @@ class _AdminBillingRemindersScreenState
 
   Color _stageColor(BillingStage stage) {
     switch (stage) {
+      case BillingStage.d0:
+        return AppTheme.primary;
       case BillingStage.d1:
         return AppTheme.warning;
       case BillingStage.d3:
@@ -393,9 +402,11 @@ class _AdminBillingRemindersScreenState
         child: _isSending
             ? const Center(
                 child: SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2)))
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
             : ElevatedButton.icon(
                 onPressed: () => _showBulkSendDialog(currentStage),
                 icon: const Icon(LucideIcons.send, size: 16),
@@ -407,7 +418,9 @@ class _AdminBillingRemindersScreenState
                   backgroundColor: AppTheme.success,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -428,13 +441,17 @@ class _AdminBillingRemindersScreenState
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(LucideIcons.checkCircle,
-                size: 48, color: AppTheme.success.withValues(alpha: 0.5)),
+            Icon(
+              LucideIcons.checkCircle,
+              size: 48,
+              color: AppTheme.success.withValues(alpha: 0.5),
+            ),
             const SizedBox(height: 16),
             Text(
               'Nenhum pagamento neste estagio',
-              style:
-                  AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -475,12 +492,10 @@ class _AdminBillingRemindersScreenState
             // Header
             Row(
               children: [
-                CircleAvatar(
+                AppCachedAvatar(
+                  imageUrl: photoUrl,
                   radius: 18,
                   backgroundColor: _stageColor(stage).withValues(alpha: 0.1),
-                  backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
-                      ? NetworkImage(photoUrl)
-                      : null,
                   child: (photoUrl == null || photoUrl.isEmpty)
                       ? Text(
                           studentName.isNotEmpty
@@ -528,20 +543,24 @@ class _AdminBillingRemindersScreenState
                   Chip(
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     visualDensity: VisualDensity.compact,
-                    avatar: Icon(LucideIcons.phone,
-                        size: 12, color: AppTheme.success),
-                    label: Text(phone,
-                        style: const TextStyle(fontSize: 11)),
+                    avatar: Icon(
+                      LucideIcons.phone,
+                      size: 12,
+                      color: AppTheme.success,
+                    ),
+                    label: Text(phone, style: const TextStyle(fontSize: 11)),
                     padding: EdgeInsets.zero,
                   ),
                 if (email != null && email.isNotEmpty)
                   Chip(
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     visualDensity: VisualDensity.compact,
-                    avatar:
-                        Icon(LucideIcons.mail, size: 12, color: AppTheme.info),
-                    label: Text(email,
-                        style: const TextStyle(fontSize: 11)),
+                    avatar: Icon(
+                      LucideIcons.mail,
+                      size: 12,
+                      color: AppTheme.info,
+                    ),
+                    label: Text(email, style: const TextStyle(fontSize: 11)),
                     padding: EdgeInsets.zero,
                   ),
                 if ((phone == null || phone.isEmpty) &&
@@ -549,13 +568,17 @@ class _AdminBillingRemindersScreenState
                   Chip(
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     visualDensity: VisualDensity.compact,
-                    avatar: Icon(LucideIcons.alertTriangle, size: 12, color: Colors.orange),
+                    avatar: Icon(
+                      LucideIcons.alertTriangle,
+                      size: 12,
+                      color: Colors.orange,
+                    ),
                     label: Text(
-                        contact?.category == 'kids'
-                            ? 'Sem contato do responsavel'
-                            : 'Sem contato',
-                        style:
-                            TextStyle(fontSize: 11, color: Colors.orange)),
+                      contact?.category == 'kids'
+                          ? 'Sem contato do responsavel'
+                          : 'Sem contato',
+                      style: TextStyle(fontSize: 11, color: Colors.orange),
+                    ),
                     padding: EdgeInsets.zero,
                   ),
               ],
@@ -602,7 +625,9 @@ class _AdminBillingRemindersScreenState
                   IconButton(
                     onPressed: () {
                       FeedbackUtils.showInfo(
-                          context, 'Ligar para $studentName: $phone');
+                        context,
+                        'Ligar para $studentName: $phone',
+                      );
                     },
                     icon: const Icon(LucideIcons.phone, size: 20),
                     color: AppTheme.textSecondary,
@@ -679,20 +704,24 @@ class _AdminBillingRemindersScreenState
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           title: Row(
             children: [
               Icon(
-                mode == 'whatsapp' ? LucideIcons.messageCircle : LucideIcons.mail,
+                mode == 'whatsapp'
+                    ? LucideIcons.messageCircle
+                    : LucideIcons.mail,
                 color: mode == 'whatsapp' ? AppTheme.success : AppTheme.info,
                 size: 24,
               ),
               const SizedBox(width: 12),
               Text(
                 mode == 'whatsapp' ? 'Enviar WhatsApp' : 'Enviar Email',
-                style:
-                    AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                style: AppTheme.titleLarge.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
@@ -703,20 +732,23 @@ class _AdminBillingRemindersScreenState
               children: [
                 Text(
                   'Para: $studentName',
-                  style: AppTheme.bodyMedium
-                      .copyWith(color: AppTheme.textSecondary),
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
                 if (mode == 'whatsapp')
                   Text(
                     'Tel: ${contact.effectivePhone}',
-                    style: AppTheme.bodySmall
-                        .copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 if (mode == 'email')
                   Text(
                     'Email: ${contact.effectiveEmail}',
-                    style: AppTheme.bodySmall
-                        .copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 const SizedBox(height: 16),
                 if (mode == 'email') ...[
@@ -729,7 +761,9 @@ class _AdminBillingRemindersScreenState
                         borderRadius: BorderRadius.circular(8),
                       ),
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -751,8 +785,10 @@ class _AdminBillingRemindersScreenState
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
-              child: Text('Cancelar',
-                  style: TextStyle(color: AppTheme.textSecondary)),
+              child: Text(
+                'Cancelar',
+                style: TextStyle(color: AppTheme.textSecondary),
+              ),
             ),
             ElevatedButton.icon(
               onPressed: () async {
@@ -767,10 +803,13 @@ class _AdminBillingRemindersScreenState
                 );
               },
               icon: Icon(LucideIcons.send, size: 16),
-              label: Text(mode == 'whatsapp' ? 'Enviar WhatsApp' : 'Enviar Email'),
+              label: Text(
+                mode == 'whatsapp' ? 'Enviar WhatsApp' : 'Enviar Email',
+              ),
               style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    mode == 'whatsapp' ? AppTheme.success : AppTheme.primary,
+                backgroundColor: mode == 'whatsapp'
+                    ? AppTheme.success
+                    : AppTheme.primary,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -841,9 +880,7 @@ class _AdminBillingRemindersScreenState
           financialId: financialId,
           studentId: studentId,
           studentName: studentName,
-          type: mode == 'whatsapp'
-              ? ContactType.whatsapp
-              : ContactType.email,
+          type: mode == 'whatsapp' ? ContactType.whatsapp : ContactType.email,
           notes:
               'Cobranca enviada via ${mode == 'whatsapp' ? 'WhatsApp' : 'Email'}',
           stage: stage.value,
@@ -854,12 +891,16 @@ class _AdminBillingRemindersScreenState
 
         if (mounted) {
           FeedbackUtils.showSuccess(
-              context, '${mode == 'whatsapp' ? 'WhatsApp' : 'Email'} enviado para $studentName!');
+            context,
+            '${mode == 'whatsapp' ? 'WhatsApp' : 'Email'} enviado para $studentName!',
+          );
         }
       } else {
         if (mounted) {
           FeedbackUtils.showError(
-              context, 'Erro: ${result.error ?? 'Falha no envio'}');
+            context,
+            'Erro: ${result.error ?? 'Falha no envio'}',
+          );
         }
       }
     } catch (e) {
@@ -898,14 +939,18 @@ class _AdminBillingRemindersScreenState
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
               title: Row(
                 children: [
                   Icon(LucideIcons.send, color: AppTheme.success, size: 22),
                   const SizedBox(width: 10),
                   Text(
                     'Cobrar todos (${items.length})',
-                    style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                    style: AppTheme.titleLarge.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
@@ -922,34 +967,58 @@ class _AdminBillingRemindersScreenState
                         decoration: BoxDecoration(
                           color: AppTheme.info.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppTheme.info.withValues(alpha: 0.2)),
+                          border: Border.all(
+                            color: AppTheme.info.withValues(alpha: 0.2),
+                          ),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
                               children: [
-                                Icon(LucideIcons.messageCircle, size: 14, color: AppTheme.success),
+                                Icon(
+                                  LucideIcons.messageCircle,
+                                  size: 14,
+                                  color: AppTheme.success,
+                                ),
                                 const SizedBox(width: 6),
-                                Text('${recipients.phones.length} telefone(s)', style: AppTheme.bodySmall),
+                                Text(
+                                  '${recipients.phones.length} telefone(s)',
+                                  style: AppTheme.bodySmall,
+                                ),
                               ],
                             ),
                             const SizedBox(height: 4),
                             Row(
                               children: [
-                                Icon(LucideIcons.mail, size: 14, color: AppTheme.info),
+                                Icon(
+                                  LucideIcons.mail,
+                                  size: 14,
+                                  color: AppTheme.info,
+                                ),
                                 const SizedBox(width: 6),
-                                Text('${recipients.emails.length} email(s)', style: AppTheme.bodySmall),
+                                Text(
+                                  '${recipients.emails.length} email(s)',
+                                  style: AppTheme.bodySmall,
+                                ),
                               ],
                             ),
                             if (recipients.skipped > 0) ...[
                               const SizedBox(height: 4),
                               Row(
                                 children: [
-                                  Icon(LucideIcons.alertTriangle, size: 14, color: Colors.orange),
+                                  Icon(
+                                    LucideIcons.alertTriangle,
+                                    size: 14,
+                                    color: Colors.orange,
+                                  ),
                                   const SizedBox(width: 6),
-                                  Text('${recipients.skipped} sem contato',
-                                      style: AppTheme.bodySmall.copyWith(color: Colors.orange)),
+                                  Text(
+                                    '${recipients.skipped} sem contato',
+                                    style: AppTheme.bodySmall.copyWith(
+                                      color: Colors.orange,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ],
@@ -966,8 +1035,13 @@ class _AdminBillingRemindersScreenState
                         TextField(
                           controller: subjectController,
                           decoration: InputDecoration(
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -980,8 +1054,11 @@ class _AdminBillingRemindersScreenState
                         controller: messageController,
                         maxLines: 6,
                         decoration: InputDecoration(
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          helperText: 'Variaveis: {nome}, {valor}, {vencimento}, {dias} — personalizadas por aluno',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          helperText:
+                              'Variaveis: {nome}, {valor}, {vencimento}, {dias} — personalizadas por aluno',
                           helperMaxLines: 2,
                         ),
                       ),
@@ -994,7 +1071,11 @@ class _AdminBillingRemindersScreenState
                       SwitchListTile(
                         title: Row(
                           children: [
-                            Icon(LucideIcons.clock, size: 18, color: AppTheme.primary),
+                            Icon(
+                              LucideIcons.clock,
+                              size: 18,
+                              color: AppTheme.primary,
+                            ),
                             const SizedBox(width: 8),
                             const Text('Agendar envio'),
                           ],
@@ -1012,17 +1093,28 @@ class _AdminBillingRemindersScreenState
                         const SizedBox(height: 8),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
-                          leading: Icon(LucideIcons.calendar, color: AppTheme.primary),
+                          leading: Icon(
+                            LucideIcons.calendar,
+                            color: AppTheme.primary,
+                          ),
                           title: Text(
                             scheduledDateTime != null
-                                ? DateFormat('dd/MM/yyyy HH:mm').format(scheduledDateTime!)
+                                ? DateFormat(
+                                    'dd/MM/yyyy HH:mm',
+                                  ).format(scheduledDateTime!)
                                 : 'Selecionar data e hora',
                             style: AppTheme.bodyMedium.copyWith(
-                              color: scheduledDateTime != null ? AppTheme.textPrimary : AppTheme.textSecondary,
+                              color: scheduledDateTime != null
+                                  ? AppTheme.textPrimary
+                                  : AppTheme.textSecondary,
                             ),
                           ),
                           subtitle: const Text('Horario de Brasilia'),
-                          trailing: Icon(LucideIcons.chevronRight, size: 18, color: AppTheme.textSecondary),
+                          trailing: Icon(
+                            LucideIcons.chevronRight,
+                            size: 18,
+                            color: AppTheme.textSecondary,
+                          ),
                           onTap: () async {
                             final now = DateTime.now();
                             final date = await showDatePicker(
@@ -1037,14 +1129,19 @@ class _AdminBillingRemindersScreenState
                               context: context,
                               initialTime: scheduledDateTime != null
                                   ? TimeOfDay.fromDateTime(scheduledDateTime!)
-                                  : TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
+                                  : TimeOfDay.fromDateTime(
+                                      now.add(const Duration(hours: 1)),
+                                    ),
                             );
                             if (time == null) return;
 
                             setDialogState(() {
                               scheduledDateTime = DateTime(
-                                date.year, date.month, date.day,
-                                time.hour, time.minute,
+                                date.year,
+                                date.month,
+                                date.day,
+                                time.hour,
+                                time.minute,
                               );
                             });
                           },
@@ -1057,7 +1154,10 @@ class _AdminBillingRemindersScreenState
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(dialogContext),
-                  child: Text('Cancelar', style: TextStyle(color: AppTheme.textSecondary)),
+                  child: Text(
+                    'Cancelar',
+                    style: TextStyle(color: AppTheme.textSecondary),
+                  ),
                 ),
                 ElevatedButton.icon(
                   onPressed: (scheduleEnabled && scheduledDateTime == null)
@@ -1070,8 +1170,11 @@ class _AdminBillingRemindersScreenState
                             subject: subjectController.text,
                             phones: recipients.phones,
                             emails: recipients.emails,
-                            scheduledTime: scheduleEnabled && scheduledDateTime != null
-                                ? DateFormat('yyyy-MM-dd HH:mm').format(scheduledDateTime!)
+                            scheduledTime:
+                                scheduleEnabled && scheduledDateTime != null
+                                ? DateFormat(
+                                    'yyyy-MM-dd HH:mm',
+                                  ).format(scheduledDateTime!)
                                 : null,
                           );
                         },
@@ -1079,11 +1182,17 @@ class _AdminBillingRemindersScreenState
                     scheduleEnabled ? LucideIcons.clock : LucideIcons.send,
                     size: 16,
                   ),
-                  label: Text(scheduleEnabled ? 'Agendar Envio' : 'Enviar Agora'),
+                  label: Text(
+                    scheduleEnabled ? 'Agendar Envio' : 'Enviar Agora',
+                  ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: scheduleEnabled ? AppTheme.primary : AppTheme.success,
+                    backgroundColor: scheduleEnabled
+                        ? AppTheme.primary
+                        : AppTheme.success,
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
               ],
@@ -1106,8 +1215,12 @@ class _AdminBillingRemindersScreenState
     String? scheduledTime,
   }) async {
     if (_notificationService == null) return;
-    if (!(_notificationSettings?.whatsappEnabled ?? false) && !(_notificationSettings?.emailEnabled ?? false)) {
-      FeedbackUtils.showError(context, 'Nenhum canal de notificacao esta habilitado. Habilite WhatsApp ou Email nas configuracoes.');
+    if (!(_notificationSettings?.whatsappEnabled ?? false) &&
+        !(_notificationSettings?.emailEnabled ?? false)) {
+      FeedbackUtils.showError(
+        context,
+        'Nenhum canal de notificacao esta habilitado. Habilite WhatsApp ou Email nas configuracoes.',
+      );
       return;
     }
 
@@ -1133,15 +1246,25 @@ class _AdminBillingRemindersScreenState
         final financialId = item['id'] as String? ?? '';
 
         final personalizedMessage = _notificationService!.applyMessageTemplate(
-          messageTemplate, studentName, amount, dueDate, daysOverdue,
+          messageTemplate,
+          studentName,
+          amount,
+          dueDate,
+          daysOverdue,
         );
         final personalizedSubject = _notificationService!.applyMessageTemplate(
-          subjectTemplate, studentName, amount, dueDate, daysOverdue,
+          subjectTemplate,
+          studentName,
+          amount,
+          dueDate,
+          daysOverdue,
         );
 
         // Send WhatsApp (only if enabled in settings)
         final phone = contact.effectivePhone;
-        if ((_notificationSettings?.whatsappEnabled ?? false) && phone != null && phone.isNotEmpty) {
+        if ((_notificationSettings?.whatsappEnabled ?? false) &&
+            phone != null &&
+            phone.isNotEmpty) {
           waTotal++;
           final result = await _notificationService!.sendWhatsApp(
             phone: phone,
@@ -1158,13 +1281,21 @@ class _AdminBillingRemindersScreenState
             waSent++;
           } else {
             waFailed++;
-            failures.add(BulkFailure(type: 'whatsapp', recipient: phone, error: result.error ?? ''));
+            failures.add(
+              BulkFailure(
+                type: 'whatsapp',
+                recipient: phone,
+                error: result.error ?? '',
+              ),
+            );
           }
         }
 
         // Send Email (only if enabled in settings)
         final email = contact.effectiveEmail;
-        if ((_notificationSettings?.emailEnabled ?? false) && email != null && email.isNotEmpty) {
+        if ((_notificationSettings?.emailEnabled ?? false) &&
+            email != null &&
+            email.isNotEmpty) {
           emTotal++;
           final result = await _notificationService!.sendEmail(
             email: email,
@@ -1182,13 +1313,25 @@ class _AdminBillingRemindersScreenState
             emSent++;
           } else {
             emFailed++;
-            failures.add(BulkFailure(type: 'email', recipient: email, error: result.error ?? ''));
+            failures.add(
+              BulkFailure(
+                type: 'email',
+                recipient: email,
+                error: result.error ?? '',
+              ),
+            );
           }
         }
 
         // Auto-log contact
-        final sentWhatsApp = (_notificationSettings?.whatsappEnabled ?? false) && phone != null && phone.isNotEmpty;
-        final sentEmail = (_notificationSettings?.emailEnabled ?? false) && email != null && email.isNotEmpty;
+        final sentWhatsApp =
+            (_notificationSettings?.whatsappEnabled ?? false) &&
+            phone != null &&
+            phone.isNotEmpty;
+        final sentEmail =
+            (_notificationSettings?.emailEnabled ?? false) &&
+            email != null &&
+            email.isNotEmpty;
         if (sentWhatsApp || sentEmail) {
           await _billingService.logContactAttempt(
             financialId: financialId,
@@ -1205,13 +1348,23 @@ class _AdminBillingRemindersScreenState
       }
 
       if (mounted) {
-        _showBulkServerResultDialog(BulkServerResult(
-          success: true,
-          scheduled: false,
-          whatsapp: BulkChannelSummary(total: waTotal, sent: waSent, failed: waFailed),
-          email: BulkChannelSummary(total: emTotal, sent: emSent, failed: emFailed),
-          failures: failures,
-        ));
+        _showBulkServerResultDialog(
+          BulkServerResult(
+            success: true,
+            scheduled: false,
+            whatsapp: BulkChannelSummary(
+              total: waTotal,
+              sent: waSent,
+              failed: waFailed,
+            ),
+            email: BulkChannelSummary(
+              total: emTotal,
+              sent: emSent,
+              failed: emFailed,
+            ),
+            failures: failures,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -1230,7 +1383,9 @@ class _AdminBillingRemindersScreenState
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           title: Row(
             children: [
               Icon(
@@ -1242,7 +1397,9 @@ class _AdminBillingRemindersScreenState
               Expanded(
                 child: Text(
                   result.scheduled ? 'Envio Agendado' : 'Resultado do Envio',
-                  style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+                  style: AppTheme.titleMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -1260,12 +1417,18 @@ class _AdminBillingRemindersScreenState
                     ),
                     child: Row(
                       children: [
-                        Icon(LucideIcons.calendar, size: 18, color: AppTheme.info),
+                        Icon(
+                          LucideIcons.calendar,
+                          size: 18,
+                          color: AppTheme.info,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Agendado para ${result.scheduledTime ?? ""}',
-                            style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
+                            style: AppTheme.bodyMedium.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],
@@ -1286,23 +1449,35 @@ class _AdminBillingRemindersScreenState
                     children: [
                       Column(
                         children: [
-                          Icon(LucideIcons.messageCircle, size: 18, color: AppTheme.success),
+                          Icon(
+                            LucideIcons.messageCircle,
+                            size: 18,
+                            color: AppTheme.success,
+                          ),
                           const SizedBox(height: 4),
                           Text('WhatsApp', style: AppTheme.labelSmall),
                           Text(
                             '${result.whatsapp.sent ?? result.whatsapp.total}/${result.whatsapp.total}',
-                            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                            style: AppTheme.titleMedium.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ],
                       ),
                       Column(
                         children: [
-                          Icon(LucideIcons.mail, size: 18, color: AppTheme.info),
+                          Icon(
+                            LucideIcons.mail,
+                            size: 18,
+                            color: AppTheme.info,
+                          ),
                           const SizedBox(height: 4),
                           Text('Email', style: AppTheme.labelSmall),
                           Text(
                             '${result.email.sent ?? result.email.total}/${result.email.total}',
-                            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                            style: AppTheme.titleMedium.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ],
                       ),
@@ -1324,34 +1499,49 @@ class _AdminBillingRemindersScreenState
                     ),
                   ),
                   const SizedBox(height: 8),
-                  ...result.failures.map((f) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Row(
-                      children: [
-                        Icon(LucideIcons.xCircle, size: 14, color: AppTheme.error),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: AppTheme.divider,
-                            borderRadius: BorderRadius.circular(4),
+                  ...result.failures.map(
+                    (f) => Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            LucideIcons.xCircle,
+                            size: 14,
+                            color: AppTheme.error,
                           ),
-                          child: Text(
-                            f.type == 'whatsapp' ? 'WA' : 'Email',
-                            style: const TextStyle(fontSize: 9),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.divider,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              f.type == 'whatsapp' ? 'WA' : 'Email',
+                              style: const TextStyle(fontSize: 9),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(f.recipient, style: AppTheme.bodySmall, overflow: TextOverflow.ellipsis),
-                        ),
-                        Text(
-                          f.error,
-                          style: AppTheme.labelSmall.copyWith(color: AppTheme.error),
-                        ),
-                      ],
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              f.recipient,
+                              style: AppTheme.bodySmall,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            f.error,
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.error,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  )),
+                  ),
                 ],
               ],
             ),
@@ -1359,7 +1549,10 @@ class _AdminBillingRemindersScreenState
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
-              child: Text('Fechar', style: TextStyle(color: AppTheme.textSecondary)),
+              child: Text(
+                'Fechar',
+                style: TextStyle(color: AppTheme.textSecondary),
+              ),
             ),
           ],
         );
@@ -1375,11 +1568,14 @@ class _AdminBillingRemindersScreenState
     bool emailEnabled = _notificationSettings?.emailEnabled ?? false;
     // Clone current templates or start empty
     final waTemplates = Map<String, String>.from(
-        _notificationSettings?.messageTemplates?.whatsapp ?? {});
+      _notificationSettings?.messageTemplates?.whatsapp ?? {},
+    );
     final emailSubjectTemplates = Map<String, String>.from(
-        _notificationSettings?.messageTemplates?.emailSubject ?? {});
+      _notificationSettings?.messageTemplates?.emailSubject ?? {},
+    );
     final emailBodyTemplates = Map<String, String>.from(
-        _notificationSettings?.messageTemplates?.emailBody ?? {});
+      _notificationSettings?.messageTemplates?.emailBody ?? {},
+    );
     bool showTemplates = false;
     int selectedStageIdx = 0;
     final stages = ['D+1', 'D+3', 'D+7', 'D+15', 'D+30'];
@@ -1393,7 +1589,8 @@ class _AdminBillingRemindersScreenState
 
             return AlertDialog(
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
+                borderRadius: BorderRadius.circular(16),
+              ),
               title: Row(
                 children: [
                   Container(
@@ -1402,14 +1599,18 @@ class _AdminBillingRemindersScreenState
                       color: AppTheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(LucideIcons.settings,
-                        color: AppTheme.primary, size: 24),
+                    child: const Icon(
+                      LucideIcons.settings,
+                      color: AppTheme.primary,
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Text(
                     'Configuracoes',
-                    style: AppTheme.titleLarge
-                        .copyWith(fontWeight: FontWeight.w600),
+                    style: AppTheme.titleLarge.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
@@ -1424,16 +1625,19 @@ class _AdminBillingRemindersScreenState
                       const SizedBox(height: 4),
                       Text(
                         'Habilite os canais que deseja utilizar para enviar cobrancas aos alunos.',
-                        style: AppTheme.bodySmall
-                            .copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                       const SizedBox(height: 16),
                       SwitchListTile(
                         title: const Text('Cobranca via WhatsApp'),
-                        secondary: Icon(LucideIcons.phone,
-                            color: whatsappEnabled
-                                ? AppTheme.success
-                                : AppTheme.textSecondary),
+                        secondary: Icon(
+                          LucideIcons.phone,
+                          color: whatsappEnabled
+                              ? AppTheme.success
+                              : AppTheme.textSecondary,
+                        ),
                         value: whatsappEnabled,
                         activeColor: AppTheme.success,
                         contentPadding: EdgeInsets.zero,
@@ -1443,10 +1647,12 @@ class _AdminBillingRemindersScreenState
                       ),
                       SwitchListTile(
                         title: const Text('Cobranca via Email'),
-                        secondary: Icon(LucideIcons.mail,
-                            color: emailEnabled
-                                ? AppTheme.primary
-                                : AppTheme.textSecondary),
+                        secondary: Icon(
+                          LucideIcons.mail,
+                          color: emailEnabled
+                              ? AppTheme.primary
+                              : AppTheme.textSecondary,
+                        ),
                         value: emailEnabled,
                         activeColor: AppTheme.primary,
                         contentPadding: EdgeInsets.zero,
@@ -1461,23 +1667,25 @@ class _AdminBillingRemindersScreenState
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('Templates de Mensagem',
-                              style: AppTheme.titleSmall),
+                          Text(
+                            'Templates de Mensagem',
+                            style: AppTheme.titleSmall,
+                          ),
                           TextButton(
                             onPressed: () {
                               setDialogState(
-                                  () => showTemplates = !showTemplates);
+                                () => showTemplates = !showTemplates,
+                              );
                             },
-                            child: Text(showTemplates
-                                ? 'Ocultar'
-                                : 'Editar'),
+                            child: Text(showTemplates ? 'Ocultar' : 'Editar'),
                           ),
                         ],
                       ),
                       Text(
                         'Variaveis: {nome}, {valor}, {vencimento}, {dias}, {academia}',
-                        style: AppTheme.labelSmall
-                            .copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
 
                       if (showTemplates) ...[
@@ -1488,14 +1696,17 @@ class _AdminBillingRemindersScreenState
                           spacing: 6,
                           children: List.generate(stages.length, (i) {
                             return ChoiceChip(
-                              label: Text(stages[i],
-                                  style: const TextStyle(fontSize: 12)),
+                              label: Text(
+                                stages[i],
+                                style: const TextStyle(fontSize: 12),
+                              ),
                               selected: selectedStageIdx == i,
                               onSelected: (_) {
                                 setDialogState(() => selectedStageIdx = i);
                               },
-                              selectedColor:
-                                  AppTheme.primary.withValues(alpha: 0.2),
+                              selectedColor: AppTheme.primary.withValues(
+                                alpha: 0.2,
+                              ),
                               visualDensity: VisualDensity.compact,
                             );
                           }),
@@ -1503,11 +1714,14 @@ class _AdminBillingRemindersScreenState
                         const SizedBox(height: 12),
 
                         // WhatsApp template
-                        Text('WhatsApp - $stageKey',
-                            style: AppTheme.labelMedium),
+                        Text(
+                          'WhatsApp - $stageKey',
+                          style: AppTheme.labelMedium,
+                        ),
                         const SizedBox(height: 6),
                         TextFormField(
-                          initialValue: waTemplates[stageKey] ??
+                          initialValue:
+                              waTemplates[stageKey] ??
                               BillingNotificationService
                                   .defaultWhatsAppTemplates[stageKey] ??
                               '',
@@ -1526,11 +1740,14 @@ class _AdminBillingRemindersScreenState
                         const SizedBox(height: 12),
 
                         // Email subject
-                        Text('Assunto Email - $stageKey',
-                            style: AppTheme.labelMedium),
+                        Text(
+                          'Assunto Email - $stageKey',
+                          style: AppTheme.labelMedium,
+                        ),
                         const SizedBox(height: 6),
                         TextFormField(
-                          initialValue: emailSubjectTemplates[stageKey] ??
+                          initialValue:
+                              emailSubjectTemplates[stageKey] ??
                               BillingNotificationService
                                   .defaultEmailSubjectTemplates[stageKey] ??
                               '',
@@ -1540,7 +1757,9 @@ class _AdminBillingRemindersScreenState
                               borderRadius: BorderRadius.circular(8),
                             ),
                             contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 10),
+                              horizontal: 10,
+                              vertical: 10,
+                            ),
                           ),
                           onChanged: (v) {
                             emailSubjectTemplates[stageKey] = v;
@@ -1549,11 +1768,14 @@ class _AdminBillingRemindersScreenState
                         const SizedBox(height: 12),
 
                         // Email body
-                        Text('Corpo Email - $stageKey',
-                            style: AppTheme.labelMedium),
+                        Text(
+                          'Corpo Email - $stageKey',
+                          style: AppTheme.labelMedium,
+                        ),
                         const SizedBox(height: 6),
                         TextFormField(
-                          initialValue: emailBodyTemplates[stageKey] ??
+                          initialValue:
+                              emailBodyTemplates[stageKey] ??
                               BillingNotificationService
                                   .defaultEmailBodyTemplates[stageKey] ??
                               '',
@@ -1584,7 +1806,9 @@ class _AdminBillingRemindersScreenState
                             child: Text(
                               'Restaurar padrao para $stageKey',
                               style: TextStyle(
-                                  fontSize: 12, color: AppTheme.warning),
+                                fontSize: 12,
+                                color: AppTheme.warning,
+                              ),
                             ),
                           ),
                         ),
@@ -1596,8 +1820,10 @@ class _AdminBillingRemindersScreenState
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(dialogContext),
-                  child: Text('Cancelar',
-                      style: TextStyle(color: AppTheme.textSecondary)),
+                  child: Text(
+                    'Cancelar',
+                    style: TextStyle(color: AppTheme.textSecondary),
+                  ),
                 ),
                 ElevatedButton(
                   onPressed: () async {
@@ -1614,8 +1840,9 @@ class _AdminBillingRemindersScreenState
                         messageTemplates: templates,
                       );
 
-                      await _billingService
-                          .saveNotificationSettings(newSettings);
+                      await _billingService.saveNotificationSettings(
+                        newSettings,
+                      );
 
                       setState(() {
                         _notificationSettings = newSettings;
@@ -1628,12 +1855,13 @@ class _AdminBillingRemindersScreenState
                       }
                       if (mounted) {
                         FeedbackUtils.showSuccess(
-                            context, 'Configuracoes salvas!');
+                          context,
+                          'Configuracoes salvas!',
+                        );
                       }
                     } catch (e) {
                       if (mounted) {
-                        FeedbackUtils.showError(
-                            context, 'Erro ao salvar: $e');
+                        FeedbackUtils.showError(context, 'Erro ao salvar: $e');
                       }
                     }
                   },
@@ -1674,7 +1902,8 @@ class _AdminBillingRemindersScreenState
           builder: (context, setDialogState) {
             return AlertDialog(
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
+                borderRadius: BorderRadius.circular(16),
+              ),
               title: Row(
                 children: [
                   Container(
@@ -1683,15 +1912,19 @@ class _AdminBillingRemindersScreenState
                       color: AppTheme.info.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(LucideIcons.clipboardList,
-                        color: AppTheme.info, size: 24),
+                    child: const Icon(
+                      LucideIcons.clipboardList,
+                      color: AppTheme.info,
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       'Registrar Contato',
-                      style: AppTheme.titleLarge
-                          .copyWith(fontWeight: FontWeight.w600),
+                      style: AppTheme.titleLarge.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -1703,12 +1936,12 @@ class _AdminBillingRemindersScreenState
                   children: [
                     Text(
                       'Aluno: $studentName',
-                      style: AppTheme.bodyMedium
-                          .copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: 16),
-                    Text('Tipo de Contato',
-                        style: AppTheme.labelMedium),
+                    Text('Tipo de Contato', style: AppTheme.labelMedium),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<ContactType>(
                       value: selectedType,
@@ -1717,7 +1950,9 @@ class _AdminBillingRemindersScreenState
                           borderRadius: BorderRadius.circular(8),
                         ),
                         contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                       ),
                       items: ContactType.values.map((type) {
                         return DropdownMenuItem(
@@ -1766,8 +2001,7 @@ class _AdminBillingRemindersScreenState
                         notes: notesController.text,
                         stage: stage.value,
                         daysOverdue: daysOverdue,
-                        contactedBy:
-                            FirebaseService.currentUserId ?? '',
+                        contactedBy: FirebaseService.currentUserId ?? '',
                         contactedByName: 'Admin',
                       );
 
@@ -1776,12 +2010,16 @@ class _AdminBillingRemindersScreenState
                       }
                       if (mounted) {
                         FeedbackUtils.showSuccess(
-                            context, 'Contato registrado com sucesso!');
+                          context,
+                          'Contato registrado com sucesso!',
+                        );
                       }
                     } catch (e) {
                       if (mounted) {
                         FeedbackUtils.showError(
-                            context, 'Erro ao registrar contato: $e');
+                          context,
+                          'Erro ao registrar contato: $e',
+                        );
                       }
                     }
                   },

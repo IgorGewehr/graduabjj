@@ -59,7 +59,9 @@ class StudentService {
     }
 
     final snapshot = await query.get();
-    var students = snapshot.docs.map((doc) => Student.fromFirestore(doc)).toList();
+    var students = snapshot.docs
+        .map((doc) => Student.fromFirestore(doc))
+        .toList();
 
     // Sort by total attendance count (descending)
     students.sort((a, b) {
@@ -107,7 +109,8 @@ class StudentService {
   // ============================================
   // Search Students by Name
   // ============================================
-  Future<List<Student>> searchByName(String searchTerm, {
+  Future<List<Student>> searchByName(
+    String searchTerm, {
     StudentStatus? status,
     StudentCategory? category,
     String? belt,
@@ -119,10 +122,13 @@ class StudentService {
     );
 
     final term = searchTerm.toLowerCase().trim();
-    return students.where((s) =>
-        s.fullName.toLowerCase().contains(term) ||
-        (s.nickname?.toLowerCase().contains(term) ?? false)
-    ).toList();
+    return students
+        .where(
+          (s) =>
+              s.fullName.toLowerCase().contains(term) ||
+              (s.nickname?.toLowerCase().contains(term) ?? false),
+        )
+        .toList();
   }
 
   // ============================================
@@ -133,16 +139,8 @@ class StudentService {
 
     final stats = {
       'total': 0,
-      'byStatus': {
-        'active': 0,
-        'injured': 0,
-        'inactive': 0,
-        'suspended': 0,
-      },
-      'byCategory': {
-        'kids': 0,
-        'adult': 0,
-      },
+      'byStatus': {'active': 0, 'injured': 0, 'inactive': 0, 'suspended': 0},
+      'byCategory': {'kids': 0, 'adult': 0},
     };
 
     for (final doc in snapshot.docs) {
@@ -151,12 +149,15 @@ class StudentService {
 
       final status = data['status'] as String?;
       if (status != null && (stats['byStatus'] as Map).containsKey(status)) {
-        (stats['byStatus'] as Map)[status] = ((stats['byStatus'] as Map)[status] as int) + 1;
+        (stats['byStatus'] as Map)[status] =
+            ((stats['byStatus'] as Map)[status] as int) + 1;
       }
 
       final category = data['category'] as String?;
-      if (category != null && (stats['byCategory'] as Map).containsKey(category)) {
-        (stats['byCategory'] as Map)[category] = ((stats['byCategory'] as Map)[category] as int) + 1;
+      if (category != null &&
+          (stats['byCategory'] as Map).containsKey(category)) {
+        (stats['byCategory'] as Map)[category] =
+            ((stats['byCategory'] as Map)[category] as int) + 1;
       }
     }
 
@@ -177,16 +178,18 @@ class StudentService {
   // Update Belt/Stripes
   // ============================================
   Future<Student> updateBelt(String id, String newBelt, int newStripes) async {
-    return update(id, {
-      'currentBelt': newBelt,
-      'currentStripes': newStripes,
-    });
+    return update(id, {'currentBelt': newBelt, 'currentStripes': newStripes});
   }
 
   // ============================================
   // Update Grade (multi-sport aware)
   // ============================================
-  Future<Student> updateGrade(String id, SportId sportId, String grade, int stripes) async {
+  Future<Student> updateGrade(
+    String id,
+    SportId sportId,
+    String grade,
+    int stripes,
+  ) async {
     final data = <String, dynamic>{};
     // Always update legacy fields for BJJ (backward compat with marcusjj)
     if (sportId == SportId.bjj) {
@@ -194,8 +197,8 @@ class StudentService {
       data['currentStripes'] = stripes;
     }
     // Write to sportData
-    data['sportData.${ sportId.value }.currentGrade'] = grade;
-    data['sportData.${ sportId.value }.currentStripes'] = stripes;
+    data['sportData.${sportId.value}.currentGrade'] = grade;
+    data['sportData.${sportId.value}.currentStripes'] = stripes;
     return update(id, data);
   }
 
@@ -203,18 +206,14 @@ class StudentService {
   // Update Sports List
   // ============================================
   Future<Student> updateSports(String id, List<SportId> sportIds) async {
-    return update(id, {
-      'sports': sportIds.map((s) => s.value).toList(),
-    });
+    return update(id, {'sports': sportIds.map((s) => s.value).toList()});
   }
 
   // ============================================
   // Update Primary Sport
   // ============================================
   Future<Student> updatePrimarySport(String id, SportId sportId) async {
-    return update(id, {
-      'primarySport': sportId.value,
-    });
+    return update(id, {'primarySport': sportId.value});
   }
 
   // ============================================
@@ -269,7 +268,10 @@ class StudentService {
   // ============================================
   // Create Student from Map (for forms)
   // ============================================
-  Future<Student> createFromMap(Map<String, dynamic> data, {String? createdBy}) async {
+  Future<Student> createFromMap(
+    Map<String, dynamic> data, {
+    String? createdBy,
+  }) async {
     data['createdAt'] = FieldValue.serverTimestamp();
     data['updatedAt'] = FieldValue.serverTimestamp();
     data['createdBy'] = createdBy;
@@ -282,14 +284,42 @@ class StudentService {
 
   // ============================================
   // Quick Create (minimal data)
+  //
+  // Requires at least one sport. The first entry in [sports] becomes the
+  // primary sport. For each sport, the student is seeded with the first
+  // grade in that sport's grade list for the requested category (kids/adult).
+  // Legacy `currentBelt`/`currentStripes` are written from the primary
+  // sport for backward compatibility with older read paths.
   // ============================================
   Future<Student> quickCreate({
     required String fullName,
+    required List<SportId> sports,
     String? phone,
     String? email,
     StudentCategory category = StudentCategory.adult,
     String? createdBy,
   }) async {
+    if (sports.isEmpty) {
+      throw ArgumentError('Pelo menos uma modalidade deve ser informada');
+    }
+
+    final primary = sports.first;
+    final sportData = <String, dynamic>{};
+    String legacyBelt = 'white';
+    int legacyStripes = 0;
+    for (final sport in sports) {
+      final grades = getGradesForSport(sport, category: category.value);
+      final firstGradeId = grades.isNotEmpty ? grades.first.id : 'white';
+      sportData[sport.value] = {
+        'currentGrade': firstGradeId,
+        'currentStripes': 0,
+      };
+      if (sport == primary) {
+        legacyBelt = firstGradeId;
+        legacyStripes = 0;
+      }
+    }
+
     final now = DateTime.now();
     final data = {
       'fullName': fullName,
@@ -297,8 +327,11 @@ class StudentService {
       'email': email,
       'category': category.value,
       'status': StudentStatus.active.value,
-      'currentBelt': 'white',
-      'currentStripes': 0,
+      'currentBelt': legacyBelt,
+      'currentStripes': legacyStripes,
+      'sports': sports.map((s) => s.value).toList(),
+      'sportData': sportData,
+      'primarySport': primary.value,
       'startDate': Timestamp.fromDate(now),
       'tuitionValue': 0.0,
       'tuitionDay': 10,
@@ -337,9 +370,45 @@ class StudentService {
   // ============================================
   Future<List<Student>> getAll() async {
     final snapshot = await _studentsRef.get();
-    var students = snapshot.docs.map((doc) => Student.fromFirestore(doc)).toList();
+    var students = snapshot.docs
+        .map((doc) => Student.fromFirestore(doc))
+        .toList();
     students.sort((a, b) => a.fullName.compareTo(b.fullName));
     return students;
+  }
+
+  // ============================================
+  // Get All Students — PAGINATED (Sprint 5)
+  //
+  // Server-side cursor pagination using `startAfterDocument`. Designed for
+  // infinite-scroll lists (admin/monitor student lists with hundreds of
+  // entries) where loading the full collection upfront would be wasteful.
+  //
+  // Sorted by `fullName` ascending so paginated chunks stay alphabetically
+  // ordered without a client-side merge step. A single-field index on
+  // `fullName` is auto-created by Firestore — no manual index entry needed.
+  //
+  // Optional `status` filter is supported. When combined with `fullName`,
+  // Firestore will warn at runtime if a composite index is missing — see
+  // TODO note in `firestore.indexes.json` for the recommended index.
+  // ============================================
+  Future<({List<Student> items, DocumentSnapshot? lastDoc})> getAllPaginated({
+    int limit = 20,
+    DocumentSnapshot? startAfter,
+    StudentStatus? status,
+  }) async {
+    Query query = _studentsRef;
+    if (status != null) {
+      query = query.where('status', isEqualTo: status.value);
+    }
+    query = query.orderBy('fullName').limit(limit);
+    if (startAfter != null) {
+      query = query.startAfterDocument(startAfter);
+    }
+
+    final snap = await query.get();
+    final items = snap.docs.map((doc) => Student.fromFirestore(doc)).toList();
+    return (items: items, lastDoc: snap.docs.isEmpty ? null : snap.docs.last);
   }
 
   // ============================================
@@ -356,7 +425,9 @@ class StudentService {
 
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final status = StudentStatusExtension.fromString(data['status'] ?? 'active');
+      final status = StudentStatusExtension.fromString(
+        data['status'] ?? 'active',
+      );
       counts[status] = counts[status]! + 1;
     }
 
@@ -385,7 +456,11 @@ class StudentService {
   // ============================================
   // Update Status
   // ============================================
-  Future<Student> updateStatus(String id, StudentStatus status, {String? note}) async {
+  Future<Student> updateStatus(
+    String id,
+    StudentStatus status, {
+    String? note,
+  }) async {
     final data = <String, dynamic>{
       'status': status.value,
       'updatedAt': FieldValue.serverTimestamp(),

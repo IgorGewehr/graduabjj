@@ -18,7 +18,8 @@ class AdminAttendanceScreen extends ConsumerStatefulWidget {
   const AdminAttendanceScreen({super.key});
 
   @override
-  ConsumerState<AdminAttendanceScreen> createState() => _AdminAttendanceScreenState();
+  ConsumerState<AdminAttendanceScreen> createState() =>
+      _AdminAttendanceScreenState();
 }
 
 class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
@@ -64,8 +65,14 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       final classService = ClassService(academyId);
       final studentService = StudentService(academyId);
 
-      final classes = await classService.list();
-      final students = await studentService.getActive();
+      // Sprint 5 — class list and active students are independent reads;
+      // run them in parallel.
+      final results = await Future.wait<dynamic>([
+        classService.list(),
+        studentService.getActive(),
+      ]);
+      final classes = results[0] as List<BJJClass>;
+      final students = results[1] as List<Student>;
 
       setState(() {
         _classes = classes;
@@ -291,7 +298,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Marcar Todos Presentes'),
-        content: Text('Deseja marcar todos os ${filteredStudents.length} alunos como presentes?'),
+        content: Text(
+          'Deseja marcar todos os ${filteredStudents.length} alunos como presentes?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -361,7 +370,8 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   }
 
   Future<void> _unmarkAllPresent() async {
-    if (_selectedClass == null || _isSaving || _presentStudentIds.isEmpty) return;
+    if (_selectedClass == null || _isSaving || _presentStudentIds.isEmpty)
+      return;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -447,28 +457,31 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
 
     // Filter by search
     if (_searchQuery.isNotEmpty) {
-      filteredStudents = filteredStudents.where((s) =>
-          s.fullName.toLowerCase().contains(_searchQuery) ||
-          (s.nickname?.toLowerCase().contains(_searchQuery) ?? false)
-      ).toList();
+      filteredStudents = filteredStudents
+          .where(
+            (s) =>
+                s.fullName.toLowerCase().contains(_searchQuery) ||
+                (s.nickname?.toLowerCase().contains(_searchQuery) ?? false),
+          )
+          .toList();
     }
 
     // Filter by class students if class has specific students
     if (_selectedClass != null && _selectedClass!.studentIds.isNotEmpty) {
-      filteredStudents = filteredStudents.where((s) =>
-          _selectedClass!.studentIds.contains(s.id)
-      ).toList();
+      filteredStudents = filteredStudents
+          .where((s) => _selectedClass!.studentIds.contains(s.id))
+          .toList();
     }
 
     // Filter by presence status
     if (_filterMode == 'present') {
-      filteredStudents = filteredStudents.where((s) =>
-          _presentStudentIds.contains(s.id)
-      ).toList();
+      filteredStudents = filteredStudents
+          .where((s) => _presentStudentIds.contains(s.id))
+          .toList();
     } else if (_filterMode == 'absent') {
-      filteredStudents = filteredStudents.where((s) =>
-          !_presentStudentIds.contains(s.id)
-      ).toList();
+      filteredStudents = filteredStudents
+          .where((s) => !_presentStudentIds.contains(s.id))
+          .toList();
     }
 
     // Sort alphabetically
@@ -507,60 +520,60 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
               : RefreshIndicator(
                   onRefresh: _loadData,
                   child: CustomScrollView(
-                slivers: [
-                  // Class + Date Selectors
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                      child: Row(
-                        children: [
-                          // Class Dropdown
-                          Expanded(child: _buildClassDropdown()),
-                          const SizedBox(width: 12),
-                          // Date Button
-                          _buildDateButton(),
-                        ],
+                    slivers: [
+                      // Class + Date Selectors
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                          child: Row(
+                            children: [
+                              // Class Dropdown
+                              Expanded(child: _buildClassDropdown()),
+                              const SizedBox(width: 12),
+                              // Date Button
+                              _buildDateButton(),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
+
+                      // Search bar
+                      if (_selectedClass != null)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                            child: _buildSearchBar(),
+                          ),
+                        ),
+
+                      // Filter chips
+                      if (_selectedClass != null)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                            child: _buildFilterChips(),
+                          ),
+                        ),
+
+                      // Action buttons
+                      if (_selectedClass != null)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                            child: _buildActionButtons(),
+                          ),
+                        ),
+
+                      // Student list or empty state
+                      _selectedClass == null
+                          ? SliverFillRemaining(child: _buildSelectClassState())
+                          : _buildStudentSliverList(),
+
+                      // Bottom padding
+                      const SliverToBoxAdapter(child: SizedBox(height: 100)),
+                    ],
                   ),
-
-                  // Search bar
-                  if (_selectedClass != null)
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                        child: _buildSearchBar(),
-                      ),
-                    ),
-
-                  // Filter chips
-                  if (_selectedClass != null)
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                        child: _buildFilterChips(),
-                      ),
-                    ),
-
-                  // Action buttons
-                  if (_selectedClass != null)
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                        child: _buildActionButtons(),
-                      ),
-                    ),
-
-                  // Student list or empty state
-                  _selectedClass == null
-                      ? SliverFillRemaining(child: _buildSelectClassState())
-                      : _buildStudentSliverList(),
-
-                  // Bottom padding
-                  const SliverToBoxAdapter(child: SizedBox(height: 100)),
-                ],
-              ),
-            ),
+                ),
           // Loading overlay: covers the screen while a bulk operation runs.
           // Blocks taps and shows a clear "doing work" affordance — without
           // this the user sees a frozen UI for several seconds with no signal.
@@ -573,7 +586,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                   alignment: Alignment.center,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 20),
+                      horizontal: 24,
+                      vertical: 20,
+                    ),
                     decoration: BoxDecoration(
                       color: AppTheme.surface,
                       borderRadius: BorderRadius.circular(16),
@@ -614,17 +629,30 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       child: DropdownButtonFormField<BJJClass>(
         value: _selectedClass,
         isExpanded: true,
-        icon: Icon(LucideIcons.chevronDown, color: AppTheme.textSecondary, size: 20),
+        icon: Icon(
+          LucideIcons.chevronDown,
+          color: AppTheme.textSecondary,
+          size: 20,
+        ),
         decoration: InputDecoration(
           labelText: 'Turma',
-          labelStyle: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+          labelStyle: AppTheme.bodySmall.copyWith(
+            color: AppTheme.textSecondary,
+          ),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 8,
+          ),
         ),
         items: _classes.map((cls) {
           return DropdownMenuItem<BJJClass>(
             value: cls,
-            child: Text(cls.name, style: AppTheme.bodyMedium, overflow: TextOverflow.ellipsis),
+            child: Text(
+              cls.name,
+              style: AppTheme.bodyMedium,
+              overflow: TextOverflow.ellipsis,
+            ),
           );
         }).toList(),
         onChanged: (value) {
@@ -674,10 +702,18 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
         decoration: InputDecoration(
           hintText: 'Buscar aluno...',
           hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.textDisabled),
-          prefixIcon: Icon(LucideIcons.search, color: AppTheme.textSecondary, size: 20),
+          prefixIcon: Icon(
+            LucideIcons.search,
+            color: AppTheme.textSecondary,
+            size: 20,
+          ),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
-                  icon: Icon(LucideIcons.x, color: AppTheme.textSecondary, size: 18),
+                  icon: Icon(
+                    LucideIcons.x,
+                    color: AppTheme.textSecondary,
+                    size: 18,
+                  ),
                   onPressed: () {
                     _searchController.clear();
                     setState(() => _searchQuery = '');
@@ -685,7 +721,10 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                 )
               : null,
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 14,
+          ),
         ),
         onChanged: (value) {
           setState(() => _searchQuery = value.toLowerCase());
@@ -712,7 +751,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
             icon: LucideIcons.checkCircle,
             iconColor: AppTheme.success,
             isSelected: _filterMode == 'present',
-            onTap: () => setState(() => _filterMode = _filterMode == 'present' ? 'all' : 'present'),
+            onTap: () => setState(
+              () => _filterMode = _filterMode == 'present' ? 'all' : 'present',
+            ),
           ),
           const SizedBox(width: 8),
           // Ausentes
@@ -721,7 +762,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
             icon: LucideIcons.circle,
             iconColor: AppTheme.textSecondary,
             isSelected: _filterMode == 'absent',
-            onTap: () => setState(() => _filterMode = _filterMode == 'absent' ? 'all' : 'absent'),
+            onTap: () => setState(
+              () => _filterMode = _filterMode == 'absent' ? 'all' : 'absent',
+            ),
           ),
         ],
       ),
@@ -795,7 +838,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
             // Limpar (outlined)
             Expanded(
               child: OutlinedButton.icon(
-                onPressed: _isSaving || _presentCount == 0 ? null : _unmarkAllPresent,
+                onPressed: _isSaving || _presentCount == 0
+                    ? null
+                    : _unmarkAllPresent,
                 icon: const Icon(LucideIcons.x, size: 18),
                 label: const Text('Limpar'),
                 style: OutlinedButton.styleFrom(
@@ -828,7 +873,11 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                 color: AppTheme.surfaceVariant,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(LucideIcons.users, size: 36, color: AppTheme.textSecondary),
+              child: const Icon(
+                LucideIcons.users,
+                size: 36,
+                color: AppTheme.textSecondary,
+              ),
             ),
             const SizedBox(height: 20),
             Text(
@@ -842,7 +891,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
             Text(
               'Escolha uma turma acima para\nregistrar as presencas',
               textAlign: TextAlign.center,
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -865,7 +916,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                 _searchQuery.isNotEmpty
                     ? 'Nenhum aluno encontrado'
                     : 'Nenhum aluno nesta turma',
-                style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ],
           ),
@@ -876,19 +929,16 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       sliver: SliverList(
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            final student = filteredStudents[index];
-            final isPresent = _presentStudentIds.contains(student.id);
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final student = filteredStudents[index];
+          final isPresent = _presentStudentIds.contains(student.id);
 
-            return _AttendanceStudentCard(
-              student: student,
-              isPresent: isPresent,
-              onTap: () => _toggleAttendance(student),
-            );
-          },
-          childCount: filteredStudents.length,
-        ),
+          return _AttendanceStudentCard(
+            student: student,
+            isPresent: isPresent,
+            onTap: () => _toggleAttendance(student),
+          );
+        }, childCount: filteredStudents.length),
       ),
     );
   }
@@ -976,8 +1026,12 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
   List<DateTime> _getDaysInMonth() {
     final firstDayOfMonth = DateTime(_viewMonth.year, _viewMonth.month, 1);
     final lastDayOfMonth = DateTime(_viewMonth.year, _viewMonth.month + 1, 0);
-    final startDate = firstDayOfMonth.subtract(Duration(days: firstDayOfMonth.weekday % 7));
-    final endDate = lastDayOfMonth.add(Duration(days: 6 - (lastDayOfMonth.weekday % 7)));
+    final startDate = firstDayOfMonth.subtract(
+      Duration(days: firstDayOfMonth.weekday % 7),
+    );
+    final endDate = lastDayOfMonth.add(
+      Duration(days: 6 - (lastDayOfMonth.weekday % 7)),
+    );
 
     final days = <DateTime>[];
     var current = startDate;
@@ -988,16 +1042,30 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
     return days;
   }
 
-  bool _isSameDay(DateTime a, DateTime b) => a.year == b.year && a.month == b.month && a.day == b.day;
-  bool _isSameMonth(DateTime a, DateTime b) => a.year == b.year && a.month == b.month;
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+  bool _isSameMonth(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month;
   bool _isToday(DateTime date) => _isSameDay(date, DateTime.now());
 
   @override
   Widget build(BuildContext context) {
     final days = _getDaysInMonth();
     final weekdays = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
-    final months = ['Janeiro', 'Fevereiro', 'Marco', 'Abril', 'Maio', 'Junho',
-                    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    final months = [
+      'Janeiro',
+      'Fevereiro',
+      'Marco',
+      'Abril',
+      'Maio',
+      'Junho',
+      'Julho',
+      'Agosto',
+      'Setembro',
+      'Outubro',
+      'Novembro',
+      'Dezembro',
+    ];
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1022,7 +1090,10 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
           const SizedBox(height: 16),
 
           // Title
-          Text('Selecionar Data', style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600)),
+          Text(
+            'Selecionar Data',
+            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 20),
 
           // Month Navigation
@@ -1030,14 +1101,22 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               IconButton(
-                onPressed: () => setState(() => _viewMonth = DateTime(_viewMonth.year, _viewMonth.month - 1, 1)),
+                onPressed: () => setState(
+                  () => _viewMonth = DateTime(
+                    _viewMonth.year,
+                    _viewMonth.month - 1,
+                    1,
+                  ),
+                ),
                 icon: const Icon(LucideIcons.chevronLeft, size: 20),
               ),
               Row(
                 children: [
                   Text(
                     '${months[_viewMonth.month - 1]} ${_viewMonth.year}',
-                    style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   if (!_isSameMonth(_viewMonth, DateTime.now())) ...[
                     const SizedBox(width: 8),
@@ -1051,19 +1130,34 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
                         widget.onDateSelected(today);
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: AppTheme.surfaceVariant,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Text('Hoje', style: AppTheme.labelSmall.copyWith(color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                        child: Text(
+                          'Hoje',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ),
                   ],
                 ],
               ),
               IconButton(
-                onPressed: () => setState(() => _viewMonth = DateTime(_viewMonth.year, _viewMonth.month + 1, 1)),
+                onPressed: () => setState(
+                  () => _viewMonth = DateTime(
+                    _viewMonth.year,
+                    _viewMonth.month + 1,
+                    1,
+                  ),
+                ),
                 icon: const Icon(LucideIcons.chevronRight, size: 20),
               ),
             ],
@@ -1072,11 +1166,21 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
 
           // Weekday headers
           Row(
-            children: weekdays.map((day) => Expanded(
-              child: Center(
-                child: Text(day, style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
-              ),
-            )).toList(),
+            children: weekdays
+                .map(
+                  (day) => Expanded(
+                    child: Center(
+                      child: Text(
+                        day,
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
           ),
           const SizedBox(height: 8),
 
@@ -1084,7 +1188,11 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, mainAxisSpacing: 4, crossAxisSpacing: 4),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              mainAxisSpacing: 4,
+              crossAxisSpacing: 4,
+            ),
             itemCount: days.length,
             itemBuilder: (context, index) {
               final day = days[index];
@@ -1094,22 +1202,36 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
               final isFuture = day.isAfter(DateTime.now());
 
               return GestureDetector(
-                onTap: isFuture || !isCurrentMonth ? null : () {
-                  setState(() => _selectedDate = day);
-                  widget.onDateSelected(day);
-                },
+                onTap: isFuture || !isCurrentMonth
+                    ? null
+                    : () {
+                        setState(() => _selectedDate = day);
+                        widget.onDateSelected(day);
+                      },
                 child: Container(
                   decoration: BoxDecoration(
-                    color: isSelected ? AppTheme.primary : isTodayDate ? AppTheme.primary.withValues(alpha: 0.1) : Colors.transparent,
+                    color: isSelected
+                        ? AppTheme.primary
+                        : isTodayDate
+                        ? AppTheme.primary.withValues(alpha: 0.1)
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(8),
-                    border: isTodayDate && !isSelected ? Border.all(color: AppTheme.primary, width: 2) : null,
+                    border: isTodayDate && !isSelected
+                        ? Border.all(color: AppTheme.primary, width: 2)
+                        : null,
                   ),
                   child: Center(
                     child: Text(
                       '${day.day}',
                       style: AppTheme.bodySmall.copyWith(
-                        color: isSelected ? Colors.white : !isCurrentMonth || isFuture ? AppTheme.textDisabled : AppTheme.textPrimary,
-                        fontWeight: isSelected || isTodayDate ? FontWeight.w600 : FontWeight.normal,
+                        color: isSelected
+                            ? Colors.white
+                            : !isCurrentMonth || isFuture
+                            ? AppTheme.textDisabled
+                            : AppTheme.textPrimary,
+                        fontWeight: isSelected || isTodayDate
+                            ? FontWeight.w600
+                            : FontWeight.normal,
                       ),
                     ),
                   ),
@@ -1144,7 +1266,9 @@ class _AttendanceStudentCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isPresent ? AppTheme.success.withValues(alpha: 0.05) : AppTheme.surface,
+          color: isPresent
+              ? AppTheme.success.withValues(alpha: 0.05)
+              : AppTheme.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isPresent ? AppTheme.success : AppTheme.divider,
@@ -1198,12 +1322,16 @@ class _AttendanceStudentCard extends StatelessWidget {
                     student.nickname ?? student.fullName.split(' ').first,
                     style: AppTheme.bodyMedium.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: isPresent ? AppTheme.success : AppTheme.textPrimary,
+                      color: isPresent
+                          ? AppTheme.success
+                          : AppTheme.textPrimary,
                     ),
                   ),
                   Text(
                     student.fullName,
-                    style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
@@ -1232,7 +1360,9 @@ class _AttendanceStudentCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: beltColor,
             borderRadius: BorderRadius.circular(2),
-            border: student.currentBelt == 'white' ? Border.all(color: AppTheme.divider) : null,
+            border: student.currentBelt == 'white'
+                ? Border.all(color: AppTheme.divider)
+                : null,
           ),
         ),
         if (stripes > 0) ...[

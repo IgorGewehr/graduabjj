@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -37,12 +38,15 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
       return _buildEmptyState('Aluno nao encontrado');
     }
 
-    final checkinEnabled = settingsAsync.valueOrNull?.studentCheckinEnabled ?? false;
+    final checkinEnabled =
+        settingsAsync.valueOrNull?.studentCheckinEnabled ?? false;
 
     // Fetch classes where student is enrolled
-    final classesAsync = ref.watch(_enrolledClassesProvider(
-      _EnrolledClassesParams(academyId: academyId, studentId: studentId),
-    ));
+    final classesAsync = ref.watch(
+      _enrolledClassesProvider(
+        _EnrolledClassesParams(academyId: academyId, studentId: studentId),
+      ),
+    );
 
     // Fetch student's pending check-ins
     final studentCheckinsAsync = checkinEnabled
@@ -50,10 +54,14 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
         : const AsyncValue<List<Checkin>>.data([]);
 
     return RefreshIndicator(
+      color: Theme.of(context).colorScheme.primary,
       onRefresh: () async {
-        ref.invalidate(_enrolledClassesProvider(
-          _EnrolledClassesParams(academyId: academyId, studentId: studentId),
-        ));
+        HapticFeedback.mediumImpact();
+        ref.invalidate(
+          _enrolledClassesProvider(
+            _EnrolledClassesParams(academyId: academyId, studentId: studentId),
+          ),
+        );
         if (checkinEnabled) {
           ref.invalidate(studentPendingCheckinsProvider(studentId));
         }
@@ -87,12 +95,18 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.info_outline, size: 20, color: AppTheme.info),
+                        Icon(
+                          Icons.info_outline,
+                          size: 20,
+                          color: AppTheme.info,
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             'Check-in disponivel de 30 min antes do inicio ate 1h apos o fim da aula.',
-                            style: AppTheme.labelSmall.copyWith(color: AppTheme.info),
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.info,
+                            ),
                           ),
                         ),
                       ],
@@ -137,11 +151,17 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                       const SizedBox(width: 24),
                       Row(
                         children: [
-                          Icon(Icons.check_circle, size: 14, color: AppTheme.success),
+                          Icon(
+                            Icons.check_circle,
+                            size: 14,
+                            color: AppTheme.success,
+                          ),
                           const SizedBox(width: 8),
                           Text(
                             'Check-in realizado',
-                            style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
                           ),
                         ],
                       ),
@@ -169,7 +189,11 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
 
     // Get next 7 days
     for (int i = 0; i < 7; i++) {
-      final date = DateTime(now.year, now.month, now.day).add(Duration(days: i));
+      final date = DateTime(
+        now.year,
+        now.month,
+        now.day,
+      ).add(Duration(days: i));
       final dayOfWeek = date.weekday % 7; // Convert to 0-6
 
       for (final bjjClass in classes) {
@@ -179,13 +203,18 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
 
         for (final schedule in classSchedules) {
           final isToday = i == 0;
-          final inWindow = isToday && isInCheckinWindow(
-            startTime: schedule.startTime,
-            endTime: schedule.endTime,
-            date: date,
-          );
+          final inWindow =
+              isToday &&
+              isInCheckinWindow(
+                startTime: schedule.startTime,
+                endTime: schedule.endTime,
+                date: date,
+              );
           final timeUntilWindow = isToday
-              ? getTimeUntilCheckinOpens(startTime: schedule.startTime, date: date)
+              ? getTimeUntilCheckinOpens(
+                  startTime: schedule.startTime,
+                  date: date,
+                )
               : null;
 
           final hasCheckin = studentCheckins.any(
@@ -196,17 +225,19 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                 c.scheduleDate.day == date.day,
           );
 
-          schedules.add(UpcomingSchedule(
-            bjjClass: bjjClass,
-            date: date,
-            dayOfWeek: dayOfWeek,
-            startTime: schedule.startTime,
-            endTime: schedule.endTime,
-            isToday: isToday,
-            inWindow: inWindow,
-            timeUntilWindow: timeUntilWindow,
-            hasCheckin: hasCheckin,
-          ));
+          schedules.add(
+            UpcomingSchedule(
+              bjjClass: bjjClass,
+              date: date,
+              dayOfWeek: dayOfWeek,
+              startTime: schedule.startTime,
+              endTime: schedule.endTime,
+              isToday: isToday,
+              inWindow: inWindow,
+              timeUntilWindow: timeUntilWindow,
+              hasCheckin: hasCheckin,
+            ),
+          );
         }
       }
     }
@@ -245,7 +276,10 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
           child: Text(
             isToday
                 ? 'HOJE'
-                : DateFormat("EEEE, d 'de' MMMM", 'pt_BR').format(dateSchedules.first.date),
+                : DateFormat(
+                    "EEEE, d 'de' MMMM",
+                    'pt_BR',
+                  ).format(dateSchedules.first.date),
             style: AppTheme.labelSmall.copyWith(
               color: isToday ? AppTheme.success : AppTheme.textSecondary,
               fontWeight: FontWeight.w600,
@@ -282,6 +316,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
   ) async {
     if (_isCreatingCheckin) return;
 
+    // Sprint 6 — light tap on press, success haptic after Firestore confirms.
+    HapticFeedback.selectionClick();
     setState(() => _isCreatingCheckin = true);
 
     try {
@@ -297,6 +333,7 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
       );
 
       if (mounted) {
+        HapticFeedback.heavyImpact();
         context.showSuccess('Check-in realizado com sucesso!');
         ref.invalidate(studentPendingCheckinsProvider(studentId));
       }
@@ -344,7 +381,9 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
             const SizedBox(height: 16),
             Text(
               'Erro ao carregar dados',
-              style: AppTheme.titleLarge.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.titleLarge.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -393,10 +432,14 @@ class _ScheduleCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: schedule.inWindow ? AppTheme.success.withOpacity(0.05) : AppTheme.surface,
+        color: schedule.inWindow
+            ? AppTheme.success.withOpacity(0.05)
+            : AppTheme.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: schedule.inWindow ? AppTheme.success.withOpacity(0.3) : AppTheme.divider,
+          color: schedule.inWindow
+              ? AppTheme.success.withOpacity(0.3)
+              : AppTheme.divider,
         ),
       ),
       child: Column(
@@ -429,7 +472,11 @@ class _ScheduleCard extends StatelessWidget {
               ),
               Row(
                 children: [
-                  Icon(Icons.access_time, size: 14, color: AppTheme.textSecondary),
+                  Icon(
+                    Icons.access_time,
+                    size: 14,
+                    color: AppTheme.textSecondary,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     '${schedule.startTime} - ${schedule.endTime}',
@@ -496,9 +543,7 @@ class _ScheduleCard extends StatelessWidget {
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
       );
     }
@@ -583,7 +628,11 @@ class WeekDay {
   final String label;
   final String short;
 
-  const WeekDay({required this.value, required this.label, required this.short});
+  const WeekDay({
+    required this.value,
+    required this.label,
+    required this.short,
+  });
 }
 
 /// Provider for enrolled classes
@@ -604,13 +653,19 @@ class _EnrolledClassesParams {
   int get hashCode => Object.hash(academyId, studentId);
 }
 
-final _enrolledClassesProvider = FutureProvider.family<List<BJJClass>, _EnrolledClassesParams>((ref, params) async {
-  final classService = ClassService(params.academyId);
-  final allClasses = await classService.list();
+final _enrolledClassesProvider =
+    FutureProvider.family<List<BJJClass>, _EnrolledClassesParams>((
+      ref,
+      params,
+    ) async {
+      final classService = ClassService(params.academyId);
+      final allClasses = await classService.list();
 
-  // Filter classes where student is enrolled
-  return allClasses.where((c) => c.studentIds.contains(params.studentId)).toList();
-});
+      // Filter classes where student is enrolled
+      return allClasses
+          .where((c) => c.studentIds.contains(params.studentId))
+          .toList();
+    });
 
 /// Academy indicator for multi-academy users
 class _AcademyIndicator extends ConsumerWidget {
@@ -632,17 +687,11 @@ class _AcademyIndicator extends ConsumerWidget {
       decoration: BoxDecoration(
         color: AppTheme.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: AppTheme.primary.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
-          Icon(
-            LucideIcons.calendar,
-            size: 16,
-            color: AppTheme.primary,
-          ),
+          Icon(LucideIcons.calendar, size: 16, color: AppTheme.primary),
           const SizedBox(width: 8),
           Expanded(
             child: Column(

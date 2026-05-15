@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:graduabjj/models/competition_photo.dart';
+import 'package:graduabjj/widgets/cached_image.dart';
 import 'package:intl/intl.dart';
 
 class PhotoCard extends StatelessWidget {
@@ -57,15 +58,13 @@ class PhotoCard extends StatelessWidget {
               children: [
                 AspectRatio(
                   aspectRatio: 1,
-                  child: Image.network(
-                    photo.url,
+                  child: AppCachedImage(
+                    imageUrl: photo.url,
                     fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        color: Colors.grey[300],
-                        child: const Icon(Icons.broken_image, size: 48),
-                      );
-                    },
+                    errorIcon: Container(
+                      color: Colors.grey[300],
+                      child: const Icon(Icons.broken_image, size: 48),
+                    ),
                   ),
                 ),
 
@@ -75,7 +74,11 @@ class PhotoCard extends StatelessWidget {
                     top: 8,
                     left: 8,
                     child: Chip(
-                      avatar: const Icon(Icons.emoji_events, size: 16, color: Colors.white),
+                      avatar: const Icon(
+                        Icons.emoji_events,
+                        size: 16,
+                        color: Colors.white,
+                      ),
                       label: Text(
                         _getMedalLabel(),
                         style: const TextStyle(
@@ -95,11 +98,7 @@ class PhotoCard extends StatelessWidget {
                   const Positioned(
                     top: 8,
                     right: 48,
-                    child: Icon(
-                      Icons.star,
-                      color: Color(0xFFFFD700),
-                      size: 28,
-                    ),
+                    child: Icon(Icons.star, color: Color(0xFFFFD700), size: 28),
                   ),
 
                 // Actions menu
@@ -147,11 +146,17 @@ class PhotoCard extends StatelessWidget {
                             child: Row(
                               children: [
                                 Icon(
-                                  photo.isHighlight ? Icons.star_border : Icons.star,
+                                  photo.isHighlight
+                                      ? Icons.star_border
+                                      : Icons.star,
                                   size: 18,
                                 ),
                                 const SizedBox(width: 8),
-                                Text(photo.isHighlight ? 'Remover Destaque' : 'Destacar'),
+                                Text(
+                                  photo.isHighlight
+                                      ? 'Remover Destaque'
+                                      : 'Destacar',
+                                ),
                               ],
                             ),
                           ),
@@ -162,7 +167,10 @@ class PhotoCard extends StatelessWidget {
                               children: [
                                 Icon(Icons.delete, size: 18, color: Colors.red),
                                 SizedBox(width: 8),
-                                Text('Deletar', style: TextStyle(color: Colors.red)),
+                                Text(
+                                  'Deletar',
+                                  style: TextStyle(color: Colors.red),
+                                ),
                               ],
                             ),
                           ),
@@ -202,8 +210,10 @@ class PhotoCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                             Text(
-                              DateFormat("d 'de' MMM 'às' HH:mm", 'pt_BR')
-                                  .format(photo.createdAt),
+                              DateFormat(
+                                "d 'de' MMM 'às' HH:mm",
+                                'pt_BR',
+                              ).format(photo.createdAt),
                               style: TextStyle(
                                 fontSize: 11,
                                 color: Colors.grey[600],
@@ -218,10 +228,7 @@ class PhotoCard extends StatelessWidget {
                     const SizedBox(height: 8),
                     Text(
                       photo.caption!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[700],
-                      ),
+                      style: TextStyle(fontSize: 12, color: Colors.grey[700]),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),

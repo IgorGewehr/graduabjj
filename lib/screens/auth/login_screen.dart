@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../widgets/loading_button.dart';
 
 /// Login Screen
 class LoginScreen extends ConsumerStatefulWidget {
@@ -110,12 +111,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 children: [
                   // Logo
                   Image.asset(
-                    'assets/images/bjjeasy_logo.png',
-                    width: 180,
-                    height: 180,
-                  ).animate().fadeIn(duration: 300.ms).scale(
-                        begin: const Offset(0.8, 0.8),
-                      ),
+                        'assets/images/bjjeasy_logo.png',
+                        width: 180,
+                        height: 180,
+                      )
+                      .animate()
+                      .fadeIn(duration: 300.ms)
+                      .scale(begin: const Offset(0.8, 0.8)),
 
                   const SizedBox(height: 40),
 
@@ -126,7 +128,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       decoration: BoxDecoration(
                         color: AppTheme.errorLight,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppTheme.error.withOpacity(0.3)),
+                        border: Border.all(
+                          color: AppTheme.error.withOpacity(0.3),
+                        ),
                       ),
                       child: Row(
                         children: [
@@ -221,22 +225,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
                   const SizedBox(height: 24),
 
-                  // Login button
+                  // Login button — LoadingButton handles spinner+disabled
+                  // animation in one place.
                   SizedBox(
                     height: 52,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _handleLogin,
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(Colors.white),
-                              ),
-                            )
-                          : const Text('Entrar'),
+                    child: LoadingButton(
+                      isLoading: _isLoading,
+                      onPressed: _handleLogin,
+                      child: const Text('Entrar'),
                     ),
                   ).animate().fadeIn(delay: 600.ms).slideY(begin: 0.1),
 
@@ -433,8 +429,11 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(LucideIcons.checkCircle,
-                    color: AppTheme.success, size: 36),
+                Icon(
+                  LucideIcons.checkCircle,
+                  color: AppTheme.success,
+                  size: 36,
+                ),
                 const SizedBox(height: 12),
                 Text(
                   'Enviamos um link de recuperacao para ${_emailController.text.trim()}.',
@@ -443,8 +442,9 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
                 const SizedBox(height: 8),
                 Text(
                   'Verifique tambem sua caixa de spam.',
-                  style: AppTheme.labelSmall
-                      .copyWith(color: AppTheme.textSecondary),
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
               ],
             )
@@ -482,8 +482,9 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
             ]
           : [
               TextButton(
-                onPressed:
-                    _isSending ? null : () => Navigator.of(context).pop(),
+                onPressed: _isSending
+                    ? null
+                    : () => Navigator.of(context).pop(),
                 child: const Text('Cancelar'),
               ),
               ElevatedButton(
@@ -494,8 +495,9 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
                         height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
                         ),
                       )
                     : const Text('Enviar'),

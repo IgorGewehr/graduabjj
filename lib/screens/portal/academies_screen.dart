@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -7,6 +8,8 @@ import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/user.dart';
 import '../../providers/providers.dart';
+import '../../widgets/cached_image.dart';
+import '../../widgets/skeletons/skeletons.dart';
 
 /// Academies Management Screen
 /// Shows list of linked academies with options to add, set primary, or unlink
@@ -30,23 +33,21 @@ class AcademiesScreen extends ConsumerWidget {
           onPressed: () => context.pop(),
           icon: const Icon(LucideIcons.arrowLeft, size: 20),
         ),
-        title: Text(
-          'Minhas Academias',
-          style: AppTheme.headlineSmall,
-        ),
+        title: Text('Minhas Academias', style: AppTheme.headlineSmall),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(
-            height: 1,
-            color: AppTheme.divider,
-          ),
+          child: Container(height: 1, color: AppTheme.divider),
         ),
       ),
       body: RefreshIndicator(
+        color: Theme.of(context).colorScheme.primary,
         onRefresh: () async {
+          HapticFeedback.mediumImpact();
           ref.invalidate(userAcademiesInfoProvider);
           ref.invalidate(userAcademyMappingProvider);
-          await ref.read(selectedAcademyProvider.notifier).refreshAcademyCache();
+          await ref
+              .read(selectedAcademyProvider.notifier)
+              .refreshAcademyCache();
         },
         child: academiesAsync.when(
           data: (academies) {
@@ -86,21 +87,23 @@ class AcademiesScreen extends ConsumerWidget {
                 const SizedBox(height: 16),
 
                 // Academy cards
-                ...academies.map((academy) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _AcademyCard(
-                    academy: academy,
-                    isSelected: academy.id == selectedId,
-                    isPrimary: academy.id == primaryId,
-                    onTap: () => _showAcademyOptions(
-                      context,
-                      ref,
-                      academy,
+                ...academies.map(
+                  (academy) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _AcademyCard(
+                      academy: academy,
+                      isSelected: academy.id == selectedId,
                       isPrimary: academy.id == primaryId,
-                      canUnlink: academies.length > 1,
+                      onTap: () => _showAcademyOptions(
+                        context,
+                        ref,
+                        academy,
+                        isPrimary: academy.id == primaryId,
+                        canUnlink: academies.length > 1,
+                      ),
                     ),
                   ),
-                )),
+                ),
 
                 const SizedBox(height: 8),
 
@@ -116,8 +119,10 @@ class AcademiesScreen extends ConsumerWidget {
               ],
             );
           },
-          loading: () => const Center(
-            child: CircularProgressIndicator(),
+          loading: () => const SkeletonList(
+            itemCount: 4,
+            itemHeight: 96,
+            padding: EdgeInsets.all(16),
           ),
           error: (error, _) => Center(
             child: Column(
@@ -171,10 +176,7 @@ class AcademiesScreen extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 24),
-            Text(
-              'Nenhuma Academia',
-              style: AppTheme.headlineSmall,
-            ),
+            Text('Nenhuma Academia', style: AppTheme.headlineSmall),
             const SizedBox(height: 8),
             Text(
               'Voce ainda nao esta vinculado a nenhuma academia.',
@@ -241,10 +243,7 @@ class AcademiesScreen extends ConsumerWidget {
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          Text(
-                            academy.role.label,
-                            style: AppTheme.bodySmall,
-                          ),
+                          Text(academy.role.label, style: AppTheme.bodySmall),
                         ],
                       ),
                     ),
@@ -268,7 +267,9 @@ class AcademiesScreen extends ConsumerWidget {
               ListTile(
                 onTap: () {
                   Navigator.pop(sheetContext);
-                  ref.read(selectedAcademyProvider.notifier).selectAcademy(academy.id);
+                  ref
+                      .read(selectedAcademyProvider.notifier)
+                      .selectAcademy(academy.id);
                   context.go('/portal');
                 },
                 leading: const Icon(LucideIcons.arrowRightLeft, size: 20),
@@ -341,9 +342,7 @@ class AcademiesScreen extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Tem certeza que deseja desvincular de "${academy.name}"?',
-            ),
+            Text('Tem certeza que deseja desvincular de "${academy.name}"?'),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
@@ -382,9 +381,7 @@ class AcademiesScreen extends ConsumerWidget {
               Navigator.pop(dialogContext);
               _unlinkAcademy(context, ref, academy);
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.error,
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.error),
             child: const Text('Desvincular'),
           ),
         ],
@@ -407,10 +404,7 @@ class AcademiesScreen extends ConsumerWidget {
       await ref.read(selectedAcademyProvider.notifier).refreshAcademyCache();
 
       if (context.mounted) {
-        FeedbackUtils.showSuccess(
-          context,
-          'Desvinculado de ${academy.name}',
-        );
+        FeedbackUtils.showSuccess(context, 'Desvinculado de ${academy.name}');
       }
     } catch (e) {
       if (context.mounted) {
@@ -429,10 +423,12 @@ class AcademiesScreen extends ConsumerWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: academy.logoUrl != null
-          ? Image.network(
-              academy.logoUrl!,
+          ? AppCachedImage(
+              imageUrl: academy.logoUrl,
+              width: 48,
+              height: 48,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _buildDefaultLogo(academy.name),
+              errorIcon: _buildDefaultLogo(academy.name),
             )
           : _buildDefaultLogo(academy.name),
     );
@@ -500,10 +496,12 @@ class _AcademyCard extends StatelessWidget {
               ),
               clipBehavior: Clip.antiAlias,
               child: academy.logoUrl != null
-                  ? Image.network(
-                      academy.logoUrl!,
+                  ? AppCachedImage(
+                      imageUrl: academy.logoUrl,
+                      width: 56,
+                      height: 56,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _buildDefaultLogo(),
+                      errorIcon: _buildDefaultLogo(),
                     )
                   : _buildDefaultLogo(),
             ),
@@ -549,10 +547,7 @@ class _AcademyCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    academy.role.label,
-                    style: AppTheme.bodySmall,
-                  ),
+                  Text(academy.role.label, style: AppTheme.bodySmall),
                   if (isSelected) ...[
                     const SizedBox(height: 4),
                     Row(

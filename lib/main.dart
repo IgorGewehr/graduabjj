@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -16,8 +17,23 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Firebase
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Enable Firestore offline persistence (Sprint 5).
+  //
+  // Once enabled, every Firestore read is served first from the local SQLite
+  // cache and then refreshed from the network in the background. This makes
+  // navigation between screens feel instantaneous after the first session,
+  // and keeps the app usable without connectivity.
+  //
+  // CACHE_SIZE_UNLIMITED is safe on mobile because Firestore garbage-collects
+  // least-recently-used entries when the device is under storage pressure.
+  // If a user reports "stale data", they can force a refresh via the existing
+  // pull-to-refresh affordance which calls `ref.invalidate(...)` and bypasses
+  // cache via `Source.server`. Reinstalling the app also wipes the cache.
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,
+    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
 
   // Initialize Push Notifications
@@ -43,11 +59,7 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  runApp(
-    const ProviderScope(
-      child: GraduaBJJApp(),
-    ),
-  );
+  runApp(const ProviderScope(child: GraduaBJJApp()));
 
   // Check for mandatory app update (Android only)
   _checkForImmediateUpdate();

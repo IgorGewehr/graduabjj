@@ -9,6 +9,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
+import '../../widgets/cached_image.dart';
 
 /// Monitor Student Detail Screen - View student info (no financial access)
 class MonitorStudentDetailScreen extends ConsumerStatefulWidget {
@@ -17,10 +18,12 @@ class MonitorStudentDetailScreen extends ConsumerStatefulWidget {
   const MonitorStudentDetailScreen({super.key, required this.studentId});
 
   @override
-  ConsumerState<MonitorStudentDetailScreen> createState() => _MonitorStudentDetailScreenState();
+  ConsumerState<MonitorStudentDetailScreen> createState() =>
+      _MonitorStudentDetailScreenState();
 }
 
-class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetailScreen>
+class _MonitorStudentDetailScreenState
+    extends ConsumerState<MonitorStudentDetailScreen>
     with SingleTickerProviderStateMixin {
   TabController? _tabController;
   Student? _student;
@@ -54,7 +57,10 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
 
   void _onTabChanged() {
     // Load global history when switching to Global tab
-    if (_hasLinkedUser && _tabController!.index == 3 && _globalHistory == null && !_isLoadingGlobal) {
+    if (_hasLinkedUser &&
+        _tabController!.index == 3 &&
+        _globalHistory == null &&
+        !_isLoadingGlobal) {
       _loadGlobalHistory();
     }
   }
@@ -69,10 +75,19 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
       final beltService = BeltProgressionService(academyId);
       final achievementService = AchievementService(academyId);
 
-      final student = await studentService.getById(widget.studentId);
-      final attendances = await attendanceService.getByStudent(widget.studentId);
-      final progressions = await beltService.getByStudent(widget.studentId);
-      final achievements = await achievementService.getForStudent(widget.studentId);
+      // Sprint 5 — fan out the four independent reads in parallel. Cuts
+      // total wait from sum-of-latencies to max-of-latencies.
+      final futures = await Future.wait<dynamic>([
+        studentService.getById(widget.studentId),
+        attendanceService.getByStudent(widget.studentId),
+        beltService.getByStudent(widget.studentId),
+        achievementService.getForStudent(widget.studentId),
+      ]);
+
+      final student = futures[0] as Student?;
+      final attendances = futures[1] as List<Attendance>;
+      final progressions = futures[2] as List<BeltProgression>;
+      final achievements = futures[3] as List<Achievement>;
 
       setState(() {
         _student = student;
@@ -116,52 +131,52 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _student == null
-              ? const Center(child: Text('Aluno nao encontrado'))
-              : NestedScrollView(
-                  headerSliverBuilder: (context, innerBoxIsScrolled) => [
-                    _buildSliverAppBar(),
-                  ],
-                  body: Column(
-                    children: [
-                      Container(
-                        color: AppTheme.surface,
-                        child: TabBar(
-                          controller: _tabController,
-                          labelColor: AppTheme.textPrimary,
-                          unselectedLabelColor: AppTheme.textSecondary,
-                          indicatorColor: AppTheme.primary,
-                          tabs: [
-                            const Tab(text: 'Info'),
-                            const Tab(text: 'Presencas'),
-                            const Tab(text: 'Historico'),
-                            if (_hasLinkedUser)
-                              const Tab(
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(LucideIcons.globe, size: 14),
-                                    SizedBox(width: 4),
-                                    Text('Global'),
-                                  ],
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        child: TabBarView(
-                          controller: _tabController,
-                          children: [
-                            _buildInfoTab(),
-                            _buildAttendanceTab(),
-                            _buildHistoryTab(),
-                            if (_hasLinkedUser) _buildGlobalTab(),
-                          ],
-                        ),
-                      ),
-                    ],
+          ? const Center(child: Text('Aluno nao encontrado'))
+          : NestedScrollView(
+              headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                _buildSliverAppBar(),
+              ],
+              body: Column(
+                children: [
+                  Container(
+                    color: AppTheme.surface,
+                    child: TabBar(
+                      controller: _tabController,
+                      labelColor: AppTheme.textPrimary,
+                      unselectedLabelColor: AppTheme.textSecondary,
+                      indicatorColor: AppTheme.primary,
+                      tabs: [
+                        const Tab(text: 'Info'),
+                        const Tab(text: 'Presencas'),
+                        const Tab(text: 'Historico'),
+                        if (_hasLinkedUser)
+                          const Tab(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(LucideIcons.globe, size: 14),
+                                SizedBox(width: 4),
+                                Text('Global'),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildInfoTab(),
+                        _buildAttendanceTab(),
+                        _buildHistoryTab(),
+                        if (_hasLinkedUser) _buildGlobalTab(),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 
@@ -170,7 +185,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
       expandedHeight: 200,
       pinned: true,
       backgroundColor: _getBeltColor(_student!.currentBelt),
-      foregroundColor: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
+      foregroundColor: _student!.currentBelt == 'white'
+          ? Colors.black
+          : Colors.white,
       actions: [
         // Generate link code button (only if student not linked)
         if (_student != null && _student!.linkedUserId == null)
@@ -208,23 +225,32 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
                   Row(
                     children: [
                       // Avatar
-                      (_student!.photoUrl ?? '').isNotEmpty
-                          ? CircleAvatar(
-                              radius: 40,
-                              backgroundImage: NetworkImage(_student!.photoUrl!),
-                            )
-                          : CircleAvatar(
-                              radius: 40,
-                              backgroundColor: Colors.white.withValues(alpha: 0.3),
-                              child: Text(
-                                _student!.fullName.substring(0, 1).toUpperCase(),
-                                style: TextStyle(
-                                  fontSize: 32,
-                                  fontWeight: FontWeight.bold,
-                                  color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
+                      Hero(
+                        tag: 'student-avatar-${_student!.id}',
+                        child: (_student!.photoUrl ?? '').isNotEmpty
+                            ? AppCachedAvatar(
+                                imageUrl: _student!.photoUrl,
+                                radius: 40,
+                              )
+                            : CircleAvatar(
+                                radius: 40,
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.3,
+                                ),
+                                child: Text(
+                                  _student!.fullName
+                                      .substring(0, 1)
+                                      .toUpperCase(),
+                                  style: TextStyle(
+                                    fontSize: 32,
+                                    fontWeight: FontWeight.bold,
+                                    color: _student!.currentBelt == 'white'
+                                        ? Colors.black
+                                        : Colors.white,
+                                  ),
                                 ),
                               ),
-                            ),
+                      ),
                       const SizedBox(width: 16),
                       Expanded(
                         child: Column(
@@ -235,7 +261,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
                               style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
+                                color: _student!.currentBelt == 'white'
+                                    ? Colors.black
+                                    : Colors.white,
                               ),
                             ),
                             const SizedBox(height: 4),
@@ -285,7 +313,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
           Text(
             beltNames[_student!.currentBelt] ?? _student!.currentBelt,
             style: TextStyle(
-              color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
+              color: _student!.currentBelt == 'white'
+                  ? Colors.black
+                  : Colors.white,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -294,7 +324,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
             Text(
               '${_student!.currentStripes} grau(s)',
               style: TextStyle(
-                color: _student!.currentBelt == 'white' ? Colors.black54 : Colors.white70,
+                color: _student!.currentBelt == 'white'
+                    ? Colors.black54
+                    : Colors.white70,
               ),
             ),
           ],
@@ -314,7 +346,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: statusColors[_student!.status]?.withValues(alpha: 0.3) ?? Colors.grey.withValues(alpha: 0.3),
+        color:
+            statusColors[_student!.status]?.withValues(alpha: 0.3) ??
+            Colors.grey.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
@@ -336,9 +370,21 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
           // Stats cards
           Row(
             children: [
-              Expanded(child: _buildStatCard('Presencas', '${_student!.totalAttendanceCount}', LucideIcons.clipboardCheck)),
+              Expanded(
+                child: _buildStatCard(
+                  'Presencas',
+                  '${_student!.totalAttendanceCount}',
+                  LucideIcons.clipboardCheck,
+                ),
+              ),
               const SizedBox(width: 12),
-              Expanded(child: _buildStatCard('Graduacoes', '${_progressions.length}', LucideIcons.award)),
+              Expanded(
+                child: _buildStatCard(
+                  'Graduacoes',
+                  '${_progressions.length}',
+                  LucideIcons.award,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 24),
@@ -362,7 +408,8 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
           ]),
 
           // Guardian Info (for kids)
-          if (_student!.category == StudentCategory.kids && _student!.guardianName != null) ...[
+          if (_student!.category == StudentCategory.kids &&
+              _student!.guardianName != null) ...[
             const SizedBox(height: 24),
             _buildSectionTitle('Responsavel'),
             const SizedBox(height: 12),
@@ -376,7 +423,8 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
           ],
 
           // Medical Info
-          if (_student!.medicalNotes != null && _student!.medicalNotes!.isNotEmpty) ...[
+          if (_student!.medicalNotes != null &&
+              _student!.medicalNotes!.isNotEmpty) ...[
             const SizedBox(height: 24),
             _buildSectionTitle('Observacoes Medicas'),
             const SizedBox(height: 12),
@@ -390,7 +438,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
               ),
               child: Text(
                 _student!.medicalNotes!,
-                style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ),
           ],
@@ -413,7 +463,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
           const SizedBox(height: 8),
           Text(
             value,
-            style: AppTheme.headlineMedium.copyWith(fontWeight: FontWeight.w700),
+            style: AppTheme.headlineMedium.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
           ),
           Text(
             label,
@@ -447,13 +499,25 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
           return Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              border: isLast ? null : Border(bottom: BorderSide(color: AppTheme.divider)),
+              border: isLast
+                  ? null
+                  : Border(bottom: BorderSide(color: AppTheme.divider)),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(row.label, style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary)),
-                Text(row.value, style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500)),
+                Text(
+                  row.label,
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                Text(
+                  row.value,
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ],
             ),
           );
@@ -468,11 +532,17 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(LucideIcons.clipboardX, size: 48, color: AppTheme.textDisabled),
+            Icon(
+              LucideIcons.clipboardX,
+              size: 48,
+              color: AppTheme.textDisabled,
+            ),
             const SizedBox(height: 16),
             Text(
               'Nenhuma presenca registrada',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -502,70 +572,87 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
                 children: [
                   Text(
                     month,
-                    style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                    style: AppTheme.titleSmall.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const Spacer(),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: AppTheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
                       '${items.length} presencas',
-                      style: AppTheme.labelSmall.copyWith(color: AppTheme.primary),
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.primary,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-            ...items.map((attendance) => Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.divider),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: AppTheme.success.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Center(
-                      child: Text(
-                        '${attendance.date.day}',
-                        style: AppTheme.titleSmall.copyWith(
-                          color: AppTheme.success,
-                          fontWeight: FontWeight.w600,
+            ...items.map(
+              (attendance) => Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.divider),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppTheme.success.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '${attendance.date.day}',
+                          style: AppTheme.titleSmall.copyWith(
+                            color: AppTheme.success,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          attendance.className,
-                          style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
-                        ),
-                        Text(
-                          DateFormat('EEEE', 'pt_BR').format(attendance.date),
-                          style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-                        ),
-                      ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            attendance.className,
+                            style: AppTheme.bodyMedium.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          Text(
+                            DateFormat('EEEE', 'pt_BR').format(attendance.date),
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  Icon(LucideIcons.checkCircle, color: AppTheme.success, size: 20),
-                ],
+                    Icon(
+                      LucideIcons.checkCircle,
+                      color: AppTheme.success,
+                      size: 20,
+                    ),
+                  ],
+                ),
               ),
-            )),
+            ),
             const SizedBox(height: 8),
           ],
         );
@@ -578,23 +665,28 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
 
     // Add belt progressions
     for (final p in _progressions) {
-      allItems.add(_HistoryItem(
-        date: p.date,
-        title: 'Graduacao: ${_getBeltName(p.belt)} ${p.stripes > 0 ? "(${p.stripes} grau)" : ""}',
-        icon: LucideIcons.award,
-        color: AppTheme.primary,
-      ));
+      allItems.add(
+        _HistoryItem(
+          date: p.date,
+          title:
+              'Graduacao: ${_getBeltName(p.belt)} ${p.stripes > 0 ? "(${p.stripes} grau)" : ""}',
+          icon: LucideIcons.award,
+          color: AppTheme.primary,
+        ),
+      );
     }
 
     // Add achievements
     for (final a in _achievements) {
-      allItems.add(_HistoryItem(
-        date: a.awardedAt,
-        title: a.title,
-        subtitle: a.description,
-        icon: LucideIcons.trophy,
-        color: AppTheme.warning,
-      ));
+      allItems.add(
+        _HistoryItem(
+          date: a.awardedAt,
+          title: a.title,
+          subtitle: a.description,
+          icon: LucideIcons.trophy,
+          color: AppTheme.warning,
+        ),
+      );
     }
 
     // Sort by date descending
@@ -609,7 +701,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
             const SizedBox(height: 16),
             Text(
               'Nenhum historico registrado',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -647,16 +741,22 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
                   children: [
                     Text(
                       item.title,
-                      style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
+                      style: AppTheme.bodyMedium.copyWith(
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                     if (item.subtitle != null)
                       Text(
                         item.subtitle!,
-                        style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                     Text(
                       DateFormat('dd/MM/yyyy').format(item.date),
-                      style: AppTheme.labelSmall.copyWith(color: AppTheme.textDisabled),
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.textDisabled,
+                      ),
                     ),
                   ],
                 ),
@@ -682,7 +782,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
             const SizedBox(height: 16),
             Text(
               'Nao foi possivel carregar o historico global',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -723,63 +825,76 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
 
           // Academies Overview
           if (history.academies.length > 1) ...[
-            _buildSectionTitle('Academias Vinculadas (${history.academies.length})'),
+            _buildSectionTitle(
+              'Academias Vinculadas (${history.academies.length})',
+            ),
             const SizedBox(height: 12),
-            ...history.academies.map((academy) => Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: academy.academyId == currentAcademyId
-                    ? AppTheme.success.withValues(alpha: 0.1)
-                    : AppTheme.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
+            ...history.academies.map(
+              (academy) => Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
                   color: academy.academyId == currentAcademyId
-                      ? AppTheme.success.withValues(alpha: 0.3)
-                      : AppTheme.divider,
+                      ? AppTheme.success.withValues(alpha: 0.1)
+                      : AppTheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: academy.academyId == currentAcademyId
+                        ? AppTheme.success.withValues(alpha: 0.3)
+                        : AppTheme.divider,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: _getBeltColor(academy.currentBelt),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            academy.academyName,
+                            style: AppTheme.bodyMedium.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          Text(
+                            '${CrossAcademyService.beltLabels[academy.currentBelt] ?? academy.currentBelt} - ${academy.currentStripes} grau(s)',
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (academy.academyId == currentAcademyId)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.success,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Atual',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: _getBeltColor(academy.currentBelt),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          academy.academyName,
-                          style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
-                        ),
-                        Text(
-                          '${CrossAcademyService.beltLabels[academy.currentBelt] ?? academy.currentBelt} - ${academy.currentStripes} grau(s)',
-                          style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (academy.academyId == currentAcademyId)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.success,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        'Atual',
-                        style: AppTheme.labelSmall.copyWith(color: Colors.white),
-                      ),
-                    ),
-                ],
-              ),
-            )),
+            ),
             const SizedBox(height: 24),
           ],
 
@@ -791,44 +906,50 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
               spacing: 8,
               runSpacing: 8,
               children: [
-                ...history.attendanceStats.map((stat) => Container(
-                  width: (MediaQuery.of(context).size.width - 48) / 2,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: stat.academyId == currentAcademyId
-                        ? AppTheme.success.withValues(alpha: 0.1)
-                        : AppTheme.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.divider),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        '${stat.totalCount}',
-                        style: AppTheme.headlineMedium.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: stat.academyId == currentAcademyId
-                              ? AppTheme.success
-                              : AppTheme.textPrimary,
+                ...history.attendanceStats.map(
+                  (stat) => Container(
+                    width: (MediaQuery.of(context).size.width - 48) / 2,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: stat.academyId == currentAcademyId
+                          ? AppTheme.success.withValues(alpha: 0.1)
+                          : AppTheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.divider),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          '${stat.totalCount}',
+                          style: AppTheme.headlineMedium.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: stat.academyId == currentAcademyId
+                                ? AppTheme.success
+                                : AppTheme.textPrimary,
+                          ),
                         ),
-                      ),
-                      Text(
-                        stat.academyName,
-                        style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                        Text(
+                          stat.academyName,
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
-                )),
+                ),
                 Container(
                   width: (MediaQuery.of(context).size.width - 48) / 2,
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
+                    border: Border.all(
+                      color: AppTheme.primary.withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Column(
                     children: [
@@ -841,7 +962,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
                       ),
                       Text(
                         'Total Global',
-                        style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                     ],
                   ),
@@ -855,62 +978,77 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
           if (history.beltProgressions.isNotEmpty) ...[
             _buildSectionTitle('Graduacoes em Outras Academias'),
             const SizedBox(height: 12),
-            ...history.beltProgressions.take(10).map((progression) => Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.divider),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
+            ...history.beltProgressions
+                .take(10)
+                .map(
+                  (progression) => Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.divider),
                     ),
-                    child: Icon(LucideIcons.award, color: AppTheme.primary, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Row(
                       children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                progression.newStripes > (progression.previousStripes ?? 0)
-                                    ? '${progression.newStripes}º grau - ${CrossAcademyService.beltLabels[progression.newBelt] ?? progression.newBelt}'
-                                    : 'Faixa ${CrossAcademyService.beltLabels[progression.newBelt] ?? progression.newBelt}',
-                                style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            _buildAcademyBadge(progression.academyName),
-                          ],
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            LucideIcons.award,
+                            color: AppTheme.primary,
+                            size: 20,
+                          ),
                         ),
-                        Text(
-                          DateFormat('dd/MM/yyyy').format(progression.promotionDate),
-                          style: AppTheme.labelSmall.copyWith(color: AppTheme.textDisabled),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      progression.newStripes >
+                                              (progression.previousStripes ?? 0)
+                                          ? '${progression.newStripes}º grau - ${CrossAcademyService.beltLabels[progression.newBelt] ?? progression.newBelt}'
+                                          : 'Faixa ${CrossAcademyService.beltLabels[progression.newBelt] ?? progression.newBelt}',
+                                      style: AppTheme.bodyMedium.copyWith(
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _buildAcademyBadge(progression.academyName),
+                                ],
+                              ),
+                              Text(
+                                DateFormat(
+                                  'dd/MM/yyyy',
+                                ).format(progression.promotionDate),
+                                style: AppTheme.labelSmall.copyWith(
+                                  color: AppTheme.textDisabled,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: _getBeltColor(progression.newBelt),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: _getBeltColor(progression.newBelt),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                ],
-              ),
-            )),
+                ),
             const SizedBox(height: 24),
           ],
 
@@ -956,7 +1094,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
                               Flexible(
                                 child: Text(
                                   result.competitionName,
-                                  style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w500),
+                                  style: AppTheme.bodyMedium.copyWith(
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
                               ),
                             ],
@@ -965,9 +1105,14 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
                           Row(
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: AppTheme.warning.withValues(alpha: 0.1),
+                                  color: AppTheme.warning.withValues(
+                                    alpha: 0.1,
+                                  ),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
@@ -983,7 +1128,9 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
                           const SizedBox(height: 4),
                           Text(
                             '${DateFormat('dd/MM/yyyy').format(result.date)} - ${positionLabels[result.position] ?? result.position}',
-                            style: AppTheme.labelSmall.copyWith(color: AppTheme.textDisabled),
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.textDisabled,
+                            ),
                           ),
                         ],
                       ),
@@ -1002,19 +1149,39 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
             Row(
               children: [
                 Expanded(
-                  child: _buildMedalCard('🥇', history.medalCount.gold, 'Ouros', const Color(0xFFFFD700)),
+                  child: _buildMedalCard(
+                    '🥇',
+                    history.medalCount.gold,
+                    'Ouros',
+                    const Color(0xFFFFD700),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: _buildMedalCard('🥈', history.medalCount.silver, 'Pratas', const Color(0xFFC0C0C0)),
+                  child: _buildMedalCard(
+                    '🥈',
+                    history.medalCount.silver,
+                    'Pratas',
+                    const Color(0xFFC0C0C0),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: _buildMedalCard('🥉', history.medalCount.bronze, 'Bronzes', const Color(0xFFCD7F32)),
+                  child: _buildMedalCard(
+                    '🥉',
+                    history.medalCount.bronze,
+                    'Bronzes',
+                    const Color(0xFFCD7F32),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: _buildMedalCard('🏆', history.medalCount.total, 'Total', AppTheme.primary),
+                  child: _buildMedalCard(
+                    '🏆',
+                    history.medalCount.total,
+                    'Total',
+                    AppTheme.primary,
+                  ),
                 ),
               ],
             ),
@@ -1030,11 +1197,17 @@ class _MonitorStudentDetailScreenState extends ConsumerState<MonitorStudentDetai
                 padding: const EdgeInsets.all(32),
                 child: Column(
                   children: [
-                    Icon(LucideIcons.globe, size: 48, color: AppTheme.textDisabled),
+                    Icon(
+                      LucideIcons.globe,
+                      size: 48,
+                      color: AppTheme.textDisabled,
+                    ),
                     const SizedBox(height: 16),
                     Text(
                       'Este aluno nao possui historico em outras academias',
-                      style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   ],

@@ -639,29 +639,38 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             
             const SizedBox(height: 8),
 
-            SegmentedButton<_DocumentType>(
-              segments: const [
-                ButtonSegment(
-                  value: _DocumentType.cpf,
-                  label: Text('CPF (Pessoa Física)'),
-                  icon: Icon(LucideIcons.user, size: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _DocumentTypeCard(
+                    icon: LucideIcons.user,
+                    title: 'CPF',
+                    subtitle: 'Pessoa Física',
+                    selected: _documentType == _DocumentType.cpf,
+                    onTap: () {
+                      setState(() {
+                        _documentType = _DocumentType.cpf;
+                        _documentController.clear();
+                      });
+                    },
+                  ),
                 ),
-                ButtonSegment(
-                  value: _DocumentType.cnpj,
-                  label: Text('CNPJ (Empresa)'),
-                  icon: Icon(LucideIcons.building2, size: 16),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _DocumentTypeCard(
+                    icon: LucideIcons.building2,
+                    title: 'CNPJ',
+                    subtitle: 'Empresa',
+                    selected: _documentType == _DocumentType.cnpj,
+                    onTap: () {
+                      setState(() {
+                        _documentType = _DocumentType.cnpj;
+                        _documentController.clear();
+                      });
+                    },
+                  ),
                 ),
               ],
-              selected: {_documentType},
-              onSelectionChanged: (Set<_DocumentType> selection) {
-                setState(() {
-                  _documentType = selection.first;
-                  _documentController.clear();
-                });
-              },
-              style: ButtonStyle(
-                visualDensity: VisualDensity.compact,
-              ),
             ).animate().fadeIn(delay: 300.ms),
 
             const SizedBox(height: 16),
@@ -870,6 +879,104 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DocumentTypeCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _DocumentTypeCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.primary;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          decoration: BoxDecoration(
+            color: selected
+                ? primary.withValues(alpha: 0.08)
+                : AppTheme.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected ? primary : AppTheme.divider,
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? primary.withValues(alpha: 0.15)
+                      : AppTheme.surfaceVariant,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  icon,
+                  size: 18,
+                  color: selected ? primary : AppTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: AppTheme.titleSmall.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: selected ? primary : AppTheme.textPrimary,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.textSecondary,
+                        height: 1.1,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              AnimatedScale(
+                duration: const Duration(milliseconds: 180),
+                scale: selected ? 1 : 0,
+                child: Icon(
+                  LucideIcons.checkCircle2,
+                  size: 18,
+                  color: primary,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +11,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/services.dart';
 import '../../widgets/competitions/competition_gallery.dart';
 import '../../widgets/competitions/photo_upload_sheet.dart';
+import '../../widgets/loading_button.dart';
 
 /// Position display config
 const _positionConfig = {
@@ -75,22 +77,22 @@ class _CompetitionDetailScreenState
       final competitionService = CompetitionService(academyId);
       final enrollmentService = CompetitionEnrollmentService(academyId);
 
-      // Load each independently to avoid one failure breaking all
-      final competition = await competitionService.getById(widget.competitionId);
+      // Sprint 5 — parallelize the three independent fetches with
+      // `Future.wait`. Each future has its own `.catchError` so a missing
+      // index on results/enrollments doesn't cancel the whole batch.
+      final futures = await Future.wait<dynamic>([
+        competitionService.getById(widget.competitionId),
+        competitionService
+            .getResultsForCompetition(widget.competitionId)
+            .catchError((_) => <CompetitionResult>[]),
+        enrollmentService
+            .getByCompetition(widget.competitionId)
+            .catchError((_) => <CompetitionEnrollment>[]),
+      ]);
 
-      List<CompetitionResult> resultsList = [];
-      try {
-        resultsList = await competitionService.getResultsForCompetition(widget.competitionId);
-      } catch (_) {
-        // Results may fail due to missing index — continue without them
-      }
-
-      List<CompetitionEnrollment> enrollmentsList = [];
-      try {
-        enrollmentsList = await enrollmentService.getByCompetition(widget.competitionId);
-      } catch (_) {
-        // Enrollments may fail — continue without them
-      }
+      final competition = futures[0] as Competition?;
+      final resultsList = futures[1] as List<CompetitionResult>;
+      final enrollmentsList = futures[2] as List<CompetitionEnrollment>;
 
       if (!mounted) return;
 
@@ -124,96 +126,98 @@ class _CompetitionDetailScreenState
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(LucideIcons.alertCircle,
-                            size: 48, color: AppTheme.error),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Erro ao carregar dados',
-                          style: AppTheme.titleMedium
-                              .copyWith(color: AppTheme.textSecondary),
-                        ),
-                        const SizedBox(height: 12),
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            setState(() {
-                              _isLoading = true;
-                              _error = null;
-                            });
-                            _loadData();
-                          },
-                          icon: const Icon(LucideIcons.refreshCw, size: 16),
-                          label: const Text('Tentar novamente'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.textPrimary,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ],
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      LucideIcons.alertCircle,
+                      size: 48,
+                      color: AppTheme.error,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Erro ao carregar dados',
+                      style: AppTheme.titleMedium.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _isLoading = true;
+                          _error = null;
+                        });
+                        _loadData();
+                      },
+                      icon: const Icon(LucideIcons.refreshCw, size: 16),
+                      label: const Text('Tentar novamente'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.textPrimary,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : _competition == null
+          ? const Center(child: Text('Competicao nao encontrada'))
+          : Column(
+              children: [
+                // Competition Info
+                _buildInfoCard(student),
+
+                // Tabs
+                Container(
+                  decoration: const BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(color: AppTheme.divider, width: 1),
                     ),
                   ),
-                )
-              : _competition == null
-                  ? const Center(child: Text('Competicao nao encontrada'))
-                  : Column(
-                      children: [
-                        // Competition Info
-                        _buildInfoCard(student),
-
-                        // Tabs
-                        Container(
-                          decoration: const BoxDecoration(
-                            border: Border(
-                              bottom:
-                                  BorderSide(color: AppTheme.divider, width: 1),
-                            ),
-                          ),
-                          child: TabBar(
-                            controller: _tabController,
-                            labelColor: AppTheme.textPrimary,
-                            unselectedLabelColor: AppTheme.textSecondary,
-                            labelStyle: AppTheme.labelMedium
-                                .copyWith(fontWeight: FontWeight.w600),
-                            unselectedLabelStyle: AppTheme.labelMedium,
-                            indicatorColor: AppTheme.primary,
-                            indicatorWeight: 2,
-                            tabs: [
-                              Tab(
-                                  text:
-                                      'Resultados (${_results.length})'),
-                              const Tab(text: 'Galeria'),
-                            ],
-                          ),
-                        ),
-
-                        // Tab Views
-                        Expanded(
-                          child: TabBarView(
-                            controller: _tabController,
-                            children: [
-                              // Results Tab
-                              _buildResultsTab(student),
-
-                              // Gallery Tab
-                              _buildGalleryTab(
-                                  student, academyId),
-                            ],
-                          ),
-                        ),
-                      ],
+                  child: TabBar(
+                    controller: _tabController,
+                    labelColor: AppTheme.textPrimary,
+                    unselectedLabelColor: AppTheme.textSecondary,
+                    labelStyle: AppTheme.labelMedium.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
+                    unselectedLabelStyle: AppTheme.labelMedium,
+                    indicatorColor: AppTheme.primary,
+                    indicatorWeight: 2,
+                    tabs: [
+                      Tab(text: 'Resultados (${_results.length})'),
+                      const Tab(text: 'Galeria'),
+                    ],
+                  ),
+                ),
+
+                // Tab Views
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      // Results Tab
+                      _buildResultsTab(student),
+
+                      // Gallery Tab
+                      _buildGalleryTab(student, academyId),
+                    ],
+                  ),
+                ),
+              ],
+            ),
     );
   }
 
   Widget _buildInfoCard(Student? student) {
     final competition = _competition!;
     final studentId = student?.id;
-    final isEnrolled = studentId != null && _enrollments.any((e) => e.studentId == studentId);
+    final isEnrolled =
+        studentId != null && _enrollments.any((e) => e.studentId == studentId);
 
     return Container(
       margin: const EdgeInsets.all(16),
@@ -231,8 +235,9 @@ class _CompetitionDetailScreenState
               Expanded(
                 child: Text(
                   competition.name,
-                  style:
-                      AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+                  style: AppTheme.titleMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               _buildStatusChip(competition.status),
@@ -241,14 +246,20 @@ class _CompetitionDetailScreenState
           const SizedBox(height: 12),
           Row(
             children: [
-              const Icon(LucideIcons.calendar,
-                  size: 14, color: AppTheme.textSecondary),
+              const Icon(
+                LucideIcons.calendar,
+                size: 14,
+                color: AppTheme.textSecondary,
+              ),
               const SizedBox(width: 8),
               Text(
-                DateFormat("d 'de' MMMM 'de' yyyy", 'pt_BR')
-                    .format(competition.date),
-                style:
-                    AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                DateFormat(
+                  "d 'de' MMMM 'de' yyyy",
+                  'pt_BR',
+                ).format(competition.date),
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ],
           ),
@@ -256,14 +267,18 @@ class _CompetitionDetailScreenState
             const SizedBox(height: 4),
             Row(
               children: [
-                const Icon(LucideIcons.mapPin,
-                    size: 14, color: AppTheme.textSecondary),
+                const Icon(
+                  LucideIcons.mapPin,
+                  size: 14,
+                  color: AppTheme.textSecondary,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     competition.location!,
-                    style: AppTheme.bodySmall
-                        .copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -276,14 +291,15 @@ class _CompetitionDetailScreenState
             const SizedBox(height: 8),
             Text(
               competition.description!,
-              style:
-                  AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ],
           // Self-enrollment button (students only)
-          if (!widget.isAdmin && studentId != null && competition.status != CompetitionStatus.completed) ...[
+          if (!widget.isAdmin &&
+              studentId != null &&
+              competition.status != CompetitionStatus.completed) ...[
             const SizedBox(height: 12),
             const Divider(height: 1),
             const SizedBox(height: 12),
@@ -291,7 +307,9 @@ class _CompetitionDetailScreenState
               width: double.infinity,
               child: isEnrolled
                   ? OutlinedButton(
-                      onPressed: _isEnrolling ? null : () => _cancelEnrollment(studentId),
+                      onPressed: _isEnrolling
+                          ? null
+                          : () => _cancelEnrollment(studentId),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppTheme.error,
                         side: const BorderSide(color: AppTheme.error),
@@ -300,12 +318,13 @@ class _CompetitionDetailScreenState
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: Text(_isEnrolling ? 'Cancelando...' : 'Cancelar Inscricao'),
+                      child: Text(
+                        _isEnrolling ? 'Cancelando...' : 'Cancelar Inscricao',
+                      ),
                     )
-                  : ElevatedButton.icon(
-                      onPressed: _isEnrolling ? null : () => _selfEnroll(student!),
-                      icon: const Icon(LucideIcons.userPlus, size: 16),
-                      label: Text(_isEnrolling ? 'Inscrevendo...' : 'Inscrever-se'),
+                  : LoadingButton(
+                      isLoading: _isEnrolling,
+                      onPressed: () => _selfEnroll(student!),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.textPrimary,
                         foregroundColor: Colors.white,
@@ -313,6 +332,14 @@ class _CompetitionDetailScreenState
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(LucideIcons.userPlus, size: 16),
+                          SizedBox(width: 8),
+                          Text('Inscrever-se'),
+                        ],
                       ),
                     ),
             ),
@@ -358,13 +385,17 @@ class _CompetitionDetailScreenState
 
   Widget _buildResultsTab(Student? student) {
     final studentId = student?.id;
-    final myResults =
-        _results.where((r) => r.studentId == studentId).toList();
-    final myEnrollment =
-        _enrollments.where((e) => e.studentId == studentId).firstOrNull;
+    final myResults = _results.where((r) => r.studentId == studentId).toList();
+    final myEnrollment = _enrollments
+        .where((e) => e.studentId == studentId)
+        .firstOrNull;
 
     return RefreshIndicator(
-      onRefresh: _loadData,
+      color: Theme.of(context).colorScheme.primary,
+      onRefresh: () async {
+        HapticFeedback.mediumImpact();
+        await _loadData();
+      },
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -393,9 +424,24 @@ class _CompetitionDetailScreenState
   Widget _buildTeamResultCard() {
     final position = _competition!.teamPosition;
     final config = {
-      'gold': {'label': 'Campeao por Equipes', 'bgColor': const Color(0xFFFEF3C7), 'borderColor': const Color(0xFFF59E0B), 'textColor': const Color(0xFF92400E)},
-      'silver': {'label': 'Vice-campeao por Equipes', 'bgColor': const Color(0xFFF3F4F6), 'borderColor': const Color(0xFF9CA3AF), 'textColor': const Color(0xFF374151)},
-      'bronze': {'label': '3o Lugar por Equipes', 'bgColor': const Color(0xFFFED7AA), 'borderColor': const Color(0xFFF97316), 'textColor': const Color(0xFF7C2D12)},
+      'gold': {
+        'label': 'Campeao por Equipes',
+        'bgColor': const Color(0xFFFEF3C7),
+        'borderColor': const Color(0xFFF59E0B),
+        'textColor': const Color(0xFF92400E),
+      },
+      'silver': {
+        'label': 'Vice-campeao por Equipes',
+        'bgColor': const Color(0xFFF3F4F6),
+        'borderColor': const Color(0xFF9CA3AF),
+        'textColor': const Color(0xFF374151),
+      },
+      'bronze': {
+        'label': '3o Lugar por Equipes',
+        'bgColor': const Color(0xFFFED7AA),
+        'borderColor': const Color(0xFFF97316),
+        'textColor': const Color(0xFF7C2D12),
+      },
     };
 
     // Admin without team result: show register button
@@ -406,8 +452,14 @@ class _CompetitionDetailScreenState
           onPressed: _showTeamResultDialog,
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 16),
-            side: const BorderSide(color: AppTheme.warning, style: BorderStyle.solid, width: 2),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            side: const BorderSide(
+              color: AppTheme.warning,
+              style: BorderStyle.solid,
+              width: 2,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -416,7 +468,9 @@ class _CompetitionDetailScreenState
               const SizedBox(width: 8),
               Text(
                 'Registrar Resultado da Equipe',
-                style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+                style: AppTheme.bodyMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
@@ -498,7 +552,8 @@ class _CompetitionDetailScreenState
     CompetitionEnrollment? myEnrollment,
   }) {
     final firstPos = myResults.isNotEmpty
-        ? _positionConfig[myResults.first.position] ?? _positionConfig['participant']!
+        ? _positionConfig[myResults.first.position] ??
+              _positionConfig['participant']!
         : null;
 
     return Container(
@@ -546,9 +601,13 @@ class _CompetitionDetailScreenState
           const SizedBox(height: 12),
           if (myResults.isNotEmpty) ...[
             ...myResults.map((result) {
-              final pos = _positionConfig[result.position] ?? _positionConfig['participant']!;
+              final pos =
+                  _positionConfig[result.position] ??
+                  _positionConfig['participant']!;
               return Padding(
-                padding: EdgeInsets.only(top: result == myResults.first ? 0 : 8),
+                padding: EdgeInsets.only(
+                  top: result == myResults.first ? 0 : 8,
+                ),
                 child: Row(
                   children: [
                     Text(
@@ -562,28 +621,35 @@ class _CompetitionDetailScreenState
                         children: [
                           Text(
                             pos['label'] as String,
-                            style: AppTheme.titleMedium
-                                .copyWith(fontWeight: FontWeight.w600),
+                            style: AppTheme.titleMedium.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                           if (result.ageCategory != null ||
                               result.weightCategory != null)
                             Text(
                               [
-                                if (result.modality != null)
-                                  result.modality == 'gi' ? 'Gi' : 'No-Gi',
-                                if (result.divisionType != null)
-                                  result.divisionType == 'absolute' ? 'Absoluto' : 'Peso',
-                                result.ageCategory,
-                                result.weightCategory,
-                              ].where((e) => e != null && e.isNotEmpty).join(' - '),
-                              style: AppTheme.bodySmall
-                                  .copyWith(color: AppTheme.textSecondary),
+                                    if (result.modality != null)
+                                      result.modality == 'gi' ? 'Gi' : 'No-Gi',
+                                    if (result.divisionType != null)
+                                      result.divisionType == 'absolute'
+                                          ? 'Absoluto'
+                                          : 'Peso',
+                                    result.ageCategory,
+                                    result.weightCategory,
+                                  ]
+                                  .where((e) => e != null && e.isNotEmpty)
+                                  .join(' - '),
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
                             ),
                           if (result.notes != null)
                             Text(
                               result.notes!,
-                              style: AppTheme.bodySmall
-                                  .copyWith(color: AppTheme.textSecondary),
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
                             ),
                         ],
                       ),
@@ -625,8 +691,11 @@ class _CompetitionDetailScreenState
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(LucideIcons.medal,
-                        size: 18, color: AppTheme.textSecondary),
+                    Icon(
+                      LucideIcons.medal,
+                      size: 18,
+                      color: AppTheme.textSecondary,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       'Registrar meu resultado',
@@ -658,17 +727,25 @@ class _CompetitionDetailScreenState
         children: [
           Row(
             children: [
-              const Icon(LucideIcons.users, size: 16, color: AppTheme.textSecondary),
+              const Icon(
+                LucideIcons.users,
+                size: 16,
+                color: AppTheme.textSecondary,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   widget.isAdmin ? 'Resultados' : 'Todos os Resultados',
-                  style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                  style: AppTheme.titleSmall.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               if (widget.isAdmin)
                 TextButton.icon(
-                  onPressed: _enrollments.isEmpty ? null : _showAdminAddResultDialog,
+                  onPressed: _enrollments.isEmpty
+                      ? null
+                      : _showAdminAddResultDialog,
                   icon: const Icon(LucideIcons.plus, size: 16),
                   label: const Text('Adicionar'),
                   style: TextButton.styleFrom(
@@ -685,13 +762,17 @@ class _CompetitionDetailScreenState
               child: Center(
                 child: Column(
                   children: [
-                    Icon(LucideIcons.medal,
-                        size: 40, color: AppTheme.textDisabled),
+                    Icon(
+                      LucideIcons.medal,
+                      size: 40,
+                      color: AppTheme.textDisabled,
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       'Nenhum resultado registrado ainda',
-                      style: AppTheme.bodySmall
-                          .copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                   ],
                 ),
@@ -700,14 +781,17 @@ class _CompetitionDetailScreenState
           else
             ...List.generate(_results.length, (index) {
               final result = _results[index];
-              final pos = _positionConfig[result.position] ??
+              final pos =
+                  _positionConfig[result.position] ??
                   _positionConfig['participant']!;
               final isMe = result.studentId == currentStudentId;
 
               return Container(
                 margin: EdgeInsets.only(top: index > 0 ? 8 : 0),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: isMe
                       ? AppTheme.primary.withValues(alpha: 0.05)
@@ -715,7 +799,8 @@ class _CompetitionDetailScreenState
                   borderRadius: BorderRadius.circular(8),
                   border: isMe
                       ? Border.all(
-                          color: AppTheme.primary.withValues(alpha: 0.3))
+                          color: AppTheme.primary.withValues(alpha: 0.3),
+                        )
                       : null,
                 ),
                 child: Row(
@@ -735,8 +820,9 @@ class _CompetitionDetailScreenState
                                 child: Text(
                                   result.studentName,
                                   style: AppTheme.bodyMedium.copyWith(
-                                    fontWeight:
-                                        isMe ? FontWeight.w700 : FontWeight.w500,
+                                    fontWeight: isMe
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -746,7 +832,9 @@ class _CompetitionDetailScreenState
                                 const SizedBox(width: 6),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: AppTheme.primary,
                                     borderRadius: BorderRadius.circular(8),
@@ -780,18 +868,26 @@ class _CompetitionDetailScreenState
                           studentId: result.studentId,
                           studentName: result.studentName,
                           existingResult: result,
-                          enrollment: _enrollments.where((e) => e.studentId == result.studentId).firstOrNull,
+                          enrollment: _enrollments
+                              .where((e) => e.studentId == result.studentId)
+                              .firstOrNull,
                         ),
                         icon: const Icon(LucideIcons.edit, size: 16),
                         color: AppTheme.textSecondary,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
                         padding: EdgeInsets.zero,
                       ),
                       IconButton(
                         onPressed: () => _deleteResult(result),
                         icon: const Icon(LucideIcons.trash2, size: 16),
                         color: Colors.red.shade400,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
                         padding: EdgeInsets.zero,
                       ),
                     ],
@@ -809,8 +905,7 @@ class _CompetitionDetailScreenState
       return const Center(child: Text('Academia nao selecionada'));
     }
 
-    final isEnrolled =
-        _enrollments.any((e) => e.studentId == student?.id);
+    final isEnrolled = _enrollments.any((e) => e.studentId == student?.id);
     final enrolledStudents = _enrollments
         .map((e) => EnrolledStudent(id: e.studentId, name: e.studentName))
         .toList();
@@ -836,6 +931,7 @@ class _CompetitionDetailScreenState
     final academyId = ref.read(selectedAcademyIdProvider);
     if (academyId == null || _competition == null) return;
 
+    HapticFeedback.selectionClick();
     setState(() => _isEnrolling = true);
     try {
       final enrollmentService = CompetitionEnrollmentService(academyId);
@@ -860,8 +956,12 @@ class _CompetitionDetailScreenState
       });
 
       if (mounted) {
+        HapticFeedback.heavyImpact();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Inscrito com sucesso!'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('Inscrito com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
@@ -880,7 +980,9 @@ class _CompetitionDetailScreenState
     final academyId = ref.read(selectedAcademyIdProvider);
     if (academyId == null || _competition == null) return;
 
-    final myEnrollment = _enrollments.where((e) => e.studentId == studentId).firstOrNull;
+    final myEnrollment = _enrollments
+        .where((e) => e.studentId == studentId)
+        .firstOrNull;
     if (myEnrollment == null) return;
 
     setState(() => _isEnrolling = true);
@@ -895,18 +997,26 @@ class _CompetitionDetailScreenState
       } catch (_) {}
 
       setState(() {
-        _enrollments = _enrollments.where((e) => e.id != myEnrollment.id).toList();
+        _enrollments = _enrollments
+            .where((e) => e.id != myEnrollment.id)
+            .toList();
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Inscricao cancelada'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('Inscricao cancelada'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Erro ao cancelar inscricao'), backgroundColor: Colors.red),
+          const SnackBar(
+            content: Text('Erro ao cancelar inscricao'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -917,7 +1027,9 @@ class _CompetitionDetailScreenState
   /// Admin: Show team result dialog
   void _showTeamResultDialog() {
     String teamPosition = _competition?.teamPosition ?? 'gold';
-    final notesController = TextEditingController(text: _competition?.teamNotes ?? '');
+    final notesController = TextEditingController(
+      text: _competition?.teamNotes ?? '',
+    );
 
     showModalBottomSheet(
       context: context,
@@ -928,7 +1040,12 @@ class _CompetitionDetailScreenState
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheetState) {
           return Padding(
-            padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20,
+              20,
+              MediaQuery.of(ctx).viewInsets.bottom + 20,
+            ),
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -936,17 +1053,30 @@ class _CompetitionDetailScreenState
                 children: [
                   Center(
                     child: Container(
-                      width: 40, height: 4,
-                      decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2)),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppTheme.divider,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    _competition?.teamPosition != null ? 'Editar Resultado da Equipe' : 'Registrar Resultado da Equipe',
-                    style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                    _competition?.teamPosition != null
+                        ? 'Editar Resultado da Equipe'
+                        : 'Registrar Resultado da Equipe',
+                    style: AppTheme.titleLarge.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 20),
-                  Text('Posicao', style: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600)),
+                  Text(
+                    'Posicao',
+                    style: AppTheme.labelMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -954,19 +1084,22 @@ class _CompetitionDetailScreenState
                       ChoiceChip(
                         label: const Text('🥇 Campeao'),
                         selected: teamPosition == 'gold',
-                        onSelected: (_) => setSheetState(() => teamPosition = 'gold'),
+                        onSelected: (_) =>
+                            setSheetState(() => teamPosition = 'gold'),
                         selectedColor: const Color(0xFFFEF3C7),
                       ),
                       ChoiceChip(
                         label: const Text('🥈 Vice'),
                         selected: teamPosition == 'silver',
-                        onSelected: (_) => setSheetState(() => teamPosition = 'silver'),
+                        onSelected: (_) =>
+                            setSheetState(() => teamPosition = 'silver'),
                         selectedColor: const Color(0xFFF3F4F6),
                       ),
                       ChoiceChip(
                         label: const Text('🥉 3o Lugar'),
                         selected: teamPosition == 'bronze',
-                        onSelected: (_) => setSheetState(() => teamPosition = 'bronze'),
+                        onSelected: (_) =>
+                            setSheetState(() => teamPosition = 'bronze'),
                         selectedColor: const Color(0xFFFED7AA),
                       ),
                     ],
@@ -989,7 +1122,9 @@ class _CompetitionDetailScreenState
                         final academyId = ref.read(selectedAcademyIdProvider);
                         if (academyId == null || _competition == null) return;
 
-                        final competitionService = CompetitionService(academyId);
+                        final competitionService = CompetitionService(
+                          academyId,
+                        );
                         try {
                           final teamData = <String, dynamic>{
                             'teamPosition': teamPosition,
@@ -999,18 +1134,27 @@ class _CompetitionDetailScreenState
                           } else {
                             teamData['teamNotes'] = FieldValue.delete();
                           }
-                          await competitionService.update(_competition!.id, teamData);
+                          await competitionService.update(
+                            _competition!.id,
+                            teamData,
+                          );
                           if (mounted) {
                             Navigator.of(ctx).pop();
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Resultado da equipe salvo!'), backgroundColor: Colors.green),
+                              const SnackBar(
+                                content: Text('Resultado da equipe salvo!'),
+                                backgroundColor: Colors.green,
+                              ),
                             );
                             _loadData();
                           }
                         } catch (e) {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
+                              SnackBar(
+                                content: Text('Erro: $e'),
+                                backgroundColor: Colors.red,
+                              ),
                             );
                           }
                         }
@@ -1019,7 +1163,9 @@ class _CompetitionDetailScreenState
                         backgroundColor: AppTheme.textPrimary,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                       child: const Text('Salvar'),
                     ),
@@ -1041,7 +1187,10 @@ class _CompetitionDetailScreenState
         title: const Text('Remover Resultado da Equipe'),
         content: const Text('Deseja remover o resultado da equipe?'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -1064,7 +1213,10 @@ class _CompetitionDetailScreenState
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Resultado da equipe removido'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('Resultado da equipe removido'),
+            backgroundColor: Colors.green,
+          ),
         );
         _loadData();
       }
@@ -1090,21 +1242,40 @@ class _CompetitionDetailScreenState
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheetState) {
           return Padding(
-            padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20,
+              20,
+              MediaQuery.of(ctx).viewInsets.bottom + 20,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Center(
                   child: Container(
-                    width: 40, height: 4,
-                    decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2)),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTheme.divider,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
-                Text('Adicionar Resultado', style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600)),
+                Text(
+                  'Adicionar Resultado',
+                  style: AppTheme.titleLarge.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 20),
-                Text('Selecione o Aluno', style: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600)),
+                Text(
+                  'Selecione o Aluno',
+                  style: AppTheme.labelMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<CompetitionEnrollment>(
                   value: selectedEnrollment,
@@ -1113,30 +1284,39 @@ class _CompetitionDetailScreenState
                     isDense: true,
                     hintText: 'Selecione...',
                   ),
-                  items: _enrollments.map((e) => DropdownMenuItem(
-                    value: e,
-                    child: Text(e.studentName),
-                  )).toList(),
-                  onChanged: (value) => setSheetState(() => selectedEnrollment = value),
+                  items: _enrollments
+                      .map(
+                        (e) => DropdownMenuItem(
+                          value: e,
+                          child: Text(e.studentName),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) =>
+                      setSheetState(() => selectedEnrollment = value),
                 ),
                 const SizedBox(height: 20),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: selectedEnrollment == null ? null : () {
-                      Navigator.of(ctx).pop();
-                      _showResultDialog(
-                        studentId: selectedEnrollment!.studentId,
-                        studentName: selectedEnrollment!.studentName,
-                        existingResult: null,
-                        enrollment: selectedEnrollment,
-                      );
-                    },
+                    onPressed: selectedEnrollment == null
+                        ? null
+                        : () {
+                            Navigator.of(ctx).pop();
+                            _showResultDialog(
+                              studentId: selectedEnrollment!.studentId,
+                              studentName: selectedEnrollment!.studentName,
+                              existingResult: null,
+                              enrollment: selectedEnrollment,
+                            );
+                          },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.textPrimary,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                     child: const Text('Continuar'),
                   ),
@@ -1175,7 +1355,11 @@ class _CompetitionDetailScreenState
         builder: (ctx, setSheetState) {
           return Padding(
             padding: EdgeInsets.fromLTRB(
-                20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+              20,
+              20,
+              20,
+              MediaQuery.of(ctx).viewInsets.bottom + 20,
+            ),
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1198,15 +1382,19 @@ class _CompetitionDetailScreenState
                     existingResult != null
                         ? 'Editar Resultado'
                         : 'Registrar Resultado',
-                    style:
-                        AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
+                    style: AppTheme.titleLarge.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 20),
 
                   // Position selector
-                  Text('Resultado',
-                      style: AppTheme.labelMedium
-                          .copyWith(fontWeight: FontWeight.w600)),
+                  Text(
+                    'Resultado',
+                    style: AppTheme.labelMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -1214,22 +1402,27 @@ class _CompetitionDetailScreenState
                       final isSelected = position == entry.key;
                       return ChoiceChip(
                         label: Text(
-                            '${entry.value['icon']} ${entry.value['label']}'),
+                          '${entry.value['icon']} ${entry.value['label']}',
+                        ),
                         selected: isSelected,
                         onSelected: (_) {
                           setSheetState(() => position = entry.key);
                         },
-                        selectedColor:
-                            Color(entry.value['color'] as int).withValues(alpha: 0.2),
+                        selectedColor: Color(
+                          entry.value['color'] as int,
+                        ).withValues(alpha: 0.2),
                       );
                     }).toList(),
                   ),
                   const SizedBox(height: 16),
 
                   // Modality: Gi / No-Gi
-                  Text('Modalidade',
-                      style: AppTheme.labelMedium
-                          .copyWith(fontWeight: FontWeight.w600)),
+                  Text(
+                    'Modalidade',
+                    style: AppTheme.labelMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -1257,9 +1450,12 @@ class _CompetitionDetailScreenState
                   const SizedBox(height: 16),
 
                   // Division Type: Peso / Absoluto
-                  Text('Divisao',
-                      style: AppTheme.labelMedium
-                          .copyWith(fontWeight: FontWeight.w600)),
+                  Text(
+                    'Divisao',
+                    style: AppTheme.labelMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -1318,16 +1514,16 @@ class _CompetitionDetailScreenState
                       onPressed: weightCategory.isEmpty
                           ? null
                           : () => _saveResult(
-                                studentId: studentId,
-                                studentName: studentName,
-                                position: position,
-                                ageCategory: ageCategory,
-                                weightCategory: weightCategory,
-                                modality: modality,
-                                divisionType: divisionType,
-                                notes: notes.isNotEmpty ? notes : null,
-                                existingResult: existingResult,
-                              ),
+                              studentId: studentId,
+                              studentName: studentName,
+                              position: position,
+                              ageCategory: ageCategory,
+                              weightCategory: weightCategory,
+                              modality: modality,
+                              divisionType: divisionType,
+                              notes: notes.isNotEmpty ? notes : null,
+                              existingResult: existingResult,
+                            ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.textPrimary,
                         foregroundColor: Colors.white,
@@ -1459,7 +1655,9 @@ class _CompetitionDetailScreenState
         );
 
         // Auto-enroll if not already enrolled
-        final alreadyEnrolled = _enrollments.any((e) => e.studentId == studentId);
+        final alreadyEnrolled = _enrollments.any(
+          (e) => e.studentId == studentId,
+        );
         if (!alreadyEnrolled) {
           try {
             final enrollmentService = CompetitionEnrollmentService(academyId);
@@ -1489,9 +1687,11 @@ class _CompetitionDetailScreenState
         Navigator.of(context).pop(); // Close bottom sheet
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(existingResult != null
-                ? 'Resultado atualizado!'
-                : 'Resultado registrado!'),
+            content: Text(
+              existingResult != null
+                  ? 'Resultado atualizado!'
+                  : 'Resultado registrado!',
+            ),
             backgroundColor: Colors.green,
           ),
         );

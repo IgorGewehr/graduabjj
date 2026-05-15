@@ -16,6 +16,7 @@ import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import '../../services/abacate_pay_service.dart';
 import '../../services/asaas_payment_service.dart';
+import '../../widgets/skeletons/skeletons.dart';
 
 /// Payment enabled provider (either AbacatePay or Asaas)
 final abacatePayEnabledProvider = FutureProvider<bool>((ref) async {
@@ -79,7 +80,9 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
         final pixKey = pixInfo['key'] ?? '';
 
         return RefreshIndicator(
+          color: Theme.of(context).colorScheme.primary,
           onRefresh: () async {
+            HapticFeedback.mediumImpact();
             ref.invalidate(studentPaymentsProvider(student.id));
             ref.invalidate(pixInfoProvider);
             ref.invalidate(abacatePayEnabledProvider);
@@ -87,29 +90,39 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
           child: paymentsAsync.when(
             data: (payments) {
               // Separate payments by status
-              final openPayments = payments
-                  .where((p) =>
-                      p.status == PaymentStatus.pending ||
-                      p.status == PaymentStatus.overdue)
-                  .toList()
-                ..sort((a, b) {
-                  // Overdue first, then by due date
-                  if (a.status == PaymentStatus.overdue &&
-                      b.status != PaymentStatus.overdue) return -1;
-                  if (b.status == PaymentStatus.overdue &&
-                      a.status != PaymentStatus.overdue) return 1;
-                  return a.dueDate.compareTo(b.dueDate);
-                });
+              final openPayments =
+                  payments
+                      .where(
+                        (p) =>
+                            p.status == PaymentStatus.pending ||
+                            p.status == PaymentStatus.overdue,
+                      )
+                      .toList()
+                    ..sort((a, b) {
+                      // Overdue first, then by due date
+                      if (a.status == PaymentStatus.overdue &&
+                          b.status != PaymentStatus.overdue)
+                        return -1;
+                      if (b.status == PaymentStatus.overdue &&
+                          a.status != PaymentStatus.overdue)
+                        return 1;
+                      return a.dueDate.compareTo(b.dueDate);
+                    });
 
-              final historyPayments = payments
-                  .where((p) =>
-                      p.status == PaymentStatus.paid ||
-                      p.status == PaymentStatus.cancelled)
-                  .toList()
-                ..sort((a, b) => b.dueDate.compareTo(a.dueDate));
+              final historyPayments =
+                  payments
+                      .where(
+                        (p) =>
+                            p.status == PaymentStatus.paid ||
+                            p.status == PaymentStatus.cancelled,
+                      )
+                      .toList()
+                    ..sort((a, b) => b.dueDate.compareTo(a.dueDate));
 
               final totalOpen = openPayments.fold<double>(
-                  0, (sum, p) => sum + p.value);
+                0,
+                (sum, p) => sum + p.value,
+              );
               final overdueCount = openPayments
                   .where((p) => p.status == PaymentStatus.overdue)
                   .length;
@@ -156,18 +169,18 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                       count: openPayments.length,
                     ),
                     const SizedBox(height: 12),
-                    ...openPayments.map((payment) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _PaymentCard(
-                            payment: payment,
-                            formatCurrency: _formatCurrency,
-                            showPayButton: abacatePayEnabled,
-                            onPayPix: () => _showPixPaymentDialog(
-                              payment,
-                              student.fullName,
-                            ),
-                          ),
-                        )),
+                    ...openPayments.map(
+                      (payment) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _PaymentCard(
+                          payment: payment,
+                          formatCurrency: _formatCurrency,
+                          showPayButton: abacatePayEnabled,
+                          onPayPix: () =>
+                              _showPixPaymentDialog(payment, student.fullName),
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 24),
                   ],
 
@@ -187,14 +200,16 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                   if (historyPayments.isEmpty)
                     _EmptyHistoryCard()
                   else
-                    ...historyPayments.map((payment) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _PaymentCard(
-                            payment: payment,
-                            formatCurrency: _formatCurrency,
-                            showStatus: true,
-                          ),
-                        )),
+                    ...historyPayments.map(
+                      (payment) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _PaymentCard(
+                          payment: payment,
+                          formatCurrency: _formatCurrency,
+                          showStatus: true,
+                        ),
+                      ),
+                    ),
                 ],
               );
             },
@@ -231,14 +246,14 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
             const SizedBox(height: 24),
             Text(
               'Pagamentos',
-              style: AppTheme.titleLarge.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+              style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             Text(
               'Vincule sua conta a um aluno para ver os pagamentos.',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
               textAlign: TextAlign.center,
             ),
           ],
@@ -250,37 +265,15 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
   Widget _buildLoadingState() {
     return ListView(
       padding: const EdgeInsets.all(20),
-      children: [
-        Container(
-          width: 120,
-          height: 24,
-          decoration: BoxDecoration(
-            color: AppTheme.surfaceVariant,
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          width: 200,
-          height: 14,
-          decoration: BoxDecoration(
-            color: AppTheme.surfaceVariant,
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-        const SizedBox(height: 24),
-        ...List.generate(
-          3,
-          (index) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Container(
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
+      children: const [
+        SkeletonStats(count: 2, height: 80),
+        SizedBox(height: 24),
+        SkeletonList(
+          itemCount: 5,
+          scrollable: false,
+          padding: EdgeInsets.zero,
+          showAvatar: false,
+          itemHeight: 80,
         ),
       ],
     );
@@ -309,14 +302,14 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
             const SizedBox(height: 24),
             Text(
               'Erro ao carregar dados',
-              style: AppTheme.titleLarge.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+              style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             Text(
               'Tente novamente mais tarde.',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -389,8 +382,9 @@ class _DebtAlertCard extends StatelessWidget {
                           : 'Voce tem pagamentos pendentes',
                       style: AppTheme.bodyMedium.copyWith(
                         fontWeight: FontWeight.w600,
-                        color:
-                            hasOverdue ? AppTheme.error : AppTheme.textPrimary,
+                        color: hasOverdue
+                            ? AppTheme.error
+                            : AppTheme.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -476,9 +470,7 @@ class _AllPaidCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.successLight,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppTheme.success.withValues(alpha: 0.3),
-        ),
+        border: Border.all(color: AppTheme.success.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -528,10 +520,7 @@ class _SectionHeader extends StatelessWidget {
   final String title;
   final int count;
 
-  const _SectionHeader({
-    required this.title,
-    required this.count,
-  });
+  const _SectionHeader({required this.title, required this.count});
 
   @override
   Widget build(BuildContext context) {
@@ -539,9 +528,7 @@ class _SectionHeader extends StatelessWidget {
       children: [
         Text(
           title,
-          style: AppTheme.titleMedium.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
+          style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
         ),
         const SizedBox(width: 8),
         Container(
@@ -576,17 +563,11 @@ class _EmptyHistoryCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Icon(
-            LucideIcons.history,
-            size: 32,
-            color: AppTheme.textDisabled,
-          ),
+          Icon(LucideIcons.history, size: 32, color: AppTheme.textDisabled),
           const SizedBox(height: 12),
           Text(
             'Nenhum pagamento no historico',
-            style: AppTheme.bodyMedium.copyWith(
-              color: AppTheme.textSecondary,
-            ),
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
           ),
         ],
       ),
@@ -622,7 +603,9 @@ class _PaymentCard extends StatelessWidget {
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isOverdue ? AppTheme.error.withValues(alpha: 0.5) : AppTheme.divider,
+          color: isOverdue
+              ? AppTheme.error.withValues(alpha: 0.5)
+              : AppTheme.divider,
         ),
       ),
       child: Column(
@@ -637,28 +620,28 @@ class _PaymentCard extends StatelessWidget {
                   color: isOverdue
                       ? AppTheme.errorLight
                       : isPaid
-                          ? AppTheme.successLight
-                          : isCancelled
-                              ? AppTheme.surfaceVariant
-                              : AppTheme.surfaceVariant,
+                      ? AppTheme.successLight
+                      : isCancelled
+                      ? AppTheme.surfaceVariant
+                      : AppTheme.surfaceVariant,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
                   isOverdue
                       ? LucideIcons.alertTriangle
                       : isPaid
-                          ? LucideIcons.checkCircle
-                          : isCancelled
-                              ? LucideIcons.xCircle
-                              : LucideIcons.receipt,
+                      ? LucideIcons.checkCircle
+                      : isCancelled
+                      ? LucideIcons.xCircle
+                      : LucideIcons.receipt,
                   size: 18,
                   color: isOverdue
                       ? AppTheme.error
                       : isPaid
-                          ? AppTheme.success
-                          : isCancelled
-                              ? AppTheme.textDisabled
-                              : AppTheme.textSecondary,
+                      ? AppTheme.success
+                      : isCancelled
+                      ? AppTheme.textDisabled
+                      : AppTheme.textSecondary,
                 ),
               ),
               const SizedBox(width: 12),
@@ -718,10 +701,11 @@ class _PaymentCard extends StatelessWidget {
                       color: isOverdue
                           ? AppTheme.error
                           : isCancelled
-                              ? AppTheme.textDisabled
-                              : AppTheme.textPrimary,
-                      decoration:
-                          isCancelled ? TextDecoration.lineThrough : null,
+                          ? AppTheme.textDisabled
+                          : AppTheme.textPrimary,
+                      decoration: isCancelled
+                          ? TextDecoration.lineThrough
+                          : null,
                     ),
                   ),
                   if (showStatus) ...[
@@ -793,18 +777,25 @@ class _StatusChip extends StatelessWidget {
         break;
     }
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        label,
-        style: AppTheme.labelSmall.copyWith(
-          color: textColor,
-          fontWeight: FontWeight.w600,
-          fontSize: 10,
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 200),
+      transitionBuilder: (child, animation) =>
+          FadeTransition(opacity: animation, child: child),
+      child: Container(
+        // ValueKey ensures AnimatedSwitcher detects the status change.
+        key: ValueKey(status),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          label,
+          style: AppTheme.labelSmall.copyWith(
+            color: textColor,
+            fontWeight: FontWeight.w600,
+            fontSize: 10,
+          ),
         ),
       ),
     );
@@ -859,19 +850,19 @@ class _PixPaymentBottomSheetState
         .doc(widget.payment.id)
         .snapshots()
         .listen((snapshot) {
-      if (!mounted) return;
+          if (!mounted) return;
 
-      final data = snapshot.data();
-      if (data != null && data['status'] == 'paid' && !_paymentConfirmed) {
-        setState(() {
-          _paymentConfirmed = true;
+          final data = snapshot.data();
+          if (data != null && data['status'] == 'paid' && !_paymentConfirmed) {
+            setState(() {
+              _paymentConfirmed = true;
+            });
+
+            _showPaymentConfirmedDialog();
+
+            ref.invalidate(studentPaymentsProvider(widget.payment.studentId));
+          }
         });
-
-        _showPaymentConfirmedDialog();
-
-        ref.invalidate(studentPaymentsProvider(widget.payment.studentId));
-      }
-    });
   }
 
   void _showPaymentConfirmedDialog() {
@@ -900,9 +891,7 @@ class _PixPaymentBottomSheetState
             const SizedBox(height: 24),
             Text(
               'Pagamento Confirmado!',
-              style: AppTheme.titleLarge.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+              style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
@@ -955,7 +944,8 @@ class _PixPaymentBottomSheetState
           studentId: widget.payment.studentId,
           studentName: widget.studentName,
           description:
-              widget.payment.description ?? 'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
+              widget.payment.description ??
+              'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
         );
       } else {
         final service = AbacatePayService(academyId);
@@ -965,7 +955,8 @@ class _PixPaymentBottomSheetState
           studentId: widget.payment.studentId,
           studentName: widget.studentName,
           description:
-              widget.payment.description ?? 'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
+              widget.payment.description ??
+              'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
         );
       }
 
@@ -1189,17 +1180,11 @@ class _AcademyIndicator extends ConsumerWidget {
       decoration: BoxDecoration(
         color: AppTheme.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: AppTheme.primary.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
-          Icon(
-            LucideIcons.receipt,
-            size: 16,
-            color: AppTheme.primary,
-          ),
+          Icon(LucideIcons.receipt, size: 16, color: AppTheme.primary),
           const SizedBox(width: 8),
           Expanded(
             child: Column(

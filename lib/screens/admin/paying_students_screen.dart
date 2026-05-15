@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/plan_service.dart';
 import '../../services/firebase_service.dart';
+import '../../widgets/cached_image.dart';
 import '../../widgets/common/belt_badge.dart';
 
 /// Paying Students Screen - List of students enrolled in plans
@@ -51,7 +52,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
         studentIdsWithPlans.add(id);
       }
     }
-    return widget.students.where((s) => studentIdsWithPlans.contains(s.id)).toList();
+    return widget.students
+        .where((s) => studentIdsWithPlans.contains(s.id))
+        .toList();
   }
 
   /// Get plans for a specific student
@@ -62,18 +65,32 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
   /// Calculate total monthly value for a student
   double _getTotalMonthlyValue(String studentId) {
     final studentPlans = _getPlansForStudent(studentId);
-    return studentPlans.fold(0.0, (sum, plan) => sum + plan.getStudentValue(studentId));
+    return studentPlans.fold(
+      0.0,
+      (sum, plan) => sum + plan.getStudentValue(studentId),
+    );
   }
 
   /// Belt order for sorting
   int _getBeltOrderValue(String belt) {
     const beltOrder = {
       'white': 0,
-      'grey-white': 1, 'grey': 2, 'grey-black': 3,
-      'yellow-white': 4, 'yellow': 5, 'yellow-black': 6,
-      'orange-white': 7, 'orange': 8, 'orange-black': 9,
-      'green-white': 10, 'green': 11, 'green-black': 12,
-      'blue': 13, 'purple': 14, 'brown': 15, 'black': 16,
+      'grey-white': 1,
+      'grey': 2,
+      'grey-black': 3,
+      'yellow-white': 4,
+      'yellow': 5,
+      'yellow-black': 6,
+      'orange-white': 7,
+      'orange': 8,
+      'orange-black': 9,
+      'green-white': 10,
+      'green': 11,
+      'green-black': 12,
+      'blue': 13,
+      'purple': 14,
+      'brown': 15,
+      'black': 16,
     };
     return beltOrder[belt] ?? 0;
   }
@@ -85,10 +102,13 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
     // Search filter
     if (_searchTerm.isNotEmpty) {
       final term = _searchTerm.toLowerCase();
-      result = result.where((s) =>
-        s.fullName.toLowerCase().contains(term) ||
-        (s.nickname?.toLowerCase().contains(term) ?? false)
-      ).toList();
+      result = result
+          .where(
+            (s) =>
+                s.fullName.toLowerCase().contains(term) ||
+                (s.nickname?.toLowerCase().contains(term) ?? false),
+          )
+          .toList();
     }
 
     // Plan filter
@@ -97,7 +117,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
         (p) => p.id == _planFilter,
         orElse: () => _plans.first,
       );
-      result = result.where((s) => selectedPlan.studentIds.contains(s.id)).toList();
+      result = result
+          .where((s) => selectedPlan.studentIds.contains(s.id))
+          .toList();
     }
 
     // Sort
@@ -108,8 +130,10 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
         break;
       case 'belt':
         result.sort((a, b) {
-          final aOrder = _getBeltOrderValue(a.currentBelt) * 10 + a.currentStripes;
-          final bOrder = _getBeltOrderValue(b.currentBelt) * 10 + b.currentStripes;
+          final aOrder =
+              _getBeltOrderValue(a.currentBelt) * 10 + a.currentStripes;
+          final bOrder =
+              _getBeltOrderValue(b.currentBelt) * 10 + b.currentStripes;
           return bOrder.compareTo(aOrder);
         });
         break;
@@ -164,7 +188,10 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
               decoration: InputDecoration(
                 hintText: 'Buscar aluno...',
                 prefixIcon: const Icon(LucideIcons.search, size: 20),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide(color: AppTheme.divider),
@@ -197,13 +224,22 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                         isExpanded: true,
                         hint: const Text('Todos os Planos'),
                         items: [
-                          const DropdownMenuItem(value: '', child: Text('Todos os Planos')),
-                          ..._plans.map((plan) => DropdownMenuItem(
-                            value: plan.id,
-                            child: Text(plan.name, overflow: TextOverflow.ellipsis),
-                          )),
+                          const DropdownMenuItem(
+                            value: '',
+                            child: Text('Todos os Planos'),
+                          ),
+                          ..._plans.map(
+                            (plan) => DropdownMenuItem(
+                              value: plan.id,
+                              child: Text(
+                                plan.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
                         ],
-                        onChanged: (value) => setState(() => _planFilter = value ?? ''),
+                        onChanged: (value) =>
+                            setState(() => _planFilter = value ?? ''),
                       ),
                     ),
                   ),
@@ -222,10 +258,17 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                       value: _sortBy,
                       items: const [
                         DropdownMenuItem(value: 'name', child: Text('Nome')),
-                        DropdownMenuItem(value: 'belt', child: Text('Graduação')),
-                        DropdownMenuItem(value: 'planCount', child: Text('Planos')),
+                        DropdownMenuItem(
+                          value: 'belt',
+                          child: Text('Graduação'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'planCount',
+                          child: Text('Planos'),
+                        ),
                       ],
-                      onChanged: (value) => setState(() => _sortBy = value ?? 'name'),
+                      onChanged: (value) =>
+                          setState(() => _sortBy = value ?? 'name'),
                     ),
                   ),
                 ),
@@ -243,7 +286,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                       _searchTerm.isNotEmpty || _planFilter.isNotEmpty
                           ? 'Nenhum aluno encontrado com os filtros aplicados'
                           : 'Nenhum aluno pagante cadastrado',
-                      style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                   )
                 : ListView.builder(
@@ -256,7 +301,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                       final hasCustomValue = studentPlans.any(
                         (plan) => plan.customValues.containsKey(student.id),
                       );
-                      final beltColor = AppTheme.getBeltColor(student.currentBelt);
+                      final beltColor = AppTheme.getBeltColor(
+                        student.currentBelt,
+                      );
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 8),
@@ -271,13 +318,15 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                             child: Row(
                               children: [
                                 // Avatar
-                                CircleAvatar(
+                                AppCachedAvatar(
+                                  imageUrl: student.photoUrl,
                                   radius: 24,
-                                  backgroundColor: beltColor.withValues(alpha: 0.15),
-                                  backgroundImage: (student.photoUrl != null && student.photoUrl!.isNotEmpty)
-                                      ? NetworkImage(student.photoUrl!)
-                                      : null,
-                                  child: (student.photoUrl == null || student.photoUrl!.isEmpty)
+                                  backgroundColor: beltColor.withValues(
+                                    alpha: 0.15,
+                                  ),
+                                  child:
+                                      (student.photoUrl == null ||
+                                          student.photoUrl!.isEmpty)
                                       ? Text(
                                           _getInitials(student.fullName),
                                           style: TextStyle(
@@ -292,14 +341,21 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                                 // Info
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Row(
                                         children: [
                                           Flexible(
                                             child: Text(
-                                              student.nickname ?? student.fullName.split(' ').first,
-                                              style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+                                              student.nickname ??
+                                                  student.fullName
+                                                      .split(' ')
+                                                      .first,
+                                              style: AppTheme.bodyMedium
+                                                  .copyWith(
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
                                               overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
@@ -320,7 +376,10 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                                             '${studentPlans.length} ${studentPlans.length == 1 ? 'plano' : 'planos'}',
                                           ),
                                           if (hasCustomValue)
-                                            _buildChip('Personalizado', isSuccess: true),
+                                            _buildChip(
+                                              'Personalizado',
+                                              isSuccess: true,
+                                            ),
                                         ],
                                       ),
                                     ],
@@ -354,7 +413,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
         color: isSuccess ? AppTheme.successLight : AppTheme.surface,
         borderRadius: BorderRadius.circular(4),
         border: Border.all(
-          color: isSuccess ? AppTheme.success.withValues(alpha: 0.3) : AppTheme.divider,
+          color: isSuccess
+              ? AppTheme.success.withValues(alpha: 0.3)
+              : AppTheme.divider,
         ),
       ),
       child: Text(
@@ -406,13 +467,12 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
               // Header: avatar + name + belt
               Row(
                 children: [
-                  CircleAvatar(
+                  AppCachedAvatar(
+                    imageUrl: student.photoUrl,
                     radius: 28,
                     backgroundColor: beltColor.withValues(alpha: 0.15),
-                    backgroundImage: (student.photoUrl != null && student.photoUrl!.isNotEmpty)
-                        ? NetworkImage(student.photoUrl!)
-                        : null,
-                    child: (student.photoUrl == null || student.photoUrl!.isEmpty)
+                    child:
+                        (student.photoUrl == null || student.photoUrl!.isEmpty)
                         ? Text(
                             _getInitials(student.fullName),
                             style: TextStyle(
@@ -430,7 +490,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                       children: [
                         Text(
                           student.fullName,
-                          style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                          style: AppTheme.titleMedium.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                         const SizedBox(height: 4),
                         BeltBadge(
@@ -479,9 +541,13 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
               // Plans list
               ...studentPlans.map((plan) {
                 final studentValue = plan.getStudentValue(student.id);
-                final hasCustomValue = plan.customValues.containsKey(student.id);
+                final hasCustomValue = plan.customValues.containsKey(
+                  student.id,
+                );
                 final studentDueDay = plan.getStudentDueDay(student.id);
-                final hasCustomDueDay = plan.customDueDays.containsKey(student.id);
+                final hasCustomDueDay = plan.customDueDays.containsKey(
+                  student.id,
+                );
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -499,7 +565,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                           Expanded(
                             child: Text(
                               plan.name,
-                              style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                              style: AppTheme.titleSmall.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                           GestureDetector(
@@ -507,14 +575,20 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                               Navigator.of(sheetContext).pop();
                               _showEditPlanOverridesDialog(student, plan);
                             },
-                            child: const Icon(LucideIcons.pencil, size: 18, color: AppTheme.textSecondary),
+                            child: const Icon(
+                              LucideIcons.pencil,
+                              size: 18,
+                              color: AppTheme.textSecondary,
+                            ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 8),
                       Text(
                         'Valor padrão: R\$ ${plan.monthlyValue.toStringAsFixed(2)}',
-                        style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                       const SizedBox(height: 4),
                       Row(
@@ -523,7 +597,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                             'Valor do aluno: R\$ ${studentValue.toStringAsFixed(2)}',
                             style: AppTheme.bodyMedium.copyWith(
                               fontWeight: FontWeight.w600,
-                              color: hasCustomValue ? AppTheme.success : AppTheme.textPrimary,
+                              color: hasCustomValue
+                                  ? AppTheme.success
+                                  : AppTheme.textPrimary,
                             ),
                           ),
                           if (hasCustomValue) ...[
@@ -539,7 +615,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                             'Vencimento: dia $studentDueDay',
                             style: AppTheme.bodyMedium.copyWith(
                               fontWeight: FontWeight.w600,
-                              color: hasCustomDueDay ? AppTheme.success : AppTheme.textPrimary,
+                              color: hasCustomDueDay
+                                  ? AppTheme.success
+                                  : AppTheme.textPrimary,
                             ),
                           ),
                           if (hasCustomDueDay) ...[
@@ -561,10 +639,14 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
 
   void _showEditPlanOverridesDialog(Student student, Plan plan) {
     final studentValue = plan.getStudentValue(student.id);
-    final valueController = TextEditingController(text: studentValue.toStringAsFixed(2));
+    final valueController = TextEditingController(
+      text: studentValue.toStringAsFixed(2),
+    );
     final hasCustomValue = plan.customValues.containsKey(student.id);
     final studentDueDay = plan.getStudentDueDay(student.id);
-    final dueDayController = TextEditingController(text: studentDueDay.toString());
+    final dueDayController = TextEditingController(
+      text: studentDueDay.toString(),
+    );
     final hasCustomDueDay = plan.customDueDays.containsKey(student.id);
     final parentContext = context;
 
@@ -583,7 +665,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: valueController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: const InputDecoration(
                 labelText: 'Valor do aluno',
                 prefixText: 'R\$ ',
@@ -598,7 +682,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                   await planService.removeCustomValue(plan.id, student.id);
                   if (mounted) {
                     Navigator.of(dialogContext).pop();
-                    parentContext.showSuccess('Valor restaurado ao padrão do plano');
+                    parentContext.showSuccess(
+                      'Valor restaurado ao padrão do plano',
+                    );
                     _refreshPlans();
                   }
                 },
@@ -629,7 +715,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                   await planService.removeCustomDueDay(plan.id, student.id);
                   if (mounted) {
                     Navigator.of(dialogContext).pop();
-                    parentContext.showSuccess('Vencimento restaurado ao padrão do plano');
+                    parentContext.showSuccess(
+                      'Vencimento restaurado ao padrão do plano',
+                    );
                     _refreshPlans();
                   }
                 },
@@ -646,7 +734,9 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
           ),
           FilledButton(
             onPressed: () async {
-              final value = double.tryParse(valueController.text.replaceAll(',', '.'));
+              final value = double.tryParse(
+                valueController.text.replaceAll(',', '.'),
+              );
               if (value == null || value <= 0) return;
               final dueDay = int.tryParse(dueDayController.text);
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;

@@ -9,6 +9,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
+import '../../widgets/cached_image.dart';
 import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/sport_chip.dart';
@@ -87,11 +88,14 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     // Search filter
     if (_searchQuery.isNotEmpty) {
       final query = _searchQuery.toLowerCase();
-      filtered = filtered.where((s) =>
-          s.fullName.toLowerCase().contains(query) ||
-          (s.nickname?.toLowerCase().contains(query) ?? false) ||
-          (s.email?.toLowerCase().contains(query) ?? false)
-      ).toList();
+      filtered = filtered
+          .where(
+            (s) =>
+                s.fullName.toLowerCase().contains(query) ||
+                (s.nickname?.toLowerCase().contains(query) ?? false) ||
+                (s.email?.toLowerCase().contains(query) ?? false),
+          )
+          .toList();
     }
 
     // Status filter
@@ -106,7 +110,9 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
 
     // Sport filter — student must practice this modality
     if (_sportFilter != null) {
-      filtered = filtered.where((s) => s.getSports().contains(_sportFilter)).toList();
+      filtered = filtered
+          .where((s) => s.getSports().contains(_sportFilter))
+          .toList();
     }
 
     // Belt filter — sport-aware. If a sport is selected, match the grade
@@ -123,9 +129,13 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     // Account filter
     if (_accountFilter != null) {
       if (_accountFilter!) {
-        filtered = filtered.where((s) => s.linkedUserId != null && s.linkedUserId!.isNotEmpty).toList();
+        filtered = filtered
+            .where((s) => s.linkedUserId != null && s.linkedUserId!.isNotEmpty)
+            .toList();
       } else {
-        filtered = filtered.where((s) => s.linkedUserId == null || s.linkedUserId!.isEmpty).toList();
+        filtered = filtered
+            .where((s) => s.linkedUserId == null || s.linkedUserId!.isEmpty)
+            .toList();
       }
     }
 
@@ -135,7 +145,9 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         filtered.sort((a, b) => a.fullName.compareTo(b.fullName));
         break;
       case 'attendance':
-        filtered.sort((a, b) => b.totalAttendanceCount.compareTo(a.totalAttendanceCount));
+        filtered.sort(
+          (a, b) => b.totalAttendanceCount.compareTo(a.totalAttendanceCount),
+        );
         break;
       case 'belt':
         filtered.sort((a, b) {
@@ -221,15 +233,11 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
             ),
 
             // Search and filters
-            SliverToBoxAdapter(
-              child: _buildSearchAndFilters(),
-            ),
+            SliverToBoxAdapter(child: _buildSearchAndFilters()),
 
             // Active filter chips
             if (_hasActiveFilters())
-              SliverToBoxAdapter(
-                child: _buildActiveFilterChips(),
-              ),
+              SliverToBoxAdapter(child: _buildActiveFilterChips()),
 
             // Student list
             _isLoading
@@ -237,13 +245,11 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                     child: Center(child: CircularProgressIndicator()),
                   )
                 : _filteredStudents.isEmpty
-                    ? SliverFillRemaining(child: _buildEmptyState())
-                    : _buildStudentSliverList(),
+                ? SliverFillRemaining(child: _buildEmptyState())
+                : _buildStudentSliverList(),
 
             // Bottom padding
-            const SliverToBoxAdapter(
-              child: SizedBox(height: 100),
-            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 100)),
           ],
         ),
       ),
@@ -305,11 +311,21 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                 controller: _searchController,
                 decoration: InputDecoration(
                   hintText: 'Buscar aluno...',
-                  hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.textDisabled),
-                  prefixIcon: Icon(LucideIcons.search, color: AppTheme.textSecondary, size: 20),
+                  hintStyle: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textDisabled,
+                  ),
+                  prefixIcon: Icon(
+                    LucideIcons.search,
+                    color: AppTheme.textSecondary,
+                    size: 20,
+                  ),
                   suffixIcon: _searchQuery.isNotEmpty
                       ? IconButton(
-                          icon: Icon(LucideIcons.x, color: AppTheme.textSecondary, size: 18),
+                          icon: Icon(
+                            LucideIcons.x,
+                            color: AppTheme.textSecondary,
+                            size: 18,
+                          ),
                           onPressed: () {
                             _searchController.clear();
                             setState(() {
@@ -320,7 +336,10 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                         )
                       : null,
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                 ),
                 onChanged: (value) {
                   setState(() {
@@ -339,16 +358,22 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: _hasActiveFilters() ? AppTheme.primary : AppTheme.surface,
+                color: _hasActiveFilters()
+                    ? AppTheme.primary
+                    : AppTheme.surface,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: _hasActiveFilters() ? AppTheme.primary : AppTheme.divider,
+                  color: _hasActiveFilters()
+                      ? AppTheme.primary
+                      : AppTheme.divider,
                 ),
               ),
               child: Icon(
                 LucideIcons.sliders,
                 size: 20,
-                color: _hasActiveFilters() ? Colors.white : AppTheme.textSecondary,
+                color: _hasActiveFilters()
+                    ? Colors.white
+                    : AppTheme.textSecondary,
               ),
             ),
           ),
@@ -397,7 +422,8 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
             ),
           if (_beltFilter != null)
             _FilterChip(
-              label: 'Faixa ${getGradeLabel(_sportFilter ?? SportId.bjj, _beltFilter!)}',
+              label:
+                  'Faixa ${getGradeLabel(_sportFilter ?? SportId.bjj, _beltFilter!)}',
               onRemove: () {
                 setState(() {
                   _beltFilter = null;
@@ -437,17 +463,14 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       sliver: SliverList(
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            final student = _filteredStudents[index];
-            return _StudentCard(
-              student: student,
-              eligibility: _eligibilityByStudent[student.id],
-              onTap: () => context.go('/admin/alunos/${student.id}'),
-            );
-          },
-          childCount: _filteredStudents.length,
-        ),
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final student = _filteredStudents[index];
+          return _StudentCard(
+            student: student,
+            eligibility: _eligibilityByStudent[student.id],
+            onTap: () => context.go('/admin/alunos/${student.id}'),
+          );
+        }, childCount: _filteredStudents.length),
       ),
     );
   }
@@ -526,7 +549,9 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            _hasActiveFilters() ? 'Nenhum aluno encontrado' : 'Nenhum aluno cadastrado',
+            _hasActiveFilters()
+                ? 'Nenhum aluno encontrado'
+                : 'Nenhum aluno cadastrado',
             style: AppTheme.titleMedium.copyWith(
               color: AppTheme.textPrimary,
               fontWeight: FontWeight.w600,
@@ -537,9 +562,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
             _hasActiveFilters()
                 ? 'Tente ajustar os filtros'
                 : 'Adicione o primeiro aluno da academia',
-            style: AppTheme.bodyMedium.copyWith(
-              color: AppTheme.textSecondary,
-            ),
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
           ),
           if (!_hasActiveFilters()) ...[
             const SizedBox(height: 24),
@@ -550,7 +573,10 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.textPrimary,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
               ),
             ),
           ],
@@ -565,10 +591,7 @@ class _FilterChip extends StatelessWidget {
   final String label;
   final VoidCallback onRemove;
 
-  const _FilterChip({
-    required this.label,
-    required this.onRemove,
-  });
+  const _FilterChip({required this.label, required this.onRemove});
 
   @override
   Widget build(BuildContext context) {
@@ -593,11 +616,7 @@ class _FilterChip extends StatelessWidget {
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onRemove,
-            child: Icon(
-              LucideIcons.x,
-              size: 14,
-              color: AppTheme.primary,
-            ),
+            child: Icon(LucideIcons.x, size: 14, color: AppTheme.primary),
           ),
         ],
       ),
@@ -609,20 +628,18 @@ class _FilterChip extends StatelessWidget {
 class _StudentCard extends StatelessWidget {
   final Student student;
   final VoidCallback? onTap;
+
   /// Optional eligibility snapshot from the academy-wide auto-graduation
   /// computation. When non-null and `requiredClasses > 0`, the card renders
   /// a progress bar (current/required) and an "Elegível" badge.
   final EligibilitySnapshotEntry? eligibility;
 
-  const _StudentCard({
-    required this.student,
-    this.onTap,
-    this.eligibility,
-  });
+  const _StudentCard({required this.student, this.onTap, this.eligibility});
 
   @override
   Widget build(BuildContext context) {
-    final showEligibility = eligibility != null && eligibility!.requiredClasses > 0;
+    final showEligibility =
+        eligibility != null && eligibility!.requiredClasses > 0;
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -788,12 +805,12 @@ class _StudentCard extends StatelessWidget {
         border: Border.all(color: sportColor, width: 2),
       ),
       child: student.photoUrl != null
-          ? ClipRRect(
+          ? AppCachedImage(
+              imageUrl: student.photoUrl,
+              width: 48,
+              height: 48,
+              fit: BoxFit.cover,
               borderRadius: BorderRadius.circular(10),
-              child: Image.network(
-                student.photoUrl!,
-                fit: BoxFit.cover,
-              ),
             )
           : Center(
               child: Text(
@@ -916,7 +933,8 @@ class _FilterBottomSheet extends StatefulWidget {
     String?,
     bool?,
     String,
-  ) onApply;
+  )
+  onApply;
   final VoidCallback onClear;
 
   const _FilterBottomSheet({
@@ -982,9 +1000,7 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
             // Title
             Text(
               'Filtros',
-              style: AppTheme.titleLarge.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+              style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 24),
 
@@ -996,7 +1012,8 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
               children: StudentStatus.values.map((status) {
                 final isSelected = _status == status;
                 return GestureDetector(
-                  onTap: () => setState(() => _status = isSelected ? null : status),
+                  onTap: () =>
+                      setState(() => _status = isSelected ? null : status),
                   child: _buildChip(status.label, isSelected),
                 );
               }).toList(),
@@ -1011,7 +1028,8 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
               children: StudentCategory.values.map((category) {
                 final isSelected = _category == category;
                 return GestureDetector(
-                  onTap: () => setState(() => _category = isSelected ? null : category),
+                  onTap: () =>
+                      setState(() => _category = isSelected ? null : category),
                   child: _buildChip(category.label, isSelected),
                 );
               }).toList(),
@@ -1042,29 +1060,39 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
             const SizedBox(height: 20),
 
             // Belt filter — grades depend on selected sport (defaults to BJJ).
-            _buildSectionTitle('Faixa${_sport != null ? ' · ${sports[_sport]!.labelShort}' : ''}'),
-            Builder(builder: (_) {
-              final activeSport = _sport ?? SportId.bjj;
-              final categoryValue = _category?.value ?? 'adult';
-              final grades = getGradesForSport(activeSport, category: categoryValue);
-              if (grades.isEmpty) {
-                return Text(
-                  'Esta modalidade não usa graduação.',
-                  style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+            _buildSectionTitle(
+              'Faixa${_sport != null ? ' · ${sports[_sport]!.labelShort}' : ''}',
+            ),
+            Builder(
+              builder: (_) {
+                final activeSport = _sport ?? SportId.bjj;
+                final categoryValue = _category?.value ?? 'adult';
+                final grades = getGradesForSport(
+                  activeSport,
+                  category: categoryValue,
                 );
-              }
-              return Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: grades.map((g) {
-                  final isSelected = _belt == g.id;
-                  return GestureDetector(
-                    onTap: () => setState(() => _belt = isSelected ? null : g.id),
-                    child: _buildChip(g.label, isSelected),
+                if (grades.isEmpty) {
+                  return Text(
+                    'Esta modalidade não usa graduação.',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   );
-                }).toList(),
-              );
-            }),
+                }
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: grades.map((g) {
+                    final isSelected = _belt == g.id;
+                    return GestureDetector(
+                      onTap: () =>
+                          setState(() => _belt = isSelected ? null : g.id),
+                      child: _buildChip(g.label, isSelected),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
             const SizedBox(height: 20),
 
             // Account filter
@@ -1072,13 +1100,11 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: [
-                (true, 'Com conta'),
-                (false, 'Sem conta'),
-              ].map((item) {
+              children: [(true, 'Com conta'), (false, 'Sem conta')].map((item) {
                 final isSelected = _account == item.$1;
                 return GestureDetector(
-                  onTap: () => setState(() => _account = isSelected ? null : item.$1),
+                  onTap: () =>
+                      setState(() => _account = isSelected ? null : item.$1),
                   child: _buildChip(item.$2, isSelected),
                 );
               }).toList(),
@@ -1090,18 +1116,19 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: [
-                ('name', 'Nome'),
-                ('attendance', 'Presencas'),
-                ('belt', 'Faixa'),
-                ('eligible_first', 'Elegiveis primeiro'),
-              ].map((item) {
-                final isSelected = _sort == item.$1;
-                return GestureDetector(
-                  onTap: () => setState(() => _sort = item.$1),
-                  child: _buildChip(item.$2, isSelected),
-                );
-              }).toList(),
+              children:
+                  [
+                    ('name', 'Nome'),
+                    ('attendance', 'Presencas'),
+                    ('belt', 'Faixa'),
+                    ('eligible_first', 'Elegiveis primeiro'),
+                  ].map((item) {
+                    final isSelected = _sort == item.$1;
+                    return GestureDetector(
+                      onTap: () => setState(() => _sort = item.$1),
+                      child: _buildChip(item.$2, isSelected),
+                    );
+                  }).toList(),
             ),
             const SizedBox(height: 32),
 
@@ -1130,7 +1157,14 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () => widget.onApply(_status, _category, _sport, _belt, _account, _sort),
+                    onPressed: () => widget.onApply(
+                      _status,
+                      _category,
+                      _sport,
+                      _belt,
+                      _account,
+                      _sort,
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.textPrimary,
                       foregroundColor: Colors.white,
@@ -1207,7 +1241,11 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(sport.icon, size: 14, color: isSelected ? accent : AppTheme.textSecondary),
+          Icon(
+            sport.icon,
+            size: 14,
+            color: isSelected ? accent : AppTheme.textSecondary,
+          ),
           const SizedBox(width: 6),
           Text(
             sport.label,
@@ -1256,8 +1294,9 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
       if (_selectedSports.contains(sport)) {
         _selectedSports.remove(sport);
         if (_primarySport == sport) {
-          _primarySport =
-              _selectedSports.isNotEmpty ? _selectedSports.first : null;
+          _primarySport = _selectedSports.isNotEmpty
+              ? _selectedSports.first
+              : null;
         }
       } else {
         _selectedSports.add(sport);
@@ -1348,8 +1387,11 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
                       color: AppTheme.primary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Icon(LucideIcons.userPlus,
-                        color: AppTheme.primary, size: 20),
+                    child: Icon(
+                      LucideIcons.userPlus,
+                      color: AppTheme.primary,
+                      size: 20,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -1359,8 +1401,9 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
                       children: [
                         Text(
                           'Cadastro rápido',
-                          style: AppTheme.titleMedium
-                              .copyWith(fontWeight: FontWeight.w700),
+                          style: AppTheme.titleMedium.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                         Text(
                           'Apenas nome e modalidade — edite o resto depois',
@@ -1381,8 +1424,11 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
                 decoration: InputDecoration(
                   labelText: 'Nome completo *',
                   hintText: 'Ex: Maria da Silva',
-                  prefixIcon: Icon(LucideIcons.user,
-                      color: AppTheme.textSecondary, size: 20),
+                  prefixIcon: Icon(
+                    LucideIcons.user,
+                    color: AppTheme.textSecondary,
+                    size: 20,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide(color: AppTheme.divider),
@@ -1403,8 +1449,11 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
                 decoration: InputDecoration(
                   labelText: 'Telefone (opcional)',
                   hintText: '(11) 99999-9999',
-                  prefixIcon: Icon(LucideIcons.phone,
-                      color: AppTheme.textSecondary, size: 20),
+                  prefixIcon: Icon(
+                    LucideIcons.phone,
+                    color: AppTheme.textSecondary,
+                    size: 20,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide(color: AppTheme.divider),
@@ -1433,8 +1482,7 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
                       child: GestureDetector(
                         onTap: () => setState(() => _category = cat),
                         child: Container(
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 10),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
                           decoration: BoxDecoration(
                             color: isSelected
                                 ? AppTheme.primary.withValues(alpha: 0.1)
@@ -1478,7 +1526,8 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
                     Text(
                       '· Principal: ${sports[_primarySport!]!.label}',
                       style: AppTheme.labelSmall.copyWith(
-                        color: sportChipColors[_primarySport!] ??
+                        color:
+                            sportChipColors[_primarySport!] ??
                             AppTheme.textSecondary,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1514,14 +1563,18 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
                   ),
                   child: Row(
                     children: [
-                      Icon(LucideIcons.alertCircle,
-                          color: AppTheme.error, size: 16),
+                      Icon(
+                        LucideIcons.alertCircle,
+                        color: AppTheme.error,
+                        size: 16,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorText!,
-                          style: AppTheme.bodySmall
-                              .copyWith(color: AppTheme.error),
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.error,
+                          ),
                         ),
                       ),
                     ],
@@ -1557,8 +1610,7 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
                             const SizedBox(width: 8),
                             const Text(
                               'Cadastrar aluno',
-                              style:
-                                  TextStyle(fontWeight: FontWeight.w600),
+                              style: TextStyle(fontWeight: FontWeight.w600),
                             ),
                           ],
                         ),
@@ -1584,7 +1636,11 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
     );
   }
 
-  Widget _buildSportPickerChip(SportId sportId, bool isSelected, bool isPrimary) {
+  Widget _buildSportPickerChip(
+    SportId sportId,
+    bool isSelected,
+    bool isPrimary,
+  ) {
     final sport = sports[sportId]!;
     final accent = sportChipColors[sportId] ?? AppTheme.textPrimary;
     return GestureDetector(
@@ -1639,4 +1695,3 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
     );
   }
 }
-

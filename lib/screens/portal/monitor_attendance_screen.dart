@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
@@ -17,10 +18,12 @@ class MonitorAttendanceScreen extends ConsumerStatefulWidget {
   const MonitorAttendanceScreen({super.key});
 
   @override
-  ConsumerState<MonitorAttendanceScreen> createState() => _MonitorAttendanceScreenState();
+  ConsumerState<MonitorAttendanceScreen> createState() =>
+      _MonitorAttendanceScreenState();
 }
 
-class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScreen> {
+class _MonitorAttendanceScreenState
+    extends ConsumerState<MonitorAttendanceScreen> {
   List<BJJClass> _classes = [];
   List<Student> _students = [];
   Set<String> _presentStudentIds = {};
@@ -294,7 +297,9 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Marcar Todos Presentes'),
-        content: Text('Deseja marcar todos os ${filteredStudents.length} alunos como presentes?'),
+        content: Text(
+          'Deseja marcar todos os ${filteredStudents.length} alunos como presentes?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -353,7 +358,8 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
   }
 
   Future<void> _unmarkAllPresent() async {
-    if (_selectedClass == null || _isSaving || _presentStudentIds.isEmpty) return;
+    if (_selectedClass == null || _isSaving || _presentStudentIds.isEmpty)
+      return;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -439,28 +445,31 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
 
     // Filter by search
     if (_searchQuery.isNotEmpty) {
-      filteredStudents = filteredStudents.where((s) =>
-          s.fullName.toLowerCase().contains(_searchQuery) ||
-          (s.nickname?.toLowerCase().contains(_searchQuery) ?? false)
-      ).toList();
+      filteredStudents = filteredStudents
+          .where(
+            (s) =>
+                s.fullName.toLowerCase().contains(_searchQuery) ||
+                (s.nickname?.toLowerCase().contains(_searchQuery) ?? false),
+          )
+          .toList();
     }
 
     // Filter by class students if class has specific students
     if (_selectedClass != null && _selectedClass!.studentIds.isNotEmpty) {
-      filteredStudents = filteredStudents.where((s) =>
-          _selectedClass!.studentIds.contains(s.id)
-      ).toList();
+      filteredStudents = filteredStudents
+          .where((s) => _selectedClass!.studentIds.contains(s.id))
+          .toList();
     }
 
     // Filter by presence status
     if (_filterMode == 'present') {
-      filteredStudents = filteredStudents.where((s) =>
-          _presentStudentIds.contains(s.id)
-      ).toList();
+      filteredStudents = filteredStudents
+          .where((s) => _presentStudentIds.contains(s.id))
+          .toList();
     } else if (_filterMode == 'absent') {
-      filteredStudents = filteredStudents.where((s) =>
-          !_presentStudentIds.contains(s.id)
-      ).toList();
+      filteredStudents = filteredStudents
+          .where((s) => !_presentStudentIds.contains(s.id))
+          .toList();
     }
 
     // Sort alphabetically
@@ -486,7 +495,11 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _loadData,
+              color: Theme.of(context).colorScheme.primary,
+              onRefresh: () async {
+                HapticFeedback.mediumImpact();
+                await _loadData();
+              },
               child: CustomScrollView(
                 slivers: [
                   // Class + Date Selectors
@@ -555,17 +568,30 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
       child: DropdownButtonFormField<BJJClass>(
         value: _selectedClass,
         isExpanded: true,
-        icon: Icon(LucideIcons.chevronDown, color: AppTheme.textSecondary, size: 20),
+        icon: Icon(
+          LucideIcons.chevronDown,
+          color: AppTheme.textSecondary,
+          size: 20,
+        ),
         decoration: InputDecoration(
           labelText: 'Turma',
-          labelStyle: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+          labelStyle: AppTheme.bodySmall.copyWith(
+            color: AppTheme.textSecondary,
+          ),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 8,
+          ),
         ),
         items: _classes.map((cls) {
           return DropdownMenuItem<BJJClass>(
             value: cls,
-            child: Text(cls.name, style: AppTheme.bodyMedium, overflow: TextOverflow.ellipsis),
+            child: Text(
+              cls.name,
+              style: AppTheme.bodyMedium,
+              overflow: TextOverflow.ellipsis,
+            ),
           );
         }).toList(),
         onChanged: (value) {
@@ -615,10 +641,18 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
         decoration: InputDecoration(
           hintText: 'Buscar aluno...',
           hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.textDisabled),
-          prefixIcon: Icon(LucideIcons.search, color: AppTheme.textSecondary, size: 20),
+          prefixIcon: Icon(
+            LucideIcons.search,
+            color: AppTheme.textSecondary,
+            size: 20,
+          ),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
-                  icon: Icon(LucideIcons.x, color: AppTheme.textSecondary, size: 18),
+                  icon: Icon(
+                    LucideIcons.x,
+                    color: AppTheme.textSecondary,
+                    size: 18,
+                  ),
                   onPressed: () {
                     _searchController.clear();
                     setState(() => _searchQuery = '');
@@ -626,7 +660,10 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
                 )
               : null,
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 14,
+          ),
         ),
         onChanged: (value) {
           setState(() => _searchQuery = value.toLowerCase());
@@ -653,7 +690,9 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
             icon: LucideIcons.checkCircle,
             iconColor: AppTheme.success,
             isSelected: _filterMode == 'present',
-            onTap: () => setState(() => _filterMode = _filterMode == 'present' ? 'all' : 'present'),
+            onTap: () => setState(
+              () => _filterMode = _filterMode == 'present' ? 'all' : 'present',
+            ),
           ),
           const SizedBox(width: 8),
           // Ausentes
@@ -662,7 +701,9 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
             icon: LucideIcons.circle,
             iconColor: AppTheme.textSecondary,
             isSelected: _filterMode == 'absent',
-            onTap: () => setState(() => _filterMode = _filterMode == 'absent' ? 'all' : 'absent'),
+            onTap: () => setState(
+              () => _filterMode = _filterMode == 'absent' ? 'all' : 'absent',
+            ),
           ),
         ],
       ),
@@ -729,7 +770,9 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
             // Limpar (outlined)
             Expanded(
               child: OutlinedButton.icon(
-                onPressed: _isSaving || _presentCount == 0 ? null : _unmarkAllPresent,
+                onPressed: _isSaving || _presentCount == 0
+                    ? null
+                    : _unmarkAllPresent,
                 icon: const Icon(LucideIcons.x, size: 18),
                 label: const Text('Limpar'),
                 style: OutlinedButton.styleFrom(
@@ -762,7 +805,11 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
                 color: AppTheme.surfaceVariant,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(LucideIcons.users, size: 36, color: AppTheme.textSecondary),
+              child: const Icon(
+                LucideIcons.users,
+                size: 36,
+                color: AppTheme.textSecondary,
+              ),
             ),
             const SizedBox(height: 20),
             Text(
@@ -776,7 +823,9 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
             Text(
               'Escolha uma turma acima para\nregistrar as presencas',
               textAlign: TextAlign.center,
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -799,7 +848,9 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
                 _searchQuery.isNotEmpty
                     ? 'Nenhum aluno encontrado'
                     : 'Nenhum aluno nesta turma',
-                style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ],
           ),
@@ -810,19 +861,16 @@ class _MonitorAttendanceScreenState extends ConsumerState<MonitorAttendanceScree
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       sliver: SliverList(
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            final student = filteredStudents[index];
-            final isPresent = _presentStudentIds.contains(student.id);
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final student = filteredStudents[index];
+          final isPresent = _presentStudentIds.contains(student.id);
 
-            return _AttendanceStudentCard(
-              student: student,
-              isPresent: isPresent,
-              onTap: () => _toggleAttendance(student),
-            );
-          },
-          childCount: filteredStudents.length,
-        ),
+          return _AttendanceStudentCard(
+            student: student,
+            isPresent: isPresent,
+            onTap: () => _toggleAttendance(student),
+          );
+        }, childCount: filteredStudents.length),
       ),
     );
   }
@@ -910,8 +958,12 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
   List<DateTime> _getDaysInMonth() {
     final firstDayOfMonth = DateTime(_viewMonth.year, _viewMonth.month, 1);
     final lastDayOfMonth = DateTime(_viewMonth.year, _viewMonth.month + 1, 0);
-    final startDate = firstDayOfMonth.subtract(Duration(days: firstDayOfMonth.weekday % 7));
-    final endDate = lastDayOfMonth.add(Duration(days: 6 - (lastDayOfMonth.weekday % 7)));
+    final startDate = firstDayOfMonth.subtract(
+      Duration(days: firstDayOfMonth.weekday % 7),
+    );
+    final endDate = lastDayOfMonth.add(
+      Duration(days: 6 - (lastDayOfMonth.weekday % 7)),
+    );
 
     final days = <DateTime>[];
     var current = startDate;
@@ -922,16 +974,30 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
     return days;
   }
 
-  bool _isSameDay(DateTime a, DateTime b) => a.year == b.year && a.month == b.month && a.day == b.day;
-  bool _isSameMonth(DateTime a, DateTime b) => a.year == b.year && a.month == b.month;
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+  bool _isSameMonth(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month;
   bool _isToday(DateTime date) => _isSameDay(date, DateTime.now());
 
   @override
   Widget build(BuildContext context) {
     final days = _getDaysInMonth();
     final weekdays = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
-    final months = ['Janeiro', 'Fevereiro', 'Marco', 'Abril', 'Maio', 'Junho',
-                    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    final months = [
+      'Janeiro',
+      'Fevereiro',
+      'Marco',
+      'Abril',
+      'Maio',
+      'Junho',
+      'Julho',
+      'Agosto',
+      'Setembro',
+      'Outubro',
+      'Novembro',
+      'Dezembro',
+    ];
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -956,7 +1022,10 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
           const SizedBox(height: 16),
 
           // Title
-          Text('Selecionar Data', style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600)),
+          Text(
+            'Selecionar Data',
+            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 20),
 
           // Month Navigation
@@ -964,14 +1033,22 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               IconButton(
-                onPressed: () => setState(() => _viewMonth = DateTime(_viewMonth.year, _viewMonth.month - 1, 1)),
+                onPressed: () => setState(
+                  () => _viewMonth = DateTime(
+                    _viewMonth.year,
+                    _viewMonth.month - 1,
+                    1,
+                  ),
+                ),
                 icon: const Icon(LucideIcons.chevronLeft, size: 20),
               ),
               Row(
                 children: [
                   Text(
                     '${months[_viewMonth.month - 1]} ${_viewMonth.year}',
-                    style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   if (!_isSameMonth(_viewMonth, DateTime.now())) ...[
                     const SizedBox(width: 8),
@@ -985,19 +1062,34 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
                         widget.onDateSelected(today);
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: AppTheme.surfaceVariant,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Text('Hoje', style: AppTheme.labelSmall.copyWith(color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                        child: Text(
+                          'Hoje',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ),
                   ],
                 ],
               ),
               IconButton(
-                onPressed: () => setState(() => _viewMonth = DateTime(_viewMonth.year, _viewMonth.month + 1, 1)),
+                onPressed: () => setState(
+                  () => _viewMonth = DateTime(
+                    _viewMonth.year,
+                    _viewMonth.month + 1,
+                    1,
+                  ),
+                ),
                 icon: const Icon(LucideIcons.chevronRight, size: 20),
               ),
             ],
@@ -1006,11 +1098,21 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
 
           // Weekday headers
           Row(
-            children: weekdays.map((day) => Expanded(
-              child: Center(
-                child: Text(day, style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
-              ),
-            )).toList(),
+            children: weekdays
+                .map(
+                  (day) => Expanded(
+                    child: Center(
+                      child: Text(
+                        day,
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
           ),
           const SizedBox(height: 8),
 
@@ -1018,7 +1120,11 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, mainAxisSpacing: 4, crossAxisSpacing: 4),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              mainAxisSpacing: 4,
+              crossAxisSpacing: 4,
+            ),
             itemCount: days.length,
             itemBuilder: (context, index) {
               final day = days[index];
@@ -1028,22 +1134,36 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
               final isFuture = day.isAfter(DateTime.now());
 
               return GestureDetector(
-                onTap: isFuture || !isCurrentMonth ? null : () {
-                  setState(() => _selectedDate = day);
-                  widget.onDateSelected(day);
-                },
+                onTap: isFuture || !isCurrentMonth
+                    ? null
+                    : () {
+                        setState(() => _selectedDate = day);
+                        widget.onDateSelected(day);
+                      },
                 child: Container(
                   decoration: BoxDecoration(
-                    color: isSelected ? AppTheme.primary : isTodayDate ? AppTheme.primary.withValues(alpha: 0.1) : Colors.transparent,
+                    color: isSelected
+                        ? AppTheme.primary
+                        : isTodayDate
+                        ? AppTheme.primary.withValues(alpha: 0.1)
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(8),
-                    border: isTodayDate && !isSelected ? Border.all(color: AppTheme.primary, width: 2) : null,
+                    border: isTodayDate && !isSelected
+                        ? Border.all(color: AppTheme.primary, width: 2)
+                        : null,
                   ),
                   child: Center(
                     child: Text(
                       '${day.day}',
                       style: AppTheme.bodySmall.copyWith(
-                        color: isSelected ? Colors.white : !isCurrentMonth || isFuture ? AppTheme.textDisabled : AppTheme.textPrimary,
-                        fontWeight: isSelected || isTodayDate ? FontWeight.w600 : FontWeight.normal,
+                        color: isSelected
+                            ? Colors.white
+                            : !isCurrentMonth || isFuture
+                            ? AppTheme.textDisabled
+                            : AppTheme.textPrimary,
+                        fontWeight: isSelected || isTodayDate
+                            ? FontWeight.w600
+                            : FontWeight.normal,
                       ),
                     ),
                   ),
@@ -1078,7 +1198,9 @@ class _AttendanceStudentCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isPresent ? AppTheme.success.withValues(alpha: 0.05) : AppTheme.surface,
+          color: isPresent
+              ? AppTheme.success.withValues(alpha: 0.05)
+              : AppTheme.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isPresent ? AppTheme.success : AppTheme.divider,
@@ -1087,18 +1209,26 @@ class _AttendanceStudentCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Toggle Circle
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: isPresent ? AppTheme.success : AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
+            // Toggle Circle - animates when presence is toggled
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              transitionBuilder: (child, animation) => ScaleTransition(
+                scale: animation,
+                child: FadeTransition(opacity: animation, child: child),
               ),
-              child: Icon(
-                isPresent ? LucideIcons.checkCircle : LucideIcons.circle,
-                color: isPresent ? Colors.white : AppTheme.textDisabled,
-                size: 22,
+              child: Container(
+                key: ValueKey(isPresent),
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isPresent ? AppTheme.success : AppTheme.surfaceVariant,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isPresent ? LucideIcons.checkCircle : LucideIcons.circle,
+                  color: isPresent ? Colors.white : AppTheme.textDisabled,
+                  size: 22,
+                ),
               ),
             ),
             const SizedBox(width: 12),
@@ -1132,12 +1262,16 @@ class _AttendanceStudentCard extends StatelessWidget {
                     student.nickname ?? student.fullName.split(' ').first,
                     style: AppTheme.bodyMedium.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: isPresent ? AppTheme.success : AppTheme.textPrimary,
+                      color: isPresent
+                          ? AppTheme.success
+                          : AppTheme.textPrimary,
                     ),
                   ),
                   Text(
                     student.fullName,
-                    style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
@@ -1166,7 +1300,9 @@ class _AttendanceStudentCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: beltColor,
             borderRadius: BorderRadius.circular(2),
-            border: student.currentBelt == 'white' ? Border.all(color: AppTheme.divider) : null,
+            border: student.currentBelt == 'white'
+                ? Border.all(color: AppTheme.divider)
+                : null,
           ),
         ),
         if (stripes > 0) ...[

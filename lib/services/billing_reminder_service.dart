@@ -55,12 +55,18 @@ extension ContactTypeExtension on ContactType {
   }
 }
 
-/// Billing stage enum
-enum BillingStage { d1, d3, d7, d15, d30 }
+/// Billing stage enum.
+///
+/// Matches marcusjj's BillingStage union (`'D+0' | 'D+1' | 'D+3' | 'D+7' |
+/// 'D+15' | 'D+30'`). `d0` is the "due-today" courtesy reminder; the others
+/// fire after vencimento.
+enum BillingStage { d0, d1, d3, d7, d15, d30 }
 
 extension BillingStageExtension on BillingStage {
   String get label {
     switch (this) {
+      case BillingStage.d0:
+        return 'D+0';
       case BillingStage.d1:
         return 'D+1';
       case BillingStage.d3:
@@ -76,6 +82,8 @@ extension BillingStageExtension on BillingStage {
 
   String get value {
     switch (this) {
+      case BillingStage.d0:
+        return 'D+0';
       case BillingStage.d1:
         return 'D+1';
       case BillingStage.d3:
@@ -202,6 +210,7 @@ class BillingReminderService {
     if (daysOverdue >= 7) return BillingStage.d7;
     if (daysOverdue >= 3) return BillingStage.d3;
     if (daysOverdue >= 1) return BillingStage.d1;
+    if (daysOverdue == 0) return BillingStage.d0;
     return null;
   }
 
@@ -213,6 +222,7 @@ class BillingReminderService {
     final snapshot = await _financialsRef.get();
 
     final result = <BillingStage, List<Map<String, dynamic>>>{
+      BillingStage.d0: [],
       BillingStage.d1: [],
       BillingStage.d3: [],
       BillingStage.d7: [],
@@ -558,10 +568,23 @@ class BillingNotificationService {
       String.fromEnvironment('WHATSAPP_API_URL', defaultValue: '');
   static const String _emailApiUrl =
       String.fromEnvironment('EMAIL_API_URL', defaultValue: '');
-  static const String _apiKey =
+  // Matches marcusjj split: WHATSAPP_API_KEY + EMAIL_API_KEY are independent.
+  // NOTIFICATION_API_KEY remains as legacy fallback for older builds.
+  static const String _legacyApiKey =
       String.fromEnvironment('NOTIFICATION_API_KEY', defaultValue: '');
+  static const String _whatsappApiKeyRaw =
+      String.fromEnvironment('WHATSAPP_API_KEY', defaultValue: '');
+  static const String _emailApiKeyRaw =
+      String.fromEnvironment('EMAIL_API_KEY', defaultValue: '');
+  static String get _whatsappApiKey =>
+      _whatsappApiKeyRaw.isNotEmpty ? _whatsappApiKeyRaw : _legacyApiKey;
+  static String get _emailApiKey =>
+      _emailApiKeyRaw.isNotEmpty ? _emailApiKeyRaw : _legacyApiKey;
   static const String _bulkApiUrlEnv =
       String.fromEnvironment('NOTIFICATION_BULK_API_URL', defaultValue: '');
+  // Marcusjj proxies stamp every notification payload with this appId so the
+  // notification server can route per-app. Match it for parity.
+  static const String _appId = 'gestao-raiz';
 
   bool get hasWhatsAppApi => _whatsappApiUrl.isNotEmpty;
   bool get hasEmailApi => _emailApiUrl.isNotEmpty;
@@ -583,16 +606,19 @@ class BillingNotificationService {
       NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
   final _dateFormat = DateFormat('dd/MM/yyyy');
 
-  // Default templates with placeholders: {nome}, {valor}, {vencimento}, {dias}, {academia}
+  // Default templates with placeholders: {nome}, {valor}, {vencimento}, {dias}, {academia}.
+  // Mirrors marcusjj/src/services/billingNotificationService.ts DEFAULT_*_TEMPLATES.
   static const defaultWhatsAppTemplates = {
+    'D+0': 'Oi {nome}! Passando rapidinho para lembrar que hoje, dia {vencimento}, vence sua mensalidade de {valor} com a {academia}. Contamos com voce! Qualquer duvida, estamos a disposicao.',
     'D+1': 'Ola {nome}! Aqui e a {academia}. Identificamos que sua mensalidade de {valor} venceu em {vencimento}. Caso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem. Caso contrario, solicitamos a regularizacao. Obrigado!',
-    'D+3': 'Ola {nome}! Sua mensalidade de {valor} da {academia} esta com 3 dias de atraso (vencimento: {vencimento}). Por favor, regularize sua situacao o mais breve possivel.',
-    'D+7': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Precisamos que regularize sua situacao para manter seus treinos em dia.',
-    'D+15': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Sua situacao precisa ser regularizada com urgencia para evitar a suspensao do acesso aos treinos.',
-    'D+30': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com mais de 30 dias de atraso. Caso a situacao nao seja regularizada, precisaremos suspender seu acesso. Entre em contato urgente.',
+    'D+3': 'Ola {nome}! Sua mensalidade de {valor} da {academia} esta com 3 dias de atraso (vencimento: {vencimento}). Por favor, regularize sua situacao o mais breve possivel. Em caso de duvidas, estamos a disposicao!',
+    'D+7': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Precisamos que regularize sua situacao para manter seus treinos em dia. Entre em contato conosco para combinar o pagamento.',
+    'D+15': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Sua situacao precisa ser regularizada com urgencia para evitar a suspensao do acesso aos treinos. Por favor, entre em contato.',
+    'D+30': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com mais de 30 dias de atraso. Caso a situacao nao seja regularizada, infelizmente precisaremos suspender seu acesso. Entre em contato urgente para negociarmos.',
   };
 
   static const defaultEmailSubjectTemplates = {
+    'D+0': 'Lembrete: Sua mensalidade vence hoje - {academia}',
     'D+1': 'Lembrete de Pagamento - {academia}',
     'D+3': 'Pagamento Atrasado - {academia}',
     'D+7': 'Pagamento Urgente - {academia}',
@@ -601,11 +627,12 @@ class BillingNotificationService {
   };
 
   static const defaultEmailBodyTemplates = {
-    'D+1': 'Prezado(a) {nome},\n\nIdentificamos que sua mensalidade no valor de {valor} com vencimento em {vencimento} ainda nao foi quitada.\n\nCaso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem.\n\nAtenciosamente,\n{academia}',
-    'D+3': 'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} esta com 3 dias de atraso (vencimento: {vencimento}).\n\nPor favor, regularize sua situacao o mais breve possivel.\n\nAtenciosamente,\n{academia}',
-    'D+7': 'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} esta com {dias} dias de atraso.\n\nPrecisamos que regularize sua situacao para manter seus treinos em dia.\n\nAtenciosamente,\n{academia}',
-    'D+15': 'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} esta com {dias} dias de atraso.\n\nSua situacao precisa ser regularizada com URGENCIA para evitar a suspensao do acesso aos treinos.\n\nAtenciosamente,\n{academia}',
-    'D+30': 'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} esta com mais de 30 dias de atraso.\n\nCaso a situacao nao seja regularizada, precisaremos suspender seu acesso a academia.\n\nAtenciosamente,\n{academia}',
+    'D+0': 'Ola {nome},\n\nPassamos apenas para lembrar que hoje, dia {vencimento}, vence sua mensalidade no valor de {valor} com a {academia}.\n\nSe voce ja efetuou o pagamento, obrigado e pode desconsiderar este aviso!\n\nCaso ainda nao tenha pago, contamos com voce para manter tudo em dia.\n\nAtenciosamente,\n{academia}',
+    'D+1': 'Prezado(a) {nome},\n\nIdentificamos que sua mensalidade no valor de {valor} com vencimento em {vencimento} ainda nao foi quitada.\n\nCaso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem.\n\nCaso contrario, solicitamos que regularize sua situacao o mais breve possivel.\n\nAtenciosamente,\n{academia}',
+    'D+3': 'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} da {academia} esta com 3 dias de atraso (vencimento: {vencimento}).\n\nPor favor, regularize sua situacao o mais breve possivel.\n\nEm caso de duvidas ou dificuldades, estamos a disposicao para ajudar.\n\nAtenciosamente,\n{academia}',
+    'D+7': 'Prezado(a) {nome},\n\nGostaramos de informar que sua mensalidade no valor de {valor} esta com {dias} dias de atraso.\n\nPrecisamos que regularize sua situacao para manter seus treinos em dia. Entre em contato conosco para combinar a melhor forma de pagamento.\n\nAtenciosamente,\n{academia}',
+    'D+15': 'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} esta com {dias} dias de atraso.\n\nInformamos que sua situacao precisa ser regularizada com URGENCIA para evitar a suspensao do acesso aos treinos.\n\nPor favor, entre em contato imediatamente para negociarmos o pagamento.\n\nAtenciosamente,\n{academia}',
+    'D+30': 'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} esta com mais de 30 dias de atraso.\n\nCaso a situacao nao seja regularizada nos proximos dias, infelizmente precisaremos suspender seu acesso a academia.\n\nEntre em contato urgente para que possamos encontrar uma solucao.\n\nAtenciosamente,\n{academia}',
   };
 
   BillingNotificationService({
@@ -707,7 +734,7 @@ class BillingNotificationService {
         Uri.parse(_whatsappApiUrl),
         headers: {
           'Content-Type': 'application/json',
-          if (_apiKey.isNotEmpty) 'x-api-key': _apiKey,
+          if (_whatsappApiKey.isNotEmpty) 'x-api-key': _whatsappApiKey,
         },
         body: jsonEncode({
           'phone': _normalizePhone(phone),
@@ -724,6 +751,7 @@ class BillingNotificationService {
           'stage': stage.value,
           'message': message,
           'type': 'billing_reminder',
+          'appId': _appId,
         }),
       ).timeout(const Duration(seconds: 30));
 
@@ -783,7 +811,7 @@ class BillingNotificationService {
         Uri.parse(_emailApiUrl),
         headers: {
           'Content-Type': 'application/json',
-          if (_apiKey.isNotEmpty) 'x-api-key': _apiKey,
+          if (_emailApiKey.isNotEmpty) 'x-api-key': _emailApiKey,
         },
         body: jsonEncode({
           'email': email,
@@ -801,6 +829,7 @@ class BillingNotificationService {
           'subject': subject,
           'message': message,
           'type': 'billing_reminder',
+          'appId': _appId,
         }),
       ).timeout(const Duration(seconds: 30));
 
@@ -1057,17 +1086,21 @@ class BillingNotificationService {
         'message': message,
         'phones': phones,
         'emails': emails,
+        'appId': _appId,
       };
       if (subject != null && subject.isNotEmpty) body['subject'] = subject;
       if (scheduledTime != null && scheduledTime.isNotEmpty) {
         body['scheduledTime'] = scheduledTime;
       }
 
+      // Bulk hits both channels; the notification server accepts either key.
+      // Prefer WhatsApp key (most builds use the same value anyway).
+      final bulkKey = _whatsappApiKey.isNotEmpty ? _whatsappApiKey : _emailApiKey;
       final response = await http.post(
         Uri.parse(_bulkApiUrl),
         headers: {
           'Content-Type': 'application/json',
-          if (_apiKey.isNotEmpty) 'x-api-key': _apiKey,
+          if (bulkKey.isNotEmpty) 'x-api-key': bulkKey,
         },
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 120));

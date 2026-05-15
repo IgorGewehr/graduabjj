@@ -1,0 +1,643 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================
+    // Global Helper Functions
+    // ============================================
+
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Get user document from root users collection
+    // Used only for root /users rules and legacy fallback
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Get user-academy mapping (primary source of role and academy membership)
+    function getUserAcademyMapping() {
+      return get(/databases/$(database)/documents/userAcademyMapping/$(request.auth.uid)).data;
+    }
+
+    // Get academy-scoped user document (secondary source of role and studentId)
+    function getAcademyUserData(academyId) {
+      return get(/databases/$(database)/documents/academies/$(academyId)/users/$(request.auth.uid)).data;
+    }
+
+    // Check if academy-scoped user document exists (prevents errors in fallback paths)
+    function academyUserExists(academyId) {
+      return exists(/databases/$(database)/documents/academies/$(academyId)/users/$(request.auth.uid));
+    }
+
+    // Check if user belongs to a specific academy (via mapping)
+    function belongsToAcademy(academyId) {
+      let mapping = getUserAcademyMapping();
+      return isAuthenticated() && (
+        academyId in mapping.academyIds ||
+        mapping.primaryAcademyId == academyId
+      );
+    }
+
+    // Check if user is admin of the academy
+    // Sources: userAcademyMapping.academyDetails (primary) > academyUser doc (fallback)
+    function isAcademyAdmin(academyId) {
+      let mapping = getUserAcademyMapping();
+      return belongsToAcademy(academyId) && (
+        // Primary: from userAcademyMapping.academyDetails
+        (mapping.keys().hasAll(['academyDetails']) &&
+         mapping.academyDetails.keys().hasAll([academyId]) &&
+         mapping.academyDetails[academyId].role == 'admin') ||
+        // Fallback: from academy-scoped user doc (only if doc exists)
+        (academyUserExists(academyId) && getAcademyUserData(academyId).role == 'admin')
+      );
+    }
+
+    // Check if user is instructor of the academy (legacy role - kept for backward compatibility)
+    // All staff should now use 'admin' role
+    function isAcademyInstructor(academyId) {
+      let mapping = getUserAcademyMapping();
+      return belongsToAcademy(academyId) && (
+        (mapping.keys().hasAll(['academyDetails']) &&
+         mapping.academyDetails.keys().hasAll([academyId]) &&
+         mapping.academyDetails[academyId].role == 'instructor') ||
+        // Fallback: from academy-scoped user doc (only if doc exists)
+        (academyUserExists(academyId) && getAcademyUserData(academyId).role == 'instructor')
+      );
+    }
+
+    // Check if user is staff (admin or instructor) of the academy
+    // Staff role is standardized as 'admin'; instructor kept as legacy fallback
+    function isAcademyStaff(academyId) {
+      return isAcademyAdmin(academyId) || isAcademyInstructor(academyId);
+    }
+
+    // Get user's studentId for a given academy
+    // Sources: userAcademyMapping.academyDetails (primary) > academyUser doc (fallback)
+    function isOwnStudent(academyId, studentId) {
+      let mapping = getUserAcademyMapping();
+      return belongsToAcademy(academyId) && (
+        // Primary: from userAcademyMapping.academyDetails
+        (mapping.keys().hasAll(['academyDetails']) &&
+         mapping.academyDetails.keys().hasAll([academyId]) &&
+         mapping.academyDetails[academyId].studentId == studentId) ||
+        // Fallback: from academy-scoped user doc (only if doc exists)
+        (academyUserExists(academyId) &&
+         getAcademyUserData(academyId).keys().hasAll(['studentId']) &&
+         getAcademyUserData(academyId).studentId == studentId)
+      );
+    }
+
+    // Check if a document's studentId matches the current user's studentId
+    function isOwnStudentRecord(academyId, docStudentId) {
+      let mapping = getUserAcademyMapping();
+      return belongsToAcademy(academyId) && (
+        // Primary: from userAcademyMapping.academyDetails
+        (mapping.keys().hasAll(['academyDetails']) &&
+         mapping.academyDetails.keys().hasAll([academyId]) &&
+         docStudentId == mapping.academyDetails[academyId].studentId) ||
+        // Fallback: from academy-scoped user doc (only if doc exists)
+        (academyUserExists(academyId) &&
+         getAcademyUserData(academyId).keys().hasAll(['studentId']) &&
+         docStudentId == getAcademyUserData(academyId).studentId)
+      );
+    }
+
+    // Check if user is the owner of the academy
+    function isAcademyOwner(academyId) {
+      let academy = get(/databases/$(database)/documents/academies/$(academyId)).data;
+      return isAuthenticated() && academy.ownerId == request.auth.uid;
+    }
+
+    // Check if user is a monitor of the academy
+    // Monitors are students with additional permissions (chamada + alunos)
+    function isMonitor(academyId) {
+      let academy = get(/databases/$(database)/documents/academies/$(academyId)).data;
+      let mapping = getUserAcademyMapping();
+      return belongsToAcademy(academyId)
+             && academy.monitorIds != null
+             && (
+               // Primary: from userAcademyMapping.academyDetails
+               (mapping.keys().hasAll(['academyDetails']) &&
+                mapping.academyDetails.keys().hasAll([academyId]) &&
+                mapping.academyDetails[academyId].studentId != null &&
+                mapping.academyDetails[academyId].studentId in academy.monitorIds) ||
+               // Fallback: from academy-scoped user doc (only if doc exists)
+               (academyUserExists(academyId) &&
+                getAcademyUserData(academyId).keys().hasAll(['studentId']) &&
+                getAcademyUserData(academyId).studentId != null &&
+                getAcademyUserData(academyId).studentId in academy.monitorIds)
+             );
+    }
+
+    // Check if user is staff OR monitor of the academy
+    function isStaffOrMonitor(academyId) {
+      return isAcademyStaff(academyId) || isMonitor(academyId);
+    }
+
+    // Helper: get current user's studentId for this academy (for inline use)
+    // Returns studentId from mapping or academy user doc
+    function getUserStudentIdFromMapping(academyId) {
+      let mapping = getUserAcademyMapping();
+      return mapping.keys().hasAll(['academyDetails']) &&
+             mapping.academyDetails.keys().hasAll([academyId])
+             ? mapping.academyDetails[academyId].studentId
+             : null;
+    }
+
+    // Validate amount is positive
+    function isPositiveAmount(amount) {
+      return amount is number && amount > 0;
+    }
+
+    // ============================================
+    // Root Users Collection
+    // ============================================
+    match /users/{userId} {
+      // Users can read their own document
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+
+      // Users can create their own document during registration
+      // Allow admin role ONLY if creating during academy creation (new user)
+      allow create: if isAuthenticated() && request.auth.uid == userId
+                    && (
+                      // Student registration (no role or role == student)
+                      (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role == 'student')
+                      ||
+                      // Admin registration during academy creation
+                      (request.resource.data.role == 'admin' && request.resource.data.isActive == true)
+                    );
+
+      // Users can update non-sensitive fields
+      allow update: if isAuthenticated() && request.auth.uid == userId
+                    && !request.resource.data.diff(resource.data).affectedKeys()
+                        .hasAny(['role', 'academyId']);
+
+      // FCM Tokens subcollection
+      match /fcmTokens/{tokenId} {
+        // User can manage their own tokens
+        allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      }
+    }
+
+    // ============================================
+    // User-Academy Mapping
+    // ============================================
+    match /userAcademyMapping/{userId} {
+      // Users can read their own mapping
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+
+      // Users can create their own mapping:
+      // 1. During normal signup (empty mapping with no academies)
+      // 2. During academy creation (mapping with admin role in root)
+      // 3. During student registration via link code (role in academyDetails)
+      allow create: if isAuthenticated()
+                    && request.auth.uid == userId
+                    && (
+                      // Empty mapping during normal signup
+                      (request.resource.data.academyIds.size() == 0)
+                      ||
+                      // Admin mapping during academy creation (legacy format with root-level role)
+                      (request.resource.data.role == 'admin'
+                       && request.resource.data.academyIds.size() == 1
+                       && request.resource.data.primaryAcademyId == request.resource.data.academyIds[0])
+                      ||
+                      // Student/any role mapping during registration (role in academyDetails)
+                      (request.resource.data.academyIds.size() >= 1
+                       && request.resource.data.primaryAcademyId in request.resource.data.academyIds
+                       && request.resource.data.keys().hasAll(['academyDetails']))
+                    );
+
+      // Users can update their own mapping to add/remove academies
+      allow update: if isAuthenticated()
+                    && request.auth.uid == userId;
+
+      // Never allow delete
+      allow delete: if false;
+    }
+
+    // ============================================
+    // Academies Collection
+    // ============================================
+    match /academies/{academyId} {
+      // Anyone who belongs to the academy can read academy info
+      allow read: if belongsToAcademy(academyId);
+
+      // Owner or admin can update academy settings
+      allow update: if (isAcademyOwner(academyId) || isAcademyAdmin(academyId))
+                    && !request.resource.data.diff(resource.data).affectedKeys()
+                        .hasAny(['ownerId', 'createdAt']);
+
+      // Allow academy creation - user must be setting themselves as owner
+      allow create: if isAuthenticated()
+                    && request.resource.data.ownerId == request.auth.uid
+                    && request.resource.data.name.size() >= 3;
+
+      // Never allow delete from client
+      allow delete: if false;
+
+      // ============================================
+      // Users Subcollection (Academy-scoped users)
+      // ============================================
+      match /users/{userId} {
+        // Staff can read all academy users
+        allow read: if isAcademyStaff(academyId);
+
+        // Users can read their own document
+        allow read: if isAuthenticated() && request.auth.uid == userId;
+
+        // Allow user to create their own document:
+        // - Admin during academy creation (role == 'admin')
+        // - Student during account linking (must already belong to academy via mapping)
+        allow create: if isAuthenticated()
+                      && request.auth.uid == userId
+                      && (
+                        request.resource.data.role == 'admin' ||
+                        (belongsToAcademy(academyId) && request.resource.data.role == 'student')
+                      );
+
+        // Staff can update users (except sensitive fields)
+        allow update: if isAcademyStaff(academyId)
+                      && !request.resource.data.diff(resource.data).affectedKeys()
+                          .hasAny(['createdAt']);
+
+        // Never allow delete from client
+        allow delete: if false;
+      }
+
+      // ============================================
+      // Students Subcollection
+      // ============================================
+      match /students/{studentId} {
+        // Staff can read all students
+        allow read: if isAcademyStaff(academyId);
+
+        // Monitors can read all students (UI filters financial fields)
+        allow read: if isMonitor(academyId);
+
+        // Students can read their own record
+        allow read: if isOwnStudent(academyId, studentId);
+
+        // Staff can create/delete students
+        allow create, delete: if isAcademyStaff(academyId);
+
+        // Monitors can create students (without financial fields)
+        allow create: if isMonitor(academyId)
+                      && !request.resource.data.keys().hasAny(['tuitionValue', 'tuitionDay', 'planId']);
+
+        // Staff can update all fields
+        allow update: if isAcademyStaff(academyId);
+
+        // Monitors can update students (except financial and sensitive fields)
+        allow update: if isMonitor(academyId)
+                      && !request.resource.data.diff(resource.data).affectedKeys()
+                          .hasAny(['tuitionValue', 'tuitionDay', 'planId',
+                                   'currentBelt', 'currentStripes', 'status',
+                                   'beltHistory', 'createdAt', 'createdBy']);
+
+        // Students can update only personal info (including photoUrl and registration linking fields)
+        allow update: if isOwnStudent(academyId, studentId)
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['photoUrl', 'updatedAt', 'linkedUserId', 'email', 'cpf', 'phone',
+                                    'nickname', 'birthDate', 'rg', 'weight',
+                                    'address', 'bloodType', 'allergies', 'healthNotes',
+                                    'emergencyContact', 'isProfilePublic']);
+
+        // Timeline subcollection
+        match /timeline/{eventId} {
+          allow read: if isStaffOrMonitor(academyId) || isOwnStudent(academyId, studentId);
+          allow write: if isAcademyStaff(academyId);
+        }
+      }
+
+      // ============================================
+      // Classes Subcollection
+      // ============================================
+      match /classes/{classId} {
+        allow read: if belongsToAcademy(academyId);
+        allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
+      // Attendance Subcollection
+      // ============================================
+      match /attendance/{attendanceId} {
+        // Staff and monitors can read all attendance
+        allow read: if isStaffOrMonitor(academyId);
+
+        // Students can read their own attendance
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+
+        // Staff and monitors can create/update/delete attendance
+        allow write: if isStaffOrMonitor(academyId);
+      }
+
+      // ============================================
+      // Plans Subcollection
+      // ============================================
+      match /plans/{planId} {
+        allow read: if belongsToAcademy(academyId);
+        allow write: if isAcademyAdmin(academyId);
+      }
+
+      // ============================================
+      // Link Codes Subcollection
+      // ============================================
+      match /linkCodes/{codeId} {
+        // Staff can read all codes
+        allow read: if isAcademyStaff(academyId);
+
+        // Students can read codes from their academy
+        allow read: if belongsToAcademy(academyId);
+
+        // CRITICAL: Allow unauthenticated users to read UNUSED codes
+        // This is necessary for account registration with link codes
+        // Users can query via collectionGroup to find their code across all academies
+        allow read: if resource.data.usedAt == null;
+
+        // Staff can create/delete codes
+        allow write: if isAcademyStaff(academyId);
+
+        // Allow marking as used during account linking (authenticated users only)
+        allow update: if isAuthenticated()
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['usedAt', 'usedBy'])
+                      && request.resource.data.usedBy == request.auth.uid;
+      }
+
+      // ============================================
+      // Financials Subcollection (CRITICAL - Payment Data)
+      // ============================================
+      match /financials/{financialId} {
+        // Staff can read all financials
+        allow read: if isAcademyStaff(academyId);
+
+        // Students can read their own financials
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+
+        // Staff can create financials
+        allow create: if isAcademyStaff(academyId)
+                      && request.resource.data.academyId == academyId
+                      && isPositiveAmount(request.resource.data.amount);
+
+        // Staff can update financials (except payment confirmation fields)
+        allow update: if isAcademyStaff(academyId)
+                      && !request.resource.data.diff(resource.data).affectedKeys()
+                          .hasAny(['paidViaAbacatePay', 'abacatePayTransactionId']);
+
+        // Staff can delete unpaid financials only
+        allow delete: if isAcademyStaff(academyId)
+                      && resource.data.status != 'paid';
+      }
+
+      // ============================================
+      // Wallet Subcollection (CRITICAL - Money)
+      // ============================================
+      match /wallet/{docId} {
+        // Owner and admins can read wallet
+        allow read: if isAcademyOwner(academyId) || isAcademyAdmin(academyId);
+
+        // NEVER allow client writes - only via Cloud Functions/webhooks
+        allow write: if false;
+      }
+
+      // ============================================
+      // Wallet Transactions (CRITICAL - Money)
+      // ============================================
+      match /walletTransactions/{transactionId} {
+        // Owner and admins can read transactions
+        allow read: if isAcademyOwner(academyId) || isAcademyAdmin(academyId);
+
+        // NEVER allow client writes - only via Cloud Functions/webhooks
+        allow write: if false;
+      }
+
+      // ============================================
+      // Store Products Subcollection
+      // ============================================
+      match /storeProducts/{productId} {
+        // Anyone in academy can read products
+        allow read: if belongsToAcademy(academyId);
+
+        // Only staff can manage products
+        allow create, update: if isAcademyStaff(academyId)
+                              && request.resource.data.academyId == academyId
+                              && isPositiveAmount(request.resource.data.price);
+
+        allow delete: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
+      // Store Orders Subcollection (CRITICAL)
+      // ============================================
+      match /storeOrders/{orderId} {
+        // Staff can read all orders
+        allow read: if isAcademyStaff(academyId);
+
+        // Students can read their own orders (via mapping or academy user doc)
+        allow read: if belongsToAcademy(academyId)
+                    && isOwnStudentRecord(academyId, resource.data.studentId);
+
+        // Students can create orders for themselves (via mapping or academy user doc)
+        allow create: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, request.resource.data.studentId)
+                      && request.resource.data.academyId == academyId
+                      && request.resource.data.status == 'pending_payment'
+                      && isPositiveAmount(request.resource.data.total);
+
+        // Staff can update order status (except payment fields)
+        allow update: if isAcademyStaff(academyId)
+                      && !request.resource.data.diff(resource.data).affectedKeys()
+                          .hasAny(['abacatePayTransactionId', 'paidAt', 'total', 'items']);
+
+        // Staff can cancel unpaid orders
+        allow delete: if isAcademyStaff(academyId)
+                      && resource.data.status == 'pending_payment';
+      }
+
+      // ============================================
+      // Competitions Subcollection
+      // ============================================
+      match /competitions/{competitionId} {
+        allow read: if belongsToAcademy(academyId);
+        allow create, delete: if isAcademyStaff(academyId);
+        allow update: if isAcademyStaff(academyId);
+
+        // Students can update only enrolledStudentIds (self-enroll/unenroll from legacy array)
+        allow update: if belongsToAcademy(academyId)
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['enrolledStudentIds', 'updatedAt']);
+      }
+
+      // ============================================
+      // Competition Enrollments
+      // ============================================
+      match /competitionEnrollments/{enrollmentId} {
+        allow read: if belongsToAcademy(academyId);
+        allow write: if isAcademyStaff(academyId);
+
+        // Students can enroll themselves (via mapping or academy user doc)
+        allow create: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, request.resource.data.studentId);
+
+        // Students can update their own enrollment (category, weight, transport)
+        allow update: if isOwnStudentRecord(academyId, resource.data.studentId)
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['ageCategory', 'weightCategory', 'transportPreference', 'updatedAt']);
+
+        // Students can cancel their own enrollment
+        allow delete: if isOwnStudentRecord(academyId, resource.data.studentId);
+      }
+
+      // ============================================
+      // Competition Results
+      // ============================================
+      match /competitionResults/{resultId} {
+        allow read: if belongsToAcademy(academyId);
+        // Admin can manage all results; students can create/update their own
+        allow create: if isAcademyStaff(academyId) ||
+          (belongsToAcademy(academyId) && isOwnStudentRecord(academyId, request.resource.data.studentId));
+        allow update: if isAcademyStaff(academyId) ||
+          (belongsToAcademy(academyId) && isOwnStudentRecord(academyId, resource.data.studentId));
+        allow delete: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
+      // Competition Photos
+      // ============================================
+      match /competitionPhotos/{photoId} {
+        // Anyone in the academy can read photos
+        allow read: if belongsToAcademy(academyId);
+
+        // Admins can create unlimited, students can create own photos
+        // Enrollment check is enforced at the application level
+        allow create: if isAuthenticated()
+                      && belongsToAcademy(academyId)
+                      && request.resource.data.studentId != null
+                      && request.resource.data.url != null
+                      && request.resource.data.competitionId != null
+                      && request.resource.data.storagePath != null
+                      && (request.resource.data.caption == null || request.resource.data.caption.size() <= 200)
+                      && (
+                        // Admin can upload unlimited
+                        isAcademyStaff(academyId) ||
+                        // Student can upload own photos
+                        isOwnStudentRecord(academyId, request.resource.data.studentId)
+                      );
+
+        // Can update own photos (caption only) or admin can update any
+        allow update: if isAuthenticated()
+                      && belongsToAcademy(academyId)
+                      && (
+                        // Admin can update any field
+                        isAcademyStaff(academyId) ||
+                        // Student can only update own photo's caption
+                        (resource.data.createdBy == request.auth.uid &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['caption', 'updatedAt']) &&
+                         (request.resource.data.caption == null || request.resource.data.caption.size() <= 200))
+                      );
+
+        // Can delete own photos or admin can delete any
+        allow delete: if isAuthenticated()
+                      && belongsToAcademy(academyId)
+                      && (isAcademyStaff(academyId) || resource.data.createdBy == request.auth.uid);
+      }
+
+      // ============================================
+      // Achievements
+      // ============================================
+      match /achievements/{achievementId} {
+        allow read: if isAcademyStaff(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow write: if isAcademyStaff(academyId);
+
+        // Students can create their own achievements (auto-created after competition results)
+        allow create: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, request.resource.data.studentId);
+      }
+
+      // ============================================
+      // Belt Progressions
+      // ============================================
+      match /beltProgressions/{progressionId} {
+        allow read: if isAcademyStaff(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
+      // Assessments (Kids)
+      // ============================================
+      match /assessments/{assessmentId} {
+        allow read: if isAcademyStaff(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
+      // Notifications
+      // ============================================
+      match /notifications/{notificationId} {
+        // Users can read their own notifications
+        allow read: if belongsToAcademy(academyId)
+                    && resource.data.userId == request.auth.uid;
+
+        // Users can mark their own notifications as read
+        allow update: if belongsToAcademy(academyId)
+                      && resource.data.userId == request.auth.uid
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']);
+
+        // Only staff/system can create notifications
+        allow create: if isAcademyStaff(academyId);
+
+        // Users can delete their own notifications
+        allow delete: if belongsToAcademy(academyId)
+                      && resource.data.userId == request.auth.uid;
+      }
+
+      // ============================================
+      // Billing Contact Log
+      // ============================================
+      match /billingContactLog/{logId} {
+        // Staff can read all contact logs
+        allow read: if isAcademyStaff(academyId);
+
+        // Staff can create contact logs (logging billing attempts)
+        allow create: if isAcademyStaff(academyId);
+
+        // No updates or deletes from client
+        allow update, delete: if false;
+      }
+
+      // ============================================
+      // Settings
+      // ============================================
+      match /settings/{settingId} {
+        allow read: if belongsToAcademy(academyId);
+        allow write: if isAcademyAdmin(academyId);
+      }
+    }
+
+    // ============================================
+    // COLLECTION GROUP QUERIES (Cross-Academy)
+    // ============================================
+
+    // Link Codes - Allow reading UNUSED codes across all academies
+    // This is required for student registration via link codes
+    // Security: Only allows reading codes that haven't been used yet
+    match /{path=**}/linkCodes/{codeId} {
+      // Allow reading unused codes for registration flow
+      // Once a code is used (usedAt != null), it becomes invisible to prevent enumeration
+      allow read: if resource.data.usedAt == null;
+    }
+
+    // ============================================
+    // DENY ALL OTHER PATHS
+    // ============================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
