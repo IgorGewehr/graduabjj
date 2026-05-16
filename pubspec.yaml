@@ -48,6 +48,7 @@ dependencies:
   shared_preferences: ^2.3.4
   collection: ^1.19.0
   http: ^1.2.0
+  dio: ^5.7.0
   qr_flutter: ^4.1.0
   # mobile_scanner 7.x bumps the underlying GoogleMLKit pods to a version
   # whose GTMSessionFetcher constraint aligns with Firebase 11.x. Older 5.x
