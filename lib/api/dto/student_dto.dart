@@ -513,6 +513,256 @@ class StudentBeltCount {
       );
 }
 
+class CreateStudentRequest {
+  const CreateStudentRequest({
+    required this.fullName,
+    this.nickname,
+    this.birthDate,
+    this.cpf,
+    this.rg,
+    this.phone,
+    this.email,
+    this.photoUrl,
+    this.address,
+    this.guardian,
+    this.startDate,
+    this.jiujitsuStartDate,
+    this.currentBelt,
+    this.currentStripes,
+    this.category,
+    this.weightKg,
+    this.initialAttendanceCount,
+    this.tuitionValue,
+    this.tuitionDay,
+    this.planId,
+    this.medicalCertificateUrl,
+    this.healthNotes,
+    this.bloodType,
+    this.allergies,
+    this.emergencyContact,
+    this.isProfilePublic,
+    this.primarySport,
+    this.sportsList,
+    this.sportData,
+  });
+
+  final String fullName;
+  final String? nickname;
+  final DateTime? birthDate;
+  final String? cpf;
+  final String? rg;
+  final String? phone;
+  final String? email;
+  final String? photoUrl;
+  final ApiAddress? address;
+  final ApiGuardian? guardian;
+  final DateTime? startDate;
+  final DateTime? jiujitsuStartDate;
+  final ApiBelt? currentBelt;
+  final int? currentStripes;
+  final ApiStudentCategory? category;
+  final double? weightKg;
+  final int? initialAttendanceCount;
+  final String? tuitionValue;
+  final int? tuitionDay;
+  final String? planId;
+  final String? medicalCertificateUrl;
+  final String? healthNotes;
+  final String? bloodType;
+  final String? allergies;
+  final String? emergencyContact;
+  final bool? isProfilePublic;
+  final String? primarySport;
+  final List<String>? sportsList;
+  final Map<String, dynamic>? sportData;
+
+  Map<String, dynamic> toJson() {
+    final m = <String, dynamic>{'full_name': fullName};
+    if (nickname != null) m['nickname'] = nickname;
+    if (birthDate != null) m['birth_date'] = _formatDate(birthDate!);
+    if (cpf != null) m['cpf'] = cpf;
+    if (rg != null) m['rg'] = rg;
+    if (phone != null) m['phone'] = phone;
+    if (email != null) m['email'] = email;
+    if (photoUrl != null) m['photo_url'] = photoUrl;
+    if (address != null) m['address'] = _addressToJson(address!);
+    if (guardian != null) m['guardian'] = _guardianToJson(guardian!);
+    if (startDate != null) m['start_date'] = _formatDate(startDate!);
+    if (jiujitsuStartDate != null) {
+      m['jiujitsu_start_date'] = _formatDate(jiujitsuStartDate!);
+    }
+    if (currentBelt != null) m['current_belt'] = currentBelt!.wire;
+    if (currentStripes != null) m['current_stripes'] = currentStripes;
+    if (category != null) m['category'] = category!.wire;
+    if (weightKg != null) m['weight_kg'] = weightKg;
+    if (initialAttendanceCount != null) {
+      m['initial_attendance_count'] = initialAttendanceCount;
+    }
+    if (tuitionValue != null) m['tuition_value'] = tuitionValue;
+    if (tuitionDay != null) m['tuition_day'] = tuitionDay;
+    if (planId != null) m['plan_id'] = planId;
+    if (medicalCertificateUrl != null) {
+      m['medical_certificate_url'] = medicalCertificateUrl;
+    }
+    if (healthNotes != null) m['health_notes'] = healthNotes;
+    if (bloodType != null) m['blood_type'] = bloodType;
+    if (allergies != null) m['allergies'] = allergies;
+    if (emergencyContact != null) m['emergency_contact'] = emergencyContact;
+    if (isProfilePublic != null) m['is_profile_public'] = isProfilePublic;
+    if (primarySport != null) m['primary_sport'] = primarySport;
+    if (sportsList != null) m['sports_list'] = sportsList;
+    if (sportData != null) m['sport_data'] = sportData;
+    return m;
+  }
+}
+
+class UpdateStudentRequest {
+  const UpdateStudentRequest({
+    this.fullName,
+    this.nickname,
+    this.birthDate,
+    this.cpf,
+    this.rg,
+    this.phone,
+    this.email,
+    this.photoUrl,
+    this.address,
+    this.guardian,
+    this.startDate,
+    this.jiujitsuStartDate,
+    this.category,
+    this.weightKg,
+    this.status,
+    this.statusNote,
+    this.tuitionValue,
+    this.tuitionDay,
+    this.planId,
+    this.medicalCertificateUrl,
+    this.healthNotes,
+    this.bloodType,
+    this.allergies,
+    this.emergencyContact,
+    this.isProfilePublic,
+    this.primarySport,
+  });
+
+  final String? fullName;
+  final String? nickname;
+  final DateTime? birthDate;
+  final String? cpf;
+  final String? rg;
+  final String? phone;
+  final String? email;
+  final String? photoUrl;
+  final ApiAddress? address;
+  final ApiGuardian? guardian;
+  final DateTime? startDate;
+  final DateTime? jiujitsuStartDate;
+  final ApiStudentCategory? category;
+  final double? weightKg;
+  final ApiStudentStatus? status;
+  final String? statusNote;
+  final String? tuitionValue;
+  final int? tuitionDay;
+  final String? planId;
+  final String? medicalCertificateUrl;
+  final String? healthNotes;
+  final String? bloodType;
+  final String? allergies;
+  final String? emergencyContact;
+  final bool? isProfilePublic;
+  final String? primarySport;
+
+  Map<String, dynamic> toJson() {
+    final m = <String, dynamic>{};
+    if (fullName != null) m['full_name'] = fullName;
+    if (nickname != null) m['nickname'] = nickname;
+    if (birthDate != null) m['birth_date'] = _formatDate(birthDate!);
+    if (cpf != null) m['cpf'] = cpf;
+    if (rg != null) m['rg'] = rg;
+    if (phone != null) m['phone'] = phone;
+    if (email != null) m['email'] = email;
+    if (photoUrl != null) m['photo_url'] = photoUrl;
+    if (address != null) m['address'] = _addressToJson(address!);
+    if (guardian != null) m['guardian'] = _guardianToJson(guardian!);
+    if (startDate != null) m['start_date'] = _formatDate(startDate!);
+    if (jiujitsuStartDate != null) {
+      m['jiujitsu_start_date'] = _formatDate(jiujitsuStartDate!);
+    }
+    if (category != null) m['category'] = category!.wire;
+    if (weightKg != null) m['weight_kg'] = weightKg;
+    if (status != null) m['status'] = status!.wire;
+    if (statusNote != null) m['status_note'] = statusNote;
+    if (tuitionValue != null) m['tuition_value'] = tuitionValue;
+    if (tuitionDay != null) m['tuition_day'] = tuitionDay;
+    if (planId != null) m['plan_id'] = planId;
+    if (medicalCertificateUrl != null) {
+      m['medical_certificate_url'] = medicalCertificateUrl;
+    }
+    if (healthNotes != null) m['health_notes'] = healthNotes;
+    if (bloodType != null) m['blood_type'] = bloodType;
+    if (allergies != null) m['allergies'] = allergies;
+    if (emergencyContact != null) m['emergency_contact'] = emergencyContact;
+    if (isProfilePublic != null) m['is_profile_public'] = isProfilePublic;
+    if (primarySport != null) m['primary_sport'] = primarySport;
+    return m;
+  }
+}
+
+class CreateBeltProgressionRequest {
+  const CreateBeltProgressionRequest({
+    required this.newBelt,
+    required this.newStripes,
+    required this.promotionDate,
+    this.notes,
+    this.sport,
+  });
+
+  final ApiBelt newBelt;
+  final int newStripes;
+  final DateTime promotionDate;
+  final String? notes;
+  final ApiSport? sport;
+
+  Map<String, dynamic> toJson() {
+    final m = <String, dynamic>{
+      'new_belt': newBelt.wire,
+      'new_stripes': newStripes,
+      'promotion_date': _formatDate(promotionDate),
+    };
+    if (notes != null) m['notes'] = notes;
+    if (sport != null) m['sport'] = sport!.wire;
+    return m;
+  }
+}
+
+class CreateAssessmentRequest {
+  const CreateAssessmentRequest({
+    required this.date,
+    required this.scores,
+    this.notes,
+  });
+
+  final DateTime date;
+  final ApiAssessmentScores scores;
+  final String? notes;
+
+  Map<String, dynamic> toJson() {
+    final m = <String, dynamic>{
+      'date': _formatDate(date),
+      'scores': {
+        'respeito': scores.respeito,
+        'disciplina': scores.disciplina,
+        'pontualidade': scores.pontualidade,
+        'tecnica': scores.tecnica,
+        'esforco': scores.esforco,
+      },
+    };
+    if (notes != null) m['notes'] = notes;
+    return m;
+  }
+}
+
 class StudentFilter {
   const StudentFilter({
     this.status,
@@ -542,6 +792,27 @@ class StudentFilter {
     if (cursor != null) m['cursor'] = cursor;
     return m;
   }
+}
+
+String _formatDate(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+Map<String, dynamic> _addressToJson(ApiAddress a) {
+  final m = <String, dynamic>{};
+  if (a.street != null) m['street'] = a.street;
+  if (a.city != null) m['city'] = a.city;
+  if (a.state != null) m['state'] = a.state;
+  if (a.zipCode != null) m['zip_code'] = a.zipCode;
+  return m;
+}
+
+Map<String, dynamic> _guardianToJson(ApiGuardian g) {
+  final m = <String, dynamic>{};
+  if (g.name != null) m['name'] = g.name;
+  if (g.cpf != null) m['cpf'] = g.cpf;
+  if (g.phone != null) m['phone'] = g.phone;
+  if (g.email != null) m['email'] = g.email;
+  return m;
 }
 
 DateTime? _parseDate(dynamic v) {

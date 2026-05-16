@@ -1,4 +1,5 @@
 import 'dto/student_dto.dart';
+import 'idempotency.dart';
 import 'tatami_client.dart';
 
 /// Repositório remoto do contexto Student.
@@ -90,5 +91,87 @@ class StudentRemoteRepo {
       queryParameters: params,
     );
     return AssessmentsPage.fromJson(json);
+  }
+
+  // ===========================================================================
+  // Mutations (Sprint 3 — escritas de baixo risco).
+  //
+  // POST /students é IDEMPOTENT — gera ou reusa Idempotency-Key. PATCH e
+  // DELETE são naturalmente idempotentes pelo verbo HTTP.
+  // ===========================================================================
+
+  /// `POST /v1/academies/{academyId}/students`.
+  /// Se [idempotencyKey] não for passada, uma é gerada — o caller pode
+  /// persistir essa chave (toString()) para retentar com segurança após
+  /// crash/restart.
+  Future<ApiStudent> create(
+    String academyId,
+    CreateStudentRequest req, {
+    IdempotencyKey? idempotencyKey,
+  }) async {
+    final key = idempotencyKey ?? IdempotencyKey.generate();
+    final json = await _api.postIdempotent<Map<String, dynamic>>(
+      '/v1/academies/$academyId/students',
+      data: req.toJson(),
+      key: key,
+    );
+    return ApiStudent.fromJson(json);
+  }
+
+  /// `PATCH /v1/academies/{academyId}/students/{studentId}` — atualização
+  /// parcial. Campos null em [req] não são enviados.
+  Future<ApiStudent> update(
+    String academyId,
+    String studentId,
+    UpdateStudentRequest req,
+  ) async {
+    final json = await _api.patch<Map<String, dynamic>>(
+      '/v1/academies/$academyId/students/$studentId',
+      data: req.toJson(),
+    );
+    return ApiStudent.fromJson(json);
+  }
+
+  /// `DELETE /v1/academies/{academyId}/students/{studentId}`.
+  /// Soft-delete: o registro permanece com status='removed'. O backend
+  /// suporta `?hard=true` (admin) — não exposto aqui de propósito; chamadas
+  /// destrutivas devem ser explícitas.
+  Future<void> delete(String academyId, String studentId) async {
+    await _api.delete('/v1/academies/$academyId/students/$studentId');
+  }
+
+  /// `POST /v1/academies/{academyId}/students/{studentId}/belt-progressions`.
+  /// Cria a promoção E atualiza `students.current_belt/current_stripes` na
+  /// mesma transação no backend — o caller não precisa de duas chamadas.
+  Future<ApiBeltProgression> createBeltProgression(
+    String academyId,
+    String studentId,
+    CreateBeltProgressionRequest req, {
+    IdempotencyKey? idempotencyKey,
+  }) async {
+    final key = idempotencyKey ?? IdempotencyKey.generate();
+    final json = await _api.postIdempotent<Map<String, dynamic>>(
+      '/v1/academies/$academyId/students/$studentId/belt-progressions',
+      data: req.toJson(),
+      key: key,
+    );
+    return ApiBeltProgression.fromJson(json);
+  }
+
+  /// `POST /v1/academies/{academyId}/students/{studentId}/assessments`.
+  /// Avaliação (kids) — 5 scores 1-5 + notas. Idempotent.
+  Future<ApiAssessment> createAssessment(
+    String academyId,
+    String studentId,
+    CreateAssessmentRequest req, {
+    IdempotencyKey? idempotencyKey,
+  }) async {
+    final key = idempotencyKey ?? IdempotencyKey.generate();
+    final json = await _api.postIdempotent<Map<String, dynamic>>(
+      '/v1/academies/$academyId/students/$studentId/assessments',
+      data: req.toJson(),
+      key: key,
+    );
+    return ApiAssessment.fromJson(json);
   }
 }
