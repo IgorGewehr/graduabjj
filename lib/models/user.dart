@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/identity_dto.dart';
+
 /// User Roles
 enum UserRole { admin, instructor, student, guardian }
 
@@ -386,6 +388,60 @@ class AppUser {
     );
   }
 
+  /// Constrói um [AppUser] a partir da resposta `GET /v1/me` do Tatami.
+  ///
+  /// [activeAcademyId] indica qual membership materializar. Se omitido, usa
+  /// o `primary_academy_id` da resposta; se a resposta também não tiver
+  /// primary, usa a primeira membership ativa.
+  ///
+  /// Retorna `null` quando o usuário não tem nenhuma membership ativa —
+  /// caller decide se trata como conta `free` ou redireciona para a tela
+  /// de "vincular academia".
+  ///
+  /// Esta factory NÃO é usada por nenhum provider hoje — é importada pelo
+  /// PR de wiring do Sprint 1 quando a flag `useTatamiIdentity` virar true.
+  static AppUser? fromCurrentUserResponse(
+    CurrentUserResponse r, {
+    String? activeAcademyId,
+  }) {
+    final actives = r.activeMemberships;
+    if (actives.isEmpty) return null;
+
+    final picked = () {
+      if (activeAcademyId != null) {
+        for (final m in actives) {
+          if (m.academyId == activeAcademyId) return m;
+        }
+      }
+      if (r.primaryAcademyId != null) {
+        for (final m in actives) {
+          if (m.academyId == r.primaryAcademyId) return m;
+        }
+      }
+      return actives.first;
+    }();
+
+    return AppUser(
+      id: r.user.uid,
+      email: r.user.email,
+      displayName: r.user.displayName ?? '',
+      photoUrl: r.user.photoUrl,
+      role: _mapApiRoleToLegacy(picked.role),
+      phone: r.user.phone,
+      accountType: r.user.accountType == ApiAccountType.linked
+          ? AccountType.linked
+          : AccountType.free,
+      jiujitsuStartDate: r.user.jiujitsuStartDate,
+      highestBelt: r.user.highestBelt,
+      highestStripes: r.user.highestStripes,
+      isProfilePublic: r.user.isProfilePublic,
+      academyId: picked.academyId,
+      studentId: picked.studentId,
+      createdAt: r.user.createdAt ?? DateTime.now(),
+      updatedAt: r.user.updatedAt ?? DateTime.now(),
+    );
+  }
+
   /// Create AppUser from GlobalUser + AcademyUser context
   factory AppUser.fromGlobalAndAcademy({
     required GlobalUser globalUser,
@@ -497,6 +553,24 @@ class AppUser {
   bool get hasLinkedStudent =>
       studentId != null || (linkedStudentIds?.isNotEmpty ?? false);
   bool get hasAcademy => accountType == AccountType.linked && academyId != null;
+}
+
+/// Mapeia o role do Tatami (incluindo `monitor`, novo no Sprint H) para o
+/// enum legacy do FE. `monitor` cai em `instructor` por enquanto — quando
+/// o app aceitar monitor como role própria, adicionar ao enum UserRole
+/// e atualizar este mapeamento (e os call-sites que checam role).
+UserRole _mapApiRoleToLegacy(ApiRole r) {
+  switch (r) {
+    case ApiRole.admin:
+      return UserRole.admin;
+    case ApiRole.instructor:
+    case ApiRole.monitor:
+      return UserRole.instructor;
+    case ApiRole.student:
+      return UserRole.student;
+    case ApiRole.guardian:
+      return UserRole.guardian;
+  }
 }
 
 /// Helper to parse dates from Firestore
