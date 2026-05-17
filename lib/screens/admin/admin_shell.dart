@@ -293,9 +293,17 @@ class AdminSidebar extends ConsumerWidget {
                     currentPath: currentPath,
                   ),
                 const Divider(),
-                // Settings + código de equipe são admin-only por design — não
-                // existe perm específica porque mexem em billing/segurança
-                // da academia toda.
+                // Settings + código de equipe + gestão de equipe são
+                // admin-only por design — mexem em billing/segurança da
+                // academia toda.
+                if (user?.isAdmin ?? false)
+                  _NavItem(
+                    icon: Icons.manage_accounts_outlined,
+                    activeIcon: Icons.manage_accounts,
+                    label: 'Equipe',
+                    path: '/admin/equipe',
+                    currentPath: currentPath,
+                  ),
                 if (user?.isAdmin ?? false)
                   _NavItem(
                     icon: Icons.settings_outlined,

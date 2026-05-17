@@ -19,3 +19,4 @@ export 'wallet_screen.dart';
 export 'totp_setup_screen.dart';
 export 'billing_reminders_screen.dart';
 export 'retention_screen.dart';
+export 'team_management_screen.dart';

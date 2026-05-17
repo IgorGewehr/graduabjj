@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart' show Options;
+
 import 'dto/identity_dto.dart';
 import 'tatami_client.dart';
 
@@ -63,6 +65,51 @@ class IdentityRemoteRepo {
   Future<ApiGlobalUser> getUserByUid(String uid) async {
     final json = await _api.get<Map<String, dynamic>>('/v1/users/$uid');
     return ApiGlobalUser.fromJson(json);
+  }
+
+  /// `PATCH /v1/academies/{academyId}/memberships/{uid}` — atualiza role
+  /// e/ou extra_permissions de uma membership. Apenas os campos passados
+  /// são enviados (omit-on-null), para que o BE faça PATCH semântico.
+  Future<ApiMembership> updateMembership(
+    String academyId,
+    String uid, {
+    ApiRole? role,
+    List<String>? extraPermissions,
+  }) async {
+    final body = <String, dynamic>{};
+    if (role != null) body['role'] = role.wire;
+    if (extraPermissions != null) body['extra_permissions'] = extraPermissions;
+
+    final json = await _api.patch<Map<String, dynamic>>(
+      '/v1/academies/$academyId/memberships/$uid',
+      data: body,
+    );
+    return ApiMembership.fromJson(json);
+  }
+
+  /// `PATCH /v1/academies/{academyId}/memberships/{uid}/status` — suspende
+  /// ou reativa uma membership. O BE espera o enum [ApiMembershipStatus]
+  /// em wire format (`active` | `suspended`).
+  Future<ApiMembership> updateMembershipStatus(
+    String academyId,
+    String uid,
+    ApiMembershipStatus status,
+  ) async {
+    final json = await _api.patch<Map<String, dynamic>>(
+      '/v1/academies/$academyId/memberships/$uid/status',
+      data: {'status': status.wire},
+    );
+    return ApiMembership.fromJson(json);
+  }
+
+  /// `DELETE /v1/academies/{academyId}/memberships/{uid}` com cabeçalho
+  /// `X-Confirm-Remove: true` para confirmar que a UI mostrou diálogo
+  /// dobrado. O BE 412 (Precondition Failed) se o header faltar.
+  Future<void> removeMembership(String academyId, String uid) async {
+    await _api.delete(
+      '/v1/academies/$academyId/memberships/$uid',
+      options: Options(headers: const {'X-Confirm-Remove': 'true'}),
+    );
   }
 }
 

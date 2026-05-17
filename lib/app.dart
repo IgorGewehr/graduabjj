@@ -837,6 +837,14 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
+            path: '/admin/equipe',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const TeamManagementScreen(),
+            ),
+          ),
+          GoRoute(
             path: '/admin/loja',
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,

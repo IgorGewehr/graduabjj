@@ -217,4 +217,89 @@ void main() {
       }
     });
   });
+
+  group('updateMembership', () {
+    test('sends role + extra_permissions as PATCH body', () async {
+      adapter.onPatch(
+        '/v1/academies/aid-1/memberships/u-42',
+        (server) => server.reply(200, {
+          'uid': 'u-42',
+          'academy_id': 'aid-1',
+          'role': 'instructor',
+          'status': 'active',
+          'extra_permissions': ['financial.write'],
+        }),
+        data: {
+          'role': 'instructor',
+          'extra_permissions': ['financial.write'],
+        },
+      );
+
+      final m = await repo.updateMembership(
+        'aid-1',
+        'u-42',
+        role: ApiRole.instructor,
+        extraPermissions: const ['financial.write'],
+      );
+      expect(m.role, ApiRole.instructor);
+      expect(m.extraPermissions, contains('financial.write'));
+    });
+
+    test('omits null fields from body (only role)', () async {
+      adapter.onPatch(
+        '/v1/academies/aid-1/memberships/u-42',
+        (server) => server.reply(200, {
+          'uid': 'u-42',
+          'academy_id': 'aid-1',
+          'role': 'monitor',
+          'status': 'active',
+        }),
+        data: {'role': 'monitor'},
+      );
+
+      final m = await repo.updateMembership(
+        'aid-1',
+        'u-42',
+        role: ApiRole.monitor,
+      );
+      expect(m.role, ApiRole.monitor);
+      expect(m.extraPermissions, isEmpty);
+    });
+  });
+
+  group('updateMembershipStatus', () {
+    test('PATCH suspended', () async {
+      adapter.onPatch(
+        '/v1/academies/aid-1/memberships/u-42/status',
+        (server) => server.reply(200, {
+          'uid': 'u-42',
+          'academy_id': 'aid-1',
+          'role': 'instructor',
+          'status': 'suspended',
+        }),
+        data: {'status': 'suspended'},
+      );
+
+      final m = await repo.updateMembershipStatus(
+        'aid-1',
+        'u-42',
+        ApiMembershipStatus.suspended,
+      );
+      expect(m.status, ApiMembershipStatus.suspended);
+    });
+  });
+
+  group('removeMembership', () {
+    test('sends X-Confirm-Remove header on DELETE', () async {
+      adapter.onDelete(
+        '/v1/academies/aid-1/memberships/u-42',
+        (server) => server.reply(204, null),
+        headers: const {'X-Confirm-Remove': 'true'},
+      );
+
+      // Sucesso == sem exception. O matcher acima exige o header — se o
+      // repo não mandar, o adapter não casa e a chamada falha.
+      await repo.removeMembership('aid-1', 'u-42');
+    });
+  });
 }
