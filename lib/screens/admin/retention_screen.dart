@@ -1,13 +1,17 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../api/domain_providers.dart' as tatami;
+import '../../api/dto/attendance_dto.dart' as api_att;
+import '../../api/dto/financial_dto.dart' as api_fin;
+import '../../api/feature_flags.dart';
 import '../../core/theme.dart';
+import '../../models/student.dart';
 import '../../services/firebase_service.dart';
 import '../../services/retention_service.dart';
 import '../../services/student_service.dart';
-import '../../models/student.dart';
 
 /// Admin Retention Screen
 /// Displays student retention analytics, risk scores, and churn indicators
@@ -52,40 +56,112 @@ class _AdminRetentionScreenState
       final academyId = FirebaseService.academyId;
       final studentService = StudentService(academyId);
       final collections = Collections(academyId);
-
-      // Fetch all students
-      final allStudents = await studentService.getAll();
-
-      // Fetch attendance from last 30 days
+      final flags = ref.read(tatamiFlagsProvider);
       final now = DateTime.now();
       final thirtyDaysAgo = now.subtract(const Duration(days: 30));
-      final attendanceSnapshot = await collections.attendance
-          .where('date',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(thirtyDaysAgo))
-          .get();
 
-      // Build attendance map by studentId
-      final attendanceMap = <String, List<Map<String, dynamic>>>{};
-      for (final doc in attendanceSnapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        final studentId = data['studentId'] as String? ?? '';
-        if (studentId.isNotEmpty) {
-          attendanceMap.putIfAbsent(studentId, () => []);
-          attendanceMap[studentId]!.add(data);
+      // Risk-score CÁLCULO ainda é client-side (gap BE Sprint B). Aqui
+      // só substituímos os reads brutos por providers Tatami quando as
+      // flags estão ligadas; fallback transparente preserva o caminho
+      // Firestore. A lógica de retenção em si vive no `RetentionService`.
+
+      Future<List<Student>> studentsFuture() async {
+        if (flags.useTatamiReads) {
+          try {
+            final q = tatami.StudentsQuery(academyId: academyId);
+            ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
+            return await ref.read(
+              tatami.tatamiStudentsLegacyProvider(q).future,
+            );
+          } catch (_) {
+            // fallback
+          }
         }
+        return studentService.getAll();
       }
 
-      // Fetch financials
-      final financialsSnapshot = await collections.payments.get();
-      final financialsMap = <String, List<Map<String, dynamic>>>{};
-      for (final doc in financialsSnapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        final studentId = data['studentId'] as String? ?? '';
-        if (studentId.isNotEmpty) {
-          financialsMap.putIfAbsent(studentId, () => []);
-          financialsMap[studentId]!.add(data);
+      Future<Map<String, List<Map<String, dynamic>>>> attendanceMapFuture() async {
+        if (flags.useTatamiAttendance) {
+          try {
+            final q = tatami.AttendanceQuery(
+              academyId: academyId,
+              filter: api_att.AttendanceFilter(
+                dateFrom: thirtyDaysAgo,
+                limit: 500,
+              ),
+            );
+            ref.invalidate(tatami.tatamiAttendanceProvider(q));
+            final page = await ref.read(
+              tatami.tatamiAttendanceProvider(q).future,
+            );
+            final m = <String, List<Map<String, dynamic>>>{};
+            for (final a in page.items) {
+              m.putIfAbsent(a.studentId, () => []).add({
+                'studentId': a.studentId,
+                'date': Timestamp.fromDate(a.date),
+              });
+            }
+            return m;
+          } catch (_) {
+            // fallback
+          }
         }
+        final snapshot = await collections.attendance
+            .where('date',
+                isGreaterThanOrEqualTo: Timestamp.fromDate(thirtyDaysAgo))
+            .get();
+        final m = <String, List<Map<String, dynamic>>>{};
+        for (final doc in snapshot.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final sid = data['studentId'] as String? ?? '';
+          if (sid.isNotEmpty) m.putIfAbsent(sid, () => []).add(data);
+        }
+        return m;
       }
+
+      Future<Map<String, List<Map<String, dynamic>>>> financialsMapFuture() async {
+        if (flags.useTatamiFinancials) {
+          try {
+            final q = tatami.FinancialsQuery(
+              academyId: academyId,
+              filter: const api_fin.FinancialFilter(limit: 500),
+            );
+            ref.invalidate(tatami.tatamiFinancialsProvider(q));
+            final page = await ref.read(
+              tatami.tatamiFinancialsProvider(q).future,
+            );
+            final m = <String, List<Map<String, dynamic>>>{};
+            for (final f in page.items) {
+              m.putIfAbsent(f.studentId, () => []).add({
+                'studentId': f.studentId,
+                'status': f.status.wire,
+                'dueDate': Timestamp.fromDate(f.dueDate),
+              });
+            }
+            return m;
+          } catch (_) {
+            // fallback
+          }
+        }
+        final snapshot = await collections.payments.get();
+        final m = <String, List<Map<String, dynamic>>>{};
+        for (final doc in snapshot.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final sid = data['studentId'] as String? ?? '';
+          if (sid.isNotEmpty) m.putIfAbsent(sid, () => []).add(data);
+        }
+        return m;
+      }
+
+      // Fan-out — students + attendance + financials são independentes
+      final results = await Future.wait<dynamic>([
+        studentsFuture(),
+        attendanceMapFuture(),
+        financialsMapFuture(),
+      ]);
+      final allStudents = results[0] as List<Student>;
+      final attendanceMap = results[1] as Map<String, List<Map<String, dynamic>>>;
+      final financialsMap = results[2] as Map<String, List<Map<String, dynamic>>>;
 
       // Compute risk scores
       final retentionService = RetentionService();
