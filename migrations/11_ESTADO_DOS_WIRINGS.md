@@ -21,6 +21,8 @@
 | 6 | Notification | `AppNotification.fromApi(ApiNotification)` | `tatamiInboxLegacyProvider(filter)`, `tatamiUnreadCountProvider` | `useTatamiNotifications` |
 | 7 | Store | `StoreProduct.fromApi`, `StoreOrder.fromApi`, `StoreOrderItem.fromApi` | `tatamiStoreProductsLegacyProvider`, `tatamiStoreOrdersLegacyProvider` | `useTatamiStore` |
 | 7 | Competition | `Competition.fromApi(ApiCompetition)` | `tatamiCompetitionsLegacyProvider(academyId)` | `useTatamiCompetitions` |
+| 7 | Achievement | `Achievement.fromApi(ApiAchievement)` | `tatamiAchievementsLegacyProvider(StudentRef)` | `useTatamiCompetitions` |
+| 7 | CompetitionPhoto | `CompetitionPhoto.fromApi(ApiPhoto)` | usar via `competitionRepoProvider.listPhotos(...)` direto | `useTatamiCompetitions` |
 
 **Comportamento default:** todas as flags `false` → app idêntico ao
 legacy. Nenhuma chamada para o Tatami acontece em produção até a flag
@@ -57,10 +59,11 @@ Tatami `TATAMI_BASE_URL` deve vir via `--dart-define` no build da app
 |---|---|---|
 | Arquivos em `lib/api/` | 0 | 33 |
 | Arquivos em `test/api/` | 0 | 26 |
-| Adapters `*.fromApi` | 0 | 11 |
-| Providers Riverpod legacy-typed | 0 | 13 |
-| Tests passing | 14 (suite herdada) | **255** |
-| Linhas adicionadas vs `feature/multi-sport` | 0 | ~18.500 |
+| Adapters `*.fromApi` | 0 | 13 |
+| Providers Riverpod legacy-typed | 0 | 14 |
+| Widgets reusáveis | 0 | 3 (ApiErrorView, PaginatedList<T>, StudentAvatar) |
+| Tests passing | 14 (suite herdada) | **264** |
+| Linhas adicionadas vs `feature/multi-sport` | 0 | ~18.900 |
 
 ---
 
@@ -129,13 +132,11 @@ mecânico:
   resume; FE migra de Firestore `.snapshots()` para polling com ETag
   primeiro (doc 03 §8), SSE entra com package `event_source` num PR
   separado.
-- **StudentAvatar widget:** doc 03 §3. Pequeno, mas só faz sentido
-  quando alguma tela já consome `photo_path` (Tatami) em vez de
-  `legacy_photo_url` (Firebase). Adicionar quando essa tela for
-  migrada.
-- **CompetitionPhoto.fromApi + Achievement.fromApi:** adapter para o
-  contexto completo de fotos. Pattern é o mesmo dos outros 11; pode ser
-  PR de follow-up cobrindo somente esses dois.
+- **StudentAvatar widget:** ✅ adicionado (`lib/api/widgets/
+  student_avatar.dart`). Aceita `photoPath` (Tatami) E `legacyPhotoUrl`
+  (Firebase) — prioriza Tatami; cai p/ legacy; última opção é initial
+  colorida via CachedNetworkImage.
+- **CompetitionPhoto.fromApi + Achievement.fromApi:** ✅ adicionados.
 - **Webhook cutover operacional** (Asaas/AbacatePay): trabalho SRE +
   ops, não de FE. Vide doc 06 §Fase 4 e doc 07.
 
