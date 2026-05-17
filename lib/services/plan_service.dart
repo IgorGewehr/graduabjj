@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/plan_dto.dart' as api;
 import 'firebase_service.dart';
 
 /// Plan Model
@@ -67,6 +68,34 @@ class Plan {
       customDueDays: customDueDays ?? this.customDueDays,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  /// Sprint 3 wiring — constrói a partir do DTO Tatami.
+  ///
+  /// Conversões:
+  /// - `monthlyValue`: decimal-string → double. Mensagem do BE garante
+  ///   formato `^-?\d+(\.\d{1,2})?$`; `tryParse` fallback para 0.
+  /// - `classesPerWeek`: API usa 0 = ilimitado; legacy é nullable (null =
+  ///   sem restrição) — mapeamos 0 → null pra preservar a semântica
+  ///   atual dos call-sites.
+  /// - `customValues`: `Map<String,String>` → `Map<String,double>` via parse.
+  factory Plan.fromApi(api.ApiPlan p) {
+    final cw = p.classesPerWeek == 0 ? null : p.classesPerWeek;
+    return Plan(
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      monthlyValue: double.tryParse(p.monthlyValue) ?? 0.0,
+      defaultDueDay: p.defaultDueDay,
+      classesPerWeek: cw,
+      studentIds: p.studentIds,
+      isActive: p.isActive,
+      customValues: p.customValues
+          .map((k, v) => MapEntry(k, double.tryParse(v) ?? 0.0)),
+      customDueDays: p.customDueDays,
+      createdAt: p.createdAt ?? DateTime.now(),
+      updatedAt: p.updatedAt ?? DateTime.now(),
     );
   }
 

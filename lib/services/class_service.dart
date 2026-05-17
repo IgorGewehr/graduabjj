@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/class_dto.dart' as api;
 import '../core/sports.dart';
 import '../models/student.dart';
 import 'firebase_service.dart';
@@ -79,6 +80,51 @@ class BJJClass {
 
   /// Effective weight (default 1 when unset).
   double effectiveWeight() => weight ?? 1.0;
+
+  /// Sprint 3 wiring — constrói a partir do DTO Tatami `ApiClass`.
+  ///
+  /// Conversões:
+  /// - `schedule`: ApiScheduleEntry → ClassSchedule (campos idênticos).
+  /// - `weight`: decimal-string → double; "1.000" → 1.0.
+  /// - `category`: ApiClassCategory.mixed → null no legacy (legacy só
+  ///   tem kids/adult; turmas mistas no Firestore ficavam sem categoria).
+  factory BJJClass.fromApi(api.ApiClass c) {
+    return BJJClass(
+      id: c.id,
+      name: c.name,
+      description: c.description,
+      instructorId: c.instructorUid,
+      instructorName: c.instructorName,
+      studentIds: c.studentIds,
+      schedule: c.schedule
+          .map((e) => ClassSchedule(
+                dayOfWeek: e.dayOfWeek,
+                startTime: e.startTime,
+                endTime: e.endTime,
+              ))
+          .toList(),
+      category: _categoryFromApi(c.category),
+      sport: c.sport,
+      minBelt: c.minBelt?.name,
+      maxBelt: c.maxBelt?.name,
+      maxStudents: c.maxStudents == 0 ? null : c.maxStudents,
+      isActive: c.isActive,
+      weight: double.tryParse(c.weight) ?? 1.0,
+      createdAt: c.createdAt ?? DateTime.now(),
+      updatedAt: c.updatedAt ?? DateTime.now(),
+    );
+  }
+
+  static StudentCategory? _categoryFromApi(api.ApiClassCategory c) {
+    switch (c) {
+      case api.ApiClassCategory.kids:
+        return StudentCategory.kids;
+      case api.ApiClassCategory.adult:
+        return StudentCategory.adult;
+      case api.ApiClassCategory.mixed:
+        return null;
+    }
+  }
 
   factory BJJClass.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;

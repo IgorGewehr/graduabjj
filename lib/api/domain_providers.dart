@@ -13,6 +13,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/student.dart' as legacy;
+import '../services/class_service.dart' show BJJClass;
+import '../services/link_code_service.dart' show LinkCode;
+import '../services/plan_service.dart' show Plan;
+import 'dto/academy_dto.dart';
 import 'dto/attendance_dto.dart';
 import 'dto/competition_dto.dart';
 import 'dto/financial_dto.dart';
@@ -169,6 +173,113 @@ final tatamiStudentByIdLegacyProvider =
     return legacy.Student.fromApi(api);
   },
 );
+
+// ---------------------------------------------------------------------------
+// Plan / Class / Settings / LinkCode (Sprint 3) — providers legacy-typed
+// para screens migrarem incrementalmente. Toda chamada checa
+// `useTatamiWrites` (mesma flag que reads pra esses contextos por
+// simplicidade — o BE não distingue read/write na flag).
+// ---------------------------------------------------------------------------
+
+final tatamiPlansLegacyProvider = FutureProvider.family<List<Plan>, String>(
+  (ref, academyId) async {
+    _requireFlag(
+      ref.watch(tatamiFlagsProvider).useTatamiWrites,
+      'useTatamiWrites',
+    );
+    final list = await ref.watch(planRepoProvider).list(academyId);
+    return list.map(Plan.fromApi).toList();
+  },
+);
+
+class ClassesQuery {
+  const ClassesQuery({
+    required this.academyId,
+    this.isActive,
+    this.limit = 50,
+    this.cursor,
+  });
+  final String academyId;
+  final bool? isActive;
+  final int limit;
+  final String? cursor;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ClassesQuery &&
+          other.academyId == academyId &&
+          other.isActive == isActive &&
+          other.limit == limit &&
+          other.cursor == cursor);
+
+  @override
+  int get hashCode => Object.hash(academyId, isActive, limit, cursor);
+}
+
+final tatamiClassesLegacyProvider =
+    FutureProvider.family<List<BJJClass>, ClassesQuery>(
+  (ref, q) async {
+    _requireFlag(
+      ref.watch(tatamiFlagsProvider).useTatamiWrites,
+      'useTatamiWrites',
+    );
+    final page = await ref.watch(classRepoProvider).list(
+          q.academyId,
+          limit: q.limit,
+          cursor: q.cursor,
+          isActive: q.isActive,
+        );
+    return page.items.map(BJJClass.fromApi).toList();
+  },
+);
+
+/// Settings retornadas como `Map<String, ApiAcademySetting>` mesmo —
+/// não há um "modelo legacy" estruturado (settings legacy é só um Map
+/// de key/value).
+final tatamiSettingsProvider =
+    FutureProvider.family<Map<String, ApiAcademySetting>, String>(
+  (ref, academyId) async {
+    _requireFlag(
+      ref.watch(tatamiFlagsProvider).useTatamiWrites,
+      'useTatamiWrites',
+    );
+    return ref.watch(settingsRepoProvider).getAll(academyId);
+  },
+);
+
+/// Redeem é uma ação one-shot, não um provider, mas o helper aqui
+/// resolve flag check em um só lugar.
+Future<RedeemLinkCodeResponse> redeemTatamiLinkCode(
+  Ref ref,
+  String code, {
+  RedeemLinkCodeRequest profile = const RedeemLinkCodeRequest(),
+}) async {
+  _requireFlag(
+    ref.read(tatamiFlagsProvider).useTatamiWrites,
+    'useTatamiWrites',
+  );
+  return ref.read(linkCodeRepoProvider).redeem(code, profile: profile);
+}
+
+/// Geração de link code (admin) com mapeamento para modelo legacy.
+Future<LinkCode> createTatamiStudentLinkCode(
+  Ref ref,
+  String academyId, {
+  String? studentId,
+  int? ttlSeconds,
+}) async {
+  _requireFlag(
+    ref.read(tatamiFlagsProvider).useTatamiWrites,
+    'useTatamiWrites',
+  );
+  final src = await ref.read(linkCodeRepoProvider).createForStudent(
+        academyId,
+        studentId: studentId,
+        ttlSeconds: ttlSeconds,
+      );
+  return LinkCode.fromApi(src);
+}
 
 class _StudentRef {
   const _StudentRef(this.academyId, this.studentId);

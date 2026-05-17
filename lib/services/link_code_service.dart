@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/academy_dto.dart' show ApiLinkCode;
 import 'firebase_service.dart';
 
 // Code configuration
@@ -34,6 +35,26 @@ class LinkCode {
     this.usedAt,
     this.usedBy,
   });
+
+  /// Sprint 3 wiring — constrói a partir do DTO Tatami `ApiLinkCode`.
+  ///
+  /// `studentName` não vem na resposta REST (poderia, mas a API canônica
+  /// é só do code + student_id) — call-sites que precisam mostrar o nome
+  /// devem buscar o student separadamente via student_repo.getById.
+  factory LinkCode.fromApi(ApiLinkCode src, {String? studentName}) {
+    return LinkCode(
+      id: src.id,
+      code: src.code,
+      studentId: src.studentId ?? '',
+      studentName: studentName ?? '',
+      academyId: src.academyId,
+      createdBy: src.createdByUid ?? '',
+      createdAt: src.createdAt ?? DateTime.now(),
+      expiresAt: src.expiresAt,
+      usedAt: src.usedAt,
+      usedBy: src.usedByUid,
+    );
+  }
 
   factory LinkCode.fromFirestore(DocumentSnapshot doc, {String? academyId}) {
     final data = doc.data() as Map<String, dynamic>;
