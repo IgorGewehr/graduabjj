@@ -11,6 +11,8 @@ import '../../api/repositories.dart' as tatami_repos;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../core/validators.dart';
+import '../../models/user.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../services/abacate_pay_service.dart';
 import '../../services/totp_service.dart';
@@ -456,9 +458,17 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                       SizedBox(
                         width: double.infinity,
                         child: TextButton.icon(
-                          onPressed: (_wallet?.availableBalance ?? 0) >= 100
-                              ? _showWithdrawalSheet
-                              : null,
+                          // Saque é uma operação financeira de escrita —
+                          // só `financial.write` pode disparar. Instrutor
+                          // read-only vê o saldo mas o botão desaparece.
+                          onPressed:
+                              ((ref.watch(currentUserProvider).valueOrNull
+                                              ?.hasPermission(TatamiPermissions
+                                                  .financialWrite) ??
+                                          false) &&
+                                      (_wallet?.availableBalance ?? 0) >= 100)
+                                  ? _showWithdrawalSheet
+                                  : null,
                           icon: const Icon(LucideIcons.arrowUpRight, size: 18),
                           label: const Text('Solicitar Saque'),
                           style: TextButton.styleFrom(

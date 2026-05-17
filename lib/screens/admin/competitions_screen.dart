@@ -151,13 +151,18 @@ class _AdminCompetitionsScreenState
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showCreateCompetitionSheet,
-        backgroundColor: AppTheme.textPrimary,
-        foregroundColor: Colors.white,
-        icon: const Icon(LucideIcons.plus, size: 20),
-        label: const Text('Novo Campeonato'),
-      ),
+      // Competições não tem perm dedicada — criar/editar requer ser pelo
+      // menos instrutor. Sidebar já filtra por isInstructor; redundante mas
+      // defensivo para deep-link.
+      floatingActionButton: (currentUser?.isInstructor ?? false)
+          ? FloatingActionButton.extended(
+              onPressed: _showCreateCompetitionSheet,
+              backgroundColor: AppTheme.textPrimary,
+              foregroundColor: Colors.white,
+              icon: const Icon(LucideIcons.plus, size: 20),
+              label: const Text('Novo Campeonato'),
+            )
+          : null,
     );
   }
 

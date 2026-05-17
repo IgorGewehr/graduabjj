@@ -7,6 +7,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
@@ -127,6 +128,13 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Criar / editar / excluir turma é mudança no catálogo — exige
+    // students.write (escopo do instrutor/admin). Sem isso, a tela vira
+    // read-only: lista visível, mas FAB + ações de edit/delete somem.
+    final user = ref.watch(currentUserProvider).valueOrNull;
+    final canWrite =
+        user?.hasPermission(TatamiPermissions.studentsWrite) ?? false;
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: RefreshIndicator(
@@ -162,8 +170,11 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                           child: _ClassCard(
                             bjjClass: cls,
                             onTap: () => _showClassDetails(cls),
-                            onEdit: () => _showEditClassSheet(cls),
-                            onDelete: () => _showDeleteConfirmation(cls),
+                            onEdit:
+                                canWrite ? () => _showEditClassSheet(cls) : null,
+                            onDelete: canWrite
+                                ? () => _showDeleteConfirmation(cls)
+                                : null,
                           ),
                         );
                       }, childCount: _filteredClasses.length),
@@ -175,13 +186,15 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showCreateClassSheet,
-        backgroundColor: AppTheme.textPrimary,
-        foregroundColor: Colors.white,
-        icon: const Icon(LucideIcons.plus, size: 20),
-        label: const Text('Nova Turma'),
-      ),
+      floatingActionButton: canWrite
+          ? FloatingActionButton.extended(
+              onPressed: _showCreateClassSheet,
+              backgroundColor: AppTheme.textPrimary,
+              foregroundColor: Colors.white,
+              icon: const Icon(LucideIcons.plus, size: 20),
+              label: const Text('Nova Turma'),
+            )
+          : null,
     );
   }
 
@@ -1754,8 +1767,9 @@ class _FilterChip extends StatelessWidget {
 class _ClassCard extends StatelessWidget {
   final BJJClass bjjClass;
   final VoidCallback onTap;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  // Nullable: sem `students.write` o popup menu inteiro some.
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   const _ClassCard({
     required this.bjjClass,
@@ -1834,50 +1848,53 @@ class _ClassCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                PopupMenuButton<String>(
-                  icon: Icon(
-                    LucideIcons.moreVertical,
-                    color: AppTheme.textSecondary,
-                    size: 20,
+                if (onEdit != null || onDelete != null)
+                  PopupMenuButton<String>(
+                    icon: Icon(
+                      LucideIcons.moreVertical,
+                      color: AppTheme.textSecondary,
+                      size: 20,
+                    ),
+                    onSelected: (value) {
+                      if (value == 'edit') onEdit?.call();
+                      if (value == 'delete') onDelete?.call();
+                    },
+                    itemBuilder: (context) => [
+                      if (onEdit != null)
+                        PopupMenuItem(
+                          value: 'edit',
+                          child: Row(
+                            children: [
+                              Icon(
+                                LucideIcons.pencil,
+                                size: 18,
+                                color: AppTheme.textSecondary,
+                              ),
+                              const SizedBox(width: 8),
+                              const Text('Editar'),
+                            ],
+                          ),
+                        ),
+                      if (onDelete != null)
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Row(
+                            children: [
+                              Icon(
+                                LucideIcons.trash2,
+                                size: 18,
+                                color: AppTheme.error,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Excluir',
+                                style: TextStyle(color: AppTheme.error),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
-                  onSelected: (value) {
-                    if (value == 'edit') onEdit();
-                    if (value == 'delete') onDelete();
-                  },
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
-                      value: 'edit',
-                      child: Row(
-                        children: [
-                          Icon(
-                            LucideIcons.pencil,
-                            size: 18,
-                            color: AppTheme.textSecondary,
-                          ),
-                          const SizedBox(width: 8),
-                          const Text('Editar'),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: Row(
-                        children: [
-                          Icon(
-                            LucideIcons.trash2,
-                            size: 18,
-                            color: AppTheme.error,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Excluir',
-                            style: TextStyle(color: AppTheme.error),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
               ],
             ),
             const SizedBox(height: 12),

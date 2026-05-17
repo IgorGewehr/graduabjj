@@ -9,6 +9,8 @@ import '../../core/feedback_utils.dart';
 import '../../widgets/common/academy_page_header.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../models/user.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import 'paying_students_screen.dart';
 import 'financial_reports_screen.dart';
@@ -190,6 +192,13 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   }
 
   Widget _buildFAB() {
+    // FAB "Gerar Mensalidades" só aparece para quem pode escrever no
+    // financeiro — instrutor read-only NÃO vê esse botão.
+    final user = ref.watch(currentUserProvider).valueOrNull;
+    if (!(user?.hasPermission(TatamiPermissions.financialWrite) ?? false)) {
+      return const SizedBox.shrink();
+    }
+
     // FAB changes based on current tab
     return AnimatedBuilder(
       animation: _tabController,
@@ -534,6 +543,14 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
   /// Unified payments tab with filter chips and search
   Widget _buildPaymentsTab() {
+    // Instrutor read-only (sem `financial.write`) vê os pagamentos mas as
+    // ações destrutivas — confirmar / cancelar / reativar / lembrar — não
+    // são oferecidas. Lembrete de pagamento por WhatsApp também conta
+    // como ação ativa, então só write.
+    final user = ref.watch(currentUserProvider).valueOrNull;
+    final canWrite =
+        user?.hasPermission(TatamiPermissions.financialWrite) ?? false;
+
     // Filter payments based on current filter
     List<Payment> filteredPayments = _allPayments;
     
@@ -685,18 +702,25 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                       child: _PaymentCard(
                         payment: payment,
                         formatCurrency: _formatCurrency,
-                        onMarkPaid: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
+                        onMarkPaid: canWrite &&
+                                payment.status != PaymentStatus.paid &&
+                                payment.status != PaymentStatus.cancelled
                             ? () => _showMarkPaidDialog(payment)
                             : null,
-                        onSendReminder: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
+                        onSendReminder: canWrite &&
+                                payment.status != PaymentStatus.paid &&
+                                payment.status != PaymentStatus.cancelled
                             ? () => _sendReminder(payment)
                             : null,
-                        onCancel: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
+                        onCancel: canWrite &&
+                                payment.status != PaymentStatus.paid &&
+                                payment.status != PaymentStatus.cancelled
                             ? () => _cancelPayment(payment)
                             : null,
-                        onReactivate: payment.status == PaymentStatus.cancelled
-                            ? () => _reactivatePayment(payment)
-                            : null,
+                        onReactivate:
+                            canWrite && payment.status == PaymentStatus.cancelled
+                                ? () => _reactivatePayment(payment)
+                                : null,
                       ),
                     );
                   },

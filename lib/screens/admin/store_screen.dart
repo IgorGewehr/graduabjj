@@ -11,6 +11,8 @@ import '../../api/dto/upload_dto.dart' as api_upload;
 import '../../api/repositories.dart' as tatami_repos;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../models/user.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
@@ -46,6 +48,11 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
   Widget build(BuildContext context) {
     final productsAsync = ref.watch(productsProvider);
     final statsAsync = ref.watch(storeStatsProvider);
+    // Loja inteira é admin-only via sidebar, mas o screen pode ser linkado
+    // direto. Mantemos a guarda local: CRUD requer store.write.
+    final user = ref.watch(currentUserProvider).valueOrNull;
+    final canWrite =
+        user?.hasPermission(TatamiPermissions.storeWrite) ?? false;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -247,11 +254,18 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
                         padding: const EdgeInsets.only(bottom: 12),
                         child: _ProductCard(
                           product: filtered[index],
-                          onTap: () =>
-                              _showProductForm(product: filtered[index]),
-                          onToggleActive: () =>
-                              _toggleProductActive(filtered[index]),
-                          onDelete: () => _deleteProduct(filtered[index]),
+                          // Sem store.write os cards viram read-only:
+                          // toque abre apenas detalhes (form não), e o
+                          // menu de toggle/delete some.
+                          onTap: canWrite
+                              ? () => _showProductForm(product: filtered[index])
+                              : () {},
+                          onToggleActive: canWrite
+                              ? () => _toggleProductActive(filtered[index])
+                              : null,
+                          onDelete: canWrite
+                              ? () => _deleteProduct(filtered[index])
+                              : null,
                         ),
                       ),
                       childCount: filtered.length,
@@ -303,13 +317,15 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showProductForm(),
-        icon: const Icon(LucideIcons.plus),
-        label: const Text('Novo Produto'),
-        backgroundColor: AppTheme.primary,
-        foregroundColor: Colors.white,
-      ),
+      floatingActionButton: canWrite
+          ? FloatingActionButton.extended(
+              onPressed: () => _showProductForm(),
+              icon: const Icon(LucideIcons.plus),
+              label: const Text('Novo Produto'),
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+            )
+          : null,
     );
   }
 
@@ -543,8 +559,10 @@ class _FilterChip extends StatelessWidget {
 class _ProductCard extends StatelessWidget {
   final StoreProduct product;
   final VoidCallback onTap;
-  final VoidCallback onToggleActive;
-  final VoidCallback onDelete;
+  // Nullable: quando o user não tem `store.write` esses callbacks vêm como
+  // null e o menu de ações some.
+  final VoidCallback? onToggleActive;
+  final VoidCallback? onDelete;
 
   const _ProductCard({
     required this.product,
@@ -699,67 +717,71 @@ class _ProductCard extends StatelessWidget {
                   ],
                 ),
               ),
-              // Actions
-              PopupMenuButton<String>(
-                icon: const Icon(LucideIcons.moreVertical, size: 20),
-                onSelected: (value) {
-                  switch (value) {
-                    case 'edit':
-                      onTap();
-                      break;
-                    case 'toggle':
-                      onToggleActive();
-                      break;
-                    case 'delete':
-                      onDelete();
-                      break;
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'edit',
-                    child: Row(
-                      children: [
-                        Icon(LucideIcons.edit, size: 18),
-                        SizedBox(width: 12),
-                        Text('Editar'),
-                      ],
+              // Actions — sem store.write nenhuma das ações aparece e o
+              // popup menu inteiro some.
+              if (onToggleActive != null || onDelete != null)
+                PopupMenuButton<String>(
+                  icon: const Icon(LucideIcons.moreVertical, size: 20),
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'edit':
+                        onTap();
+                        break;
+                      case 'toggle':
+                        onToggleActive?.call();
+                        break;
+                      case 'delete':
+                        onDelete?.call();
+                        break;
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(LucideIcons.edit, size: 18),
+                          SizedBox(width: 12),
+                          Text('Editar'),
+                        ],
+                      ),
                     ),
-                  ),
-                  PopupMenuItem(
-                    value: 'toggle',
-                    child: Row(
-                      children: [
-                        Icon(
-                          product.isActive
-                              ? LucideIcons.eyeOff
-                              : LucideIcons.eye,
-                          size: 18,
+                    if (onToggleActive != null)
+                      PopupMenuItem(
+                        value: 'toggle',
+                        child: Row(
+                          children: [
+                            Icon(
+                              product.isActive
+                                  ? LucideIcons.eyeOff
+                                  : LucideIcons.eye,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(product.isActive ? 'Desativar' : 'Ativar'),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        Text(product.isActive ? 'Desativar' : 'Ativar'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        Icon(
-                          LucideIcons.trash2,
-                          size: 18,
-                          color: AppTheme.error,
+                      ),
+                    if (onDelete != null)
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(
+                              LucideIcons.trash2,
+                              size: 18,
+                              color: AppTheme.error,
+                            ),
+                            SizedBox(width: 12),
+                            Text(
+                              'Excluir',
+                              style: TextStyle(color: AppTheme.error),
+                            ),
+                          ],
                         ),
-                        SizedBox(width: 12),
-                        Text(
-                          'Excluir',
-                          style: TextStyle(color: AppTheme.error),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+                      ),
+                  ],
+                ),
             ],
           ),
         ),

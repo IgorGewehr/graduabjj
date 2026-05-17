@@ -14,6 +14,8 @@ import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../models/user.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
 import '../../services/belt_progression_service.dart';
@@ -269,21 +271,29 @@ class _AdminStudentDetailScreenState
   }
 
   Widget _buildSliverAppBar() {
+    // Reads the current user to gate destructive actions by permission.
+    // Edit + status toggle = students.write; Delete = students.write + admin
+    // (delete reservado a admin por ser irreversível).
+    final user = ref.watch(currentUserProvider).valueOrNull;
+    final canEdit = user?.hasPermission(TatamiPermissions.studentsWrite) ?? false;
+    final canDelete = canEdit && (user?.isAdmin ?? false);
+
     return SliverAppBar(
       expandedHeight: 200,
       pinned: true,
       actions: [
-        IconButton(
-          icon: const Icon(Icons.edit),
-          onPressed: () async {
-            final result = await context.push(
-              '/admin/alunos/${widget.studentId}/editar',
-            );
-            if (result == true && mounted) {
-              _loadData();
-            }
-          },
-        ),
+        if (canEdit)
+          IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () async {
+              final result = await context.push(
+                '/admin/alunos/${widget.studentId}/editar',
+              );
+              if (result == true && mounted) {
+                _loadData();
+              }
+            },
+          ),
         PopupMenuButton<String>(
           onSelected: (value) {
             if (value == 'promote') _showPromoteDialog();
@@ -302,26 +312,27 @@ class _AdminStudentDetailScreenState
                 ],
               ),
             ),
-            PopupMenuItem(
-              value: 'toggle_status',
-              child: Row(
-                children: [
-                  Icon(
-                    _student!.status == StudentStatus.active
-                        ? Icons.person_off
-                        : Icons.person,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _student!.status == StudentStatus.active
-                        ? 'Desativar'
-                        : 'Ativar',
-                  ),
-                ],
+            if (canEdit)
+              PopupMenuItem(
+                value: 'toggle_status',
+                child: Row(
+                  children: [
+                    Icon(
+                      _student!.status == StudentStatus.active
+                          ? Icons.person_off
+                          : Icons.person,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _student!.status == StudentStatus.active
+                          ? 'Desativar'
+                          : 'Ativar',
+                    ),
+                  ],
+                ),
               ),
-            ),
             // Only show if student doesn't have a linked account
-            if (_student!.linkedUserId == null)
+            if (canEdit && _student!.linkedUserId == null)
               const PopupMenuItem(
                 value: 'generate_code',
                 child: Row(
@@ -332,16 +343,17 @@ class _AdminStudentDetailScreenState
                   ],
                 ),
               ),
-            const PopupMenuItem(
-              value: 'delete',
-              child: Row(
-                children: [
-                  Icon(Icons.delete, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('Excluir', style: TextStyle(color: Colors.red)),
-                ],
+            if (canDelete)
+              const PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text('Excluir', style: TextStyle(color: Colors.red)),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ],
