@@ -5,6 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
+import '../../api/dto/student_dto.dart' as api_student;
+import '../../api/feature_flags.dart';
+import '../../api/repositories.dart' as tatami_repos;
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -40,6 +43,28 @@ class _TimelineEvent {
   });
 }
 
+/// Adapter inline: ApiBeltProgression → BeltProgression legacy. Reside
+/// na tela porque a model legacy não tem `BeltProgression.fromApi` (gap
+/// para Sprint 3). Mapping é 1:1 com a única peculiaridade de
+/// `promotedByName` ser nulo (BE só expõe uid).
+BeltProgression _beltProgressionFromApi(api_student.ApiBeltProgression p) =>
+    BeltProgression(
+      id: p.id,
+      studentId: p.studentId,
+      previousBelt: p.previousBelt.wire,
+      previousStripes: p.previousStripes,
+      newBelt: p.newBelt.wire,
+      newStripes: p.newStripes,
+      promotionDate: p.promotionDate,
+      totalClasses: p.totalClasses,
+      effectiveCountAtPromotion: p.effectiveCountAtPromotion,
+      promotedBy: p.promotedByUid,
+      promotedByName: null,
+      notes: p.notes,
+      sport: p.sport.wire,
+      createdAt: p.createdAt ?? p.promotionDate,
+    );
+
 /// Belt progressions provider for timeline
 final studentBeltProgressionsProvider =
     FutureProvider.family<List<BeltProgression>, String>((
@@ -49,7 +74,24 @@ final studentBeltProgressionsProvider =
       final currentUser = await ref.watch(currentUserProvider.future);
       if (currentUser?.academyId == null) return [];
 
-      final service = BeltProgressionService(currentUser!.academyId!);
+      final academyId = currentUser!.academyId!;
+      final flags = ref.watch(tatamiFlagsProvider);
+
+      if (flags.useTatamiReads) {
+        try {
+          // Lê direto via studentRepo — não há domain provider equivalente
+          // (gap registrado pra Sprint 3 — domain_providers ainda não
+          // expõe beltProgressions).
+          final page = await ref
+              .watch(tatami_repos.studentRepoProvider)
+              .listBeltProgressions(academyId, studentId, limit: 100);
+          return page.items.map(_beltProgressionFromApi).toList();
+        } catch (_) {
+          // Fallback transparente para Firestore legacy.
+        }
+      }
+
+      final service = BeltProgressionService(academyId);
       return await service.getByStudent(studentId);
     });
 
