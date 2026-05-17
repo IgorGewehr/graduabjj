@@ -18,6 +18,7 @@ import 'plan_repo.dart';
 import 'settings_repo.dart';
 import 'store_repo.dart';
 import 'student_repo.dart';
+import 'uploads_repo.dart';
 import 'wallet_repo.dart';
 
 // Identity (/v1/me, /v1/users, /v1/academies/{id}/memberships)
@@ -78,4 +79,9 @@ final storeRepoProvider = Provider<StoreRemoteRepo>(
 // Competition (/v1/academies/{id}/competitions* + photos + achievements)
 final competitionRepoProvider = Provider<CompetitionRemoteRepo>(
   (ref) => CompetitionRemoteRepo(ref.watch(tatamiClientProvider)),
+);
+
+// Uploads (/v1/uploads/sign + /v1/uploads/finalize — 2-step signed URL flow)
+final uploadsRepoProvider = Provider<UploadsRemoteRepo>(
+  (ref) => UploadsRemoteRepo(ref.watch(tatamiClientProvider)),
 );
