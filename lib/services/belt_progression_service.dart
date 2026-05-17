@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/student_dto.dart' as api;
 import '../core/sports.dart';
 import 'firebase_service.dart';
 
@@ -101,6 +102,37 @@ class BeltProgression {
       notes: data['notes'],
       sport: data['sport'],
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    );
+  }
+
+  /// Constrói uma [BeltProgression] a partir do DTO [api.ApiBeltProgression]
+  /// (resposta de `GET /v1/academies/{id}/students/{sid}/belt-progressions`).
+  ///
+  /// Sprint 2 wiring (FE-only). Pontos de atenção:
+  /// - `promotedBy` recebe `promotedByUid` (snake_case → camelCase).
+  /// - `promotedByName` fica `null`: o BE só expõe o UID; o nome do
+  ///   instrutor deve ser denormalizado no caller se necessário (lookup
+  ///   em membership/identity).
+  /// - `sport` é serializado como `wire` (mesmo formato textual do
+  ///   legacy: `'bjj'`, `'judo'`, etc.).
+  /// - `createdAt` cai pra `promotionDate` se ausente — o BE garante
+  ///   `created_at`, mas tratamos defensivamente para parity com fromFirestore.
+  factory BeltProgression.fromApi(api.ApiBeltProgression a) {
+    return BeltProgression(
+      id: a.id,
+      studentId: a.studentId,
+      previousBelt: a.previousBelt.wire,
+      previousStripes: a.previousStripes,
+      newBelt: a.newBelt.wire,
+      newStripes: a.newStripes,
+      promotionDate: a.promotionDate,
+      totalClasses: a.totalClasses,
+      effectiveCountAtPromotion: a.effectiveCountAtPromotion,
+      promotedBy: a.promotedByUid.isEmpty ? null : a.promotedByUid,
+      promotedByName: null,
+      notes: a.notes,
+      sport: a.sport.wire,
+      createdAt: a.createdAt ?? a.promotionDate,
     );
   }
 
