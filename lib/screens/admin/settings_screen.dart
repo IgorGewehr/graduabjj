@@ -11,6 +11,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../api/dto/upload_dto.dart' as api_upload;
+import '../../api/feature_flags.dart';
+import '../../api/repositories.dart' as tatami_repos;
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
@@ -417,19 +420,43 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
       setState(() => _isSaving = true);
 
-      // Upload to Firebase Storage
+      final academyId = FirebaseService.academyId;
       final file = File(croppedFile.path);
-      final storageRef = FirebaseStorage.instance
-          .ref()
-          .child('academies')
-          .child(FirebaseService.academyId)
-          .child('logo.png');
+      final flags = ref.read(tatamiFlagsProvider);
+      String? downloadUrl;
 
-      await storageRef.putFile(file);
-      final downloadUrl = await storageRef.getDownloadURL();
+      // Sem flag dedicada `useTatamiUploads` ainda (8 flags atuais não
+      // cobrem uploads). Usamos `useTatamiWrites` como proxy — same risk
+      // profile (mutações server-side). Fix de flag dedicada vai no
+      // Sprint 3 quando o catálogo for ampliado.
+      if (flags.useTatamiWrites) {
+        try {
+          final repo = ref.read(tatami_repos.uploadsRepoProvider);
+          final uploaded = await repo.uploadFileFromDisk(
+            purpose: api_upload.ApiUploadPurpose.academySettings,
+            file: file,
+            contentType: 'image/png',
+            academyId: academyId,
+          );
+          downloadUrl = uploaded.publicUrl;
+        } catch (_) {
+          // Fallback transparente para o Firebase Storage legacy.
+        }
+      }
+
+      if (downloadUrl == null) {
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('academies')
+            .child(academyId)
+            .child('logo.png');
+
+        await storageRef.putFile(file);
+        downloadUrl = await storageRef.getDownloadURL();
+      }
 
       // Update settings
-      final service = SettingsService(FirebaseService.academyId);
+      final service = SettingsService(academyId);
       await service.updateLogo(downloadUrl);
 
       // Invalidate providers to refresh UI across the app
