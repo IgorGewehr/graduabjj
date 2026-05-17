@@ -20,18 +20,11 @@ void main() async {
   // Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Enable Firestore offline persistence (Sprint 5).
-  //
-  // Once enabled, every Firestore read is served first from the local SQLite
-  // cache and then refreshed from the network in the background. This makes
-  // navigation between screens feel instantaneous after the first session,
-  // and keeps the app usable without connectivity.
-  //
-  // CACHE_SIZE_UNLIMITED is safe on mobile because Firestore garbage-collects
-  // least-recently-used entries when the device is under storage pressure.
-  // If a user reports "stale data", they can force a refresh via the existing
-  // pull-to-refresh affordance which calls `ref.invalidate(...)` and bypasses
-  // cache via `Source.server`. Reinstalling the app also wipes the cache.
+  // Firestore offline persistence — mantido apenas enquanto chamadas
+  // residuais ao Firestore sobrevivem (auth fallback global_user, models
+  // como Timestamp helpers, retention/billing services). Pós-Fase 3 +
+  // wiring completo dos services Firestore restantes, este bloco e o
+  // import de cloud_firestore podem sair de main.dart.
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,
     cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
@@ -57,18 +50,11 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // Bootstrap Tatami feature flags from Remote Config BEFORE the app mounts.
-  //
-  // Pattern: build a standalone [ProviderContainer], hidrate
-  // [tatamiFlagsProvider] from Remote Config, then hand the same container
-  // to [UncontrolledProviderScope] so the running app inherits the resolved
-  // flags on the very first frame (no "flag flip" mid-session).
-  //
-  // Any failure (offline, timeout, malformed values) is swallowed — the
-  // container keeps the all-off default. Tatami paths stay dark, the app
-  // boots on the legacy Firestore path. Operacional can re-flip when the
-  // user is back online via the pull-to-refresh pattern documented in
-  // docs/USING_TATAMI_REPOS.md §1.
+  // Pós-Fase 1: Tatami é o único path e o `tatamiFlagsProvider` é um shim
+  // @Deprecated (tudo já default `true`). Mantemos o bootstrap via Remote
+  // Config para o caso de operacional querer DESLIGAR explicitamente um
+  // grupo em produção (ex.: rollback emergencial após bug regressão).
+  // Qualquer falha continua silenciosamente — defaults são allOn agora.
   final container = ProviderContainer();
   await _hydrateTatamiFlags(container);
 
@@ -83,30 +69,34 @@ void main() async {
   _checkForImmediateUpdate();
 }
 
-/// Reads the eight Tatami flags from Firebase Remote Config and applies them
-/// to [tatamiFlagsProvider] inside [container]. Defaults to all-off on any
-/// error so an offline boot stays on the legacy path.
+/// Lê os 8 bits de Remote Config e aplica em [tatamiFlagsProvider].
+///
+/// **Pós-Fase 1**: defaults agora são `true` (Tatami é o único path). Este
+/// hidrate sobrescreve só os bits que estiverem `false` no Remote Config —
+/// caminho usado em emergência para forçar rollback de um contexto
+/// específico sem deploy. Qualquer falha (offline, timeout) é silenciosa;
+/// a app boota com tudo ligado como padrão.
 Future<void> _hydrateTatamiFlags(ProviderContainer container) async {
+  // ignore: deprecated_member_use_from_same_package
   try {
     final rc = FirebaseRemoteConfig.instance;
     await rc.setConfigSettings(
       RemoteConfigSettings(
         fetchTimeout: const Duration(seconds: 10),
-        // 1h is the recommended minimum for production — shorter intervals
-        // are throttled by Firebase server-side. Operacional can force-fetch
-        // via the Remote Config console for canary tests.
         minimumFetchInterval: const Duration(hours: 1),
       ),
     );
+    // Defaults pós-migração: tudo ligado. Operacional só baixa um bit para
+    // `false` no Remote Config em caso de rollback emergencial.
     await rc.setDefaults(const <String, dynamic>{
-      'useTatamiIdentity': false,
-      'useTatamiReads': false,
-      'useTatamiWrites': false,
-      'useTatamiFinancials': false,
-      'useTatamiAttendance': false,
-      'useTatamiNotifications': false,
-      'useTatamiStore': false,
-      'useTatamiCompetitions': false,
+      'useTatamiIdentity': true,
+      'useTatamiReads': true,
+      'useTatamiWrites': true,
+      'useTatamiFinancials': true,
+      'useTatamiAttendance': true,
+      'useTatamiNotifications': true,
+      'useTatamiStore': true,
+      'useTatamiCompetitions': true,
     });
     await rc.fetchAndActivate();
 
@@ -121,10 +111,8 @@ Future<void> _hydrateTatamiFlags(ProviderContainer container) async {
       useTatamiCompetitions: rc.getBool('useTatamiCompetitions'),
     );
   } catch (_) {
-    // Silently fall through with TatamiFlags.allOff — the app must boot
-    // even when Remote Config is unreachable (offline / first launch on
-    // a flaky network / Firebase outage). Operacional sees the legacy
-    // path; flags will hidrate on the next successful boot.
+    // Silently fall through with TatamiFlags.allOn — Tatami é o único path
+    // mesmo quando Remote Config está inacessível.
   }
 }
 
