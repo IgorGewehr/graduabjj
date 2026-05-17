@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/academy_dto.dart' as api;
+
 /// Academy Subscription Plan
 enum SubscriptionPlan { free, basic, premium, enterprise }
 
@@ -245,6 +247,69 @@ class Academy {
     required this.ownerId,
   });
 
+  /// Constrói um [Academy] a partir do DTO [api.ApiAcademy] (resposta dos
+  /// endpoints `GET/PUT /v1/academies/{id}` do Tatami).
+  ///
+  /// Sprint 1B adapter (FE-only). Esta factory é o ponto de tradução
+  /// snake_case → camelCase entre o backend novo e o domain legacy.
+  ///
+  /// Pontos de atenção:
+  /// - O contrato Tatami NÃO expõe campos de branding (`logo_url`,
+  ///   `portal_slogan`, sidebar/background URLs). Esses campos ficam null
+  ///   na conversão — o caller que precisa renderizar branding deve
+  ///   recuperar do Firestore via merge enquanto o BE não expor branding
+  ///   multi-tenant (Sprint B no plano de migração).
+  /// - O endereço Tatami é um subset (street/city/state/zip) — sem
+  ///   `number`, `complement`, `neighborhood`. Como o legacy `address` é
+  ///   `String?` (não objeto), serializamos o subset como string única
+  ///   "street, city/state, zip" quando há dados.
+  /// - `subscription_status` Tatami inclui `trial` e `suspended`, que não
+  ///   existem no enum legacy `SubscriptionStatus`. `trial` vira `trialing`
+  ///   e `suspended` vira `cancelled` (degradação segura — o usuário perde
+  ///   acesso em qualquer um dos dois estados).
+  /// - Tatami não devolve `subscription_plan` como enum, e sim string livre
+  ///   (`null` quando não set). Mapeamos string → SubscriptionPlan legacy.
+  static Academy fromApi(api.ApiAcademy a) {
+    return Academy(
+      id: a.id,
+      name: a.name,
+      slug: a.slug,
+      logoUrl: null,
+      portalSlogan: null,
+      sidebarLogoUrl: null,
+      portalBackgroundUrl: null,
+      adminBackgroundUrl: null,
+      sidebarBackgroundUrl: null,
+      cnpj: a.cnpj,
+      email: a.email,
+      phone: a.phone,
+      address: _formatAddress(a.address),
+      city: a.address?.city,
+      state: a.address?.state,
+      zipCode: a.address?.zipCode,
+      pixKey: a.pixKey,
+      pixKeyType: _mapPixKeyType(a.pixKeyType),
+      abacatePayEnabled: a.abacatePayEnabled,
+      asaasEnabled: a.asaasEnabled,
+      asaasOnboardingStatus: a.asaasOnboardingStatus,
+      autoGraduationEnabled: a.autoGraduationEnabled,
+      autoGraduationAttendances: a.autoGraduationAttendances,
+      storeEnabled: a.storeEnabled,
+      storePublished: a.storePublished,
+      studentCheckinEnabled: a.studentCheckinEnabled,
+      subscription: AcademySubscription(
+        plan: a.subscriptionPlan != null
+            ? SubscriptionPlanExtension.fromString(a.subscriptionPlan!)
+            : SubscriptionPlan.free,
+        status: _mapSubscriptionStatus(a.subscriptionStatus),
+        expiresAt: a.subscriptionExpiresAt,
+      ),
+      createdAt: a.createdAt,
+      updatedAt: a.updatedAt,
+      ownerId: a.ownerUid,
+    );
+  }
+
   factory Academy.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return Academy(
@@ -405,4 +470,58 @@ class Academy {
       ownerId: ownerId ?? this.ownerId,
     );
   }
+}
+
+// ============================================
+// Helpers privados — adapters Tatami → legacy
+// ============================================
+
+PixKeyType? _mapPixKeyType(api.ApiPixKeyType? t) {
+  if (t == null) return null;
+  switch (t) {
+    case api.ApiPixKeyType.cpf:
+      return PixKeyType.cpf;
+    case api.ApiPixKeyType.cnpj:
+      return PixKeyType.cnpj;
+    case api.ApiPixKeyType.email:
+      return PixKeyType.email;
+    case api.ApiPixKeyType.phone:
+      return PixKeyType.phone;
+    case api.ApiPixKeyType.random:
+      return PixKeyType.random;
+  }
+}
+
+/// Mapeia o status do Tatami pro enum legacy. `trial` → `trialing` (legacy
+/// também é trial), `suspended` → `cancelled` (legacy não tem o conceito;
+/// degradação segura — usuário perde acesso em ambos).
+SubscriptionStatus _mapSubscriptionStatus(
+  api.ApiAcademySubscriptionStatus s,
+) {
+  switch (s) {
+    case api.ApiAcademySubscriptionStatus.trial:
+      return SubscriptionStatus.trialing;
+    case api.ApiAcademySubscriptionStatus.active:
+      return SubscriptionStatus.active;
+    case api.ApiAcademySubscriptionStatus.pastDue:
+      return SubscriptionStatus.pastDue;
+    case api.ApiAcademySubscriptionStatus.canceled:
+    case api.ApiAcademySubscriptionStatus.suspended:
+      return SubscriptionStatus.cancelled;
+  }
+}
+
+/// Serializa o endereço Tatami (subset estruturado) na string única que o
+/// legacy espera em `Academy.address`. Retorna null quando todos os campos
+/// estão vazios — o caller distingue "sem endereço" de "endereço vazio".
+String? _formatAddress(api.ApiAcademyAddress? a) {
+  if (a == null || a.isEmpty) return null;
+  final parts = <String>[];
+  if (a.street != null && a.street!.isNotEmpty) parts.add(a.street!);
+  final cityState = <String>[];
+  if (a.city != null && a.city!.isNotEmpty) cityState.add(a.city!);
+  if (a.state != null && a.state!.isNotEmpty) cityState.add(a.state!);
+  if (cityState.isNotEmpty) parts.add(cityState.join('/'));
+  if (a.zipCode != null && a.zipCode!.isNotEmpty) parts.add(a.zipCode!);
+  return parts.isEmpty ? null : parts.join(', ');
 }

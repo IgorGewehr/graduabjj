@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/attendance_dto.dart' as api;
+
 /// Checkin Status
 enum CheckinStatus { pending, confirmed, rejected }
 
@@ -76,6 +78,56 @@ class Checkin {
     this.confirmedAt,
     required this.createdAt,
   });
+
+  /// Constrói um [Checkin] a partir do DTO [api.ApiAttendance] —
+  /// resposta do `POST /v1/academies/{id}/attendance/self-checkin` do Tatami.
+  ///
+  /// Sprint 1B adapter (FE-only). No Tatami NÃO existe entidade `Checkin`
+  /// separada: o self-checkin via QR PRODUZ uma row de `attendance` direto
+  /// (sem fluxo de aprovação intermediário — o backend valida o token HMAC
+  /// e grava atomic). Portanto qualquer `Checkin` materializado a partir
+  /// de `ApiAttendance` é por definição [CheckinStatus.confirmed].
+  ///
+  /// Pontos de atenção:
+  /// - `studentName` / `className` NÃO vêm em `ApiAttendance` (Tatami só
+  ///   devolve IDs). Caller passa via parâmetro quando souber — fallback
+  ///   é string vazia (legacy non-null).
+  /// - `schedule_*` (dayOfWeek, startTime, endTime) é metadata da CLASS,
+  ///   não da attendance. Caller passa via parâmetro se renderizar listas
+  ///   por horário; fallback é zero / empty string.
+  /// - `confirmedBy*` é populado com `verified_by_uid` da attendance —
+  ///   no Tatami SEMPRE há um verifier (mesmo no self-checkin, o backend
+  ///   marca o próprio aluno como `verified_by_uid`).
+  /// - `checkinTime` = `created_at` da attendance (momento do POST).
+  /// - `scheduleDate` = `date` (dia da aula, formato YYYY-MM-DD).
+  factory Checkin.fromApi(
+    api.ApiAttendance a, {
+    String? studentName,
+    String? className,
+    int? scheduleDayOfWeek,
+    String? scheduleStartTime,
+    String? scheduleEndTime,
+    String? confirmedByName,
+  }) {
+    final createdAt = a.createdAt ?? DateTime.now();
+    return Checkin(
+      id: a.id,
+      studentId: a.studentId,
+      studentName: studentName ?? '',
+      classId: a.classId,
+      className: className ?? '',
+      scheduleDate: a.date,
+      scheduleDayOfWeek: scheduleDayOfWeek ?? 0,
+      scheduleStartTime: scheduleStartTime ?? '',
+      scheduleEndTime: scheduleEndTime ?? '',
+      checkinTime: createdAt,
+      status: CheckinStatus.confirmed,
+      confirmedBy: a.verifiedByUid,
+      confirmedByName: confirmedByName,
+      confirmedAt: createdAt,
+      createdAt: createdAt,
+    );
+  }
 
   factory Checkin.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;

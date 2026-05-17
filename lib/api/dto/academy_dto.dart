@@ -1,7 +1,181 @@
-// DTOs do contexto Academy (settings + link codes), alinhados 1:1 com
-// api/openapi/academy.yaml.
+// DTOs do contexto Academy (academy entity + settings + link codes),
+// alinhados 1:1 com api/openapi/academy.yaml.
 //
-// Aqui ficam tipos pequenos compartilhados por settings_repo + link_code_repo.
+// Aqui ficam tipos pequenos compartilhados por academy_repo (futuro) +
+// settings_repo + link_code_repo.
+
+enum ApiAcademySubscriptionStatus { trial, active, pastDue, canceled, suspended }
+
+extension ApiAcademySubscriptionStatusX on ApiAcademySubscriptionStatus {
+  String get wire {
+    switch (this) {
+      case ApiAcademySubscriptionStatus.trial:
+        return 'trial';
+      case ApiAcademySubscriptionStatus.active:
+        return 'active';
+      case ApiAcademySubscriptionStatus.pastDue:
+        return 'past_due';
+      case ApiAcademySubscriptionStatus.canceled:
+        return 'canceled';
+      case ApiAcademySubscriptionStatus.suspended:
+        return 'suspended';
+    }
+  }
+
+  static ApiAcademySubscriptionStatus fromWire(String? value) {
+    switch (value) {
+      case 'trial':
+        return ApiAcademySubscriptionStatus.trial;
+      case 'past_due':
+        return ApiAcademySubscriptionStatus.pastDue;
+      case 'canceled':
+        return ApiAcademySubscriptionStatus.canceled;
+      case 'suspended':
+        return ApiAcademySubscriptionStatus.suspended;
+      case 'active':
+      default:
+        return ApiAcademySubscriptionStatus.active;
+    }
+  }
+}
+
+enum ApiPixKeyType { cpf, cnpj, email, phone, random }
+
+extension ApiPixKeyTypeX on ApiPixKeyType {
+  String get wire => name;
+  static ApiPixKeyType? fromWire(String? value) {
+    if (value == null) return null;
+    for (final t in ApiPixKeyType.values) {
+      if (t.name == value) return t;
+    }
+    return null;
+  }
+}
+
+/// Endereço da academia (subset do `address` legacy — Tatami só armazena
+/// street/city/state/zip_code, sem número/complemento/bairro).
+class ApiAcademyAddress {
+  const ApiAcademyAddress({
+    this.street,
+    this.city,
+    this.state,
+    this.zipCode,
+  });
+
+  final String? street;
+  final String? city;
+  final String? state;
+  final String? zipCode;
+
+  bool get isEmpty =>
+      (street == null || street!.isEmpty) &&
+      (city == null || city!.isEmpty) &&
+      (state == null || state!.isEmpty) &&
+      (zipCode == null || zipCode!.isEmpty);
+
+  factory ApiAcademyAddress.fromJson(Map<String, dynamic> j) =>
+      ApiAcademyAddress(
+        street: j['street'] as String?,
+        city: j['city'] as String?,
+        state: j['state'] as String?,
+        zipCode: j['zip_code'] as String?,
+      );
+}
+
+/// Academy entity (tenant root) — corresponde 1:1 ao schema `Academy` do
+/// `api/openapi/academy.yaml`.
+///
+/// Nota: campos visuais como `logo_url`, `portal_slogan`, sidebar/background
+/// URLs NÃO existem no contrato Tatami atual — eles ficam no domínio legacy
+/// (Firestore) até o BE expor branding multi-tenant. O adapter
+/// `Academy.fromApi` deixa esses campos null e o caller que precisa renderizar
+/// branding faz `copyWith` com os valores legacy quando disponíveis.
+class ApiAcademy {
+  const ApiAcademy({
+    required this.id,
+    required this.name,
+    required this.slug,
+    required this.ownerUid,
+    required this.subscriptionStatus,
+    required this.createdAt,
+    required this.updatedAt,
+    this.cnpj,
+    this.email,
+    this.phone,
+    this.pixKey,
+    this.pixKeyType,
+    this.address,
+    this.subscriptionPlan,
+    this.subscriptionExpiresAt,
+    this.abacatePayEnabled = false,
+    this.asaasEnabled = false,
+    this.asaasOnboardingStatus,
+    this.autoGraduationEnabled = false,
+    this.autoGraduationAttendances,
+    this.useClassWeights = false,
+    this.storeEnabled = false,
+    this.storePublished = false,
+    this.studentCheckinEnabled = false,
+  });
+
+  final String id;
+  final String name;
+  final String slug;
+  final String ownerUid;
+  final ApiAcademySubscriptionStatus subscriptionStatus;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  final String? cnpj;
+  final String? email;
+  final String? phone;
+  final String? pixKey;
+  final ApiPixKeyType? pixKeyType;
+  final ApiAcademyAddress? address;
+  final String? subscriptionPlan;
+  final DateTime? subscriptionExpiresAt;
+  final bool abacatePayEnabled;
+  final bool asaasEnabled;
+  final String? asaasOnboardingStatus;
+  final bool autoGraduationEnabled;
+  final int? autoGraduationAttendances;
+  final bool useClassWeights;
+  final bool storeEnabled;
+  final bool storePublished;
+  final bool studentCheckinEnabled;
+
+  factory ApiAcademy.fromJson(Map<String, dynamic> j) => ApiAcademy(
+        id: j['id'] as String,
+        name: j['name'] as String? ?? '',
+        slug: j['slug'] as String? ?? '',
+        ownerUid: j['owner_uid'] as String? ?? '',
+        subscriptionStatus: ApiAcademySubscriptionStatusX.fromWire(
+          j['subscription_status'] as String?,
+        ),
+        createdAt: _parseDate(j['created_at']) ?? DateTime.now(),
+        updatedAt: _parseDate(j['updated_at']) ?? DateTime.now(),
+        cnpj: j['cnpj'] as String?,
+        email: j['email'] as String?,
+        phone: j['phone'] as String?,
+        pixKey: j['pix_key'] as String?,
+        pixKeyType: ApiPixKeyTypeX.fromWire(j['pix_key_type'] as String?),
+        address: j['address'] is Map<String, dynamic>
+            ? ApiAcademyAddress.fromJson(j['address'] as Map<String, dynamic>)
+            : null,
+        subscriptionPlan: j['subscription_plan'] as String?,
+        subscriptionExpiresAt: _parseDate(j['subscription_expires_at']),
+        abacatePayEnabled: j['abacatepay_enabled'] as bool? ?? false,
+        asaasEnabled: j['asaas_enabled'] as bool? ?? false,
+        asaasOnboardingStatus: j['asaas_onboarding_status'] as String?,
+        autoGraduationEnabled: j['auto_graduation_enabled'] as bool? ?? false,
+        autoGraduationAttendances:
+            (j['auto_graduation_attendances'] as num?)?.toInt(),
+        useClassWeights: j['use_class_weights'] as bool? ?? false,
+        storeEnabled: j['store_enabled'] as bool? ?? false,
+        storePublished: j['store_published'] as bool? ?? false,
+        studentCheckinEnabled: j['student_checkin_enabled'] as bool? ?? false,
+      );
+}
 
 enum ApiLinkCodeRole { admin, instructor, monitor, student, guardian }
 
