@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/attendance_dto.dart' as api;
 import 'achievement_service.dart';
 import 'firebase_service.dart';
 import 'student_service.dart';
@@ -35,6 +36,35 @@ class Attendance {
     this.weight,
     required this.createdAt,
   });
+
+  /// Sprint 5 wiring — adapter `ApiAttendance` → `Attendance` legacy.
+  ///
+  /// Tatami trabalha com IDs (verified_by_uid, student_id, class_id);
+  /// nomes não vêm na resposta. Caller passa `studentName`, `className`,
+  /// `verifiedByName` via parâmetro quando souber (denormalização local).
+  ///
+  /// `weight` legacy é nullable e o Tatami é decimal-string "1.000".
+  /// Aqui parseamos para double; "1.000" vira 1.0 (não null) pra
+  /// preservar o snapshot histórico.
+  factory Attendance.fromApi(
+    api.ApiAttendance a, {
+    String? studentName,
+    String? className,
+    String? verifiedByName,
+  }) {
+    return Attendance(
+      id: a.id,
+      studentId: a.studentId,
+      studentName: studentName ?? '',
+      classId: a.classId,
+      className: className ?? '',
+      date: a.date,
+      verifiedBy: a.verifiedByUid,
+      verifiedByName: verifiedByName ?? '',
+      weight: double.tryParse(a.weight),
+      createdAt: a.createdAt ?? DateTime.now(),
+    );
+  }
 
   factory Attendance.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;

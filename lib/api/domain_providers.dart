@@ -13,6 +13,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/student.dart' as legacy;
+import '../services/attendance_service.dart' as legacy_att;
 import '../services/class_service.dart' show BJJClass;
 import '../services/link_code_service.dart' show LinkCode;
 import '../services/payment_service.dart' as legacy_pay;
@@ -488,6 +489,18 @@ final tatamiAttendanceProvider =
     return ref
         .watch(attendanceRepoProvider)
         .list(q.academyId, filter: q.filter);
+  },
+);
+
+/// Provider legacy-typed para o modelo Attendance. Screens não
+/// precisam refatorar — só trocar `service.getByStudent()` por isso.
+/// NOMES (studentName, className, verifiedByName) vêm vazios — caller
+/// faz denorm local se precisar.
+final tatamiAttendanceLegacyProvider =
+    FutureProvider.family<List<legacy_att.Attendance>, AttendanceQuery>(
+  (ref, q) async {
+    final page = await ref.watch(tatamiAttendanceProvider(q).future);
+    return page.items.map(legacy_att.Attendance.fromApi).toList();
   },
 );
 
