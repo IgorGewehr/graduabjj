@@ -7,7 +7,6 @@ import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 
 import '../../api/dto/financial_dto.dart' as api_fin;
-import '../../api/feature_flags.dart';
 import '../../api/repositories.dart' as tatami_repos;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
@@ -180,127 +179,45 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
     if (academyId.isEmpty) return;
 
     try {
-      final flags = ref.read(tatamiFlagsProvider);
+      // Wallet snapshot + transactions vêm direto do Tatami (fallback
+      // Firestore removido na Fase 1). O endpoint Tatami só expõe `balance`
+      // como string — separação available/pending/totalReceived/
+      // totalWithdrawn fica em 0 até BE expor breakdown (gap registrado
+      // para Sprint B BE).
+      final walletRepo = ref.read(tatami_repos.walletRepoProvider);
+      final results = await Future.wait<dynamic>([
+        walletRepo.get(academyId),
+        walletRepo.listTransactions(academyId, limit: 50),
+      ]);
+      final apiWallet = results[0] as api_fin.ApiWallet;
+      final txPage = results[1] as api_fin.WalletTransactionsPage;
 
-      // Tatami path — usa walletRepo direto (não via family provider para
-      // evitar StateError do flag check interno; gateamos aqui).
-      if (flags.useTatamiFinancials) {
-        try {
-          final walletRepo = ref.read(tatami_repos.walletRepoProvider);
-          final results = await Future.wait<dynamic>([
-            walletRepo.get(academyId),
-            walletRepo.listTransactions(academyId, limit: 50),
-          ]);
-          final apiWallet = results[0] as api_fin.ApiWallet;
-          final txPage = results[1] as api_fin.WalletTransactionsPage;
-
-          // O shape ApiWallet só expõe `balance` (string) — não há
-          // separação available/pending/totalReceived/totalWithdrawn no
-          // contrato atual. Mapeamos balance → availableBalance e os
-          // demais para 0; consumers verão o saldo correto enquanto BE
-          // não expor breakdown (gap registrado pra Sprint B).
-          final balance = double.tryParse(apiWallet.balance) ?? 0.0;
-          final txList = txPage.items.map((t) {
-            // Mapeamento conservador kind → type/source. credit (pagamento
-            // de aluno) e refund (estorno) vão como 'payment'/mensalidade;
-            // debit/payout (saque) vão como 'withdrawal'/saque.
-            final isPayout = t.kind == api_fin.ApiWalletTxnKind.debit ||
-                t.kind == api_fin.ApiWalletTxnKind.payout;
-            final type = isPayout ? 'withdrawal' : 'payment';
-            final source = isPayout
-                ? 'saque'
-                : (t.financialId?.startsWith('order_') == true
-                    ? 'loja'
-                    : 'mensalidade');
-            return WalletTransaction(
-              id: t.id,
-              type: type,
-              source: source,
-              amount: double.tryParse(t.amount) ?? 0.0,
-              status: 'completed', // BE só persiste txn após settle.
-              description: t.description,
-              createdAt: t.createdAt,
-              completedAt: t.createdAt,
-              isAbacatePay: true,
-            );
-          }).toList();
-
-          bool totpEnabled = false;
-          try {
-            totpEnabled = await TotpService().isTotpEnabled();
-          } catch (_) {}
-
-          setState(() {
-            _wallet = AcademyWallet(
-              availableBalance: balance,
-              pendingBalance: 0,
-              totalReceived: 0,
-              totalWithdrawn: 0,
-              transactionCount: txList.length,
-            );
-            _transactions = txList;
-            _isTotpEnabled = totpEnabled;
-            _isLoading = false;
-          });
-          return;
-        } catch (_) {
-          // Cai pro caminho Firestore legacy abaixo.
-        }
-      }
-
-      final firestore = FirebaseService.firestore;
-      final academyRef = firestore.collection('academies').doc(academyId);
-
-      // Load wallet balance document (maintained by webhook with fee deduction)
-      final walletSnap = await academyRef.collection('wallet').doc('balance').get();
-
-      // Load wallet transactions (the authoritative source)
-      final txSnapshot = await academyRef
-          .collection('walletTransactions')
-          .orderBy('createdAt', descending: true)
-          .limit(50)
-          .get();
-
-      final transactions = txSnapshot.docs.map((doc) {
-        final data = doc.data();
-        final type = data['type'] as String? ?? 'payment';
-        final source = type == 'withdrawal' ? 'saque' :
-            (data['financialId']?.toString().startsWith('order_') == true ? 'loja' : 'mensalidade');
-
+      final balance = double.tryParse(apiWallet.balance) ?? 0.0;
+      final txList = txPage.items.map((t) {
+        // Mapeamento conservador kind → type/source. credit (pagamento de
+        // aluno) e refund (estorno) vão como 'payment'/mensalidade;
+        // debit/payout (saque) vão como 'withdrawal'/saque.
+        final isPayout = t.kind == api_fin.ApiWalletTxnKind.debit ||
+            t.kind == api_fin.ApiWalletTxnKind.payout;
+        final type = isPayout ? 'withdrawal' : 'payment';
+        final source = isPayout
+            ? 'saque'
+            : (t.financialId?.startsWith('order_') == true
+                ? 'loja'
+                : 'mensalidade');
         return WalletTransaction(
-          id: doc.id,
+          id: t.id,
           type: type,
           source: source,
-          amount: (data['amount'] ?? 0).toDouble(),
-          status: data['status'] ?? 'pending',
-          description: data['description'],
-          studentName: data['studentName'],
-          createdAt: data['createdAt']?.toDate() ?? DateTime.now(),
-          completedAt: data['completedAt']?.toDate(),
+          amount: double.tryParse(t.amount) ?? 0.0,
+          status: 'completed', // BE só persiste txn após settle.
+          description: t.description,
+          createdAt: t.createdAt,
+          completedAt: t.createdAt,
           isAbacatePay: true,
         );
-      })
-      // Hide pending student payments/orders, but keep withdrawals (any status)
-      .where((t) => t.status != 'pending' || t.type == 'withdrawal')
-      .toList();
+      }).toList();
 
-      // Use wallet/balance document for balances (correctly includes fee deductions)
-      double availableBalance = 0;
-      double pendingBalance = 0;
-      double totalReceived = 0;
-      double totalWithdrawn = 0;
-      int transactionCount = transactions.length;
-
-      if (walletSnap.exists) {
-        final walletData = walletSnap.data()!;
-        availableBalance = (walletData['availableBalance'] ?? 0).toDouble();
-        pendingBalance = (walletData['pendingBalance'] ?? 0).toDouble();
-        totalReceived = (walletData['totalReceived'] ?? 0).toDouble();
-        totalWithdrawn = (walletData['totalWithdrawn'] ?? 0).toDouble();
-        transactionCount = (walletData['transactionCount'] ?? transactions.length);
-      }
-
-      // Load TOTP status
       bool totpEnabled = false;
       try {
         totpEnabled = await TotpService().isTotpEnabled();
@@ -308,13 +225,13 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
 
       setState(() {
         _wallet = AcademyWallet(
-          availableBalance: availableBalance,
-          pendingBalance: pendingBalance,
-          totalReceived: totalReceived,
-          totalWithdrawn: totalWithdrawn,
-          transactionCount: transactionCount,
+          availableBalance: balance,
+          pendingBalance: 0,
+          totalReceived: 0,
+          totalWithdrawn: 0,
+          transactionCount: txList.length,
         );
-        _transactions = transactions;
+        _transactions = txList;
         _isTotpEnabled = totpEnabled;
         _isLoading = false;
       });

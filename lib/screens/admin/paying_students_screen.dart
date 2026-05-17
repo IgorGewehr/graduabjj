@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../api/domain_providers.dart' as tatami;
-import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -42,22 +41,9 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
 
   Future<void> _refreshPlans() async {
     final academyId = FirebaseService.academyId;
-    final flags = ref.read(tatamiFlagsProvider);
-
-    List<Plan> plans;
-    if (flags.useTatamiWrites) {
-      try {
-        ref.invalidate(tatami.tatamiPlansLegacyProvider(academyId));
-        plans = await ref.read(
-          tatami.tatamiPlansLegacyProvider(academyId).future,
-        );
-      } catch (_) {
-        // Fallback transparente para Firestore legacy.
-        plans = await PlanService(academyId).list();
-      }
-    } else {
-      plans = await PlanService(academyId).list();
-    }
+    ref.invalidate(tatami.tatamiPlansLegacyProvider(academyId));
+    final plans =
+        await ref.read(tatami.tatamiPlansLegacyProvider(academyId).future);
 
     if (mounted) {
       setState(() => _plans = plans);

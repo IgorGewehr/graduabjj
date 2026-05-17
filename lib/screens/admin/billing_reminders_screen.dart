@@ -5,7 +5,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/financial_dto.dart' as api_fin;
-import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/selected_academy_provider.dart';
@@ -73,45 +72,37 @@ class _AdminBillingRemindersScreenState
     try {
       final academyId = FirebaseService.academyId;
       _billingService = BillingReminderService(academyId);
-      final flags = ref.read(tatamiFlagsProvider);
 
-      // Sprint 2 wiring — stages reconstruídas no widget a partir do Tatami
-      // (overdue + pending paginados) quando flag ligada. Stats/contatos/
-      // settings seguem legacy nesta batch — porting completo é Sprint 3.
+      // Stages reconstruídas no widget a partir do Tatami (overdue + pending
+      // paginados em paralelo, classificados por daysOverdue local). Fallback
+      // Firestore removido na Fase 1; `_billingService` ainda existe para
+      // getStudentContacts/getCollectionStats/getNotificationSettings (gap
+      // BE — collection stats/settings ainda Firestore-backed).
       Future<Map<BillingStage, List<Map<String, dynamic>>>> stagesFuture(
         Map<String, StudentContact> contacts,
       ) async {
-        if (flags.useTatamiFinancials) {
-          try {
-            // Busca overdue + pending em paralelo (BE só aceita status único
-            // por filter); merge e classifica por daysOverdue no widget.
-            final overdueQ = tatami.FinancialsQuery(
-              academyId: academyId,
-              filter: const api_fin.FinancialFilter(
-                status: api_fin.ApiFinancialStatus.overdue,
-                limit: 500,
-              ),
-            );
-            final pendingQ = tatami.FinancialsQuery(
-              academyId: academyId,
-              filter: const api_fin.FinancialFilter(
-                status: api_fin.ApiFinancialStatus.pending,
-                limit: 500,
-              ),
-            );
-            ref.invalidate(tatami.tatamiPaymentsLegacyProvider(overdueQ));
-            ref.invalidate(tatami.tatamiPaymentsLegacyProvider(pendingQ));
-            final futures = await Future.wait([
-              ref.read(tatami.tatamiPaymentsLegacyProvider(overdueQ).future),
-              ref.read(tatami.tatamiPaymentsLegacyProvider(pendingQ).future),
-            ]);
-            final all = <Payment>[...futures[0], ...futures[1]];
-            return _buildStagesFromPayments(all, contacts);
-          } catch (_) {
-            // fallback
-          }
-        }
-        return _billingService.getOverdueWithStages();
+        final overdueQ = tatami.FinancialsQuery(
+          academyId: academyId,
+          filter: const api_fin.FinancialFilter(
+            status: api_fin.ApiFinancialStatus.overdue,
+            limit: 500,
+          ),
+        );
+        final pendingQ = tatami.FinancialsQuery(
+          academyId: academyId,
+          filter: const api_fin.FinancialFilter(
+            status: api_fin.ApiFinancialStatus.pending,
+            limit: 500,
+          ),
+        );
+        ref.invalidate(tatami.tatamiPaymentsLegacyProvider(overdueQ));
+        ref.invalidate(tatami.tatamiPaymentsLegacyProvider(pendingQ));
+        final futures = await Future.wait([
+          ref.read(tatami.tatamiPaymentsLegacyProvider(overdueQ).future),
+          ref.read(tatami.tatamiPaymentsLegacyProvider(pendingQ).future),
+        ]);
+        final all = <Payment>[...futures[0], ...futures[1]];
+        return _buildStagesFromPayments(all, contacts);
       }
 
       // Carrega contatos primeiro para poder denormalizar studentName quando

@@ -7,7 +7,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/financial_dto.dart' as api_fin;
 import '../../api/dto/student_dto.dart' as api_student;
-import '../../api/feature_flags.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
@@ -48,71 +47,53 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
     try {
       final academyId = FirebaseService.academyId;
-      final flags = ref.read(tatamiFlagsProvider);
 
-      // Student stats — Tatami quando flag de reads ligada.
+      // Student stats — Tatami direto (fallback Firestore removido na Fase 1).
       Future<Map<String, dynamic>> statsFuture() async {
-        if (flags.useTatamiReads) {
-          try {
-            ref.invalidate(tatami.tatamiStudentStatsProvider(academyId));
-            final s = await ref.read(
-              tatami.tatamiStudentStatsProvider(academyId).future,
-            );
-            // Adapta ApiStudentStats → Map shape esperado pela UI legacy.
-            return {
-              'total': s.total,
-              'byStatus': {
-                'active':
-                    s.byStatus[api_student.ApiStudentStatus.active] ?? 0,
-                'injured':
-                    s.byStatus[api_student.ApiStudentStatus.injured] ?? 0,
-                'inactive':
-                    s.byStatus[api_student.ApiStudentStatus.inactive] ?? 0,
-                'suspended':
-                    s.byStatus[api_student.ApiStudentStatus.suspended] ?? 0,
-              },
-              'byCategory': {
-                'kids': s.kidsCount,
-                'adult': s.adultsCount,
-              },
-            };
-          } catch (_) {
-            // fallback
-          }
-        }
-        return StudentService(academyId).getDashboardStats();
+        ref.invalidate(tatami.tatamiStudentStatsProvider(academyId));
+        final s = await ref.read(
+          tatami.tatamiStudentStatsProvider(academyId).future,
+        );
+        // Adapta ApiStudentStats → Map shape esperado pela UI legacy.
+        return {
+          'total': s.total,
+          'byStatus': {
+            'active': s.byStatus[api_student.ApiStudentStatus.active] ?? 0,
+            'injured': s.byStatus[api_student.ApiStudentStatus.injured] ?? 0,
+            'inactive': s.byStatus[api_student.ApiStudentStatus.inactive] ?? 0,
+            'suspended':
+                s.byStatus[api_student.ApiStudentStatus.suspended] ?? 0,
+          },
+          'byCategory': {
+            'kids': s.kidsCount,
+            'adult': s.adultsCount,
+          },
+        };
       }
 
       // Overdue payments — Tatami via financials list com status=overdue.
       Future<List<dynamic>> overdueFuture() async {
-        if (flags.useTatamiFinancials) {
-          try {
-            final q = tatami.FinancialsQuery(
-              academyId: academyId,
-              filter: const api_fin.FinancialFilter(
-                status: api_fin.ApiFinancialStatus.overdue,
-                limit: 100,
-              ),
-            );
-            ref.invalidate(tatami.tatamiPaymentsLegacyProvider(q));
-            final list = await ref.read(
-              tatami.tatamiPaymentsLegacyProvider(q).future,
-            );
-            return list;
-          } catch (_) {
-            // fallback
-          }
-        }
-        return PaymentService(academyId).getOverdue();
+        final q = tatami.FinancialsQuery(
+          academyId: academyId,
+          filter: const api_fin.FinancialFilter(
+            status: api_fin.ApiFinancialStatus.overdue,
+            limit: 100,
+          ),
+        );
+        ref.invalidate(tatami.tatamiPaymentsLegacyProvider(q));
+        return ref.read(tatami.tatamiPaymentsLegacyProvider(q).future);
       }
 
-      // Monthly summary — Tatami expõe `tatamiMonthlyReportProvider` mas
-      // o family key (_AcademyMonth privada) não é construível externamente
-      // hoje (api/domain_providers.dart — fix programado para Sprint 3).
-      // Por ora mantemos o caminho Firestore legacy.
+      // Monthly summary — Tatami via tatamiMonthlyReportLegacyProvider que
+      // adapta ApiMonthlyReport → Map legacy esperado pela UI.
       final monthLabel = DateFormat('yyyy-MM').format(DateTime.now());
       Future<Map<String, dynamic>> monthlyFuture() async {
-        return PaymentService(academyId).getMonthlySummary(monthLabel);
+        final key = tatami.AcademyMonth(
+          academyId: academyId,
+          month: monthLabel,
+        );
+        ref.invalidate(tatami.tatamiMonthlyReportLegacyProvider(key));
+        return ref.read(tatami.tatamiMonthlyReportLegacyProvider(key).future);
       }
 
       final results = await Future.wait<dynamic>([
