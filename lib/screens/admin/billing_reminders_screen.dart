@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -6,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
 import '../../core/feedback_utils.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../services/billing_reminder_service.dart';
 import '../../widgets/cached_image.dart';
@@ -77,12 +77,20 @@ class _AdminBillingRemindersScreenState
         _billingService.getNotificationSettings(),
       ]);
 
-      // Get academy name for notification service
-      final academyDoc = await FirebaseFirestore.instance
-          .collection('academies')
-          .doc(academyId)
-          .get();
-      final academyName = academyDoc.data()?['name'] as String? ?? 'Academia';
+      // Academy name for notification service templates ({academia}). Vem do
+      // cache populado por `selectedAcademyProvider` no boot — evita uma
+      // round-trip Firestore por load (era o único uso direto de
+      // FirebaseFirestore.instance nesta tela). Quando a academia ainda não
+      // estiver no cache (caso de borda em deep-link), faz fallback para
+      // o `getAcademyInfo(academyId)` async do notifier.
+      String academyName =
+          ref.read(currentAcademyInfoProvider)?.name ?? '';
+      if (academyName.isEmpty) {
+        final info = await ref
+            .read(selectedAcademyProvider.notifier)
+            .getAcademyInfo(academyId);
+        academyName = info?.name ?? 'Academia';
+      }
 
       final notifSettings = results[3] as BillingNotificationSettings;
 
