@@ -7,9 +7,15 @@
 # em WHATSAPP_API_KEY e EMAIL_API_KEY — mesmo valor para ambos canais).
 NOTIFICATION_INTERNAL_KEY='c3d85c618a412a93034bd9cf6fcb20536fbd54cc73385ba6b369846ff87db119'
 
+# Base URL do backend Tatami. Override via env var:
+#   TATAMI_BASE_URL=https://api.tatami.dev ./build.sh   # produção
+#   ./build.sh                                          # default: staging
+TATAMI_BASE_URL="${TATAMI_BASE_URL:-https://api.staging.tatami.dev}"
+
 flutter build appbundle \
   --dart-define=APP_BASE_URL=https://bjjeasy.netlify.app \
   --dart-define=API_BASE_URL=https://bjjeasy.netlify.app/api \
+  --dart-define=TATAMI_BASE_URL="$TATAMI_BASE_URL" \
   --dart-define=WHATSAPP_API_URL=https://notification.tensorroot.com/api/send-whatsapp \
   --dart-define=EMAIL_API_URL=https://notification.tensorroot.com/api/send-email \
   --dart-define=WHATSAPP_API_KEY="$NOTIFICATION_INTERNAL_KEY" \
