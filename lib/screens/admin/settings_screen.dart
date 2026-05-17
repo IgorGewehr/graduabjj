@@ -6,13 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../api/dto/upload_dto.dart' as api_upload;
-import '../../api/feature_flags.dart';
 import '../../api/repositories.dart' as tatami_repos;
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
@@ -422,37 +420,20 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
       final academyId = FirebaseService.academyId;
       final file = File(croppedFile.path);
-      final flags = ref.read(tatamiFlagsProvider);
-      String? downloadUrl;
 
-      // Sem flag dedicada `useTatamiUploads` ainda (8 flags atuais não
-      // cobrem uploads). Usamos `useTatamiWrites` como proxy — same risk
-      // profile (mutações server-side). Fix de flag dedicada vai no
-      // Sprint 3 quando o catálogo for ampliado.
-      if (flags.useTatamiWrites) {
-        try {
-          final repo = ref.read(tatami_repos.uploadsRepoProvider);
-          final uploaded = await repo.uploadFileFromDisk(
-            purpose: api_upload.ApiUploadPurpose.academySettings,
-            file: file,
-            contentType: 'image/png',
-            academyId: academyId,
-          );
-          downloadUrl = uploaded.publicUrl;
-        } catch (_) {
-          // Fallback transparente para o Firebase Storage legacy.
-        }
-      }
-
+      // Upload via Tatami (signed-URL); fallback Firebase Storage removido
+      // na Fase 1.
+      final repo = ref.read(tatami_repos.uploadsRepoProvider);
+      final uploaded = await repo.uploadFileFromDisk(
+        purpose: api_upload.ApiUploadPurpose.academySettings,
+        file: file,
+        contentType: 'image/png',
+        academyId: academyId,
+      );
+      final downloadUrl = uploaded.publicUrl;
       if (downloadUrl == null) {
-        final storageRef = FirebaseStorage.instance
-            .ref()
-            .child('academies')
-            .child(academyId)
-            .child('logo.png');
-
-        await storageRef.putFile(file);
-        downloadUrl = await storageRef.getDownloadURL();
+        if (mounted) context.showError('Upload concluído sem URL pública.');
+        return;
       }
 
       // Update settings

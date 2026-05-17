@@ -8,7 +8,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/attendance_dto.dart' as api_att;
 import '../../api/dto/financial_dto.dart' as api_fin;
-import '../../api/feature_flags.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
@@ -433,8 +432,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     if (currentUser?.academyId == null) return;
 
     final academyId = currentUser!.academyId!;
-    final attendanceService = AttendanceService(academyId);
-    final flags = ref.read(tatamiFlagsProvider);
 
     final startOfMonth = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
     final endOfMonth = DateTime(
@@ -454,29 +451,20 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     );
 
     Future<List<Attendance>> rangeFuture(DateTime from, DateTime to) async {
-      if (flags.useTatamiAttendance) {
-        try {
-          // dateTo é exclusivo no contrato Tatami; getByDateRange legacy é
-          // inclusivo end-of-day. Adiciona +1 dia para casar a janela.
-          final exclusiveTo = DateTime(to.year, to.month, to.day)
-              .add(const Duration(days: 1));
-          final q = tatami.AttendanceQuery(
-            academyId: academyId,
-            filter: api_att.AttendanceFilter(
-              dateFrom: DateTime(from.year, from.month, from.day),
-              dateTo: exclusiveTo,
-              limit: 1000,
-            ),
-          );
-          ref.invalidate(tatami.tatamiAttendanceLegacyProvider(q));
-          return await ref.read(
-            tatami.tatamiAttendanceLegacyProvider(q).future,
-          );
-        } catch (_) {
-          // fallback
-        }
-      }
-      return attendanceService.getByDateRange(from, to);
+      // dateTo é exclusivo no contrato Tatami; adiciona +1 dia para casar
+      // a janela inclusiva end-of-day usada pelo cálculo.
+      final exclusiveTo = DateTime(to.year, to.month, to.day)
+          .add(const Duration(days: 1));
+      final q = tatami.AttendanceQuery(
+        academyId: academyId,
+        filter: api_att.AttendanceFilter(
+          dateFrom: DateTime(from.year, from.month, from.day),
+          dateTo: exclusiveTo,
+          limit: 1000,
+        ),
+      );
+      ref.invalidate(tatami.tatamiAttendanceLegacyProvider(q));
+      return ref.read(tatami.tatamiAttendanceLegacyProvider(q).future);
     }
 
     // Sprint 5 — fetch current and previous month attendance in parallel.
@@ -524,49 +512,47 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     if (currentUser?.academyId == null) return;
 
     final academyId = currentUser!.academyId!;
-    final paymentService = PaymentService(academyId);
-    final flags = ref.read(tatamiFlagsProvider);
 
     final currentMonth = DateFormat('yyyy-MM').format(_selectedMonth);
     final lastMonth = DateFormat(
       'yyyy-MM',
     ).format(DateTime(_selectedMonth.year, _selectedMonth.month - 1));
 
-    // Payments do mês — Tatami via tatamiPaymentsLegacyProvider
-    // (janela [first, last+1) do _selectedMonth).
+    // Payments do mês — Tatami direto (janela [first, last+1)).
     Future<List<Payment>> currentMonthPaymentsFuture() async {
-      if (flags.useTatamiFinancials) {
-        try {
-          final first =
-              DateTime(_selectedMonth.year, _selectedMonth.month, 1);
-          final last =
-              DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
-          final q = tatami.FinancialsQuery(
-            academyId: academyId,
-            filter: api_fin.FinancialFilter(
-              dueFrom: first,
-              dueTo: last,
-              limit: 500,
-            ),
-          );
-          ref.invalidate(tatami.tatamiPaymentsLegacyProvider(q));
-          return await ref.read(
-            tatami.tatamiPaymentsLegacyProvider(q).future,
-          );
-        } catch (_) {
-          // fallback
-        }
-      }
-      return paymentService.getByMonth(currentMonth);
+      final first = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
+      final last = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
+      final q = tatami.FinancialsQuery(
+        academyId: academyId,
+        filter: api_fin.FinancialFilter(
+          dueFrom: first,
+          dueTo: last,
+          limit: 500,
+        ),
+      );
+      ref.invalidate(tatami.tatamiPaymentsLegacyProvider(q));
+      return ref.read(tatami.tatamiPaymentsLegacyProvider(q).future);
     }
 
-    // Sprint 5 — three independent reads in parallel (current summary,
-    // last-month summary, current month payments). Os summaries
-    // agregados client-side seguem legacy (sem equivalente shape no
-    // tatamiMonthlyReportProvider).
+    // Three reads em paralelo — monthly summaries via tatamiMonthlyReport
+    // (Map legacy adapter) + payments do mês.
+    final summaryCurrentKey = tatami.AcademyMonth(
+      academyId: academyId,
+      month: currentMonth,
+    );
+    final summaryLastKey = tatami.AcademyMonth(
+      academyId: academyId,
+      month: lastMonth,
+    );
+    ref.invalidate(tatami.tatamiMonthlyReportLegacyProvider(summaryCurrentKey));
+    ref.invalidate(tatami.tatamiMonthlyReportLegacyProvider(summaryLastKey));
     final results = await Future.wait<dynamic>([
-      paymentService.getMonthlySummary(currentMonth),
-      paymentService.getMonthlySummary(lastMonth),
+      ref.read(
+        tatami.tatamiMonthlyReportLegacyProvider(summaryCurrentKey).future,
+      ),
+      ref.read(
+        tatami.tatamiMonthlyReportLegacyProvider(summaryLastKey).future,
+      ),
       currentMonthPaymentsFuture(),
     ]);
     final summary = results[0] as Map<String, dynamic>;
@@ -595,14 +581,24 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
         ? overdueInMonth.map((p) => p.value).reduce((a, b) => a + b)
         : 0.0;
 
+    // monthlyReportToLegacyMap shape: paid.value / pending.value / overdue.value
+    double _readMapValue(Map<String, dynamic> s, String key) {
+      final entry = s[key];
+      if (entry is Map<String, dynamic>) {
+        final v = entry['value'];
+        return v is num ? v.toDouble() : 0.0;
+      }
+      return 0.0;
+    }
+
     setState(() {
-      _totalRevenue = (summary['totalPaid'] ?? 0.0) as double;
-      _totalPending = (summary['totalPending'] ?? 0.0) as double;
+      _totalRevenue = _readMapValue(summary, 'paid');
+      _totalPending = _readMapValue(summary, 'pending');
       _totalOverdue = overdueTotal;
       _paidPayments = paidInMonth.length;
       _pendingPayments = pendingInMonth.length;
       _overduePayments = overdueInMonth.length;
-      _lastMonthRevenue = (lastMonthSummary['totalPaid'] ?? 0.0) as double;
+      _lastMonthRevenue = _readMapValue(lastMonthSummary, 'paid');
       _averageTicket = avgTicket;
     });
   }
@@ -612,23 +608,10 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     if (currentUser?.academyId == null) return;
 
     final academyId = currentUser!.academyId!;
-    final storeService = StoreService(academyId);
-    final flags = ref.read(tatamiFlagsProvider);
-
-    List<StoreOrder> orders;
-    if (flags.useTatamiStore) {
-      try {
-        final q = tatami.OrdersQuery(academyId: academyId, limit: 500);
-        ref.invalidate(tatami.tatamiStoreOrdersLegacyProvider(q));
-        orders = await ref.read(
-          tatami.tatamiStoreOrdersLegacyProvider(q).future,
-        );
-      } catch (_) {
-        orders = await storeService.getOrders();
-      }
-    } else {
-      orders = await storeService.getOrders();
-    }
+    final q = tatami.OrdersQuery(academyId: academyId, limit: 500);
+    ref.invalidate(tatami.tatamiStoreOrdersLegacyProvider(q));
+    final orders =
+        await ref.read(tatami.tatamiStoreOrdersLegacyProvider(q).future);
 
     // Filter orders by selected month
     final startOfMonth = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
@@ -675,23 +658,10 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     if (currentUser?.academyId == null) return;
 
     final academyId = currentUser!.academyId!;
-    final studentService = StudentService(academyId);
-    final flags = ref.read(tatamiFlagsProvider);
-
-    List<Student> students;
-    if (flags.useTatamiReads) {
-      try {
-        final q = tatami.StudentsQuery(academyId: academyId);
-        ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
-        students = await ref.read(
-          tatami.tatamiStudentsLegacyProvider(q).future,
-        );
-      } catch (_) {
-        students = await studentService.getAll();
-      }
-    } else {
-      students = await studentService.getAll();
-    }
+    final q = tatami.StudentsQuery(academyId: academyId);
+    ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
+    final students =
+        await ref.read(tatami.tatamiStudentsLegacyProvider(q).future);
 
     // Separate by category
     final kids = students
