@@ -378,7 +378,7 @@ final tatamiFinancialsProvider =
 );
 
 final tatamiMonthlyReportProvider =
-    FutureProvider.family<ApiMonthlyReport, _AcademyMonth>(
+    FutureProvider.family<ApiMonthlyReport, AcademyMonth>(
   (ref, k) async {
     _requireFlag(
       ref.watch(tatamiFlagsProvider).useTatamiFinancials,
@@ -390,27 +390,15 @@ final tatamiMonthlyReportProvider =
   },
 );
 
-class _AcademyMonth {
-  const _AcademyMonth(this.academyId, this.month);
-  final String academyId;
-  final String? month;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is _AcademyMonth &&
-          other.academyId == academyId &&
-          other.month == month);
-
-  @override
-  int get hashCode => Object.hash(academyId, month);
-}
-
+/// Helper de conveniência: `academyMonth(aid)` é equivalente a
+/// `AcademyMonth(academyId: aid)`. Mantido para retrocompatibilidade.
 AcademyMonth academyMonth(String academyId, [String? month]) =>
-    AcademyMonth._(academyId, month);
+    AcademyMonth(academyId: academyId, month: month);
 
+/// Family key pública para `tatamiMonthlyReportProvider`. Construa via
+/// `AcademyMonth(academyId: ..., month: 'YYYY-MM')`.
 class AcademyMonth {
-  const AcademyMonth._(this.academyId, this.month);
+  const AcademyMonth({required this.academyId, this.month});
   final String academyId;
   final String? month;
 
