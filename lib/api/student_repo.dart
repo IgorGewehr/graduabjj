@@ -46,15 +46,17 @@ class StudentRemoteRepo {
     return ApiStudentStats.fromJson(json);
   }
 
-  /// `GET /v1/academies/{academyId}/students/{studentId}/eligibility` —
-  /// avaliação server-side de elegibilidade pra próxima graduação. Antes
-  /// o cliente fazia a comparação threshold-vs-attendances localmente.
+  /// `GET /v1/academies/{academyId}/students/{studentId}/graduation-eligibility`
+  /// — avaliação server-side de elegibilidade pra próxima graduação. Antes
+  /// o cliente fazia a comparação threshold-vs-attendances localmente. O
+  /// path explícito "graduation-eligibility" (vs só "eligibility") evita
+  /// colisão semântica com checks de entitlement em outros contextos.
   Future<ApiEligibilityView> getEligibility(
     String academyId,
     String studentId,
   ) async {
     final json = await _api.get<Map<String, dynamic>>(
-      '/v1/academies/$academyId/students/$studentId/eligibility',
+      '/v1/academies/$academyId/students/$studentId/graduation-eligibility',
     );
     return ApiEligibilityView.fromJson(json);
   }

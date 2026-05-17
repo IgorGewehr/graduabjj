@@ -141,8 +141,8 @@ void main() {
         'current_stripes': 2,
         'next_belt': 'blue',
         'next_stripes': 3,
-        'attendances_since': 25,
-        'threshold': 40,
+        'current_count': 25,
+        'required_count': 40,
         'auto_enabled': true,
       });
       expect(e.attendancesNeeded, 15);
@@ -156,8 +156,8 @@ void main() {
         'current_stripes': 4,
         'next_belt': 'purple',
         'next_stripes': 0,
-        'attendances_since': 50,
-        'threshold': 40,
+        'current_count': 50,
+        'required_count': 40,
         'auto_enabled': true,
       });
       expect(e.attendancesNeeded, 0);
@@ -170,8 +170,8 @@ void main() {
         'current_belt': 'black',
         'current_stripes': 6,
         'next_belt': null,
-        'attendances_since': 100,
-        'threshold': 40,
+        'current_count': 100,
+        'required_count': 40,
         'auto_enabled': false,
       });
       expect(e.nextBelt, isNull);

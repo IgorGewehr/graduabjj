@@ -416,39 +416,49 @@ class ApiEligibilityView {
     required this.eligible,
     required this.currentBelt,
     required this.currentStripes,
-    required this.attendancesSince,
-    required this.threshold,
+    required this.currentCount,
+    required this.requiredCount,
     required this.autoEnabled,
+    this.reason,
     this.nextBelt,
     this.nextStripes,
     this.lastPromotionDate,
   });
 
   final bool eligible;
+  final String? reason;
   final ApiBelt currentBelt;
   final int currentStripes;
   final ApiBelt? nextBelt;
   final int? nextStripes;
-  final int attendancesSince;
-  final int threshold;
+
+  /// Presenças contadas desde a última promoção (ou início no BJJ se
+  /// nunca promovido). Wire field: `current_count`.
+  final int currentCount;
+
+  /// Threshold da academia (`auto_graduation_attendances`); default 40
+  /// quando não setado. Wire field: `required_count`.
+  final int requiredCount;
   final bool autoEnabled;
   final DateTime? lastPromotionDate;
 
   /// Quantas presenças ainda faltam para ficar elegível.
   /// Zero ou negativo significa que já passou do threshold.
-  int get attendancesNeeded => (threshold - attendancesSince).clamp(0, threshold);
+  int get attendancesNeeded =>
+      (requiredCount - currentCount).clamp(0, requiredCount);
 
   factory ApiEligibilityView.fromJson(Map<String, dynamic> j) =>
       ApiEligibilityView(
         eligible: j['eligible'] as bool? ?? false,
+        reason: j['reason'] as String?,
         currentBelt: ApiBeltX.fromWire(j['current_belt'] as String?),
         currentStripes: (j['current_stripes'] as num?)?.toInt() ?? 0,
         nextBelt: j['next_belt'] == null
             ? null
             : ApiBeltX.fromWire(j['next_belt'] as String?),
         nextStripes: (j['next_stripes'] as num?)?.toInt(),
-        attendancesSince: (j['attendances_since'] as num?)?.toInt() ?? 0,
-        threshold: (j['threshold'] as num?)?.toInt() ?? 40,
+        currentCount: (j['current_count'] as num?)?.toInt() ?? 0,
+        requiredCount: (j['required_count'] as num?)?.toInt() ?? 40,
         autoEnabled: j['auto_enabled'] as bool? ?? false,
         lastPromotionDate: _parseDate(j['last_promotion_date']),
       );

@@ -171,15 +171,15 @@ void main() {
   group('getEligibility', () {
     test('parses eligibility view', () async {
       adapter.onGet(
-        '/v1/academies/aid/students/sid/eligibility',
+        '/v1/academies/aid/students/sid/graduation-eligibility',
         (server) => server.reply(200, {
           'eligible': true,
           'current_belt': 'blue',
           'current_stripes': 4,
           'next_belt': 'purple',
           'next_stripes': 0,
-          'attendances_since': 50,
-          'threshold': 40,
+          'current_count': 50,
+          'required_count': 40,
           'auto_enabled': true,
           'last_promotion_date': '2024-06-01',
         }),
@@ -188,6 +188,25 @@ void main() {
       expect(e.eligible, isTrue);
       expect(e.attendancesNeeded, 0);
       expect(e.nextBelt, ApiBelt.purple);
+    });
+
+    test('parses reason when not eligible', () async {
+      adapter.onGet(
+        '/v1/academies/aid/students/sid/graduation-eligibility',
+        (server) => server.reply(200, {
+          'eligible': false,
+          'reason': 'needs 12 more classes',
+          'current_belt': 'blue',
+          'current_stripes': 2,
+          'current_count': 28,
+          'required_count': 40,
+          'auto_enabled': true,
+        }),
+      );
+      final e = await repo.getEligibility('aid', 'sid');
+      expect(e.eligible, isFalse);
+      expect(e.reason, 'needs 12 more classes');
+      expect(e.attendancesNeeded, 12);
     });
   });
 
