@@ -8,6 +8,7 @@ import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/financial_dto.dart' as api_fin;
 import '../../api/dto/student_dto.dart' as api_student;
 import '../../core/theme.dart';
+import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 
@@ -150,8 +151,13 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final currentUser = ref.watch(currentUserProvider);
-    final userName =
-        currentUser.valueOrNull?.displayName.split(' ').first ?? 'Admin';
+    final user = currentUser.valueOrNull;
+    final userName = user?.displayName.split(' ').first ?? 'Admin';
+    // Cards de KPI financeiro requerem `financial.read` — instrutor default
+    // tem (vê read-only). Monitor não vê. Cards de Loja não existem aqui
+    // hoje; quando vierem, gate-amos com `store.read`.
+    final canSeeFinancial =
+        user?.hasPermission(TatamiPermissions.financialRead) ?? false;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -168,22 +174,24 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     _buildWelcomeHeader(userName),
 
                     // Quick Actions
-                    _buildQuickActions(),
+                    _buildQuickActions(canSeeFinancial: canSeeFinancial),
 
                     const SizedBox(height: 24),
 
-                    // Stats Carousel
-                    _buildStatsCarousel(),
+                    // Stats Carousel — sempre exibe Alunos Ativos; só anexa
+                    // o card de Receita do Mês para quem tem financial.read.
+                    _buildStatsCarousel(includeFinancial: canSeeFinancial),
 
                     const SizedBox(height: 24),
 
-                    // Monthly Financial Card
-                    _buildMonthlyFinancialCard(),
+                    // Monthly Financial Card — KPI puramente financeiro
+                    if (canSeeFinancial) _buildMonthlyFinancialCard(),
 
-                    const SizedBox(height: 24),
+                    if (canSeeFinancial) const SizedBox(height: 24),
 
-                    // Alerts Section
-                    _buildAlertsSection(),
+                    // Alerts Section — inclui inadimplência e cobranças,
+                    // só faz sentido com financial.read.
+                    if (canSeeFinancial) _buildAlertsSection(),
 
                     const SizedBox(height: 100),
                   ],
@@ -217,7 +225,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildQuickActions() {
+  Widget _buildQuickActions({required bool canSeeFinancial}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
@@ -241,22 +249,24 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
               onTap: () => context.go('/admin/alunos/novo'),
             ),
           ),
-          const SizedBox(width: 12),
-          // Financeiro
-          Expanded(
-            child: _QuickActionCard(
-              icon: LucideIcons.dollarSign,
-              label: 'Financeiro',
-              isPrimary: false,
-              onTap: () => context.go('/admin/financeiro'),
+          if (canSeeFinancial) ...[
+            const SizedBox(width: 12),
+            // Financeiro — só com financial.read
+            Expanded(
+              child: _QuickActionCard(
+                icon: LucideIcons.dollarSign,
+                label: 'Financeiro',
+                isPrimary: false,
+                onTap: () => context.go('/admin/financeiro'),
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildStatsCarousel() {
+  Widget _buildStatsCarousel({required bool includeFinancial}) {
     final stats = _studentStats ?? {};
     final byStatus = stats['byStatus'] as Map<String, dynamic>? ?? {};
     final summary = _monthlySummary ?? {};
@@ -265,6 +275,28 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     final totalStudents = stats['total'] ?? 0;
     final monthlyRevenue = (summary['paid']?['value'] ?? 0).toDouble();
     final paidCount = summary['paid']?['count'] ?? 0;
+
+    // Monta a lista de cards condicionalmente; o número de páginas se ajusta
+    // automaticamente. Sem `financial.read`, só fica o card de alunos.
+    final cards = <Widget>[
+      _StatsCarouselCard(
+        icon: LucideIcons.users,
+        label: 'Alunos Ativos',
+        value: totalActive.toString(),
+        subtitle: 'de $totalStudents total',
+        onTap: () => context.go('/admin/alunos'),
+      ),
+      if (includeFinancial)
+        _StatsCarouselCard(
+          icon: LucideIcons.dollarSign,
+          iconBgColor: AppTheme.successLight,
+          iconColor: AppTheme.success,
+          label: 'Receita do Mes',
+          value: _formatCurrency(monthlyRevenue),
+          subtitle: '$paidCount pagamentos',
+          onTap: () => context.go('/admin/financeiro'),
+        ),
+    ];
 
     return Column(
       children: [
@@ -275,28 +307,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
             onPageChanged: (page) {
               setState(() => _currentStatsPage = page);
             },
-            itemCount: 2,
+            itemCount: cards.length,
             itemBuilder: (context, index) {
-              final cards = [
-                // Alunos Ativos
-                _StatsCarouselCard(
-                  icon: LucideIcons.users,
-                  label: 'Alunos Ativos',
-                  value: totalActive.toString(),
-                  subtitle: 'de $totalStudents total',
-                  onTap: () => context.go('/admin/alunos'),
-                ),
-                // Receita do Mes
-                _StatsCarouselCard(
-                  icon: LucideIcons.dollarSign,
-                  iconBgColor: AppTheme.successLight,
-                  iconColor: AppTheme.success,
-                  label: 'Receita do Mes',
-                  value: _formatCurrency(monthlyRevenue),
-                  subtitle: '$paidCount pagamentos',
-                  onTap: () => context.go('/admin/financeiro'),
-                ),
-              ];
               return Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: cards[index],
@@ -304,28 +316,30 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
             },
           ),
         ),
-        const SizedBox(height: 12),
-        // Dot indicators
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(
-            2,
-            (index) {
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                width: _currentStatsPage == index ? 20 : 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _currentStatsPage == index
-                      ? AppTheme.textPrimary
-                      : AppTheme.divider,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              );
-            },
+        if (cards.length > 1) ...[
+          const SizedBox(height: 12),
+          // Dot indicators
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(
+              cards.length,
+              (index) {
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: _currentStatsPage == index ? 20 : 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _currentStatsPage == index
+                        ? AppTheme.textPrimary
+                        : AppTheme.divider,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                );
+              },
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
