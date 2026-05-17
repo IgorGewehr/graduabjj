@@ -7,7 +7,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../api/domain_providers.dart' as tatami;
-import '../../api/feature_flags.dart';
 import '../../api/repositories.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
@@ -61,27 +60,15 @@ class _AdminQrSessionScreenState extends ConsumerState<AdminQrSessionScreen> {
       final academyId = user!.academyId!;
       final today = DateTime.now();
       final dayOfWeek = today.weekday % 7;
-      final flags = ref.read(tatamiFlagsProvider);
 
-      Future<List<BJJClass>> allFuture() async {
-        if (flags.useTatamiWrites) {
-          try {
-            final q = tatami.ClassesQuery(
-              academyId: academyId,
-              isActive: true,
-            );
-            ref.invalidate(tatami.tatamiClassesLegacyProvider(q));
-            return await ref.read(
-              tatami.tatamiClassesLegacyProvider(q).future,
-            );
-          } catch (_) {
-            // fallback
-          }
-        }
-        return ClassService(academyId).list();
-      }
-
-      final all = await allFuture();
+      // Classes ativas direto do Tatami (fallback Firestore removido).
+      final q = tatami.ClassesQuery(
+        academyId: academyId,
+        isActive: true,
+      );
+      ref.invalidate(tatami.tatamiClassesLegacyProvider(q));
+      final all =
+          await ref.read(tatami.tatamiClassesLegacyProvider(q).future);
 
       final entries = <_ClassWithSchedule>[];
       for (final cls in all) {
@@ -378,10 +365,9 @@ class _QrFullscreenPageState extends ConsumerState<_QrFullscreenPage> {
 
   Timer? _timer;
   late QrPayload _payload;
-  // Quando useTatamiAttendance liga, mantemos um token opaco assinado pelo BE
-  // (formato `<b64>.<sig>`). Renderizamos esse string cru no QR; o scanner
-  // (portal) reconhece o formato e roteia para `selfCheckin(qrToken: ...)`.
-  // Quando a flag está off, caímos no payload JSON legacy (`QrPayload`).
+  // Token opaco assinado pelo BE (formato `<b64>.<sig>`) — Tatami é o único
+  // path agora; mantemos `_payload` legacy só como UI placeholder até o
+  // primeiro token chegar (Fase 1 removeu o fallback off-flag).
   String? _tatamiToken;
 
   @override
@@ -394,7 +380,7 @@ class _QrFullscreenPageState extends ConsumerState<_QrFullscreenPage> {
     );
     // Tenta puxar o token Tatami já no boot (não-bloqueante — se falhar,
     // o widget continua renderizando o payload legacy).
-    _refreshTatamiTokenIfEnabled();
+    _refreshTatamiToken();
     _timer = Timer.periodic(_rotateInterval, (_) {
       if (!mounted) return;
       setState(() {
@@ -403,18 +389,11 @@ class _QrFullscreenPageState extends ConsumerState<_QrFullscreenPage> {
           classId: widget.classId,
         );
       });
-      _refreshTatamiTokenIfEnabled();
+      _refreshTatamiToken();
     });
   }
 
-  Future<void> _refreshTatamiTokenIfEnabled() async {
-    final flags = ref.read(tatamiFlagsProvider);
-    if (!flags.useTatamiAttendance) {
-      if (_tatamiToken != null && mounted) {
-        setState(() => _tatamiToken = null);
-      }
-      return;
-    }
+  Future<void> _refreshTatamiToken() async {
     try {
       final repo = ref.read(attendanceRepoProvider);
       final token = await repo.issueQrToken(

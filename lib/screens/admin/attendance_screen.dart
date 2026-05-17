@@ -5,7 +5,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/attendance_dto.dart' as api_att;
-import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/checkin.dart';
@@ -65,54 +64,29 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       }
 
       final academyId = currentUser!.academyId!;
-      final classService = ClassService(academyId);
-      final studentService = StudentService(academyId);
-      final flags = ref.read(tatamiFlagsProvider);
 
-      // Classes — Tatami via `tatamiClassesLegacyProvider` quando flag de
-      // writes (Sprint 3) está ligada. Para a chamada de leitura aqui o
-      // BE não distingue read/write na flag, ent o que importa  ela estar
-      // verdadeira no canary. Filtra ativas (UI mostra somente turmas
-      // ativas para chamada hoje).
+      // Classes — Tatami direto, filtra ativas no BE.
       Future<List<BJJClass>> classesFuture() async {
-        if (flags.useTatamiWrites) {
-          try {
-            final q = tatami.ClassesQuery(
-              academyId: academyId,
-              isActive: true,
-            );
-            ref.invalidate(tatami.tatamiClassesLegacyProvider(q));
-            return await ref.read(
-              tatami.tatamiClassesLegacyProvider(q).future,
-            );
-          } catch (_) {
-            // fallback
-          }
-        }
-        return classService.list();
+        final q = tatami.ClassesQuery(
+          academyId: academyId,
+          isActive: true,
+        );
+        ref.invalidate(tatami.tatamiClassesLegacyProvider(q));
+        return ref.read(tatami.tatamiClassesLegacyProvider(q).future);
       }
 
-      // Students — Tatami via legacy-typed provider, filtro ativo/lesionado
-      // aplicado client-side para casar a semântica de StudentService.getActive
-      // (que historicamente inclui ativos + lesionados).
+      // Students — Tatami direto, filtro ativo/lesionado client-side
+      // (semântica histórica do StudentService.getActive).
       Future<List<Student>> studentsFuture() async {
-        if (flags.useTatamiReads) {
-          try {
-            final q = tatami.StudentsQuery(academyId: academyId);
-            ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
-            final all = await ref.read(
-              tatami.tatamiStudentsLegacyProvider(q).future,
-            );
-            return all
-                .where((s) =>
-                    s.status == StudentStatus.active ||
-                    s.status == StudentStatus.injured)
-                .toList();
-          } catch (_) {
-            // fallback
-          }
-        }
-        return studentService.getActive();
+        final q = tatami.StudentsQuery(academyId: academyId);
+        ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
+        final all =
+            await ref.read(tatami.tatamiStudentsLegacyProvider(q).future);
+        return all
+            .where((s) =>
+                s.status == StudentStatus.active ||
+                s.status == StudentStatus.injured)
+            .toList();
       }
 
       final results = await Future.wait<dynamic>([
@@ -144,48 +118,27 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       if (currentUser?.academyId == null) return;
 
       final academyId = currentUser!.academyId!;
-      final attendanceService = AttendanceService(academyId);
-      final flags = ref.read(tatamiFlagsProvider);
 
-      Set<String> presentIds;
-      if (flags.useTatamiAttendance) {
-        try {
-          // Janela do dia [00:00, 24:00) para casar a semântica de
-          // getByDateAndClass (que filtra por date == _selectedDate).
-          final dayStart = DateTime(
-            _selectedDate.year,
-            _selectedDate.month,
-            _selectedDate.day,
-          );
-          final dayEnd = dayStart.add(const Duration(days: 1));
-          final q = tatami.AttendanceQuery(
-            academyId: academyId,
-            filter: api_att.AttendanceFilter(
-              classId: _selectedClass!.id,
-              dateFrom: dayStart,
-              dateTo: dayEnd,
-              limit: 200,
-            ),
-          );
-          ref.invalidate(tatami.tatamiAttendanceLegacyProvider(q));
-          final list = await ref.read(
-            tatami.tatamiAttendanceLegacyProvider(q).future,
-          );
-          presentIds = list.map((a) => a.studentId).toSet();
-        } catch (_) {
-          final attendance = await attendanceService.getByDateAndClass(
-            _selectedDate,
-            _selectedClass!.id,
-          );
-          presentIds = attendance.map((a) => a.studentId).toSet();
-        }
-      } else {
-        final attendance = await attendanceService.getByDateAndClass(
-          _selectedDate,
-          _selectedClass!.id,
-        );
-        presentIds = attendance.map((a) => a.studentId).toSet();
-      }
+      // Janela do dia [00:00, 24:00) — Tatami direto (fallback removido).
+      final dayStart = DateTime(
+        _selectedDate.year,
+        _selectedDate.month,
+        _selectedDate.day,
+      );
+      final dayEnd = dayStart.add(const Duration(days: 1));
+      final q = tatami.AttendanceQuery(
+        academyId: academyId,
+        filter: api_att.AttendanceFilter(
+          classId: _selectedClass!.id,
+          dateFrom: dayStart,
+          dateTo: dayEnd,
+          limit: 200,
+        ),
+      );
+      ref.invalidate(tatami.tatamiAttendanceLegacyProvider(q));
+      final list =
+          await ref.read(tatami.tatamiAttendanceLegacyProvider(q).future);
+      final presentIds = list.map((a) => a.studentId).toSet();
 
       setState(() {
         _presentStudentIds = presentIds;
