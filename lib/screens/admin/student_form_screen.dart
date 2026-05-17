@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/dto/student_dto.dart' as api_student;
+import '../../api/feature_flags.dart';
+import '../../api/repositories.dart' as tatami_repos;
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
@@ -1419,15 +1422,116 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
       }
 
       String studentId;
+      final flags = ref.read(tatamiFlagsProvider);
+      final useTatamiWrite = flags.useTatamiWrites;
+
       if (isEditing) {
-        await studentService.update(widget.studentId!, data);
+        bool wroteViaTatami = false;
+        if (useTatamiWrite) {
+          try {
+            final repo = ref.read(tatami_repos.studentRepoProvider);
+            await repo.update(
+              academyId,
+              widget.studentId!,
+              api_student.UpdateStudentRequest(
+                fullName: _fullNameController.text.trim(),
+                nickname: _nicknameController.text.trim().isEmpty
+                    ? null
+                    : _nicknameController.text.trim(),
+                email: _emailController.text.trim().isEmpty
+                    ? null
+                    : _emailController.text.trim(),
+                phone: _phoneController.text.trim().isEmpty
+                    ? null
+                    : _phoneController.text.trim(),
+                cpf: _cpfController.text.trim().isEmpty
+                    ? null
+                    : _cpfController.text.trim(),
+                birthDate: _birthDate,
+                startDate: _startDate,
+                category: _category == StudentCategory.kids
+                    ? api_student.ApiStudentCategory.kids
+                    : api_student.ApiStudentCategory.adult,
+                status: api_student.ApiStudentStatusX.fromWire(_status.value),
+                tuitionValue: _tuitionValueController.text.trim().isEmpty
+                    ? null
+                    : _tuitionValueController.text.trim().replaceAll(',', '.'),
+                tuitionDay: int.tryParse(_tuitionDayController.text),
+                healthNotes: _healthNotesController.text.trim().isEmpty
+                    ? null
+                    : _healthNotesController.text.trim(),
+                primarySport: primarySport.value,
+              ),
+            );
+            wroteViaTatami = true;
+          } catch (_) {
+            // Fallback transparente para o Firestore legacy. A camada Tatami
+            // ainda não cobre alguns campos (sportData/sports_list/
+            // emergency_contact estruturado) — quando isso bloquear, o
+            // legacy garante que o admin não perde a edição.
+          }
+        }
+        if (!wroteViaTatami) {
+          await studentService.update(widget.studentId!, data);
+        }
         studentId = widget.studentId!;
       } else {
         data['isProfilePublic'] = false;
         data['attendanceCount'] = 0;
         data['initialAttendanceCount'] = 0;
-        final created = await studentService.createFromMap(data);
-        studentId = created.id;
+        String? createdViaTatamiId;
+        if (useTatamiWrite) {
+          try {
+            final repo = ref.read(tatami_repos.studentRepoProvider);
+            final created = await repo.create(
+              academyId,
+              api_student.CreateStudentRequest(
+                fullName: _fullNameController.text.trim(),
+                nickname: _nicknameController.text.trim().isEmpty
+                    ? null
+                    : _nicknameController.text.trim(),
+                email: _emailController.text.trim().isEmpty
+                    ? null
+                    : _emailController.text.trim(),
+                phone: _phoneController.text.trim().isEmpty
+                    ? null
+                    : _phoneController.text.trim(),
+                cpf: _cpfController.text.trim().isEmpty
+                    ? null
+                    : _cpfController.text.trim(),
+                birthDate: _birthDate,
+                startDate: _startDate,
+                category: _category == StudentCategory.kids
+                    ? api_student.ApiStudentCategory.kids
+                    : api_student.ApiStudentCategory.adult,
+                currentBelt:
+                    api_student.ApiBeltX.fromWire(primaryGrade.belt),
+                currentStripes: primaryGrade.stripes,
+                tuitionValue: _tuitionValueController.text.trim().isEmpty
+                    ? null
+                    : _tuitionValueController.text.trim().replaceAll(',', '.'),
+                tuitionDay: int.tryParse(_tuitionDayController.text),
+                healthNotes: _healthNotesController.text.trim().isEmpty
+                    ? null
+                    : _healthNotesController.text.trim(),
+                isProfilePublic: false,
+                initialAttendanceCount: 0,
+                primarySport: primarySport.value,
+                sportsList: _grades.keys.map((s) => s.value).toList(),
+                sportData: sportData,
+              ),
+            );
+            createdViaTatamiId = created.id;
+          } catch (_) {
+            // Fallback — vide nota acima.
+          }
+        }
+        if (createdViaTatamiId != null) {
+          studentId = createdViaTatamiId;
+        } else {
+          final created = await studentService.createFromMap(data);
+          studentId = created.id;
+        }
       }
 
       // Sync plans: add/remove student from plans as needed
