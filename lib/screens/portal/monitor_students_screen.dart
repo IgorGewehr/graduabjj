@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/domain_providers.dart' as tatami;
+import '../../api/feature_flags.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -59,8 +61,24 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final service = StudentService(FirebaseService.academyId);
-      final students = await service.getAll();
+      final academyId = FirebaseService.academyId;
+      final flags = ref.read(tatamiFlagsProvider);
+
+      List<Student> students;
+      if (flags.useTatamiReads) {
+        try {
+          final q = tatami.StudentsQuery(academyId: academyId);
+          ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
+          students = await ref.read(
+            tatami.tatamiStudentsLegacyProvider(q).future,
+          );
+        } catch (_) {
+          students = await StudentService(academyId).getAll();
+        }
+      } else {
+        students = await StudentService(academyId).getAll();
+      }
+
       setState(() {
         _students = students;
         _applyFilters();
