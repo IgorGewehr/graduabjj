@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/domain_providers.dart' as tatami;
+import '../../api/dto/financial_dto.dart' as api_fin;
+import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
 import '../../widgets/common/academy_page_header.dart';
 import '../../core/theme.dart';
@@ -57,11 +60,66 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
     try {
       final academyId = FirebaseService.academyId;
+      final flags = ref.read(tatamiFlagsProvider);
+
+      // Payments do mês — Tatami via tatamiPaymentsLegacyProvider com
+      // janela [first, last+1) do mês selecionado.
+      Future<List<Payment>> paymentsFuture() async {
+        if (flags.useTatamiFinancials) {
+          try {
+            final first =
+                DateTime(_selectedMonth.year, _selectedMonth.month, 1);
+            final last =
+                DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
+            final q = tatami.FinancialsQuery(
+              academyId: academyId,
+              filter: api_fin.FinancialFilter(
+                dueFrom: first,
+                dueTo: last,
+                limit: 500,
+              ),
+            );
+            ref.invalidate(tatami.tatamiPaymentsLegacyProvider(q));
+            return await ref.read(
+              tatami.tatamiPaymentsLegacyProvider(q).future,
+            );
+          } catch (_) {
+            // fallback
+          }
+        }
+        return PaymentService(academyId).getByMonth(_currentMonthKey);
+      }
+
+      // Students — Tatami via legacy-typed provider (ativos+lesionados).
+      Future<List<Student>> studentsFuture() async {
+        if (flags.useTatamiReads) {
+          try {
+            final q = tatami.StudentsQuery(academyId: academyId);
+            ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
+            final all = await ref.read(
+              tatami.tatamiStudentsLegacyProvider(q).future,
+            );
+            return all
+                .where((s) =>
+                    s.status == StudentStatus.active ||
+                    s.status == StudentStatus.injured)
+                .toList();
+          } catch (_) {
+            // fallback
+          }
+        }
+        return StudentService(academyId).getActive();
+      }
 
       final results = await Future.wait([
-        PaymentService(academyId).getByMonth(_currentMonthKey),
+        paymentsFuture(),
         PlanService(academyId).list(),
-        StudentService(academyId).getActive(),
+        studentsFuture(),
+        // Monthly summary segue legacy — cálculo agregado client-side
+        // que itera os pagamentos; equivalente Tatami é
+        // `tatamiMonthlyReportProvider` mas devolve shape diferente
+        // (ApiMonthlyReport) e o widget tree consome o Map legacy.
+        // Sprint 3 (remoção da lógica) faz o port.
         PaymentService(academyId).getMonthlySummary(_currentMonthKey),
       ]);
 
