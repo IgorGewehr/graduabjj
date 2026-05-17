@@ -8,6 +8,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/dto/upload_dto.dart' as api_upload;
+import '../../api/feature_flags.dart';
+import '../../api/repositories.dart' as tatami_repos;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../services/services.dart';
@@ -896,17 +899,17 @@ class _EmptyState extends StatelessWidget {
 }
 
 /// Product Form Bottom Sheet
-class _ProductFormSheet extends StatefulWidget {
+class _ProductFormSheet extends ConsumerStatefulWidget {
   final StoreProduct? product;
   final Future<void> Function(Map<String, dynamic>) onSave;
 
   const _ProductFormSheet({this.product, required this.onSave});
 
   @override
-  State<_ProductFormSheet> createState() => _ProductFormSheetState();
+  ConsumerState<_ProductFormSheet> createState() => _ProductFormSheetState();
 }
 
-class _ProductFormSheetState extends State<_ProductFormSheet> {
+class _ProductFormSheetState extends ConsumerState<_ProductFormSheet> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
   late TextEditingController _descriptionController;
@@ -993,21 +996,43 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
 
       setState(() => _isUploadingImage = true);
 
-      // Upload to Firebase Storage
+      final academyId = FirebaseService.academyId;
       final file = File(croppedFile.path);
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final storageRef = FirebaseStorage.instance
-          .ref()
-          .child('academies')
-          .child(FirebaseService.academyId)
-          .child('products')
-          .child('product_$timestamp.jpg');
+      final flags = ref.read(tatamiFlagsProvider);
+      String? downloadUrl;
 
-      await storageRef.putFile(file);
-      final downloadUrl = await storageRef.getDownloadURL();
+      // Sem flag dedicada `useTatamiUploads`; usamos `useTatamiStore`
+      // (mesmo bounded context — produto da loja).
+      if (flags.useTatamiStore) {
+        try {
+          final repo = ref.read(tatami_repos.uploadsRepoProvider);
+          final uploaded = await repo.uploadFileFromDisk(
+            purpose: api_upload.ApiUploadPurpose.storeProduct,
+            file: file,
+            contentType: 'image/jpeg',
+            academyId: academyId,
+          );
+          downloadUrl = uploaded.publicUrl;
+        } catch (_) {
+          // Fallback transparente para o Firebase Storage legacy.
+        }
+      }
+
+      if (downloadUrl == null) {
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('academies')
+            .child(academyId)
+            .child('products')
+            .child('product_$timestamp.jpg');
+
+        await storageRef.putFile(file);
+        downloadUrl = await storageRef.getDownloadURL();
+      }
 
       setState(() {
-        _imageUrls.add(downloadUrl);
+        _imageUrls.add(downloadUrl!);
         _isUploadingImage = false;
       });
     } catch (e) {
