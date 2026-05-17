@@ -2,8 +2,81 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../api/dto/identity_dto.dart';
 
+/// Catalog of permission strings used across the Tatami backend.
+///
+/// Mirror of `internal/identity/domain/permission.go` no backend. Mantenha em
+/// sync — qualquer permission nova precisa ser adicionada aqui E no mapa
+/// [_defaultPermissionsByRole]. As strings exatas são o contrato wire com o
+/// BE (são gravadas em `extra_permissions` no Firestore/Tatami).
+class TatamiPermissions {
+  TatamiPermissions._();
+
+  static const attendanceRead = 'attendance.read';
+  static const attendanceWrite = 'attendance.write';
+  static const financialRead = 'financial.read';
+  static const financialWrite = 'financial.write';
+  static const studentsRead = 'students.read';
+  static const studentsWrite = 'students.write';
+  static const storeRead = 'store.read';
+  static const storeWrite = 'store.write';
+  static const notificationsSend = 'notifications.send';
+
+  /// Conjunto de todas as permissões que podem aparecer no FE. Útil para
+  /// renderizar checkboxes de extras no team management.
+  static const all = <String>[
+    attendanceRead,
+    attendanceWrite,
+    financialRead,
+    financialWrite,
+    studentsRead,
+    studentsWrite,
+    storeRead,
+    storeWrite,
+    notificationsSend,
+  ];
+}
+
 /// User Roles
 enum UserRole { admin, instructor, student, guardian }
+
+/// Default permissions per role — mirror do BE em
+/// `internal/identity/domain/permission.go::defaultPermissions`.
+///
+/// IMPORTANTE: o enum [UserRole] hoje colapsa `monitor` em `instructor` (ver
+/// [_mapApiRoleToLegacy]). Como ainda não temos `monitor` no enum, não há
+/// entrada para ele aqui — quem se importa com a diferença precisa olhar o
+/// payload Tatami direto. Quando adicionarmos `UserRole.monitor`, basta
+/// incluir o conjunto correspondente neste mapa.
+const Map<UserRole, List<String>> _defaultPermissionsByRole = {
+  UserRole.admin: [
+    TatamiPermissions.attendanceRead,
+    TatamiPermissions.attendanceWrite,
+    TatamiPermissions.financialRead,
+    TatamiPermissions.financialWrite,
+    TatamiPermissions.studentsRead,
+    TatamiPermissions.studentsWrite,
+    TatamiPermissions.storeRead,
+    TatamiPermissions.storeWrite,
+    TatamiPermissions.notificationsSend,
+  ],
+  UserRole.instructor: [
+    TatamiPermissions.attendanceRead,
+    TatamiPermissions.attendanceWrite,
+    TatamiPermissions.studentsRead,
+    TatamiPermissions.studentsWrite,
+    TatamiPermissions.financialRead,
+    TatamiPermissions.storeRead,
+    TatamiPermissions.notificationsSend,
+  ],
+  UserRole.student: [
+    TatamiPermissions.attendanceRead,
+    TatamiPermissions.studentsRead,
+  ],
+  UserRole.guardian: [
+    TatamiPermissions.attendanceRead,
+    TatamiPermissions.studentsRead,
+  ],
+};
 
 extension UserRoleExtension on UserRole {
   String get value {
@@ -332,6 +405,12 @@ class AppUser {
   final String? pendingStudentLink;
   final DateTime? approvedAt;
 
+  /// Permissões extras concedidas pelo admin da academia sobre o role default
+  /// — strings no formato do contrato Tatami (`financial.read`,
+  /// `notifications.send`, etc., catalogados em [TatamiPermissions]). Vazio
+  /// na maioria dos casos; usado pelos checks via [hasPermission].
+  final List<String> extraPermissions;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -353,6 +432,7 @@ class AppUser {
     this.instructorId,
     this.pendingStudentLink,
     this.approvedAt,
+    this.extraPermissions = const [],
     required this.createdAt,
     required this.updatedAt,
   });
@@ -383,6 +463,9 @@ class AppUser {
       instructorId: data['instructorId'],
       pendingStudentLink: data['pendingStudentLink'],
       approvedAt: _parseDate(data['approvedAt']),
+      extraPermissions: data['extraPermissions'] is List
+          ? List<String>.from(data['extraPermissions'])
+          : const [],
       createdAt: _parseDate(data['createdAt']) ?? DateTime.now(),
       updatedAt: _parseDate(data['updatedAt']) ?? DateTime.now(),
     );
@@ -437,6 +520,7 @@ class AppUser {
       isProfilePublic: r.user.isProfilePublic,
       academyId: picked.academyId,
       studentId: picked.studentId,
+      extraPermissions: picked.extraPermissions,
       createdAt: r.user.createdAt ?? DateTime.now(),
       updatedAt: r.user.updatedAt ?? DateTime.now(),
     );
@@ -452,6 +536,7 @@ class AppUser {
     String? instructorId,
     String? pendingStudentLink,
     DateTime? approvedAt,
+    List<String> extraPermissions = const [],
   }) {
     return AppUser(
       id: globalUser.id,
@@ -471,6 +556,7 @@ class AppUser {
       instructorId: instructorId,
       pendingStudentLink: pendingStudentLink,
       approvedAt: approvedAt,
+      extraPermissions: extraPermissions,
       createdAt: globalUser.createdAt,
       updatedAt: globalUser.updatedAt,
     );
@@ -496,6 +582,7 @@ class AppUser {
       'instructorId': instructorId,
       'pendingStudentLink': pendingStudentLink,
       'approvedAt': approvedAt != null ? Timestamp.fromDate(approvedAt!) : null,
+      if (extraPermissions.isNotEmpty) 'extraPermissions': extraPermissions,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(DateTime.now()),
     };
@@ -519,6 +606,7 @@ class AppUser {
     String? instructorId,
     String? pendingStudentLink,
     DateTime? approvedAt,
+    List<String>? extraPermissions,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -540,6 +628,7 @@ class AppUser {
       instructorId: instructorId ?? this.instructorId,
       pendingStudentLink: pendingStudentLink ?? this.pendingStudentLink,
       approvedAt: approvedAt ?? this.approvedAt,
+      extraPermissions: extraPermissions ?? this.extraPermissions,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -553,6 +642,19 @@ class AppUser {
   bool get hasLinkedStudent =>
       studentId != null || (linkedStudentIds?.isNotEmpty ?? false);
   bool get hasAcademy => accountType == AccountType.linked && academyId != null;
+
+  /// Verifica se este user tem a permission [perm] — checa primeiro o
+  /// conjunto default do seu [role] e depois fallback em [extraPermissions].
+  ///
+  /// Use as constantes de [TatamiPermissions] como argumento, não literais:
+  ///
+  /// ```dart
+  /// if (user.hasPermission(TatamiPermissions.financialWrite)) { ... }
+  /// ```
+  bool hasPermission(String perm) {
+    final defaults = _defaultPermissionsByRole[role] ?? const <String>[];
+    return defaults.contains(perm) || extraPermissions.contains(perm);
+  }
 }
 
 /// Mapeia o role do Tatami (incluindo `monitor`, novo no Sprint H) para o
