@@ -5,6 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/domain_providers.dart' as tatami;
+import '../../api/dto/attendance_dto.dart' as api_att;
+import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -74,14 +77,85 @@ class _MonitorStudentDetailScreenState
       final attendanceService = AttendanceService(academyId);
       final beltService = BeltProgressionService(academyId);
       final achievementService = AchievementService(academyId);
+      final flags = ref.read(tatamiFlagsProvider);
+
+      // Tatami-backed reads atrás de feature flags. Fallback transparente.
+      Future<Student?> studentFuture() async {
+        if (flags.useTatamiReads) {
+          try {
+            ref.invalidate(tatami.tatamiStudentByIdLegacyProvider(
+              tatami.studentRef(academyId, widget.studentId),
+            ));
+            return await ref.read(
+              tatami.tatamiStudentByIdLegacyProvider(
+                tatami.studentRef(academyId, widget.studentId),
+              ).future,
+            );
+          } catch (_) {
+            // fallback
+          }
+        }
+        return studentService.getById(widget.studentId);
+      }
+
+      Future<List<Attendance>> attendanceFuture() async {
+        if (flags.useTatamiAttendance) {
+          try {
+            final q = tatami.AttendanceQuery(
+              academyId: academyId,
+              filter: api_att.AttendanceFilter(
+                studentId: widget.studentId,
+                limit: 200,
+              ),
+            );
+            ref.invalidate(tatami.tatamiAttendanceLegacyProvider(q));
+            return await ref.read(
+              tatami.tatamiAttendanceLegacyProvider(q).future,
+            );
+          } catch (_) {
+            // fallback
+          }
+        }
+        return attendanceService.getByStudent(widget.studentId);
+      }
+
+      Future<List<BeltProgression>> beltFuture() async {
+        if (flags.useTatamiReads) {
+          try {
+            final r = tatami.studentRef(academyId, widget.studentId);
+            ref.invalidate(tatami.tatamiBeltProgressionsLegacyProvider(r));
+            return await ref.read(
+              tatami.tatamiBeltProgressionsLegacyProvider(r).future,
+            );
+          } catch (_) {
+            // fallback
+          }
+        }
+        return beltService.getByStudent(widget.studentId);
+      }
+
+      Future<List<Achievement>> achievementsFuture() async {
+        if (flags.useTatamiCompetitions) {
+          try {
+            final r = tatami.studentRef(academyId, widget.studentId);
+            ref.invalidate(tatami.tatamiAchievementsLegacyProvider(r));
+            return await ref.read(
+              tatami.tatamiAchievementsLegacyProvider(r).future,
+            );
+          } catch (_) {
+            // fallback
+          }
+        }
+        return achievementService.getForStudent(widget.studentId);
+      }
 
       // Sprint 5 — fan out the four independent reads in parallel. Cuts
       // total wait from sum-of-latencies to max-of-latencies.
       final futures = await Future.wait<dynamic>([
-        studentService.getById(widget.studentId),
-        attendanceService.getByStudent(widget.studentId),
-        beltService.getByStudent(widget.studentId),
-        achievementService.getForStudent(widget.studentId),
+        studentFuture(),
+        attendanceFuture(),
+        beltFuture(),
+        achievementsFuture(),
       ]);
 
       final student = futures[0] as Student?;
