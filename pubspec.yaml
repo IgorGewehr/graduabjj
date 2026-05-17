@@ -19,6 +19,9 @@ dependencies:
   cloud_firestore: ^5.6.0
   firebase_storage: ^12.4.1
   cloud_functions: ^5.2.0
+  # Remote Config hydrates `tatamiFlagsProvider` at boot — see lib/main.dart.
+  # Keep the constraint loose enough to track firebase_core 3.x.
+  firebase_remote_config: ^5.4.0
 
   # State Management
   flutter_riverpod: ^2.6.1
