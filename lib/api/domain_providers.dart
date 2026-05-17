@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/student.dart' as legacy;
 import '../services/achievement_service.dart' as legacy_ach;
 import '../services/attendance_service.dart' as legacy_att;
+import '../services/belt_progression_service.dart' as legacy_belt;
 import '../services/class_service.dart' show BJJClass;
 import '../services/competition_service.dart' as legacy_comp;
 import '../services/link_code_service.dart' show LinkCode;
@@ -177,6 +178,38 @@ final tatamiStudentByIdLegacyProvider =
       r.studentId,
     )).future);
     return legacy.Student.fromApi(api);
+  },
+);
+
+/// Histórico de promoções por aluno tipado no modelo legacy
+/// [legacy_belt.BeltProgression]. Wraps `student_repo.listBeltProgressions`
+/// e adapta via `BeltProgression.fromApi`.
+///
+/// Gated por `useTatamiReads` (mesma flag que cobre demais reads do contexto
+/// Student no Sprint 2). Cache `.family` por `StudentRef`.
+///
+/// Uso típico em tela:
+/// ```dart
+/// try {
+///   if (flags.useTatamiReads) {
+///     return await ref.read(tatamiBeltProgressionsLegacyProvider(
+///       studentRef(academyId, studentId),
+///     ).future);
+///   }
+/// } catch (_) {/* fallback */}
+/// return BeltProgressionService(academyId).getByStudent(studentId);
+/// ```
+final tatamiBeltProgressionsLegacyProvider =
+    FutureProvider.family<List<legacy_belt.BeltProgression>, StudentRef>(
+  (ref, r) async {
+    _requireFlag(
+      ref.watch(tatamiFlagsProvider).useTatamiReads,
+      'useTatamiReads',
+    );
+    final page = await ref
+        .watch(studentRepoProvider)
+        .listBeltProgressions(r.academyId, r.studentId);
+    return page.items.map(legacy_belt.BeltProgression.fromApi).toList();
   },
 );
 

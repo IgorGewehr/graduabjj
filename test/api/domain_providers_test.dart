@@ -153,6 +153,59 @@ void main() {
     });
   });
 
+  group('tatamiBeltProgressionsLegacyProvider', () {
+    test('flag off explode com TatamiFlagDisabledError', () async {
+      final c = container();
+      addTearDown(c.dispose);
+      expect(
+        () => c.read(
+          tatamiBeltProgressionsLegacyProvider(studentRef('aid', 's-1')).future,
+        ),
+        throwsA(isA<TatamiFlagDisabledError>()),
+      );
+    });
+
+    test('flag on adapta DTO → modelo legacy', () async {
+      adapter.onGet(
+        '/v1/academies/aid/students/s-1/belt-progressions',
+        (s) => s.reply(200, {
+          'items': [
+            {
+              'id': 'bp-1',
+              'student_id': 's-1',
+              'sport': 'bjj',
+              'previous_belt': 'white',
+              'previous_stripes': 3,
+              'new_belt': 'blue',
+              'new_stripes': 0,
+              'promotion_date': '2026-05-16T00:00:00Z',
+              'total_classes': 82,
+              'effective_count_at_promotion': 80,
+              'promoted_by_uid': 'uid-instr',
+              'created_at': '2026-05-16T19:00:00Z',
+            },
+          ],
+          'has_more': false,
+        }),
+        queryParameters: {'limit': 20},
+      );
+
+      final c = container(
+        flags: TatamiFlags.allOff.copyWith(useTatamiReads: true),
+      );
+      addTearDown(c.dispose);
+
+      final list = await c.read(
+        tatamiBeltProgressionsLegacyProvider(studentRef('aid', 's-1')).future,
+      );
+      expect(list, hasLength(1));
+      expect(list.first.id, 'bp-1');
+      expect(list.first.newBelt, 'blue');
+      expect(list.first.promotedBy, 'uid-instr');
+      expect(list.first.promotedByName, isNull);
+    });
+  });
+
   group('StudentsQuery equality (Riverpod family cache key)', () {
     test('mesmo academy + filter = mesma chave', () {
       const a = StudentsQuery(
