@@ -4,6 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/domain_providers.dart' as tatami;
+import '../../api/dto/student_dto.dart' as api_student;
+import '../../api/feature_flags.dart';
+import '../../api/repositories.dart' as tatami_repos;
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
@@ -78,7 +82,24 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
     try {
       final academyId = FirebaseService.academyId;
       final studentService = StudentService(academyId);
-      final student = await studentService.getById(widget.studentId!);
+      final flags = ref.read(tatamiFlagsProvider);
+
+      Student? student;
+      if (flags.useTatamiReads) {
+        try {
+          ref.invalidate(tatami.tatamiStudentByIdLegacyProvider(
+            tatami.studentRef(academyId, widget.studentId!),
+          ));
+          student = await ref.read(
+            tatami.tatamiStudentByIdLegacyProvider(
+              tatami.studentRef(academyId, widget.studentId!),
+            ).future,
+          );
+        } catch (_) {
+          // fallback
+        }
+      }
+      student ??= await studentService.getById(widget.studentId!);
 
       if (student != null) {
         _populateForm(student);
@@ -158,8 +179,47 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
         };
       }
 
+      final flags = ref.read(tatamiFlagsProvider);
+
       if (isEditing) {
-        await studentService.update(widget.studentId!, studentData);
+        bool wroteViaTatami = false;
+        if (flags.useTatamiWrites) {
+          try {
+            final repo = ref.read(tatami_repos.studentRepoProvider);
+            await repo.update(
+              academyId,
+              widget.studentId!,
+              api_student.UpdateStudentRequest(
+                fullName: _fullNameController.text.trim(),
+                nickname: _nicknameController.text.trim().isEmpty
+                    ? null
+                    : _nicknameController.text.trim(),
+                email: _emailController.text.trim().isEmpty
+                    ? null
+                    : _emailController.text.trim(),
+                phone: _phoneController.text.trim().isEmpty
+                    ? null
+                    : _phoneController.text.trim(),
+                birthDate: _birthDate,
+                startDate: _startDate,
+                category: _category == StudentCategory.kids
+                    ? api_student.ApiStudentCategory.kids
+                    : api_student.ApiStudentCategory.adult,
+                status: api_student.ApiStudentStatusX.fromWire(_status.value),
+                healthNotes: _notesController.text.trim().isEmpty
+                    ? null
+                    : _notesController.text.trim(),
+              ),
+            );
+            wroteViaTatami = true;
+          } catch (_) {
+            // fallback transparente — preserva campos não suportados pelo DTO
+            // (emergency_contact estruturado, guardianName/Phone/Email).
+          }
+        }
+        if (!wroteViaTatami) {
+          await studentService.update(widget.studentId!, studentData);
+        }
         if (mounted) {
           context.showSuccess('Aluno atualizado com sucesso!');
           context.pop();
