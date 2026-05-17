@@ -9,7 +9,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/attendance_dto.dart' as api_att;
 import '../../api/dto/financial_dto.dart' as api_fin;
-import '../../api/feature_flags.dart';
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
@@ -67,79 +66,55 @@ class _AdminStudentDetailScreenState
 
     try {
       final academyId = FirebaseService.academyId;
-      final studentService = StudentService(academyId);
-      final attendanceService = AttendanceService(academyId);
-      final paymentService = PaymentService(academyId);
+      // Services legacy mantidos onde Tatami ainda não tem equivalente
+      // ou onde o service age como model holder (BeltProgressionService,
+      // AchievementService, StoreService.getOrdersByStudent, AssessmentService,
+      // PlanService.getPlansForStudent).
       final beltService = BeltProgressionService(academyId);
       final achievementService = AchievementService(academyId);
-
       final storeService = StoreService(academyId);
       final assessmentService = AssessmentService(academyId);
       final planService = PlanService(academyId);
 
-      final flags = ref.read(tatamiFlagsProvider);
-
-      // Tatami-backed reads for student/payments/attendance behind feature
-      // flags. Fallback transparente para o Firestore se a chamada Tatami
-      // falhar — não quebra o resto do load.
+      // Tatami direto para student/payments/attendance — fallback Firestore
+      // removido na Fase 1.
       Future<Student?> studentFuture() async {
-        if (flags.useTatamiReads) {
-          try {
-            ref.invalidate(tatami.tatamiStudentByIdLegacyProvider(
+        try {
+          ref.invalidate(tatami.tatamiStudentByIdLegacyProvider(
+            tatami.studentRef(academyId, widget.studentId),
+          ));
+          return await ref.read(
+            tatami.tatamiStudentByIdLegacyProvider(
               tatami.studentRef(academyId, widget.studentId),
-            ));
-            return await ref.read(
-              tatami.tatamiStudentByIdLegacyProvider(
-                tatami.studentRef(academyId, widget.studentId),
-              ).future,
-            );
-          } catch (_) {
-            // fallback
-          }
+            ).future,
+          );
+        } catch (_) {
+          return null;
         }
-        return studentService.getById(widget.studentId);
       }
 
       Future<List<Attendance>> attendanceFuture() async {
-        if (flags.useTatamiAttendance) {
-          try {
-            final q = tatami.AttendanceQuery(
-              academyId: academyId,
-              filter: api_att.AttendanceFilter(
-                studentId: widget.studentId,
-                limit: 200,
-              ),
-            );
-            ref.invalidate(tatami.tatamiAttendanceLegacyProvider(q));
-            return await ref.read(
-              tatami.tatamiAttendanceLegacyProvider(q).future,
-            );
-          } catch (_) {
-            // fallback
-          }
-        }
-        return attendanceService.getByStudent(widget.studentId);
+        final q = tatami.AttendanceQuery(
+          academyId: academyId,
+          filter: api_att.AttendanceFilter(
+            studentId: widget.studentId,
+            limit: 200,
+          ),
+        );
+        ref.invalidate(tatami.tatamiAttendanceLegacyProvider(q));
+        return ref.read(tatami.tatamiAttendanceLegacyProvider(q).future);
       }
 
       Future<List<Payment>> paymentsFuture() async {
-        if (flags.useTatamiFinancials) {
-          try {
-            final q = tatami.FinancialsQuery(
-              academyId: academyId,
-              filter: api_fin.FinancialFilter(
-                studentId: widget.studentId,
-                limit: 100,
-              ),
-            );
-            ref.invalidate(tatami.tatamiPaymentsLegacyProvider(q));
-            return await ref.read(
-              tatami.tatamiPaymentsLegacyProvider(q).future,
-            );
-          } catch (_) {
-            // fallback
-          }
-        }
-        return paymentService.getByStudent(widget.studentId);
+        final q = tatami.FinancialsQuery(
+          academyId: academyId,
+          filter: api_fin.FinancialFilter(
+            studentId: widget.studentId,
+            limit: 100,
+          ),
+        );
+        ref.invalidate(tatami.tatamiPaymentsLegacyProvider(q));
+        return ref.read(tatami.tatamiPaymentsLegacyProvider(q).future);
       }
 
       // Sprint 5 — fan out the eight independent reads with `Future.wait`.

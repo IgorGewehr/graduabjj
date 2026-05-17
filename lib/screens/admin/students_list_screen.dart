@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../api/domain_providers.dart' as tatami;
-import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
@@ -60,31 +59,21 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
 
     try {
       final academyId = FirebaseService.academyId;
-      final flags = ref.read(tatamiFlagsProvider);
-      List<Student> students;
-      if (flags.useTatamiReads) {
-        try {
-          // Invalidate to force a fresh fetch on pull-to-refresh.
-          ref.invalidate(
-            tatami.tatamiStudentsLegacyProvider(
-              tatami.StudentsQuery(academyId: academyId),
-            ),
-          );
-          students = await ref.read(
-            tatami.tatamiStudentsLegacyProvider(
-              tatami.StudentsQuery(academyId: academyId),
-            ).future,
-          );
-          // Match legacy sort (alphabetical by fullName) — Tatami list may
-          // not preserve client-side ordering by default.
-          students.sort((a, b) => a.fullName.compareTo(b.fullName));
-        } catch (_) {
-          // Fallback transparente para o caminho Firestore legacy.
-          students = await StudentService(academyId).getAll();
-        }
-      } else {
-        students = await StudentService(academyId).getAll();
-      }
+
+      // Invalidate to force a fresh fetch on pull-to-refresh.
+      ref.invalidate(
+        tatami.tatamiStudentsLegacyProvider(
+          tatami.StudentsQuery(academyId: academyId),
+        ),
+      );
+      final students = await ref.read(
+        tatami.tatamiStudentsLegacyProvider(
+          tatami.StudentsQuery(academyId: academyId),
+        ).future,
+      );
+      // Match legacy sort (alphabetical by fullName) — Tatami list may not
+      // preserve client-side ordering by default.
+      students.sort((a, b) => a.fullName.compareTo(b.fullName));
 
       // Eligibility snapshot — only loaded when the academy has auto-graduation
       // enabled. Reading the academy settings is cheap (single doc) and lets
