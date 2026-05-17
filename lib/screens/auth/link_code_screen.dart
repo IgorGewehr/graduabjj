@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +8,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/global_user_service.dart';
 import '../../services/instructor_link_code_service.dart';
 import '../../services/link_code_service.dart';
 
@@ -202,16 +202,22 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
       if (user == null) throw Exception('No user returned from Firebase Auth');
       await user.updateDisplayName(displayName);
 
-      // Root /users/{uid} doc so subsequent updates by linkUserToAcademy can
-      // bump accountType to "linked" without failing on a missing doc.
-      await FirebaseFirestore.instance.doc('users/${user.uid}').set({
-        'email': email,
-        'displayName': displayName,
-        'accountType': 'free',
-        'isActive': true,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      // Root /users/{uid} doc — uses the centralized GlobalUserService
+      // abstraction (não escreve no Firestore direto) para garantir que o
+      // doc existe antes do `linkUserToAcademy` (que faz `userRef.update`).
+      //
+      // NOTA (Sprint 1B): o endpoint Tatami `/v1/link-codes/{code}/redeem`
+      // (atômico server-side) cobre o fluxo de aluno (6 chars). O fluxo de
+      // instrutor (8 chars) ainda não tem `redeem` exposto em
+      // `LinkCodeRemoteRepo` — só `createForInstructor`. Quando o endpoint
+      // `POST /v1/instructor-link-codes/{code}/redeem` existir + sair no
+      // repo, este bloco inteiro vira `await linkCodeRepoProvider.redeem(...)`
+      // e o `redeemInstructorCode` legacy abaixo é removido.
+      await globalUserService.getOrCreateGlobalUser(
+        userId: user.uid,
+        email: email,
+        displayName: displayName,
+      );
 
       await redeemInstructorCode(
         code: _validatedInstructorCode!,
