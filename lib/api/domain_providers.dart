@@ -12,6 +12,7 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/student.dart' as legacy;
 import 'dto/attendance_dto.dart';
 import 'dto/competition_dto.dart';
 import 'dto/financial_dto.dart';
@@ -138,6 +139,34 @@ final tatamiStudentByIdProvider =
       'useTatamiReads',
     );
     return ref.watch(studentRepoProvider).getById(r.academyId, r.studentId);
+  },
+);
+
+/// Provider tipado **com modelo legacy** — telas que ainda usam Student
+/// podem migrar para isto sem refatorar o widget tree inteiro. Adapta
+/// ApiStudent → Student via Student.fromApi.
+///
+/// Quando `useTatamiReads` for ligada via Remote Config, screens que usem
+/// este provider passam a ler do Tatami; quando desligada, lança
+/// TatamiFlagDisabledError. Não há fallback automático aqui porque o
+/// caller decide a estratégia (ex.: try { tatamiX } catch { legacyX }).
+final tatamiStudentsLegacyProvider =
+    FutureProvider.family<List<legacy.Student>, StudentsQuery>(
+  (ref, q) async {
+    final page = await ref.watch(tatamiStudentsProvider(q).future);
+    return page.items.map(legacy.Student.fromApi).toList();
+  },
+);
+
+/// Versão para getById que devolve o modelo legacy direto.
+final tatamiStudentByIdLegacyProvider =
+    FutureProvider.family<legacy.Student, StudentRef>(
+  (ref, r) async {
+    final api = await ref.watch(tatamiStudentByIdProvider(_StudentRef(
+      r.academyId,
+      r.studentId,
+    )).future);
+    return legacy.Student.fromApi(api);
   },
 );
 
