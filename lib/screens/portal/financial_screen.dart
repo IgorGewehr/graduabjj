@@ -9,6 +9,9 @@ import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../api/dto/financial_dto.dart' as api_fin;
+import '../../api/feature_flags.dart';
+import '../../api/repositories.dart' as tatami_repos;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
@@ -826,6 +829,7 @@ class _PixPaymentBottomSheetState
   String? _error;
   bool _paymentConfirmed = false;
   StreamSubscription<DocumentSnapshot>? _paymentListener;
+  Timer? _paymentPollTimer;
 
   @override
   void initState() {
@@ -837,11 +841,47 @@ class _PixPaymentBottomSheetState
   @override
   void dispose() {
     _paymentListener?.cancel();
+    _paymentPollTimer?.cancel();
     super.dispose();
   }
 
   void _setupPaymentListener() {
     final academyId = FirebaseService.academyId;
+    final flags = ref.read(tatamiFlagsProvider);
+
+    if (flags.useTatamiFinancials) {
+      // Tatami não tem stream em tempo real para um único financial; o
+      // padrão acordado é polling de 2s no /v1/.../financials/{id} até o
+      // status sair de pending. Cancela ao confirmar ou no dispose.
+      _paymentPollTimer = Timer.periodic(
+        const Duration(seconds: 2),
+        (timer) async {
+          if (!mounted) {
+            timer.cancel();
+            return;
+          }
+          try {
+            final repo = ref.read(tatami_repos.financialRepoProvider);
+            final f = await repo.getById(academyId, widget.payment.id);
+            if (!mounted) return;
+            if (f.status == api_fin.ApiFinancialStatus.paid &&
+                !_paymentConfirmed) {
+              setState(() => _paymentConfirmed = true);
+              timer.cancel();
+              _showPaymentConfirmedDialog();
+              ref.invalidate(
+                studentPaymentsProvider(widget.payment.studentId),
+              );
+            }
+          } catch (_) {
+            // Erro transiente — segue o polling sem propagar para a UI.
+            // Se a flag estiver mal-configurada e cada poll falhar, o usuário
+            // ainda pode encerrar manualmente o bottom sheet.
+          }
+        },
+      );
+      return;
+    }
 
     _paymentListener = FirebaseFirestore.instance
         .collection('academies')
