@@ -3,11 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
-import '../../core/theme.dart';
+import '../../api/domain_providers.dart' as tatami;
+import '../../api/dto/financial_dto.dart' as api_fin;
+import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
+import '../../core/theme.dart';
 import '../../providers/selected_academy_provider.dart';
-import '../../services/firebase_service.dart';
 import '../../services/billing_reminder_service.dart';
+import '../../services/firebase_service.dart';
+import '../../services/payment_service.dart';
 import '../../widgets/cached_image.dart';
 
 /// Admin Billing Reminders Screen
@@ -69,13 +73,64 @@ class _AdminBillingRemindersScreenState
     try {
       final academyId = FirebaseService.academyId;
       _billingService = BillingReminderService(academyId);
+      final flags = ref.read(tatamiFlagsProvider);
 
-      final results = await Future.wait([
-        _billingService.getOverdueWithStages(),
-        _billingService.getCollectionStats(),
+      // Sprint 2 wiring — stages reconstruídas no widget a partir do Tatami
+      // (overdue + pending paginados) quando flag ligada. Stats/contatos/
+      // settings seguem legacy nesta batch — porting completo é Sprint 3.
+      Future<Map<BillingStage, List<Map<String, dynamic>>>> stagesFuture(
+        Map<String, StudentContact> contacts,
+      ) async {
+        if (flags.useTatamiFinancials) {
+          try {
+            // Busca overdue + pending em paralelo (BE só aceita status único
+            // por filter); merge e classifica por daysOverdue no widget.
+            final overdueQ = tatami.FinancialsQuery(
+              academyId: academyId,
+              filter: const api_fin.FinancialFilter(
+                status: api_fin.ApiFinancialStatus.overdue,
+                limit: 500,
+              ),
+            );
+            final pendingQ = tatami.FinancialsQuery(
+              academyId: academyId,
+              filter: const api_fin.FinancialFilter(
+                status: api_fin.ApiFinancialStatus.pending,
+                limit: 500,
+              ),
+            );
+            ref.invalidate(tatami.tatamiPaymentsLegacyProvider(overdueQ));
+            ref.invalidate(tatami.tatamiPaymentsLegacyProvider(pendingQ));
+            final futures = await Future.wait([
+              ref.read(tatami.tatamiPaymentsLegacyProvider(overdueQ).future),
+              ref.read(tatami.tatamiPaymentsLegacyProvider(pendingQ).future),
+            ]);
+            final all = <Payment>[...futures[0], ...futures[1]];
+            return _buildStagesFromPayments(all, contacts);
+          } catch (_) {
+            // fallback
+          }
+        }
+        return _billingService.getOverdueWithStages();
+      }
+
+      // Carrega contatos primeiro para poder denormalizar studentName quando
+      // os stages vierem do Tatami (DTO Financial não traz studentName).
+      // Stats/settings em paralelo com isso. Sequenciamento mínimo para
+      // não perder o fan-out.
+      final contactsAndExtras = await Future.wait([
         _billingService.getStudentContacts(),
+        _billingService.getCollectionStats(),
         _billingService.getNotificationSettings(),
       ]);
+      final contacts = contactsAndExtras[0] as Map<String, StudentContact>;
+      final stages = await stagesFuture(contacts);
+      final results = [
+        stages,
+        contactsAndExtras[1],
+        contacts,
+        contactsAndExtras[2],
+      ];
 
       // Academy name for notification service templates ({academia}). Vem do
       // cache populado por `selectedAcademyProvider` no boot — evita uma
@@ -117,6 +172,76 @@ class _AdminBillingRemindersScreenState
 
   int _stageCount(BillingStage stage) {
     return _overdueStages[stage]?.length ?? 0;
+  }
+
+  /// Pure: agrupa pagamentos overdue/pending em billing stages D+1..D+30+.
+  /// Replica `BillingReminderService._classifyStage` no widget — sem chamar
+  /// nada de IO. studentName vem denormalizado a partir de [contacts].
+  Map<BillingStage, List<Map<String, dynamic>>> _buildStagesFromPayments(
+    List<Payment> payments,
+    Map<String, StudentContact> contacts,
+  ) {
+    final out = <BillingStage, List<Map<String, dynamic>>>{
+      BillingStage.d0: [],
+      BillingStage.d1: [],
+      BillingStage.d3: [],
+      BillingStage.d7: [],
+      BillingStage.d15: [],
+      BillingStage.d30: [],
+    };
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+
+    for (final p in payments) {
+      if (p.status != PaymentStatus.overdue &&
+          p.status != PaymentStatus.pending) {
+        continue;
+      }
+      final dueStart =
+          DateTime(p.dueDate.year, p.dueDate.month, p.dueDate.day);
+      final daysOverdue = todayStart.difference(dueStart).inDays;
+      if (daysOverdue < 1) continue;
+
+      BillingStage? stage;
+      if (daysOverdue >= 30) {
+        stage = BillingStage.d30;
+      } else if (daysOverdue >= 15) {
+        stage = BillingStage.d15;
+      } else if (daysOverdue >= 7) {
+        stage = BillingStage.d7;
+      } else if (daysOverdue >= 3) {
+        stage = BillingStage.d3;
+      } else if (daysOverdue >= 1) {
+        stage = BillingStage.d1;
+      }
+      if (stage == null) continue;
+
+      final contact = contacts[p.studentId];
+      out[stage]!.add({
+        'id': p.id,
+        'studentId': p.studentId,
+        'studentName': p.studentName.isNotEmpty
+            ? p.studentName
+            : (contact?.studentName ?? ''),
+        'amount': p.value,
+        'dueDate': p.dueDate,
+        'status': p.status == PaymentStatus.overdue ? 'overdue' : 'pending',
+        'referenceMonth': p.referenceMonth,
+        'planId': p.planId,
+        'description': p.description,
+        'daysOverdue': daysOverdue,
+        'stage': stage.value,
+      });
+    }
+
+    for (final st in BillingStage.values) {
+      out[st]!.sort((a, b) {
+        final aD = a['daysOverdue'] as int;
+        final bD = b['daysOverdue'] as int;
+        return bD.compareTo(aD);
+      });
+    }
+    return out;
   }
 
   BillingStage get _currentStage => BillingStage.values[_tabController.index];
