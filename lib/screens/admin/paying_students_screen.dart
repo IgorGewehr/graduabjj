@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/domain_providers.dart' as tatami;
+import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -10,7 +13,7 @@ import '../../widgets/cached_image.dart';
 import '../../widgets/common/belt_badge.dart';
 
 /// Paying Students Screen - List of students enrolled in plans
-class PayingStudentsScreen extends StatefulWidget {
+class PayingStudentsScreen extends ConsumerStatefulWidget {
   final List<Student> students;
   final List<Plan> plans;
 
@@ -21,10 +24,11 @@ class PayingStudentsScreen extends StatefulWidget {
   });
 
   @override
-  State<PayingStudentsScreen> createState() => _PayingStudentsScreenState();
+  ConsumerState<PayingStudentsScreen> createState() =>
+      _PayingStudentsScreenState();
 }
 
-class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
+class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
   String _searchTerm = '';
   String _planFilter = '';
   String _sortBy = 'name'; // name | belt | planCount
@@ -37,8 +41,24 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
   }
 
   Future<void> _refreshPlans() async {
-    final planService = PlanService(FirebaseService.academyId);
-    final plans = await planService.list();
+    final academyId = FirebaseService.academyId;
+    final flags = ref.read(tatamiFlagsProvider);
+
+    List<Plan> plans;
+    if (flags.useTatamiWrites) {
+      try {
+        ref.invalidate(tatami.tatamiPlansLegacyProvider(academyId));
+        plans = await ref.read(
+          tatami.tatamiPlansLegacyProvider(academyId).future,
+        );
+      } catch (_) {
+        // Fallback transparente para Firestore legacy.
+        plans = await PlanService(academyId).list();
+      }
+    } else {
+      plans = await PlanService(academyId).list();
+    }
+
     if (mounted) {
       setState(() => _plans = plans);
     }
