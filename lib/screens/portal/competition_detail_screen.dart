@@ -1,13 +1,15 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/feature_flags.dart';
+import '../../api/repositories.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/services.dart';
 import '../../widgets/competitions/competition_gallery.dart';
 import '../../widgets/competitions/photo_upload_sheet.dart';
@@ -76,12 +78,27 @@ class _CompetitionDetailScreenState
     try {
       final competitionService = CompetitionService(academyId);
       final enrollmentService = CompetitionEnrollmentService(academyId);
+      final flags = ref.read(tatamiFlagsProvider);
 
       // Sprint 5 — parallelize the three independent fetches with
       // `Future.wait`. Each future has its own `.catchError` so a missing
       // index on results/enrollments doesn't cancel the whole batch.
+      Future<Competition?> competitionFuture() async {
+        if (flags.useTatamiCompetitions) {
+          try {
+            final api = await ref
+                .read(competitionRepoProvider)
+                .getById(academyId, widget.competitionId);
+            return Competition.fromApi(api);
+          } catch (_) {
+            // fallback
+          }
+        }
+        return competitionService.getById(widget.competitionId);
+      }
+
       final futures = await Future.wait<dynamic>([
-        competitionService.getById(widget.competitionId),
+        competitionFuture(),
         competitionService
             .getResultsForCompetition(widget.competitionId)
             .catchError((_) => <CompetitionResult>[]),
