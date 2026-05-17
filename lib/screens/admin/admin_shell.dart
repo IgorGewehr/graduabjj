@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
+import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../widgets/cached_image.dart';
@@ -192,7 +193,14 @@ class AdminSidebar extends ConsumerWidget {
           ),
           const Divider(height: 1),
 
-          // Navigation Items
+          // Navigation Items — cada item gated pela permission Tatami
+          // correspondente. user=null (loading) esconde tudo defensivamente.
+          //
+          // Decisão para Financeiro/Loja: o instrutor default tem
+          // `financial.read` mas não `financial.write` — exibimos o item de
+          // menu porque a tela em si oferece vistas read-only (quem pagou,
+          // recibos). Os botões destrutivos dentro de cada tela (criar
+          // cobrança, sacar etc.) são gated em commit 3.
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -204,59 +212,79 @@ class AdminSidebar extends ConsumerWidget {
                   path: '/admin',
                   currentPath: currentPath,
                 ),
-                _NavItem(
-                  icon: Icons.people_outline,
-                  activeIcon: Icons.people,
-                  label: 'Alunos',
-                  path: '/admin/alunos',
-                  currentPath: currentPath,
-                ),
+                if (user?.hasPermission(TatamiPermissions.studentsRead) ?? false)
+                  _NavItem(
+                    icon: Icons.people_outline,
+                    activeIcon: Icons.people,
+                    label: 'Alunos',
+                    path: '/admin/alunos',
+                    currentPath: currentPath,
+                  ),
                 // 'Chamada' abre a chamada normal. O FAB 'Chamada por QR'
                 // dentro da propria tela leva pra projecao — sem precisar
                 // de duas entradas na sidebar.
-                _NavItem(
-                  icon: Icons.check_circle_outline,
-                  activeIcon: Icons.check_circle,
-                  label: 'Chamada',
-                  path: '/admin/chamada',
-                  currentPath: currentPath,
-                ),
-                _NavItem(
-                  icon: Icons.calendar_month_outlined,
-                  activeIcon: Icons.calendar_month,
-                  label: 'Turmas',
-                  path: '/admin/turmas',
-                  currentPath: currentPath,
-                ),
-                _NavItem(
-                  icon: Icons.emoji_events_outlined,
-                  activeIcon: Icons.emoji_events,
-                  label: 'Campeonatos',
-                  path: '/admin/campeonatos',
-                  currentPath: currentPath,
-                ),
-                _NavItem(
-                  icon: Icons.attach_money_outlined,
-                  activeIcon: Icons.attach_money,
-                  label: 'Financeiro',
-                  path: '/admin/financeiro',
-                  currentPath: currentPath,
-                ),
-                _NavItem(
-                  icon: Icons.receipt_long_outlined,
-                  activeIcon: Icons.receipt_long,
-                  label: 'Cobranca',
-                  path: '/admin/cobranca',
-                  currentPath: currentPath,
-                ),
-                _NavItem(
-                  icon: Icons.bar_chart_outlined,
-                  activeIcon: Icons.bar_chart,
-                  label: 'Relatorios',
-                  path: '/admin/relatorios',
-                  currentPath: currentPath,
-                ),
-                if (isStoreEnabled)
+                if (user?.hasPermission(TatamiPermissions.attendanceRead) ??
+                    false)
+                  _NavItem(
+                    icon: Icons.check_circle_outline,
+                    activeIcon: Icons.check_circle,
+                    label: 'Chamada',
+                    path: '/admin/chamada',
+                    currentPath: currentPath,
+                  ),
+                if (user?.hasPermission(TatamiPermissions.attendanceRead) ??
+                    false)
+                  _NavItem(
+                    icon: Icons.calendar_month_outlined,
+                    activeIcon: Icons.calendar_month,
+                    label: 'Turmas',
+                    path: '/admin/turmas',
+                    currentPath: currentPath,
+                  ),
+                // Campeonatos não tem perm dedicada hoje — fica visível para
+                // qualquer instrutor/admin (consome o mesmo escopo lógico
+                // que students). Estudantes/guardiões não veem.
+                if (user?.isInstructor ?? false)
+                  _NavItem(
+                    icon: Icons.emoji_events_outlined,
+                    activeIcon: Icons.emoji_events,
+                    label: 'Campeonatos',
+                    path: '/admin/campeonatos',
+                    currentPath: currentPath,
+                  ),
+                if (user?.hasPermission(TatamiPermissions.financialRead) ??
+                    false)
+                  _NavItem(
+                    icon: Icons.attach_money_outlined,
+                    activeIcon: Icons.attach_money,
+                    label: 'Financeiro',
+                    path: '/admin/financeiro',
+                    currentPath: currentPath,
+                  ),
+                // Cobrança lança/edita pagamento — requer write.
+                if (user?.hasPermission(TatamiPermissions.financialWrite) ??
+                    false)
+                  _NavItem(
+                    icon: Icons.receipt_long_outlined,
+                    activeIcon: Icons.receipt_long,
+                    label: 'Cobranca',
+                    path: '/admin/cobranca',
+                    currentPath: currentPath,
+                  ),
+                // Relatórios — KPI financeiro/atendance. Mostra para quem
+                // tem financial.read; instrutor default vê (read-only).
+                if (user?.hasPermission(TatamiPermissions.financialRead) ??
+                    false)
+                  _NavItem(
+                    icon: Icons.bar_chart_outlined,
+                    activeIcon: Icons.bar_chart,
+                    label: 'Relatorios',
+                    path: '/admin/relatorios',
+                    currentPath: currentPath,
+                  ),
+                if (isStoreEnabled &&
+                    (user?.hasPermission(TatamiPermissions.storeWrite) ??
+                        false))
                   _NavItem(
                     icon: Icons.store_outlined,
                     activeIcon: Icons.store,
@@ -265,20 +293,25 @@ class AdminSidebar extends ConsumerWidget {
                     currentPath: currentPath,
                   ),
                 const Divider(),
-                _NavItem(
-                  icon: Icons.settings_outlined,
-                  activeIcon: Icons.settings,
-                  label: 'Configurações',
-                  path: '/admin/configuracoes',
-                  currentPath: currentPath,
-                ),
-                _NavItem(
-                  icon: Icons.key_outlined,
-                  activeIcon: Icons.key,
-                  label: 'Código de equipe',
-                  path: '/codigo-equipe',
-                  currentPath: currentPath,
-                ),
+                // Settings + código de equipe são admin-only por design — não
+                // existe perm específica porque mexem em billing/segurança
+                // da academia toda.
+                if (user?.isAdmin ?? false)
+                  _NavItem(
+                    icon: Icons.settings_outlined,
+                    activeIcon: Icons.settings,
+                    label: 'Configurações',
+                    path: '/admin/configuracoes',
+                    currentPath: currentPath,
+                  ),
+                if (user?.isAdmin ?? false)
+                  _NavItem(
+                    icon: Icons.key_outlined,
+                    activeIcon: Icons.key,
+                    label: 'Código de equipe',
+                    path: '/codigo-equipe',
+                    currentPath: currentPath,
+                  ),
               ],
             ),
           ),
@@ -488,17 +521,33 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
         (settings?.abacatePayEnabled ?? false) ||
         (settings?.asaasEnabled ?? false);
 
-    // Filter menu items based on conditions
+    final user = ref.read(currentUserProvider).valueOrNull;
+
+    // Filter menu items based on conditions. Mesma matriz da sidebar: cada
+    // item exige a permission Tatami correspondente. Loja/Carteira também
+    // dependem das settings da academia (store enabled, payment provider
+    // configurado) — combinamos AND.
     final filteredItems = _moreMenuItems.where((item) {
-      // Loja only shows if store is enabled
-      if (item.path == '/admin/loja') {
-        return isStoreEnabled;
+      switch (item.path) {
+        case '/admin/turmas':
+          return user?.hasPermission(TatamiPermissions.attendanceRead) ?? false;
+        case '/admin/campeonatos':
+          return user?.isInstructor ?? false;
+        case '/admin/cobranca':
+          return user?.hasPermission(TatamiPermissions.financialWrite) ?? false;
+        case '/admin/relatorios':
+          return user?.hasPermission(TatamiPermissions.financialRead) ?? false;
+        case '/admin/loja':
+          return isStoreEnabled &&
+              (user?.hasPermission(TatamiPermissions.storeWrite) ?? false);
+        case '/admin/carteira':
+          return isPaymentEnabled &&
+              (user?.hasPermission(TatamiPermissions.financialWrite) ?? false);
+        case '/admin/configuracoes':
+          return user?.isAdmin ?? false;
+        default:
+          return true;
       }
-      // Carteira only shows if a payment provider is enabled
-      if (item.path == '/admin/carteira') {
-        return isPaymentEnabled;
-      }
-      return true;
     }).toList();
 
     showModalBottomSheet(
