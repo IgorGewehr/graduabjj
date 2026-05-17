@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../api/domain_providers.dart' as tatami;
+import '../../api/feature_flags.dart';
+import '../../api/repositories.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
@@ -55,10 +58,30 @@ class _AdminQrSessionScreenState extends ConsumerState<AdminQrSessionScreen> {
         return;
       }
 
-      final classService = ClassService(user!.academyId!);
+      final academyId = user!.academyId!;
       final today = DateTime.now();
       final dayOfWeek = today.weekday % 7;
-      final all = await classService.list();
+      final flags = ref.read(tatamiFlagsProvider);
+
+      Future<List<BJJClass>> allFuture() async {
+        if (flags.useTatamiWrites) {
+          try {
+            final q = tatami.ClassesQuery(
+              academyId: academyId,
+              isActive: true,
+            );
+            ref.invalidate(tatami.tatamiClassesLegacyProvider(q));
+            return await ref.read(
+              tatami.tatamiClassesLegacyProvider(q).future,
+            );
+          } catch (_) {
+            // fallback
+          }
+        }
+        return ClassService(academyId).list();
+      }
+
+      final all = await allFuture();
 
       final entries = <_ClassWithSchedule>[];
       for (final cls in all) {
@@ -331,7 +354,7 @@ class _ClassTile extends StatelessWidget {
 /// older than [kQrTokenTtl] are rejected by [QrAttendanceService], so each
 /// frame the student scans must be reasonably fresh — preventing replay of a
 /// stale screenshot or a photo of an old screen.
-class _QrFullscreenPage extends StatefulWidget {
+class _QrFullscreenPage extends ConsumerStatefulWidget {
   final String academyId;
   final String classId;
   final String className;
@@ -347,14 +370,19 @@ class _QrFullscreenPage extends StatefulWidget {
   });
 
   @override
-  State<_QrFullscreenPage> createState() => _QrFullscreenPageState();
+  ConsumerState<_QrFullscreenPage> createState() => _QrFullscreenPageState();
 }
 
-class _QrFullscreenPageState extends State<_QrFullscreenPage> {
+class _QrFullscreenPageState extends ConsumerState<_QrFullscreenPage> {
   static const Duration _rotateInterval = Duration(seconds: 30);
 
   Timer? _timer;
   late QrPayload _payload;
+  // Quando useTatamiAttendance liga, mantemos um token opaco assinado pelo BE
+  // (formato `<b64>.<sig>`). Renderizamos esse string cru no QR; o scanner
+  // (portal) reconhece o formato e roteia para `selfCheckin(qrToken: ...)`.
+  // Quando a flag está off, caímos no payload JSON legacy (`QrPayload`).
+  String? _tatamiToken;
 
   @override
   void initState() {
@@ -364,6 +392,9 @@ class _QrFullscreenPageState extends State<_QrFullscreenPage> {
       academyId: widget.academyId,
       classId: widget.classId,
     );
+    // Tenta puxar o token Tatami já no boot (não-bloqueante — se falhar,
+    // o widget continua renderizando o payload legacy).
+    _refreshTatamiTokenIfEnabled();
     _timer = Timer.periodic(_rotateInterval, (_) {
       if (!mounted) return;
       setState(() {
@@ -372,7 +403,29 @@ class _QrFullscreenPageState extends State<_QrFullscreenPage> {
           classId: widget.classId,
         );
       });
+      _refreshTatamiTokenIfEnabled();
     });
+  }
+
+  Future<void> _refreshTatamiTokenIfEnabled() async {
+    final flags = ref.read(tatamiFlagsProvider);
+    if (!flags.useTatamiAttendance) {
+      if (_tatamiToken != null && mounted) {
+        setState(() => _tatamiToken = null);
+      }
+      return;
+    }
+    try {
+      final repo = ref.read(attendanceRepoProvider);
+      final token = await repo.issueQrToken(
+        widget.academyId,
+        widget.classId,
+      );
+      if (!mounted) return;
+      setState(() => _tatamiToken = token.token);
+    } catch (_) {
+      // Mantém payload legacy se falhar.
+    }
   }
 
   @override
@@ -421,7 +474,7 @@ class _QrFullscreenPageState extends State<_QrFullscreenPage> {
                         border: Border.all(color: AppTheme.border),
                       ),
                       child: QrImageView(
-                        data: _payload.encode(),
+                        data: _tatamiToken ?? _payload.encode(),
                         version: QrVersions.auto,
                         size: qrSize,
                         backgroundColor: Colors.white,
