@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/domain_providers.dart' as tatami;
+import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
@@ -89,8 +91,23 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
         return;
       }
 
-      final service = ClassService(currentUser!.academyId!);
-      final classes = await service.list();
+      final academyId = currentUser!.academyId!;
+      final flags = ref.read(tatamiFlagsProvider);
+      List<BJJClass> classes;
+      if (flags.useTatamiWrites) {
+        try {
+          final q = tatami.ClassesQuery(academyId: academyId);
+          ref.invalidate(tatami.tatamiClassesLegacyProvider(q));
+          classes = await ref.read(
+            tatami.tatamiClassesLegacyProvider(q).future,
+          );
+        } catch (_) {
+          // Fallback transparente para o caminho Firestore legacy.
+          classes = await ClassService(academyId).list();
+        }
+      } else {
+        classes = await ClassService(academyId).list();
+      }
 
       setState(() {
         _classes = classes;
