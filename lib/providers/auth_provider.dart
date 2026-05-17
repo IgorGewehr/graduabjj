@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/feature_flags.dart';
+import '../api/identity_repo.dart';
+import '../api/repositories.dart';
 import '../models/user.dart';
 import '../services/firebase_service.dart';
 import '../services/global_user_service.dart';
@@ -79,6 +82,26 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   if (firebaseUser == null) {
     print('[AUTH] No firebase user');
     return null;
+  }
+
+  // Sprint 1 wiring — gated by `useTatamiIdentity` (Remote Config, default
+  // off). Em caso de qualquer erro de rede / 5xx, cai para o caminho
+  // Firestore legacy. Quando estável, removemos o legacy no Sprint 8.
+  final flags = ref.watch(tatamiFlagsProvider);
+  if (flags.useTatamiIdentity) {
+    try {
+      final app = await loadCurrentUserFromTatami(
+        repo: ref.read(identityRepoProvider),
+        selectedAcademyId: selectedAcademyId,
+      );
+      if (app.academyId != null) {
+        FirebaseService.setAcademyId(app.academyId!);
+      }
+      return app;
+    } catch (e) {
+      print('[AUTH] Tatami /v1/me falhou ($e); fallback p/ Firestore legacy');
+      // segue para o caminho legacy abaixo.
+    }
   }
 
   print('[AUTH] Loading user data for: ${firebaseUser.uid}');
@@ -183,6 +206,42 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
     studentId: academyDetails?.studentId,
   );
 });
+
+/// Helper isolado para a parte Tatami do [currentUserProvider]. Extraído
+/// daquele FutureProvider para que dê pra testar em unidade sem precisar
+/// montar Firestore / FirebaseAuth / Riverpod inteiro.
+///
+/// Retorna SEMPRE um AppUser não-nulo: quando a resposta de /v1/me não
+/// tem membership ativa, constrói um AppUser `accountType=free` direto
+/// do `ApiGlobalUser`.
+Future<AppUser> loadCurrentUserFromTatami({
+  required IdentityRemoteRepo repo,
+  String? selectedAcademyId,
+}) async {
+  final cu = await repo.getMe();
+  final app = AppUser.fromCurrentUserResponse(
+    cu,
+    activeAcademyId: selectedAcademyId,
+  );
+  if (app != null) return app;
+
+  // Sem membership ativa = usuário free. Mapeia direto do ApiGlobalUser.
+  return AppUser(
+    id: cu.user.uid,
+    email: cu.user.email,
+    displayName: cu.user.displayName ?? '',
+    photoUrl: cu.user.photoUrl,
+    role: UserRole.student,
+    phone: cu.user.phone,
+    accountType: AccountType.free,
+    jiujitsuStartDate: cu.user.jiujitsuStartDate,
+    highestBelt: cu.user.highestBelt,
+    highestStripes: cu.user.highestStripes,
+    isProfilePublic: cu.user.isProfilePublic,
+    createdAt: cu.user.createdAt ?? DateTime.now(),
+    updatedAt: cu.user.updatedAt ?? DateTime.now(),
+  );
+}
 
 /// Auth service provider
 final authServiceProvider = Provider<AuthService>((ref) {
