@@ -435,25 +435,6 @@ class StudentService {
   }
 
   // ============================================
-  // Sync Attendance Counts from Records
-  // ============================================
-  Future<void> syncAttendanceCounts() async {
-    final students = await getAll();
-    final attendanceRef = _collections.attendance;
-
-    for (final student in students) {
-      final attendanceQuery = await attendanceRef
-          .where('studentId', isEqualTo: student.id)
-          .get();
-
-      await _collections.student(student.id).update({
-        'attendanceCount': attendanceQuery.size,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-  }
-
-  // ============================================
   // Update Status
   // ============================================
   Future<Student> updateStatus(
