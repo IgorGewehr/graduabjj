@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/financial_dto.dart' as api;
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
 import 'plan_service.dart';
@@ -138,6 +139,64 @@ class Payment {
     this.planId,
     required this.createdAt,
   });
+
+  /// Sprint 4 wiring — adapter `ApiFinancial` (Tatami) → `Payment` (legacy).
+  ///
+  /// O backend usa `Financial` como tabela canônica; o FE legacy chama de
+  /// `Payment`. Mapeamento:
+  /// - `studentName` não vem na resposta (precisa do student por separado;
+  ///   passe via parâmetro quando souber).
+  /// - `value`: decimal-string → double (0.0 fallback).
+  /// - `referenceMonth`: passa direto (formato YYYY-MM).
+  /// - `externalId`: prioriza asaas_payment_id → abacatepay_transaction_id.
+  /// - `planId` não existe na API Financial (Plan tem N alunos, não o
+  ///   reverso); permanece null. Quando o caller souber, passa via param.
+  factory Payment.fromApi(api.ApiFinancial f, {String? studentName, String? planId}) {
+    return Payment(
+      id: f.id,
+      studentId: f.studentId,
+      studentName: studentName ?? '',
+      value: double.tryParse(f.amount) ?? 0.0,
+      dueDate: f.dueDate,
+      paidAt: f.paymentDate,
+      status: _statusFromApi(f.status),
+      method: f.method == null ? null : _methodFromApi(f.method!),
+      description: f.description,
+      referenceMonth: f.referenceMonth,
+      externalId: f.asaasPaymentId ?? f.abacatepayTransactionId,
+      planId: planId,
+      createdAt: f.createdAt ?? DateTime.now(),
+    );
+  }
+
+  static PaymentStatus _statusFromApi(api.ApiFinancialStatus s) {
+    switch (s) {
+      case api.ApiFinancialStatus.paid:
+        return PaymentStatus.paid;
+      case api.ApiFinancialStatus.pending:
+        return PaymentStatus.pending;
+      case api.ApiFinancialStatus.overdue:
+        return PaymentStatus.overdue;
+      case api.ApiFinancialStatus.cancelled:
+        return PaymentStatus.cancelled;
+    }
+  }
+
+  static PaymentMethod _methodFromApi(api.ApiPaymentMethod m) {
+    switch (m) {
+      case api.ApiPaymentMethod.pix:
+        return PaymentMethod.pix;
+      case api.ApiPaymentMethod.credit_card:
+        return PaymentMethod.creditCard;
+      case api.ApiPaymentMethod.cash:
+        return PaymentMethod.cash;
+      case api.ApiPaymentMethod.bank_transfer:
+        return PaymentMethod.bankTransfer;
+      case api.ApiPaymentMethod.other:
+        // legacy não tem `other` — cai em pix (default mais comum)
+        return PaymentMethod.pix;
+    }
+  }
 
   factory Payment.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;

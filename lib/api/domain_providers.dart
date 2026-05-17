@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/student.dart' as legacy;
 import '../services/class_service.dart' show BJJClass;
 import '../services/link_code_service.dart' show LinkCode;
+import '../services/payment_service.dart' as legacy_pay;
 import '../services/plan_service.dart' show Plan;
 import 'dto/academy_dto.dart';
 import 'dto/attendance_dto.dart';
@@ -426,6 +427,17 @@ final tatamiWalletProvider = FutureProvider.family<ApiWallet, String>(
       'useTatamiFinancials',
     );
     return ref.watch(walletRepoProvider).get(academyId);
+  },
+);
+
+/// Provider legacy-typed: `List<Payment>`. Permite que screens financeiras
+/// migrem para Tatami trocando só o provider; o widget tree (StudentTile,
+/// PaymentRow, etc.) continua consumindo o modelo Payment do legacy.
+final tatamiPaymentsLegacyProvider =
+    FutureProvider.family<List<legacy_pay.Payment>, FinancialsQuery>(
+  (ref, q) async {
+    final page = await ref.watch(tatamiFinancialsProvider(q).future);
+    return page.items.map(legacy_pay.Payment.fromApi).toList();
   },
 );
 
