@@ -15,10 +15,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/student.dart' as legacy;
 import '../services/attendance_service.dart' as legacy_att;
 import '../services/class_service.dart' show BJJClass;
+import '../services/competition_service.dart' as legacy_comp;
 import '../services/link_code_service.dart' show LinkCode;
 import '../services/notification_service.dart' as legacy_notif;
 import '../services/payment_service.dart' as legacy_pay;
 import '../services/plan_service.dart' show Plan;
+import '../services/store_service.dart' as legacy_store;
 import 'dto/academy_dto.dart';
 import 'dto/attendance_dto.dart';
 import 'dto/competition_dto.dart';
@@ -604,6 +606,23 @@ final tatamiOrdersProvider = FutureProvider.family<OrdersPage, OrdersQuery>(
   },
 );
 
+/// Providers legacy-typed para screens da loja.
+final tatamiStoreProductsLegacyProvider =
+    FutureProvider.family<List<legacy_store.StoreProduct>, String>(
+  (ref, academyId) async {
+    final page = await ref.watch(tatamiProductsProvider(academyId).future);
+    return page.items.map(legacy_store.StoreProduct.fromApi).toList();
+  },
+);
+
+final tatamiStoreOrdersLegacyProvider =
+    FutureProvider.family<List<legacy_store.StoreOrder>, OrdersQuery>(
+  (ref, q) async {
+    final page = await ref.watch(tatamiOrdersProvider(q).future);
+    return page.items.map(legacy_store.StoreOrder.fromApi).toList();
+  },
+);
+
 // ---------------------------------------------------------------------------
 // Competition (Sprint 7)
 // ---------------------------------------------------------------------------
@@ -616,6 +635,14 @@ final tatamiCompetitionsProvider =
       'useTatamiCompetitions',
     );
     return ref.watch(competitionRepoProvider).list(academyId);
+  },
+);
+
+final tatamiCompetitionsLegacyProvider =
+    FutureProvider.family<List<legacy_comp.Competition>, String>(
+  (ref, academyId) async {
+    final page = await ref.watch(tatamiCompetitionsProvider(academyId).future);
+    return page.items.map(legacy_comp.Competition.fromApi).toList();
   },
 );
 

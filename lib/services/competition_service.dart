@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/competition_dto.dart' as api;
 import 'firebase_service.dart';
 
 /// Competition Status
@@ -110,6 +111,60 @@ class Competition {
     required this.createdAt,
     required this.updatedAt,
   });
+
+  /// Sprint 7 wiring — adapter `ApiCompetition` → `Competition` legacy.
+  ///
+  /// Mapeamentos:
+  /// - `status`: legacy tem `cancelled` que Tatami não tem. Cancelar uma
+  ///   competição no Tatami é via DELETE (não muda status); marca legacy
+  ///   `cancelled` é só semântica histórica do app.
+  /// - `transportStatus`: legacy é availability (available/full/notAvailable);
+  ///   Tatami é fase da viagem (not_planned/planned/departed/arrived).
+  ///   Sem mapping limpo → sempre null. Caller que precisar desse campo
+  ///   deve ler diretamente do ApiCompetition.transportStatus.
+  /// - `teamPosition` legacy é string (gold/silver/bronze); Tatami é int.
+  ///   Converter o inteiro para o nome do pódio quando 1/2/3.
+  /// - `enrolledStudentIds`: NÃO vem na resposta — caller precisa buscar
+  ///   /enrollments separadamente; aqui passa lista vazia.
+  factory Competition.fromApi(api.ApiCompetition c) {
+    String? teamPos;
+    if (c.teamPosition == 1) {
+      teamPos = 'gold';
+    } else if (c.teamPosition == 2) {
+      teamPos = 'silver';
+    } else if (c.teamPosition == 3) {
+      teamPos = 'bronze';
+    }
+
+    return Competition(
+      id: c.id,
+      name: c.name,
+      date: c.date,
+      location: c.location,
+      description: c.description,
+      status: _statusFromApi(c.status),
+      registrationDeadline: c.registrationDeadline,
+      enrolledStudentIds: const [],
+      transportStatus: null,
+      transportNotes: c.teamNotes,
+      transportCapacity: c.transportCapacity,
+      teamPosition: teamPos,
+      teamNotes: c.teamNotes,
+      createdAt: c.createdAt ?? DateTime.now(),
+      updatedAt: c.updatedAt ?? DateTime.now(),
+    );
+  }
+
+  static CompetitionStatus _statusFromApi(api.ApiCompetitionStatus s) {
+    switch (s) {
+      case api.ApiCompetitionStatus.upcoming:
+        return CompetitionStatus.upcoming;
+      case api.ApiCompetitionStatus.ongoing:
+        return CompetitionStatus.ongoing;
+      case api.ApiCompetitionStatus.completed:
+        return CompetitionStatus.completed;
+    }
+  }
 
   factory Competition.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;

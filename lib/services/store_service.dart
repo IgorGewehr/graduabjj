@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/store_dto.dart' as api;
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
 
@@ -173,6 +174,39 @@ class StoreProduct {
     required this.updatedAt,
   });
 
+  /// Sprint 7 wiring — adapter `ApiProduct` → `StoreProduct` legacy.
+  ///
+  /// Diferenças:
+  /// - `imageUrls` legacy ↔ `images` API (rename).
+  /// - Tatami só tem `stockQuantity` int; legacy tem `stockType` enum
+  ///   (inStock/onDemand) + nullable `stockQuantity`. Mapping: `stockQty
+  ///   > 0 → inStock`, `== 0 → onDemand` (mais conservador — onDemand
+  ///   permite venda mesmo sem estoque, que combina com produto sob
+  ///   encomenda; admins refinam manualmente quando necessário).
+  /// - `category` API é string livre; mapeamos via legacy enum.
+  /// - `sizes`/`colors`: legacy tem; API não — sempre null.
+  factory StoreProduct.fromApi(api.ApiProduct p) {
+    final stockQty = p.stockQuantity;
+    final stockType = stockQty > 0
+        ? StoreStockType.inStock
+        : StoreStockType.onDemand;
+    return StoreProduct(
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      price: double.tryParse(p.price) ?? 0.0,
+      category: StoreProductCategoryExtension.fromString(p.category ?? 'other'),
+      imageUrls: p.images,
+      stockType: stockType,
+      stockQuantity: stockQty,
+      sizes: null,
+      colors: null,
+      isActive: p.isActive,
+      createdAt: p.createdAt ?? DateTime.now(),
+      updatedAt: p.updatedAt ?? DateTime.now(),
+    );
+  }
+
   factory StoreProduct.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return StoreProduct(
@@ -227,6 +261,18 @@ class StoreOrderItem {
     this.size,
     this.color,
   });
+
+  /// Sprint 7 wiring — adapter `ApiOrderItem` → `StoreOrderItem` legacy.
+  /// `size` e `color` não existem na API (campos só do uniforme legacy) —
+  /// sempre null aqui.
+  factory StoreOrderItem.fromApi(api.ApiOrderItem oi) {
+    return StoreOrderItem(
+      productId: oi.productId,
+      productName: oi.name,
+      price: double.tryParse(oi.unitPrice) ?? 0.0,
+      quantity: oi.quantity,
+    );
+  }
 
   factory StoreOrderItem.fromMap(Map<String, dynamic> map) {
     return StoreOrderItem(
@@ -300,6 +346,44 @@ class StoreOrder {
     required this.createdAt,
     required this.updatedAt,
   });
+
+  /// Sprint 7 wiring — adapter `ApiOrder` → `StoreOrder` legacy.
+  ///
+  /// `studentName` não vem na resposta canônica — caller passa quando
+  /// souber via parâmetro. `pixCode`/`pixQrCode` vêm via PayIntentResponse
+  /// separado (não no Order — pagamento é flow distinto).
+  factory StoreOrder.fromApi(api.ApiOrder o, {String? studentName}) {
+    return StoreOrder(
+      id: o.id,
+      studentId: o.studentId,
+      studentName: studentName ?? '',
+      items: o.items.map(StoreOrderItem.fromApi).toList(),
+      total: double.tryParse(o.total) ?? 0.0,
+      status: _orderStatusFromApi(o.status),
+      externalPaymentId: o.asaasPaymentId ?? o.abacatepayTransactionId,
+      paidAt: o.paidAt,
+      deliveredAt: o.deliveredAt,
+      createdAt: o.createdAt,
+      updatedAt: o.updatedAt ?? o.createdAt,
+    );
+  }
+
+  static StoreOrderStatus _orderStatusFromApi(api.ApiOrderStatus s) {
+    switch (s) {
+      case api.ApiOrderStatus.pending_payment:
+        return StoreOrderStatus.pendingPayment;
+      case api.ApiOrderStatus.paid:
+        return StoreOrderStatus.paid;
+      case api.ApiOrderStatus.preparing:
+        return StoreOrderStatus.preparing;
+      case api.ApiOrderStatus.ready:
+        return StoreOrderStatus.ready;
+      case api.ApiOrderStatus.delivered:
+        return StoreOrderStatus.delivered;
+      case api.ApiOrderStatus.cancelled:
+        return StoreOrderStatus.cancelled;
+    }
+  }
 
   factory StoreOrder.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
