@@ -1,10 +1,12 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../api/feature_flags.dart';
+import '../../api/repositories.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
@@ -480,11 +482,27 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
     });
 
     try {
-      final authService = ref.read(authServiceProvider);
-      await authService.linkStudentAccount(
-        _codeController.text.toUpperCase(),
-        _academyId!,
-      );
+      final flags = ref.read(tatamiFlagsProvider);
+      final code = _codeController.text.toUpperCase();
+
+      // Caminho Tatami: o redeem é atômico server-side (1 chamada vs. 5
+      // writes Firestore não-atômicos do legacy). Idempotente — se o
+      // usuário retry após erro de rede, o BE retorna 409 com type
+      // `link-code-already-used` que o caller pode mostrar ao user.
+      var redeemed = false;
+      if (flags.useTatamiWrites) {
+        try {
+          await ref.read(linkCodeRepoProvider).redeem(code);
+          redeemed = true;
+        } catch (_) {
+          // fallback para fluxo legacy abaixo
+        }
+      }
+
+      if (!redeemed) {
+        final authService = ref.read(authServiceProvider);
+        await authService.linkStudentAccount(code, _academyId!);
+      }
 
       // Refresh providers
       ref.invalidate(userAcademiesInfoProvider);
