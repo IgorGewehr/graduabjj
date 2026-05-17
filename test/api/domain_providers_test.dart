@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http_mock_adapter/http_mock_adapter.dart';
 
 import 'package:graduabjj/api/domain_providers.dart';
+import 'package:graduabjj/api/dto/financial_dto.dart';
 import 'package:graduabjj/api/dto/student_dto.dart';
 import 'package:graduabjj/api/feature_flags.dart';
 import 'package:graduabjj/providers/api_provider.dart';
@@ -203,6 +204,75 @@ void main() {
       expect(list.first.newBelt, 'blue');
       expect(list.first.promotedBy, 'uid-instr');
       expect(list.first.promotedByName, isNull);
+    });
+  });
+
+  group('monthlyReportToLegacyMap (ApiMonthlyReport adapter)', () {
+    test('mapeia counts e converte decimal strings para double', () {
+      final r = ApiMonthlyReport.fromJson({
+        'month': '2026-05',
+        'total_revenue': '1500.00',
+        'outstanding': '500.00',
+        'overdue_count': 2,
+        'paid_count': 10,
+        'pending_count': 3,
+        'cancelled_count': 1,
+      });
+      final m = monthlyReportToLegacyMap(r);
+      expect(m['referenceMonth'], '2026-05');
+      expect(m['totalExpected'], 2000.0);
+      expect((m['paid'] as Map)['value'], 1500.0);
+      expect((m['paid'] as Map)['count'], 10);
+      // outstanding = pending + overdue combinado → entra em pending.value
+      expect((m['pending'] as Map)['value'], 500.0);
+      expect((m['pending'] as Map)['count'], 3);
+      expect((m['overdue'] as Map)['value'], 0.0);
+      expect((m['overdue'] as Map)['count'], 2);
+      expect(m['cancelled'], 1);
+      expect(m['collectionRate'], 75.0); // 1500 / 2000 * 100
+    });
+
+    test('collectionRate = 0 quando totalExpected = 0', () {
+      final r = ApiMonthlyReport.fromJson({
+        'month': '2026-01',
+        'total_revenue': '0',
+        'outstanding': '0',
+        'overdue_count': 0,
+        'paid_count': 0,
+        'pending_count': 0,
+        'cancelled_count': 0,
+      });
+      final m = monthlyReportToLegacyMap(r);
+      expect(m['collectionRate'], 0.0);
+      expect(m['totalExpected'], 0.0);
+    });
+
+    test('tatamiMonthlyReportLegacyProvider devolve Map adaptado', () async {
+      adapter.onGet(
+        '/v1/academies/aid/financials/reports/monthly',
+        (s) => s.reply(200, {
+          'month': '2026-05',
+          'total_revenue': '3000.00',
+          'outstanding': '1000.00',
+          'overdue_count': 1,
+          'paid_count': 20,
+          'pending_count': 5,
+          'cancelled_count': 0,
+        }),
+        queryParameters: {'month': '2026-05'},
+      );
+      final c = container(
+        flags: TatamiFlags.allOff.copyWith(useTatamiFinancials: true),
+      );
+      addTearDown(c.dispose);
+
+      final m = await c.read(
+        tatamiMonthlyReportLegacyProvider(
+          const AcademyMonth(academyId: 'aid', month: '2026-05'),
+        ).future,
+      );
+      expect(m['referenceMonth'], '2026-05');
+      expect(m['totalExpected'], 4000.0);
     });
   });
 

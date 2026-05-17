@@ -423,6 +423,45 @@ final tatamiMonthlyReportProvider =
   },
 );
 
+/// Adapter Map-shaped (legacy) para o relatório mensal do Tatami.
+///
+/// Equivalente a `PaymentService.getMonthlySummary(month)`. Reusa o widget
+/// tree atual da tela financeira sem precisar refatorar.
+///
+/// **Limitação consciente**: o endpoint Tatami devolve `outstanding`
+/// (pending + overdue COMBINADO). O Map legacy esperaria `pending.value`
+/// e `overdue.value` separados — não temos como dividir sem iterar
+/// pagamentos. Solução: ambos vão para 0 e `outstanding` total entra
+/// como soma em `pending.value` (mais comum que overdue na visão UI).
+/// Sprint 3 (remoção de lógica) deve trocar o widget tree para consumir
+/// `ApiMonthlyReport` direto.
+Map<String, dynamic> monthlyReportToLegacyMap(ApiMonthlyReport r) {
+  final totalRevenue = double.tryParse(r.totalRevenue) ?? 0.0;
+  final outstanding = double.tryParse(r.outstanding) ?? 0.0;
+  final totalExpected = totalRevenue + outstanding;
+  return {
+    'referenceMonth': r.month,
+    'totalExpected': totalExpected,
+    'paid': {'value': totalRevenue, 'count': r.paidCount},
+    'pending': {'value': outstanding, 'count': r.pendingCount},
+    'overdue': {'value': 0.0, 'count': r.overdueCount},
+    'cancelled': r.cancelledCount,
+    'collectionRate': totalExpected > 0
+        ? (totalRevenue / totalExpected * 100)
+        : 0.0,
+  };
+}
+
+/// Provider de conveniência: já devolve o Map legacy para screens.
+/// Gated por useTatamiFinancials.
+final tatamiMonthlyReportLegacyProvider =
+    FutureProvider.family<Map<String, dynamic>, AcademyMonth>(
+  (ref, k) async {
+    final r = await ref.watch(tatamiMonthlyReportProvider(k).future);
+    return monthlyReportToLegacyMap(r);
+  },
+);
+
 /// Helper de conveniência: `academyMonth(aid)` é equivalente a
 /// `AcademyMonth(academyId: aid)`. Mantido para retrocompatibilidade.
 AcademyMonth academyMonth(String academyId, [String? month]) =>
