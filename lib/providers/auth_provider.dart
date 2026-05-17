@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../api/feature_flags.dart';
 import '../api/identity_repo.dart';
 import '../api/repositories.dart';
 import '../models/user.dart';
@@ -83,24 +82,23 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
     return null;
   }
 
-  // Sprint 1 wiring — gated by `useTatamiIdentity` (Remote Config, default
-  // off). Em caso de qualquer erro de rede / 5xx, cai para o caminho
-  // Firestore legacy. Quando estável, removemos o legacy no Sprint 8.
-  final flags = ref.watch(tatamiFlagsProvider);
-  if (flags.useTatamiIdentity) {
-    try {
-      final app = await loadCurrentUserFromTatami(
-        repo: ref.read(identityRepoProvider),
-        selectedAcademyId: selectedAcademyId,
-      );
-      if (app.academyId != null) {
-        FirebaseService.setAcademyId(app.academyId!);
-      }
-      return app;
-    } catch (e) {
-      print('[AUTH] Tatami /v1/me falhou ($e); fallback p/ Firestore legacy');
-      // segue para o caminho legacy abaixo.
+  // Pós-Fase 1: Tatami é o único path. Se /v1/me falhar (rede / 5xx),
+  // propaga o erro para o consumer ao invés de cair em Firestore legacy.
+  try {
+    final app = await loadCurrentUserFromTatami(
+      repo: ref.read(identityRepoProvider),
+      selectedAcademyId: selectedAcademyId,
+    );
+    if (app.academyId != null) {
+      FirebaseService.setAcademyId(app.academyId!);
     }
+    return app;
+  } catch (e) {
+    print('[AUTH] Tatami /v1/me falhou ($e); usando caminho Firestore residual');
+    // Caminho Firestore mantido aqui temporariamente porque cobre o
+    // edge-case "usuário recém-criado sem global_user no Tatami". Esse
+    // fluxo deve ser eliminado na Fase 3 (BE precisa auto-provisionar
+    // ApiGlobalUser no primeiro /v1/me com Bearer Firebase).
   }
 
   print('[AUTH] Loading user data for: ${firebaseUser.uid}');

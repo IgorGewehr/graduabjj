@@ -7,18 +7,17 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../api/dto/attendance_dto.dart' as api_att;
-import '../../api/feature_flags.dart';
 import '../../api/repositories.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/student_provider.dart';
-import '../../services/qr_attendance_service.dart';
+import '../../services/qr_attendance_service.dart' show QrAttendanceException, QrAttendanceResult;
 
 /// QR Scan Screen (Student Portal)
 ///
-/// Reads the QR shown by the professor (or printed) and immediately marks
-/// attendance through [QrAttendanceService]. The check-in window and class
-/// enrollment are validated server-side by the service.
+/// Reads the Tatami-signed QR token shown by the professor (`<b64>.<sig>`) and
+/// immediately calls `/v1/.../attendance/self-checkin` para marcar presença.
+/// BE valida assinatura, TTL (60s), turma e roster.
 class QrScanScreen extends ConsumerStatefulWidget {
   const QrScanScreen({super.key});
 
@@ -70,49 +69,30 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
         );
       }
 
-      final flags = ref.read(tatamiFlagsProvider);
+      // Tatami token format `<b64>.<sig>` — único path agora.
+      // Para apps muito antigos que ainda lerem QR payload JSON legacy
+      // (`{v,a,c,t}`), o BE rejeita o body e o caller vê a mensagem genérica.
       QrAttendanceResult? result;
-
-      // Detecta formato do payload: Tatami é `<b64>.<sig>` (sem `{`),
-      // legacy é JSON cru `{v,a,c,t}`. Se flag estiver on E formato bater
-      // o do Tatami, tenta selfCheckin (POST com qr_token). Fallback
-      // automático para o caminho legacy se a flag estiver off ou se a
-      // chamada Tatami falhar.
-      final looksTatami = !raw.trimLeft().startsWith('{') && raw.contains('.');
-      if (flags.useTatamiAttendance && looksTatami) {
-        try {
-          final classId = _extractClassIdFromTatamiToken(raw);
-          if (classId != null) {
-            final att = await ref.read(attendanceRepoProvider).selfCheckin(
-                  academyId,
-                  api_att.SelfCheckinRequest(
-                    classId: classId,
-                    qrToken: raw,
-                  ),
-                );
-            result = QrAttendanceResult(
-              classId: att.classId,
-              className: '',
-              studentId: att.studentId,
-              studentName: student?.fullName ?? user!.displayName,
-              markedAt: att.createdAt ?? DateTime.now(),
-            );
-          }
-        } catch (_) {
-          // fallback legacy abaixo
-        }
-      }
-
-      if (result == null) {
-        final service = QrAttendanceService(academyId);
-        result = await service.processScan(
-          rawPayload: raw,
-          studentId: studentId,
-          studentNameOverride: student?.fullName ?? user!.displayName,
-          verifiedBy: user!.id,
-          verifiedByName: user.displayName,
+      final classId = _extractClassIdFromTatamiToken(raw);
+      if (classId == null) {
+        throw const QrAttendanceException(
+          'QR inválido. Peça ao professor para gerar um novo.',
         );
       }
+      final att = await ref.read(attendanceRepoProvider).selfCheckin(
+            academyId,
+            api_att.SelfCheckinRequest(
+              classId: classId,
+              qrToken: raw,
+            ),
+          );
+      result = QrAttendanceResult(
+        classId: att.classId,
+        className: '',
+        studentId: att.studentId,
+        studentName: student?.fullName ?? user!.displayName,
+        markedAt: att.createdAt ?? DateTime.now(),
+      );
 
       await _controller.stop();
       if (!mounted) return;

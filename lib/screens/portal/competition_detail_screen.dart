@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
-import '../../api/feature_flags.dart';
 import '../../api/repositories.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -78,23 +77,14 @@ class _CompetitionDetailScreenState
     try {
       final competitionService = CompetitionService(academyId);
       final enrollmentService = CompetitionEnrollmentService(academyId);
-      final flags = ref.read(tatamiFlagsProvider);
 
-      // Sprint 5 — parallelize the three independent fetches with
-      // `Future.wait`. Each future has its own `.catchError` so a missing
-      // index on results/enrollments doesn't cancel the whole batch.
+      // Competition fetch via Tatami; results/enrollments seguem
+      // CompetitionService (gap — Tatami não expõe esses sub-recursos hoje).
       Future<Competition?> competitionFuture() async {
-        if (flags.useTatamiCompetitions) {
-          try {
-            final api = await ref
-                .read(competitionRepoProvider)
-                .getById(academyId, widget.competitionId);
-            return Competition.fromApi(api);
-          } catch (_) {
-            // fallback
-          }
-        }
-        return competitionService.getById(widget.competitionId);
+        final api = await ref
+            .read(competitionRepoProvider)
+            .getById(academyId, widget.competitionId);
+        return Competition.fromApi(api);
       }
 
       final futures = await Future.wait<dynamic>([

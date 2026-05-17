@@ -6,7 +6,6 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../api/domain_providers.dart' as tatami;
-import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/checkin.dart';
@@ -660,21 +659,10 @@ final _enrolledClassesProvider =
       ref,
       params,
     ) async {
-      final flags = ref.watch(tatamiFlagsProvider);
-      List<BJJClass> allClasses;
-      if (flags.useTatamiWrites) {
-        try {
-          final q = tatami.ClassesQuery(academyId: params.academyId);
-          allClasses = await ref.watch(
-            tatami.tatamiClassesLegacyProvider(q).future,
-          );
-        } catch (_) {
-          // Fallback transparente para Firestore legacy.
-          allClasses = await ClassService(params.academyId).list();
-        }
-      } else {
-        allClasses = await ClassService(params.academyId).list();
-      }
+      final q = tatami.ClassesQuery(academyId: params.academyId);
+      final allClasses = await ref.watch(
+        tatami.tatamiClassesLegacyProvider(q).future,
+      );
 
       // Filter classes where student is enrolled
       return allClasses

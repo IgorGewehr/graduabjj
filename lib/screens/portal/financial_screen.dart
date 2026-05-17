@@ -7,10 +7,8 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../api/dto/financial_dto.dart' as api_fin;
-import '../../api/feature_flags.dart';
 import '../../api/repositories.dart' as tatami_repos;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
@@ -828,7 +826,7 @@ class _PixPaymentBottomSheetState
   PaymentLink? _paymentLink;
   String? _error;
   bool _paymentConfirmed = false;
-  StreamSubscription<DocumentSnapshot>? _paymentListener;
+  // Firestore listener removido na Fase 1 — polling Tatami é o único caminho.
   Timer? _paymentPollTimer;
 
   @override
@@ -840,69 +838,40 @@ class _PixPaymentBottomSheetState
 
   @override
   void dispose() {
-    _paymentListener?.cancel();
     _paymentPollTimer?.cancel();
     super.dispose();
   }
 
   void _setupPaymentListener() {
     final academyId = FirebaseService.academyId;
-    final flags = ref.read(tatamiFlagsProvider);
 
-    if (flags.useTatamiFinancials) {
-      // Tatami não tem stream em tempo real para um único financial; o
-      // padrão acordado é polling de 2s no /v1/.../financials/{id} até o
-      // status sair de pending. Cancela ao confirmar ou no dispose.
-      _paymentPollTimer = Timer.periodic(
-        const Duration(seconds: 2),
-        (timer) async {
-          if (!mounted) {
-            timer.cancel();
-            return;
-          }
-          try {
-            final repo = ref.read(tatami_repos.financialRepoProvider);
-            final f = await repo.getById(academyId, widget.payment.id);
-            if (!mounted) return;
-            if (f.status == api_fin.ApiFinancialStatus.paid &&
-                !_paymentConfirmed) {
-              setState(() => _paymentConfirmed = true);
-              timer.cancel();
-              _showPaymentConfirmedDialog();
-              ref.invalidate(
-                studentPaymentsProvider(widget.payment.studentId),
-              );
-            }
-          } catch (_) {
-            // Erro transiente — segue o polling sem propagar para a UI.
-            // Se a flag estiver mal-configurada e cada poll falhar, o usuário
-            // ainda pode encerrar manualmente o bottom sheet.
-          }
-        },
-      );
-      return;
-    }
-
-    _paymentListener = FirebaseFirestore.instance
-        .collection('academies')
-        .doc(academyId)
-        .collection('financials')
-        .doc(widget.payment.id)
-        .snapshots()
-        .listen((snapshot) {
+    // Tatami não tem stream em tempo real para um único financial; o padrão
+    // é polling de 2s no GET /v1/.../financials/{id} até o status sair de
+    // pending. Cancela ao confirmar ou no dispose. (Listener Firestore
+    // removido na Fase 1.)
+    _paymentPollTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (timer) async {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        try {
+          final repo = ref.read(tatami_repos.financialRepoProvider);
+          final f = await repo.getById(academyId, widget.payment.id);
           if (!mounted) return;
-
-          final data = snapshot.data();
-          if (data != null && data['status'] == 'paid' && !_paymentConfirmed) {
-            setState(() {
-              _paymentConfirmed = true;
-            });
-
+          if (f.status == api_fin.ApiFinancialStatus.paid &&
+              !_paymentConfirmed) {
+            setState(() => _paymentConfirmed = true);
+            timer.cancel();
             _showPaymentConfirmedDialog();
-
             ref.invalidate(studentPaymentsProvider(widget.payment.studentId));
           }
-        });
+        } catch (_) {
+          // Erro transiente — segue o polling sem propagar para a UI.
+        }
+      },
+    );
   }
 
   void _showPaymentConfirmedDialog() {
@@ -972,66 +941,28 @@ class _PixPaymentBottomSheetState
     final academyId = FirebaseService.academyId;
 
     try {
-      final flags = ref.read(tatamiFlagsProvider);
-
-      // Caminho Tatami: POST /financials/{id}/pay/pix — idempotente,
-      // BE escolhe gateway (Asaas/AbacatePay) baseado no settings da
-      // academia. Substitui os 2 chamados client-side (asaas.isEnabled +
-      // gateway-specific createPixPayment).
-      PaymentLink? link;
-      if (flags.useTatamiFinancials) {
-        try {
-          final payIntent =
-              await ref.read(tatami_repos.financialRepoProvider).payWithPix(
-                    academyId,
-                    widget.payment.id,
-                    body: api_fin.PayIntentRequest(
-                      customerName: widget.studentName,
-                    ),
-                  );
-          link = PaymentLink(
-            pixCode: payIntent.pixCopyPaste ?? '',
-            qrCodeUrl: payIntent.pixQrCode,
-            expiresAt: DateTime.now().add(const Duration(hours: 24)),
-            abacatePayId: payIntent.externalId,
-          );
-        } catch (_) {
-          // fallback para gateway-specific legacy abaixo
-        }
-      }
-
-      if (link == null) {
-        // Check which provider is active
-        final asaasService = AsaasPaymentService(academyId);
-        final isAsaas = await asaasService.isEnabled();
-        if (isAsaas) {
-          link = await asaasService.createPixPayment(
-            amount: widget.payment.value,
-            financialId: widget.payment.id,
-            studentId: widget.payment.studentId,
-            studentName: widget.studentName,
-            description: widget.payment.description ??
-                'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
-          );
-        } else {
-          final service = AbacatePayService(academyId);
-          link = await service.createPixPayment(
-            amount: widget.payment.value,
-            financialId: widget.payment.id,
-            studentId: widget.payment.studentId,
-            studentName: widget.studentName,
-            description: widget.payment.description ??
-                'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
-          );
-        }
-      }
+      // Tatami: POST /financials/{id}/pay/pix — idempotente, BE escolhe
+      // gateway (Asaas/AbacatePay) baseado no settings da academia.
+      // Substitui os 2 client-paths (asaas/abacatePay) — fallback gateway-
+      // specific removido na Fase 1.
+      final payIntent =
+          await ref.read(tatami_repos.financialRepoProvider).payWithPix(
+                academyId,
+                widget.payment.id,
+                body: api_fin.PayIntentRequest(
+                  customerName: widget.studentName,
+                ),
+              );
+      final link = PaymentLink(
+        pixCode: payIntent.pixCopyPaste ?? '',
+        qrCodeUrl: payIntent.pixQrCode,
+        expiresAt: DateTime.now().add(const Duration(hours: 24)),
+        abacatePayId: payIntent.externalId,
+      );
 
       setState(() {
         _paymentLink = link;
         _isLoading = false;
-        if (link == null) {
-          _error = 'Erro ao gerar pagamento PIX';
-        }
       });
     } catch (e) {
       setState(() {

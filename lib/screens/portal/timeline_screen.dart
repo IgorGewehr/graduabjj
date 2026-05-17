@@ -6,7 +6,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
 import '../../api/dto/student_dto.dart' as api_student;
-import '../../api/feature_flags.dart';
 import '../../api/repositories.dart' as tatami_repos;
 import '../../core/sports.dart';
 import '../../core/theme.dart';
@@ -75,24 +74,13 @@ final studentBeltProgressionsProvider =
       if (currentUser?.academyId == null) return [];
 
       final academyId = currentUser!.academyId!;
-      final flags = ref.watch(tatamiFlagsProvider);
-
-      if (flags.useTatamiReads) {
-        try {
-          // Lê direto via studentRepo — não há domain provider equivalente
-          // (gap registrado pra Sprint 3 — domain_providers ainda não
-          // expõe beltProgressions).
-          final page = await ref
-              .watch(tatami_repos.studentRepoProvider)
-              .listBeltProgressions(academyId, studentId, limit: 100);
-          return page.items.map(_beltProgressionFromApi).toList();
-        } catch (_) {
-          // Fallback transparente para Firestore legacy.
-        }
-      }
-
-      final service = BeltProgressionService(academyId);
-      return await service.getByStudent(studentId);
+      // Tatami direto via studentRepo (domain provider equivalente já
+      // existe — tatamiBeltProgressionsLegacyProvider — mas mantemos o
+      // call site explícito porque controla o `limit=100`).
+      final page = await ref
+          .watch(tatami_repos.studentRepoProvider)
+          .listBeltProgressions(academyId, studentId, limit: 100);
+      return page.items.map(_beltProgressionFromApi).toList();
     });
 
 /// Timeline Screen - Linha do Tempo with enhanced design

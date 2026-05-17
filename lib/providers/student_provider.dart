@@ -1,50 +1,37 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/domain_providers.dart' as tatami;
-import '../api/feature_flags.dart';
 import '../models/student.dart';
 import '../services/services.dart';
 import 'auth_provider.dart';
 
 /// Current student provider - fetches the student linked to the logged-in user.
 ///
-/// Sprint 2 wiring — quando `useTatamiReads` estiver ligada, busca o
-/// student pelo `student_id` do membership ativo via Tatami. Fallback
-/// transparente para o caminho Firestore legacy em qualquer erro.
-/// O caminho `getByLinkedUserId` (busca por linkedUserId quando não tem
-/// studentId direto) NÃO é suportado pelo Tatami — segue só no legacy.
+/// Pós-Fase 1: Tatami é o único path. Caminho `getByLinkedUserId` (busca
+/// quando não tem studentId direto) ainda usa Firestore — gap registrado
+/// para BE (sem endpoint `/v1/students?linked_user_id=...`).
 final currentStudentProvider = FutureProvider<Student?>((ref) async {
   final currentUser = await ref.watch(currentUserProvider.future);
 
   if (currentUser == null) return null;
 
-  // If user has a studentId, fetch the student
+  // If user has a studentId, fetch the student via Tatami
   if (currentUser.studentId != null && currentUser.academyId != null) {
-    // Set the academy context
     FirebaseService.setAcademyId(currentUser.academyId!);
-
-    final flags = ref.watch(tatamiFlagsProvider);
-    if (flags.useTatamiReads) {
-      try {
-        return await ref.read(
-          tatami.tatamiStudentByIdLegacyProvider(
-            tatami.studentRef(currentUser.academyId!, currentUser.studentId!),
-          ).future,
-        );
-      } catch (_) {
-        // segue para o caminho legacy abaixo
-      }
+    try {
+      return await ref.read(
+        tatami.tatamiStudentByIdLegacyProvider(
+          tatami.studentRef(currentUser.academyId!, currentUser.studentId!),
+        ).future,
+      );
+    } catch (_) {
+      return null;
     }
-
-    final service = StudentService(currentUser.academyId!);
-    return await service.getById(currentUser.studentId!);
   }
 
-  // Try to find student by linkedUserId — Tatami não tem equivalente
-  // direto; mantemos apenas no caminho Firestore.
+  // Fallback by linkedUserId (Firestore-only — Tatami não tem o endpoint).
   if (currentUser.academyId != null) {
     FirebaseService.setAcademyId(currentUser.academyId!);
-
     final service = StudentService(currentUser.academyId!);
     return await service.getByLinkedUserId(currentUser.id);
   }

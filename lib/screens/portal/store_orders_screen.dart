@@ -7,10 +7,8 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../api/dto/store_dto.dart' as api_store;
-import '../../api/feature_flags.dart';
 import '../../api/repositories.dart' as tatami_repos;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
@@ -1296,7 +1294,7 @@ class _PixPaymentBottomSheet extends ConsumerStatefulWidget {
 
 class _PixPaymentBottomSheetState extends ConsumerState<_PixPaymentBottomSheet> {
   bool _paymentConfirmed = false;
-  StreamSubscription<DocumentSnapshot>? _orderListener;
+  // Firestore listener removido na Fase 1 — polling Tatami é o único caminho.
   Timer? _orderPollTimer;
 
   @override
@@ -1307,68 +1305,37 @@ class _PixPaymentBottomSheetState extends ConsumerState<_PixPaymentBottomSheet> 
 
   @override
   void dispose() {
-    _orderListener?.cancel();
     _orderPollTimer?.cancel();
     super.dispose();
   }
 
-  /// Listen to order status changes in real-time
+  /// Listen to order status changes via Tatami polling (2s interval).
+  /// Listener Firestore real-time removido na Fase 1.
   void _setupOrderListener() {
     final academyId = FirebaseService.academyId;
-    final flags = ref.read(tatamiFlagsProvider);
-
-    if (flags.useTatamiStore) {
-      // Tatami não tem stream em tempo real para um único storeOrder; o
-      // padrão acordado é polling de 2s no /v1/.../orders/{id} até o
-      // status sair de pending_payment. Cancela ao confirmar ou no dispose.
-      _orderPollTimer = Timer.periodic(
-        const Duration(seconds: 2),
-        (timer) async {
-          if (!mounted) {
-            timer.cancel();
-            return;
-          }
-          try {
-            final repo = ref.read(tatami_repos.storeRepoProvider);
-            final o = await repo.getOrder(academyId, widget.orderId);
-            if (!mounted) return;
-            if (o.status == api_store.ApiOrderStatus.paid &&
-                !_paymentConfirmed) {
-              setState(() => _paymentConfirmed = true);
-              timer.cancel();
-              _showPaymentConfirmedDialog();
-              widget.onPaymentConfirmed?.call();
-            }
-          } catch (_) {
-            // Erro transiente — segue o polling sem propagar pra UI.
-          }
-        },
-      );
-      return;
-    }
-
-    _orderListener = FirebaseFirestore.instance
-        .collection('academies')
-        .doc(academyId)
-        .collection('storeOrders')
-        .doc(widget.orderId)
-        .snapshots()
-        .listen((snapshot) {
+    _orderPollTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (timer) async {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        try {
+          final repo = ref.read(tatami_repos.storeRepoProvider);
+          final o = await repo.getOrder(academyId, widget.orderId);
           if (!mounted) return;
-
-          final data = snapshot.data();
-          if (data != null && data['status'] == 'paid' && !_paymentConfirmed) {
-            setState(() {
-              _paymentConfirmed = true;
-            });
-
-            // Show success feedback
+          if (o.status == api_store.ApiOrderStatus.paid &&
+              !_paymentConfirmed) {
+            setState(() => _paymentConfirmed = true);
+            timer.cancel();
             _showPaymentConfirmedDialog();
-
-            // Notify parent
             widget.onPaymentConfirmed?.call();
           }
-        });
+        } catch (_) {
+          // Erro transiente — segue o polling sem propagar pra UI.
+        }
+      },
+    );
   }
 
   void _showPaymentConfirmedDialog() {

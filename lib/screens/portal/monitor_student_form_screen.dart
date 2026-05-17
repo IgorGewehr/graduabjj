@@ -6,7 +6,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/student_dto.dart' as api_student;
-import '../../api/feature_flags.dart';
 import '../../api/repositories.dart' as tatami_repos;
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
@@ -81,29 +80,16 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
 
     try {
       final academyId = FirebaseService.academyId;
-      final studentService = StudentService(academyId);
-      final flags = ref.read(tatamiFlagsProvider);
+      ref.invalidate(tatami.tatamiStudentByIdLegacyProvider(
+        tatami.studentRef(academyId, widget.studentId!),
+      ));
+      final student = await ref.read(
+        tatami.tatamiStudentByIdLegacyProvider(
+          tatami.studentRef(academyId, widget.studentId!),
+        ).future,
+      );
 
-      Student? student;
-      if (flags.useTatamiReads) {
-        try {
-          ref.invalidate(tatami.tatamiStudentByIdLegacyProvider(
-            tatami.studentRef(academyId, widget.studentId!),
-          ));
-          student = await ref.read(
-            tatami.tatamiStudentByIdLegacyProvider(
-              tatami.studentRef(academyId, widget.studentId!),
-            ).future,
-          );
-        } catch (_) {
-          // fallback
-        }
-      }
-      student ??= await studentService.getById(widget.studentId!);
-
-      if (student != null) {
-        _populateForm(student);
-      }
+      _populateForm(student);
     } catch (e) {
       // Handle error
     }
@@ -141,101 +127,94 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
 
     try {
       final academyId = FirebaseService.academyId;
-      final studentService = StudentService(academyId);
+      final repo = ref.read(tatami_repos.studentRepoProvider);
 
-      // Build student data (without financial fields)
-      final studentData = <String, dynamic>{
-        'fullName': _fullNameController.text.trim(),
-        'nickname': _nicknameController.text.trim().isEmpty ? null : _nicknameController.text.trim(),
-        'email': _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
-        'phone': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
-        'birthDate': _birthDate,
-        'category': _category!.name,
-        'startDate': _startDate,
-        'currentBelt': _belt,
-        'currentStripes': _stripes,
-        'status': _status.name,
-        'healthNotes': _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-      };
-
-      // Guardian info (for kids)
-      if (_category == StudentCategory.kids) {
-        studentData['guardianName'] = _guardianNameController.text.trim().isEmpty
-            ? null
-            : _guardianNameController.text.trim();
-        studentData['guardianPhone'] = _guardianPhoneController.text.trim().isEmpty
-            ? null
-            : _guardianPhoneController.text.trim();
-        studentData['guardianEmail'] = _guardianEmailController.text.trim().isEmpty
-            ? null
-            : _guardianEmailController.text.trim();
+      // Guardian (for kids)
+      api_student.ApiGuardian? guardianDto;
+      if (_category == StudentCategory.kids &&
+          _guardianNameController.text.trim().isNotEmpty) {
+        guardianDto = api_student.ApiGuardian(
+          name: _guardianNameController.text.trim(),
+          phone: _guardianPhoneController.text.trim().isEmpty
+              ? null
+              : _guardianPhoneController.text.trim(),
+          email: _guardianEmailController.text.trim().isEmpty
+              ? null
+              : _guardianEmailController.text.trim(),
+        );
       }
 
-      // Emergency contact
+      // Emergency contact (string "name | phone").
+      String? emergencyContactStr;
       if (_emergencyContactNameController.text.trim().isNotEmpty) {
-        studentData['emergencyContact'] = {
-          'name': _emergencyContactNameController.text.trim(),
-          'phone': _emergencyContactPhoneController.text.trim(),
-        };
+        emergencyContactStr =
+            '${_emergencyContactNameController.text.trim()} | ${_emergencyContactPhoneController.text.trim()}';
       }
-
-      final flags = ref.read(tatamiFlagsProvider);
 
       if (isEditing) {
-        bool wroteViaTatami = false;
-        if (flags.useTatamiWrites) {
-          try {
-            final repo = ref.read(tatami_repos.studentRepoProvider);
-            await repo.update(
-              academyId,
-              widget.studentId!,
-              api_student.UpdateStudentRequest(
-                fullName: _fullNameController.text.trim(),
-                nickname: _nicknameController.text.trim().isEmpty
-                    ? null
-                    : _nicknameController.text.trim(),
-                email: _emailController.text.trim().isEmpty
-                    ? null
-                    : _emailController.text.trim(),
-                phone: _phoneController.text.trim().isEmpty
-                    ? null
-                    : _phoneController.text.trim(),
-                birthDate: _birthDate,
-                startDate: _startDate,
-                category: _category == StudentCategory.kids
-                    ? api_student.ApiStudentCategory.kids
-                    : api_student.ApiStudentCategory.adult,
-                status: api_student.ApiStudentStatusX.fromWire(_status.value),
-                healthNotes: _notesController.text.trim().isEmpty
-                    ? null
-                    : _notesController.text.trim(),
-              ),
-            );
-            wroteViaTatami = true;
-          } catch (_) {
-            // fallback transparente — preserva campos não suportados pelo DTO
-            // (emergency_contact estruturado, guardianName/Phone/Email).
-          }
-        }
-        if (!wroteViaTatami) {
-          await studentService.update(widget.studentId!, studentData);
-        }
-        if (mounted) {
-          context.showSuccess('Aluno atualizado com sucesso!');
-          context.pop();
-        }
+        await repo.update(
+          academyId,
+          widget.studentId!,
+          api_student.UpdateStudentRequest(
+            fullName: _fullNameController.text.trim(),
+            nickname: _nicknameController.text.trim().isEmpty
+                ? null
+                : _nicknameController.text.trim(),
+            email: _emailController.text.trim().isEmpty
+                ? null
+                : _emailController.text.trim(),
+            phone: _phoneController.text.trim().isEmpty
+                ? null
+                : _phoneController.text.trim(),
+            birthDate: _birthDate,
+            startDate: _startDate,
+            category: _category == StudentCategory.kids
+                ? api_student.ApiStudentCategory.kids
+                : api_student.ApiStudentCategory.adult,
+            status: api_student.ApiStudentStatusX.fromWire(_status.value),
+            healthNotes: _notesController.text.trim().isEmpty
+                ? null
+                : _notesController.text.trim(),
+            guardian: guardianDto,
+            emergencyContact: emergencyContactStr,
+          ),
+        );
       } else {
-        // Set default financial values for new students
-        studentData['tuitionValue'] = 0.0;
-        studentData['tuitionDay'] = 10;
-        studentData['totalAttendanceCount'] = 0;
-        studentData['monthlyAttendanceCount'] = 0;
+        await repo.create(
+          academyId,
+          api_student.CreateStudentRequest(
+            fullName: _fullNameController.text.trim(),
+            nickname: _nicknameController.text.trim().isEmpty
+                ? null
+                : _nicknameController.text.trim(),
+            email: _emailController.text.trim().isEmpty
+                ? null
+                : _emailController.text.trim(),
+            phone: _phoneController.text.trim().isEmpty
+                ? null
+                : _phoneController.text.trim(),
+            birthDate: _birthDate,
+            startDate: _startDate,
+            category: _category == StudentCategory.kids
+                ? api_student.ApiStudentCategory.kids
+                : api_student.ApiStudentCategory.adult,
+            currentBelt: api_student.ApiBeltX.fromWire(_belt),
+            currentStripes: _stripes,
+            initialAttendanceCount: 0,
+            healthNotes: _notesController.text.trim().isEmpty
+                ? null
+                : _notesController.text.trim(),
+            guardian: guardianDto,
+            emergencyContact: emergencyContactStr,
+          ),
+        );
+      }
 
-        await studentService.createFromMap(studentData);
-        if (mounted) {
-          context.showSuccess('Aluno cadastrado com sucesso!');
-          context.pop();
-        }
+      if (mounted) {
+        context.showSuccess(
+          isEditing ? 'Aluno atualizado com sucesso!' : 'Aluno cadastrado com sucesso!',
+        );
+        context.pop();
       }
     } catch (e) {
       if (mounted) {
