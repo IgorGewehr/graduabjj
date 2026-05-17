@@ -8,7 +8,6 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'core/theme.dart';
 import 'core/constants.dart';
 import 'providers/auth_provider.dart';
-import 'services/push_notification_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/auth/link_code_screen.dart';
@@ -454,13 +453,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       print(
         '[ROUTER] User loaded: ${user?.displayName}, role: ${user?.role}, isAdmin: ${user?.isAdmin}, isInstructor: ${user?.isInstructor}',
       );
-
-      // Inform notification service of user role for correct routing
-      if (user != null) {
-        pushNotificationService.setUserRole(
-          isAdmin: user.isAdmin || user.isInstructor,
-        );
-      }
 
       // If logged in and on auth pages, redirect based on role
       if (isLoggingIn ||

@@ -9,7 +9,6 @@ import '../api/repositories.dart';
 import '../models/user.dart';
 import '../services/firebase_service.dart';
 import '../services/global_user_service.dart';
-import '../services/push_notification_service.dart';
 import 'selected_academy_provider.dart';
 
 /// Firebase Auth instance provider
@@ -266,9 +265,6 @@ class AuthService {
       password: password,
     );
 
-    // Update FCM token for push notifications
-    await pushNotificationService.onUserLogin();
-
     return credential;
   }
 
@@ -295,16 +291,11 @@ class AuthService {
       accountType: AccountType.free, // New users start as free
     );
 
-    // Register FCM token for push notifications
-    await pushNotificationService.onUserLogin();
-
     return credential;
   }
 
   /// Sign out
   Future<void> signOut() async {
-    // Remove FCM token before signing out
-    await pushNotificationService.onUserLogout();
     await _auth.signOut();
   }
 
@@ -346,10 +337,7 @@ class AuthService {
     final uid = user.uid;
 
     try {
-      // 1. Remove FCM token
-      await pushNotificationService.onUserLogout();
-
-      // 2. Get user's academy mappings to delete related data
+      // 1. Get user's academy mappings to delete related data
       final mapping = await globalUserService.getUserAcademyMapping(uid);
 
       // 3. Delete student records from each academy
@@ -496,9 +484,6 @@ class AuthService {
 
     // Sync highest belt from all linked academies
     await globalUserService.syncHighestBelt(user.uid);
-
-    // Subscribe to academy push notifications topic
-    await pushNotificationService.subscribeToTopic('academy_$academyId');
   }
 
   /// Unlink from academy
@@ -535,9 +520,6 @@ class AuthService {
       userId: user.uid,
       academyId: academyId,
     );
-
-    // Unsubscribe from academy push notifications topic
-    await pushNotificationService.unsubscribeFromTopic('academy_$academyId');
   }
 
   /// Switch primary academy (for multi-academy users)
@@ -638,12 +620,6 @@ class AuthService {
       role: UserRole.admin,
     );
 
-    // Step 7: Register FCM token for push notifications
-    await pushNotificationService.onUserLogin();
-
-    // Step 8: Subscribe to academy push notifications topic
-    await pushNotificationService.subscribeToTopic('academy_$academyId');
-
     return credential;
   }
 
@@ -697,12 +673,6 @@ class AuthService {
         'status': 'active',
       },
     );
-
-    // Register FCM token for push notifications
-    await pushNotificationService.onUserLogin();
-
-    // Subscribe to academy push notifications topic
-    await pushNotificationService.subscribeToTopic('academy_$academyId');
 
     // Update student document with linkedUserId and CPF (with retry logic)
     // This MUST complete before returning to avoid race conditions on first login
