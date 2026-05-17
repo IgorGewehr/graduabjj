@@ -1,4 +1,4 @@
-# 09 — Glossário & convenções
+# Glossário & convenções
 
 > Quando um time grande passa meses numa migração, **drift de vocabulário** é a primeira fonte de bug que ninguém vê chegando. Alguém vai chamar o que aqui é `belt_progressions` de "graduations" porque o produto fala assim em reunião. Pior: alguém vai mandar PR renomeando algo "para padronizar" sem checar o resto.
 >

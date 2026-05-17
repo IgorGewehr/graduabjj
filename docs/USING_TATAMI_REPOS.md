@@ -1,4 +1,4 @@
-# 10 — Usando os repos do Tatami (manual para o PR de wiring)
+# Usando os repos do Tatami (manual para PRs de wiring)
 
 > Manual prático de "como consumir" a camada `lib/api/*` que foi construída
 > nos Sprints 0-7 (FE-only). Este doc é o guia que cada PR de wiring
