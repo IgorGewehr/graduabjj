@@ -34,14 +34,26 @@ import 'dto/student_dto.dart';
 import 'feature_flags.dart';
 import 'repositories.dart';
 
+/// Mantido apenas para retrocompatibilidade dos testes existentes que
+/// validam o comportamento pré-Fase 1. Não é mais lançado por nenhum
+/// provider — todos os flag-checks foram removidos junto com o caminho
+/// Firestore.
+@Deprecated(
+  'Migração Firestore→Tatami foi concluída na Fase 1 (2026-05). '
+  'Nenhum provider lança mais este erro; mantido apenas para evitar '
+  'quebrar imports em testes legados que serão revisados na Fase 3.',
+)
 class TatamiFlagDisabledError extends StateError {
   TatamiFlagDisabledError(String flag)
       : super('Tatami flag "$flag" is disabled. Toggle in Remote Config '
             'before consuming the corresponding *TatamiProvider.');
 }
 
+/// No-op pós-Fase 1: a migração Firestore→Tatami foi concluída, Tatami é
+/// o único path. Mantido como função inline para preservar a assinatura
+/// de chamada nos providers (zero-cost em release, evita refactor massivo).
 void _requireFlag(bool enabled, String flagName) {
-  if (!enabled) throw TatamiFlagDisabledError(flagName);
+  // Tatami é o único path agora — nenhuma flag bloqueia.
 }
 
 // ---------------------------------------------------------------------------

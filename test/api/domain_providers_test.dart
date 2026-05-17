@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use_from_same_package
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,7 +30,7 @@ void main() {
   });
 
   ProviderContainer container({
-    TatamiFlags flags = TatamiFlags.allOff,
+    TatamiFlags flags = TatamiFlags.allOn,
   }) =>
       ProviderContainer(
         overrides: [
@@ -37,26 +39,29 @@ void main() {
         ],
       );
 
-  group('flag disabled → TatamiFlagDisabledError', () {
-    test('currentTatamiUserProvider explode quando flag off', () async {
-      final c = container();
-      addTearDown(c.dispose);
-      expect(
-        () => c.read(currentTatamiUserProvider.future),
-        throwsA(isA<TatamiFlagDisabledError>()),
+  group('pós-Fase 1: providers Tatami funcionam sem flag-gating', () {
+    test('currentTatamiUserProvider carrega /v1/me sem flag explícita',
+        () async {
+      adapter.onGet(
+        '/v1/me',
+        (s) => s.reply(200, {
+          'user': {
+            'uid': 'u-0',
+            'email': 'u@x.com',
+            'account_type': 'linked',
+          },
+          'memberships': [],
+        }),
       );
-    });
 
-    test('tatamiStudentsProvider explode quando flag off', () async {
-      final c = container();
-      addTearDown(c.dispose);
-      expect(
-        () => c.read(
-          tatamiStudentsProvider(const StudentsQuery(academyId: 'aid'))
-              .future,
-        ),
-        throwsA(isA<TatamiFlagDisabledError>()),
+      // Container sem override de flags = default allOn (Tatami sempre on).
+      final c = ProviderContainer(
+        overrides: [tatamiClientProvider.overrideWithValue(client)],
       );
+      addTearDown(c.dispose);
+
+      final cu = await c.read(currentTatamiUserProvider.future);
+      expect(cu.user.uid, 'u-0');
     });
   });
 
@@ -155,18 +160,7 @@ void main() {
   });
 
   group('tatamiBeltProgressionsLegacyProvider', () {
-    test('flag off explode com TatamiFlagDisabledError', () async {
-      final c = container();
-      addTearDown(c.dispose);
-      expect(
-        () => c.read(
-          tatamiBeltProgressionsLegacyProvider(studentRef('aid', 's-1')).future,
-        ),
-        throwsA(isA<TatamiFlagDisabledError>()),
-      );
-    });
-
-    test('flag on adapta DTO → modelo legacy', () async {
+    test('adapta DTO → modelo legacy', () async {
       adapter.onGet(
         '/v1/academies/aid/students/s-1/belt-progressions',
         (s) => s.reply(200, {

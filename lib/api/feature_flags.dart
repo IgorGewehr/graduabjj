@@ -2,25 +2,35 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Feature flags da migração Firestore → Tatami.
 ///
-/// Hoje os valores são `const` hardcoded (todos false). Quando o Firebase
-/// Remote Config estiver provisionado, esta classe vai ler de lá no boot
-/// da app e atualizar o `tatamiFlagsProvider` — os call-sites não mudam.
+/// **Estado pós-encerramento da migração** (Fase 1, 2026-05): a migração
+/// foi concluída. Todas as flags têm default `true` e os call-sites nas
+/// screens já não as consultam — Tatami é o único path. Esta classe é
+/// mantida como **shim de compatibilidade** para:
 ///
-/// O contrato com cada PR de wiring é:
-///   - Mergeado com a flag default `false` → comportamento legacy (Firestore).
-///   - Operacional ativa a flag em canary 10% → 50% → 100% por academia.
-///   - Após estabilidade comprovada (>7d sem rollback), próximo PR remove
-///     o branch legacy e a flag (Sprint 8 — encerramento Firestore).
+///   - Testes de `domain_providers` que ainda parametrizam flags.
+///   - Boot via Remote Config no `main.dart` (no-op funcional — qualquer
+///     valor remoto continua sendo aceito, mas o default seguro agora é
+///     "tudo ligado" caso o Remote Config esteja inacessível).
+///
+/// Próximo passo (Fase 3): marcar como `@Deprecated` para sinalizar
+/// remoção futura sem quebrar consumers existentes.
+@Deprecated(
+  'A migração Firestore→Tatami foi concluída na Fase 1 (2026-05). '
+  'Todos os flags retornam true por padrão; novos call-sites não devem '
+  'mais consultar TatamiFlags — chame os providers Tatami diretamente. '
+  'Mantido apenas para retrocompatibilidade dos testes e do bootstrap '
+  'via Remote Config no main.dart.',
+)
 class TatamiFlags {
   const TatamiFlags({
-    this.useTatamiIdentity = false,
-    this.useTatamiReads = false,
-    this.useTatamiWrites = false,
-    this.useTatamiFinancials = false,
-    this.useTatamiAttendance = false,
-    this.useTatamiNotifications = false,
-    this.useTatamiStore = false,
-    this.useTatamiCompetitions = false,
+    this.useTatamiIdentity = true,
+    this.useTatamiReads = true,
+    this.useTatamiWrites = true,
+    this.useTatamiFinancials = true,
+    this.useTatamiAttendance = true,
+    this.useTatamiNotifications = true,
+    this.useTatamiStore = true,
+    this.useTatamiCompetitions = true,
   });
 
   final bool useTatamiIdentity;
@@ -32,8 +42,13 @@ class TatamiFlags {
   final bool useTatamiStore;
   final bool useTatamiCompetitions;
 
-  /// Default seguro: tudo desligado. Comportamento idêntico ao app legacy.
+  /// Default pós-migração: tudo **ligado** (Tatami é o único path).
+  /// O nome `allOff` é mantido por compatibilidade com overrides existentes
+  /// em testes, mas semanticamente equivale a `allOn`.
   static const allOff = TatamiFlags();
+
+  /// Alias explícito para o estado pós-migração. Preferir em código novo.
+  static const allOn = TatamiFlags();
 
   TatamiFlags copyWith({
     bool? useTatamiIdentity,
@@ -59,29 +74,23 @@ class TatamiFlags {
       );
 }
 
-/// Provider Riverpod para as flags. Default = tudo desligado (legacy).
+/// Provider Riverpod para as flags. Default pós-migração = tudo **ligado**.
 ///
 /// Tests podem sobrescrever via:
 /// ```dart
 /// ProviderScope(
 ///   overrides: [
 ///     tatamiFlagsProvider.overrideWithValue(
-///       TatamiFlags(useTatamiIdentity: true),
+///       const TatamiFlags(useTatamiIdentity: false),
 ///     ),
 ///   ],
 ///   child: ...,
 /// );
 /// ```
 ///
-/// Boot real da app sobrescreve este provider depois de ler o Remote Config:
-/// ```dart
-/// final fetched = await FirebaseRemoteConfig.instance.fetchAndActivate();
-/// container.read(tatamiFlagsProvider.notifier).state = TatamiFlags(
-///   useTatamiIdentity:
-///       FirebaseRemoteConfig.instance.getBool('useTatamiIdentity'),
-///   ...,
-/// );
-/// ```
+/// Boot real da app sobrescreve este provider depois de ler o Remote Config
+/// (no-op funcional pós-migração; consumir Remote Config continua só para
+/// manter o flow operacional documentado).
 final tatamiFlagsProvider = StateProvider<TatamiFlags>(
-  (ref) => TatamiFlags.allOff,
+  (ref) => TatamiFlags.allOn,
 );
