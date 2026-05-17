@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/domain_providers.dart' as tatami;
+import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -518,8 +520,24 @@ class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
 
   Future<void> _loadStudents() async {
     try {
-      final svc = StudentService(widget.academyId);
-      final all = await svc.listAll();
+      final flags = ref.read(tatamiFlagsProvider);
+
+      Future<List<Student>> listFuture() async {
+        if (flags.useTatamiReads) {
+          try {
+            final q = tatami.StudentsQuery(academyId: widget.academyId);
+            ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
+            return await ref.read(
+              tatami.tatamiStudentsLegacyProvider(q).future,
+            );
+          } catch (_) {
+            // fallback
+          }
+        }
+        return StudentService(widget.academyId).listAll();
+      }
+
+      final all = await listFuture();
       if (!mounted) return;
       setState(() {
         _candidates = all
