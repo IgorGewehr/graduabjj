@@ -1,9 +1,14 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../api/dto/attendance_dto.dart' as api_att;
+import '../../api/feature_flags.dart';
+import '../../api/repositories.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/student_provider.dart';
@@ -65,14 +70,49 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
         );
       }
 
-      final service = QrAttendanceService(academyId);
-      final result = await service.processScan(
-        rawPayload: raw,
-        studentId: studentId,
-        studentNameOverride: student?.fullName ?? user!.displayName,
-        verifiedBy: user!.id,
-        verifiedByName: user.displayName,
-      );
+      final flags = ref.read(tatamiFlagsProvider);
+      QrAttendanceResult? result;
+
+      // Detecta formato do payload: Tatami é `<b64>.<sig>` (sem `{`),
+      // legacy é JSON cru `{v,a,c,t}`. Se flag estiver on E formato bater
+      // o do Tatami, tenta selfCheckin (POST com qr_token). Fallback
+      // automático para o caminho legacy se a flag estiver off ou se a
+      // chamada Tatami falhar.
+      final looksTatami = !raw.trimLeft().startsWith('{') && raw.contains('.');
+      if (flags.useTatamiAttendance && looksTatami) {
+        try {
+          final classId = _extractClassIdFromTatamiToken(raw);
+          if (classId != null) {
+            final att = await ref.read(attendanceRepoProvider).selfCheckin(
+                  academyId,
+                  api_att.SelfCheckinRequest(
+                    classId: classId,
+                    qrToken: raw,
+                  ),
+                );
+            result = QrAttendanceResult(
+              classId: att.classId,
+              className: '',
+              studentId: att.studentId,
+              studentName: student?.fullName ?? user!.displayName,
+              markedAt: att.createdAt ?? DateTime.now(),
+            );
+          }
+        } catch (_) {
+          // fallback legacy abaixo
+        }
+      }
+
+      if (result == null) {
+        final service = QrAttendanceService(academyId);
+        result = await service.processScan(
+          rawPayload: raw,
+          studentId: studentId,
+          studentNameOverride: student?.fullName ?? user!.displayName,
+          verifiedBy: user!.id,
+          verifiedByName: user.displayName,
+        );
+      }
 
       await _controller.stop();
       if (!mounted) return;
@@ -96,6 +136,30 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
         _isProcessing = false;
       });
       _scheduleStatusReset();
+    }
+  }
+
+  /// Decodifica o primeiro segmento (`<b64url(payload)>.<sig>`) e extrai
+  /// `c` (classId). Retorna null se o formato não bater — caller cai
+  /// no caminho legacy. Não valida assinatura (BE faz isso).
+  String? _extractClassIdFromTatamiToken(String token) {
+    try {
+      final dot = token.indexOf('.');
+      if (dot <= 0) return null;
+      final payloadB64 = token.substring(0, dot);
+      // base64url permite padding ausente — normalize.
+      final padded = payloadB64.padRight(
+        (payloadB64.length + 3) ~/ 4 * 4,
+        '=',
+      );
+      final bytes = base64Url.decode(padded);
+      final decoded = jsonDecode(utf8.decode(bytes));
+      if (decoded is Map && decoded['c'] is String) {
+        return decoded['c'] as String;
+      }
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 
