@@ -16,6 +16,7 @@ import '../models/student.dart' as legacy;
 import '../services/attendance_service.dart' as legacy_att;
 import '../services/class_service.dart' show BJJClass;
 import '../services/link_code_service.dart' show LinkCode;
+import '../services/notification_service.dart' as legacy_notif;
 import '../services/payment_service.dart' as legacy_pay;
 import '../services/plan_service.dart' show Plan;
 import 'dto/academy_dto.dart';
@@ -529,6 +530,17 @@ final tatamiUnreadCountProvider = FutureProvider.family<int, String?>(
     return ref
         .watch(notificationRepoProvider)
         .getUnreadCount(academyId: academyId);
+  },
+);
+
+/// Provider legacy-typed: `List<AppNotification>`. Screens consumem
+/// AppNotification (do notification_service) e podem migrar trocando só
+/// o provider source.
+final tatamiInboxLegacyProvider =
+    FutureProvider.family<List<legacy_notif.AppNotification>, NotificationsFilter>(
+  (ref, filter) async {
+    final page = await ref.watch(tatamiInboxProvider(filter).future);
+    return page.items.map(legacy_notif.AppNotification.fromApi).toList();
   },
 );
 

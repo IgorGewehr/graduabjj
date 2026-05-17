@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/notification_dto.dart' as api;
 import 'firebase_service.dart';
 
 /// Notification Type - matches types stored in Firestore by webhook/Cloud Functions
@@ -153,6 +154,63 @@ class AppNotification {
     required this.createdAt,
     this.expiresAt,
   });
+
+  /// Sprint 6 wiring — adapter `ApiNotification` → `AppNotification` legacy.
+  ///
+  /// Mapeamento de tipos (Tatami catálogo vs legacy):
+  /// - payment_due       → paymentPending  (Tatami unifica 3 estados em 1)
+  /// - payment_paid      → paymentReceived
+  /// - payment_overdue   → paymentOverdue
+  /// - graduation_eligible → graduationEligible
+  /// - graduation_promoted → studentMilestone
+  /// - competition_announcement → competitionReminder
+  /// - competition_enrollment → competitionReminder
+  /// - store_order_update → orderPaid
+  /// - generic           → system
+  ///
+  /// Priority não vem do Tatami (não foi modelada) — sempre `normal`.
+  /// Channels: Tatami expõe inbox/push/whatsapp/email; legacy só sabe
+  /// `in_app` e `push` — projetamos via `.name`.
+  factory AppNotification.fromApi(api.ApiNotification n) {
+    return AppNotification(
+      id: n.id,
+      userId: n.recipientUid,
+      type: _typeFromApi(n.type),
+      priority: NotificationPriority.normal,
+      title: n.title,
+      message: n.body ?? '',
+      actionUrl: n.actionUrl,
+      studentId: n.metadata?['student_id'] as String?,
+      financialId: n.metadata?['financial_id'] as String?,
+      competitionId: n.metadata?['competition_id'] as String?,
+      read: n.isRead,
+      readAt: n.readAt,
+      channels: n.channels.map((c) => c.name).toList(),
+      createdAt: n.createdAt,
+    );
+  }
+
+  static NotificationType _typeFromApi(api.ApiNotificationType t) {
+    switch (t) {
+      case api.ApiNotificationType.payment_due:
+        return NotificationType.paymentPending;
+      case api.ApiNotificationType.payment_paid:
+        return NotificationType.paymentReceived;
+      case api.ApiNotificationType.payment_overdue:
+        return NotificationType.paymentOverdue;
+      case api.ApiNotificationType.graduation_eligible:
+        return NotificationType.graduationEligible;
+      case api.ApiNotificationType.graduation_promoted:
+        return NotificationType.studentMilestone;
+      case api.ApiNotificationType.competition_announcement:
+      case api.ApiNotificationType.competition_enrollment:
+        return NotificationType.competitionReminder;
+      case api.ApiNotificationType.store_order_update:
+        return NotificationType.orderPaid;
+      case api.ApiNotificationType.generic:
+        return NotificationType.system;
+    }
+  }
 
   factory AppNotification.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
