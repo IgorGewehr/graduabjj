@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/competition_dto.dart' as api;
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
 import 'student_service.dart';
@@ -131,6 +132,81 @@ class Achievement {
     required this.createdAt,
     this.createdBy,
   });
+
+  /// Sprint 7 wiring — adapter `ApiAchievement` → `Achievement` legacy.
+  ///
+  /// Diferenças:
+  /// - `studentName` não vem na resposta (param opcional).
+  /// - `title`/`description` legacy não existem na API — derivamos de
+  ///   type quando possível.
+  /// - `date` legacy = `unlocked_at` API.
+  /// - `photoUrl`/`isPublic`/`createdBy` não existem na API.
+  factory Achievement.fromApi(api.ApiAchievement a, {String? studentName}) {
+    final type = _typeFromApi(a.type);
+    return Achievement(
+      id: a.id,
+      studentId: a.studentId,
+      studentName: studentName ?? '',
+      type: type,
+      title: _derivedTitle(type, a),
+      description: a.payload?['description'] as String?,
+      date: a.unlockedAt,
+      fromBelt: a.fromBelt,
+      toBelt: a.toBelt,
+      fromStripes: a.fromStripes,
+      toStripes: a.toStripes,
+      competitionId: a.competitionId,
+      position: a.position == null ? null : _positionFromApi(a.position!),
+      milestone: a.milestoneKey,
+      isPublic: true,
+      createdAt: a.unlockedAt,
+    );
+  }
+
+  static AchievementType _typeFromApi(api.ApiAchievementType t) {
+    switch (t) {
+      case api.ApiAchievementType.graduation:
+        return AchievementType.graduation;
+      case api.ApiAchievementType.stripe:
+        return AchievementType.stripe;
+      case api.ApiAchievementType.competition:
+        return AchievementType.competition;
+      case api.ApiAchievementType.milestone:
+        return AchievementType.milestone;
+    }
+  }
+
+  static CompetitionPosition _positionFromApi(api.ApiPosition p) {
+    switch (p) {
+      case api.ApiPosition.gold:
+        return CompetitionPosition.gold;
+      case api.ApiPosition.silver:
+        return CompetitionPosition.silver;
+      case api.ApiPosition.bronze:
+        return CompetitionPosition.bronze;
+      case api.ApiPosition.participant:
+        return CompetitionPosition.participant;
+    }
+  }
+
+  static String _derivedTitle(AchievementType type, api.ApiAchievement a) {
+    switch (type) {
+      case AchievementType.graduation:
+        if (a.fromBelt != null && a.toBelt != null) {
+          return 'Graduação: faixa ${a.fromBelt} → ${a.toBelt}';
+        }
+        return 'Graduação';
+      case AchievementType.stripe:
+        if (a.toStripes != null) {
+          return 'Conquistou ${a.toStripes}ª grau';
+        }
+        return 'Novo grau';
+      case AchievementType.competition:
+        return 'Competição: ${a.position?.name ?? 'participação'}';
+      case AchievementType.milestone:
+        return a.milestoneKey ?? 'Marco';
+    }
+  }
 
   factory Achievement.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;

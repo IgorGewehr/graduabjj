@@ -13,6 +13,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/student.dart' as legacy;
+import '../services/achievement_service.dart' as legacy_ach;
 import '../services/attendance_service.dart' as legacy_att;
 import '../services/class_service.dart' show BJJClass;
 import '../services/competition_service.dart' as legacy_comp;
@@ -643,6 +644,14 @@ final tatamiCompetitionsLegacyProvider =
   (ref, academyId) async {
     final page = await ref.watch(tatamiCompetitionsProvider(academyId).future);
     return page.items.map(legacy_comp.Competition.fromApi).toList();
+  },
+);
+
+final tatamiAchievementsLegacyProvider =
+    FutureProvider.family<List<legacy_ach.Achievement>, StudentRef>(
+  (ref, r) async {
+    final page = await ref.watch(tatamiAchievementsProvider(r).future);
+    return page.items.map(legacy_ach.Achievement.fromApi).toList();
   },
 );
 

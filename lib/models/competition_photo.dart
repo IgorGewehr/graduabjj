@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/competition_dto.dart' as api;
+
 /// Competition Position (Medal Type)
 enum CompetitionPosition { gold, silver, bronze, participant }
 
@@ -79,6 +81,37 @@ class CompetitionPhoto {
     required this.updatedAt,
     required this.createdBy,
   });
+
+  /// Sprint 7 wiring — adapter `ApiPhoto` → `CompetitionPhoto` legacy.
+  ///
+  /// Differences:
+  /// - `competitionName`, `studentName`, `createdBy` não vêm na resposta
+  ///   canônica REST. Caller passa via param quando precisa.
+  /// - `likes`/`isHighlight`/`medalType`/`photoType` não existem na API;
+  ///   defaultam para 0/false/null/null. Telas que dependem desses
+  ///   campos podem buscar separadamente (mas idealmente são removidos
+  ///   da UI no Tatami — não são responsabilidades de Photo).
+  /// - `updatedAt` cai em `uploaded_at` pois API não distingue.
+  factory CompetitionPhoto.fromApi(
+    api.ApiPhoto p, {
+    String competitionName = '',
+    String studentName = '',
+    String? createdBy,
+  }) {
+    return CompetitionPhoto(
+      id: p.id,
+      competitionId: p.competitionId,
+      competitionName: competitionName,
+      studentId: p.studentId ?? '',
+      studentName: studentName,
+      url: p.url,
+      storagePath: p.storagePath,
+      caption: p.caption,
+      createdAt: p.uploadedAt,
+      updatedAt: p.uploadedAt,
+      createdBy: createdBy ?? p.uploadedByUid ?? '',
+    );
+  }
 
   factory CompetitionPhoto.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
