@@ -972,32 +972,58 @@ class _PixPaymentBottomSheetState
     final academyId = FirebaseService.academyId;
 
     try {
-      // Check which provider is active
-      final asaasService = AsaasPaymentService(academyId);
-      final isAsaas = await asaasService.isEnabled();
+      final flags = ref.read(tatamiFlagsProvider);
 
+      // Caminho Tatami: POST /financials/{id}/pay/pix — idempotente,
+      // BE escolhe gateway (Asaas/AbacatePay) baseado no settings da
+      // academia. Substitui os 2 chamados client-side (asaas.isEnabled +
+      // gateway-specific createPixPayment).
       PaymentLink? link;
-      if (isAsaas) {
-        link = await asaasService.createPixPayment(
-          amount: widget.payment.value,
-          financialId: widget.payment.id,
-          studentId: widget.payment.studentId,
-          studentName: widget.studentName,
-          description:
-              widget.payment.description ??
-              'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
-        );
-      } else {
-        final service = AbacatePayService(academyId);
-        link = await service.createPixPayment(
-          amount: widget.payment.value,
-          financialId: widget.payment.id,
-          studentId: widget.payment.studentId,
-          studentName: widget.studentName,
-          description:
-              widget.payment.description ??
-              'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
-        );
+      if (flags.useTatamiFinancials) {
+        try {
+          final payIntent =
+              await ref.read(tatami_repos.financialRepoProvider).payWithPix(
+                    academyId,
+                    widget.payment.id,
+                    body: api_fin.PayIntentRequest(
+                      customerName: widget.studentName,
+                    ),
+                  );
+          link = PaymentLink(
+            pixCode: payIntent.pixCopyPaste ?? '',
+            qrCodeUrl: payIntent.pixQrCode,
+            expiresAt: DateTime.now().add(const Duration(hours: 24)),
+            abacatePayId: payIntent.externalId,
+          );
+        } catch (_) {
+          // fallback para gateway-specific legacy abaixo
+        }
+      }
+
+      if (link == null) {
+        // Check which provider is active
+        final asaasService = AsaasPaymentService(academyId);
+        final isAsaas = await asaasService.isEnabled();
+        if (isAsaas) {
+          link = await asaasService.createPixPayment(
+            amount: widget.payment.value,
+            financialId: widget.payment.id,
+            studentId: widget.payment.studentId,
+            studentName: widget.studentName,
+            description: widget.payment.description ??
+                'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
+          );
+        } else {
+          final service = AbacatePayService(academyId);
+          link = await service.createPixPayment(
+            amount: widget.payment.value,
+            financialId: widget.payment.id,
+            studentId: widget.payment.studentId,
+            studentName: widget.studentName,
+            description: widget.payment.description ??
+                'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
+          );
+        }
       }
 
       setState(() {
