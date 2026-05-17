@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/domain_providers.dart' as tatami;
+import '../../api/feature_flags.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -60,16 +62,33 @@ class _AdminCompetitionsScreenState
     setState(() => _isLoading = true);
 
     try {
-      final service = CompetitionService(academyId);
-      // Sprint 5 — fetch upcoming + full list in parallel.
-      final results = await Future.wait([
-        service.getUpcoming(),
-        service.list(),
-      ]);
-      final upcoming = results[0];
-      final all = results[1];
+      final flags = ref.read(tatamiFlagsProvider);
+
+      // Tatami-backed read behind useTatamiCompetitions. Fallback transparente
+      // para o Firestore se a chamada Tatami falhar. Filtragem upcoming/past
+      // é client-side (legacy `getUpcoming` faz a mesma divisão por `date`).
+      Future<List<Competition>> allFuture() async {
+        if (flags.useTatamiCompetitions) {
+          try {
+            ref.invalidate(tatami.tatamiCompetitionsLegacyProvider(academyId));
+            return await ref.read(
+              tatami.tatamiCompetitionsLegacyProvider(academyId).future,
+            );
+          } catch (_) {
+            // fallback
+          }
+        }
+        return CompetitionService(academyId).list();
+      }
+
+      final all = await allFuture();
       final now = DateTime.now();
-      final past = all.where((c) => c.date.isBefore(now)).toList();
+      final upcoming =
+          all.where((c) => !c.date.isBefore(now)).toList()
+            ..sort((a, b) => a.date.compareTo(b.date));
+      final past =
+          all.where((c) => c.date.isBefore(now)).toList()
+            ..sort((a, b) => b.date.compareTo(a.date));
 
       setState(() {
         _upcomingCompetitions = upcoming;
