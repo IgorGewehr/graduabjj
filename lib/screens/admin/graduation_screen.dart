@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/dto/student_dto.dart' as api_student;
+import '../../api/feature_flags.dart';
+import '../../api/repositories.dart' as tatami_repos;
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
@@ -720,7 +723,38 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
     String? notes,
   }) async {
     try {
-      final service = BeltProgressionService(FirebaseService.academyId);
+      final academyId = FirebaseService.academyId;
+      final flags = ref.read(tatamiFlagsProvider);
+
+      if (flags.useTatamiWrites) {
+        try {
+          final repo = ref.read(tatami_repos.studentRepoProvider);
+          await repo.createBeltProgression(
+            academyId,
+            studentId,
+            api_student.CreateBeltProgressionRequest(
+              newBelt: api_student.ApiBeltX.fromWire(newBelt),
+              newStripes: newStripes,
+              promotionDate: DateTime.now(),
+              notes: notes,
+            ),
+          );
+          if (mounted) {
+            context.showSuccess('$studentName foi graduado com sucesso!');
+            _loadData();
+          }
+          return;
+        } catch (_) {
+          // Fallback transparente — vide nota abaixo.
+        }
+      }
+
+      // Fallback / caminho legacy. A leitura da lista de elegíveis
+      // (`getEligibleStudents`) segue toda no BeltProgressionService porque
+      // o Tatami não tem endpoint de "list eligible" — só per-student
+      // (`tatamiStudentEligibilityProvider`). Wiring desse loop fica para
+      // quando o BE expuser o endpoint agregado.
+      final service = BeltProgressionService(academyId);
       await service.promote(
         studentId: studentId,
         studentName: studentName,
