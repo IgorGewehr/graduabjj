@@ -528,7 +528,7 @@ class PaymentService {
           );
         }
       } catch (e) {
-        print('Failed to send new tuition notification: $e');
+        // ignore notification errors
       }
     }
 
@@ -797,7 +797,7 @@ class PaymentService {
               );
             }
           } catch (e) {
-            print('Failed to send overdue notification: $e');
+            // ignore notification errors
           }
         }
       }

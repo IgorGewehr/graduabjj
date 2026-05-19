@@ -1,13 +1,16 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
+
 import 'dto/notification_dto.dart';
 import 'idempotency.dart';
 import 'tatami_client.dart';
 
 /// Repositório remoto do contexto Notification.
 ///
-/// Inclui inbox do usuário, FCM tokens (push) e broadcast admin. NÃO inclui
-/// SSE stream — esse fica para um PR posterior usando event_source ou
-/// HTTP streaming hand-rolled. O caminho intermediário do doc 03 §8 é
-/// polling com ETag, que pode ser implementado por cima do list() daqui.
+/// Inclui inbox do usuário, FCM tokens (push), broadcast admin e SSE stream.
 class NotificationRemoteRepo {
   NotificationRemoteRepo(this._api);
 
@@ -64,6 +67,54 @@ class NotificationRemoteRepo {
 
   Future<void> delete(String notificationId) async {
     await _api.delete('/v1/me/notifications/$notificationId');
+  }
+
+  /// `GET /v1/me/notifications/stream` — SSE (Server-Sent Events).
+  ///
+  /// O servidor emite eventos do tipo `data: <json>\n\n`. Cada evento pode
+  /// ser um objeto `ApiNotification` único ou uma lista deles. O stream
+  /// permanece aberto enquanto houver um listener; descarte o subscription
+  /// para fechar a conexão HTTP.
+  Stream<List<ApiNotification>> streamNotifications() async* {
+    final uri = Uri.parse('${_api.baseUrl}/v1/me/notifications/stream');
+
+    // Usa FirebaseAuth diretamente — TatamiClient não expõe getAuthToken().
+    final token =
+        await FirebaseAuth.instance.currentUser?.getIdToken();
+
+    final client = http.Client();
+    try {
+      final request = http.Request('GET', uri)
+        ..headers['Accept'] = 'text/event-stream'
+        ..headers['Cache-Control'] = 'no-cache';
+
+      if (token != null) {
+        request.headers['Authorization'] = 'Bearer $token';
+      }
+
+      final response = await client.send(request);
+
+      await for (final line in response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())) {
+        if (!line.startsWith('data: ')) continue;
+
+        final raw = line.substring(6).trim();
+        if (raw.isEmpty || raw == '[DONE]') continue;
+
+        final dynamic decoded = jsonDecode(raw);
+        if (decoded is List) {
+          yield decoded
+              .whereType<Map<String, dynamic>>()
+              .map(ApiNotification.fromJson)
+              .toList();
+        } else if (decoded is Map<String, dynamic>) {
+          yield [ApiNotification.fromJson(decoded)];
+        }
+      }
+    } finally {
+      client.close();
+    }
   }
 
   // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/achievement_repo.dart' as repo_ach;
 import '../api/dto/competition_dto.dart' as api;
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
@@ -161,6 +162,73 @@ class Achievement {
       isPublic: true,
       createdAt: a.unlockedAt,
     );
+  }
+
+  /// Adapter `repo_ach.ApiAchievement` (achievement_repo.dart) → `Achievement`.
+  ///
+  /// Usa o DTO retornado diretamente por `AchievementRemoteRepo.getByStudent`.
+  /// Diferencia-se de `fromApi` porque `position` aqui é `String?` (wire raw)
+  /// em vez de `ApiPosition?` (enum do competition_dto).
+  factory Achievement.fromApiRepo(
+    repo_ach.ApiAchievement a, {
+    String? studentName,
+  }) {
+    final type = _typeFromRepoApi(a.type);
+    return Achievement(
+      id: a.id,
+      studentId: a.studentId,
+      studentName: studentName ?? '',
+      type: type,
+      title: _derivedTitleRepo(type, a),
+      description: a.payload?['description'] as String?,
+      date: a.unlockedAt,
+      fromBelt: a.fromBelt,
+      toBelt: a.toBelt,
+      fromStripes: a.fromStripes,
+      toStripes: a.toStripes,
+      competitionId: a.competitionId,
+      position: a.position == null
+          ? null
+          : CompetitionPositionExtension.fromString(a.position!),
+      milestone: a.milestoneKey,
+      isPublic: true,
+      createdAt: a.unlockedAt,
+    );
+  }
+
+  static AchievementType _typeFromRepoApi(repo_ach.ApiAchievementType t) {
+    switch (t) {
+      case repo_ach.ApiAchievementType.graduation:
+        return AchievementType.graduation;
+      case repo_ach.ApiAchievementType.stripe:
+        return AchievementType.stripe;
+      case repo_ach.ApiAchievementType.competition:
+        return AchievementType.competition;
+      case repo_ach.ApiAchievementType.milestone:
+        return AchievementType.milestone;
+    }
+  }
+
+  static String _derivedTitleRepo(
+    AchievementType type,
+    repo_ach.ApiAchievement a,
+  ) {
+    switch (type) {
+      case AchievementType.graduation:
+        if (a.fromBelt != null && a.toBelt != null) {
+          return 'Graduação: faixa ${a.fromBelt} → ${a.toBelt}';
+        }
+        return 'Graduação';
+      case AchievementType.stripe:
+        if (a.toStripes != null) {
+          return 'Conquistou ${a.toStripes}ª grau';
+        }
+        return 'Novo grau';
+      case AchievementType.competition:
+        return 'Competição: ${a.position ?? 'participação'}';
+      case AchievementType.milestone:
+        return a.milestoneKey ?? 'Marco';
+    }
   }
 
   static AchievementType _typeFromApi(api.ApiAchievementType t) {
@@ -487,7 +555,7 @@ class AchievementService {
           );
         }
       } catch (e) {
-        print('Failed to send achievement notification: $e');
+        // ignore notification errors
       }
     }
 

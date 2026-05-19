@@ -7,10 +7,12 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
 import '../../core/theme.dart';
+import '../../api/dto/academy_dto.dart' show RedeemLinkCodeRequest;
+import '../../api/link_code_repo.dart';
+import '../../api/repositories.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/global_user_service.dart';
 import '../../services/instructor_link_code_service.dart';
-import '../../services/link_code_service.dart';
 
 /// Link Code Screen - Create account using access code
 class LinkCodeScreen extends ConsumerStatefulWidget {
@@ -37,7 +39,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   String? _errorMessage;
-  LinkCode? _validatedLinkCode;
+  LinkCodePreview? _validatedPreview;
 
   // Instructor flow state. Populated when the entered code is 8 chars and
   // resolves in /instructorLinkCodes — switches the form to a minimal
@@ -47,6 +49,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
   final _fullNameController = TextEditingController();
 
   bool get _isInstructorMode => _validatedInstructorCode != null;
+  bool get _isStudentMode => _validatedPreview != null && !_isInstructorMode;
 
   @override
   void dispose() {
@@ -100,7 +103,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
-      _validatedLinkCode = null;
+      _validatedPreview = null;
       _validatedInstructorCode = null;
       _validatedInstructorAcademyId = null;
     });
@@ -128,28 +131,23 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         return;
       }
 
-      // Student flow (6 chars).
-      final validation = await validateCodeGlobally(raw);
-
-      if (!validation.valid) {
-        if (!mounted) return;
-        setState(() {
-          _errorMessage = validation.error;
-          _isLoading = false;
-        });
-        return;
-      }
-
+      // Student flow (6 chars) — Go backend, no Firestore.
+      final preview = await ref.read(linkCodeRepoProvider).getPreview(raw);
       if (!mounted) return;
       setState(() {
-        _validatedLinkCode = validation.linkCode;
+        _validatedPreview = preview;
         _currentStep = _Step.register;
         _isLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
+      final msg = e.toString().contains('404') || e.toString().contains('not found')
+          ? 'Codigo nao encontrado ou ja utilizado.'
+          : e.toString().contains('expired') || e.toString().contains('409')
+              ? 'Este codigo expirou. Solicite um novo.'
+              : 'Erro ao validar codigo. Tente novamente.';
       setState(() {
-        _errorMessage = 'Erro ao validar codigo. Tente novamente.';
+        _errorMessage = msg;
         _isLoading = false;
       });
     }
@@ -253,82 +251,65 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
   Future<void> _createAccount() async {
     if (!_registerFormKey.currentState!.validate()) return;
-    if (_validatedLinkCode == null) return;
+    if (_validatedPreview == null) return;
 
     // Re-validate code expiration before creating account
-    // (code could have expired while user was filling the form)
-    if (_validatedLinkCode!.expiresAt.isBefore(DateTime.now())) {
+    if (_validatedPreview!.expiresAt.isBefore(DateTime.now())) {
       setState(() {
         _errorMessage = 'Este codigo expirou. Solicite um novo codigo.';
         _currentStep = _Step.code;
-        _validatedLinkCode = null;
+        _validatedPreview = null;
       });
       return;
     }
 
-    // Capture everything we need BEFORE any async operation.
-    // The widget may be disposed during async work (GoRouter rebuilds on auth state change),
-    // so we use the ProviderContainer directly instead of ref.
+    // Capture everything before async work — widget may be disposed during
+    // GoRouter rebuilds triggered by auth state changes.
     final container = ProviderScope.containerOf(context);
-    final authService = ref.read(authServiceProvider);
-    final academyId = _validatedLinkCode!.academyId;
-    final linkCodeService = LinkCodeService(academyId);
-    final cpfDigits = _cpfController.text.replaceAll(RegExp(r'\D'), '');
     final phone = _phoneController.text.replaceAll(RegExp(r'\D'), '');
     final email = _emailController.text.trim();
     final password = _passwordController.text;
-    final studentName = _validatedLinkCode!.studentName;
-    final studentId = _validatedLinkCode!.studentId;
-    final code = _validatedLinkCode!.code;
+    final code = _codeController.text.trim().toUpperCase();
+    final displayName = _validatedPreview!.studentName ?? email;
 
-    // Show full-screen overlay (survives GoRouter rebuilds since it's in app.dart builder)
-    container.read(creatingAccountStudentNameProvider.notifier).state = studentName;
+    container.read(creatingAccountStudentNameProvider.notifier).state = displayName;
     container.read(isCreatingAccountProvider.notifier).state = true;
 
     try {
-      // Create Firebase account with the student name from the link code
-      // This will also update the student document with linkedUserId and CPF
-      final userCredential = await authService.createAccountWithLinkCode(
-        email,
-        password,
-        studentName,
-        studentId,
-        academyId,
-        cpfDigits.isNotEmpty ? cpfDigits : null,
-        phone: phone.isNotEmpty ? phone : null,
+      // 1) Create Firebase Auth account (client-side — required for JWT).
+      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
       );
+      await credential.user?.updateDisplayName(displayName);
 
-      // Mark the code as used
-      await linkCodeService.markAsUsed(code, userCredential.user!.uid);
+      // 2) Redeem the link code atomically on the Go backend. The backend:
+      //    - marks the code as used (SELECT FOR UPDATE → no race)
+      //    - links the student row to this Firebase UID
+      //    - upserts user_academy_mappings
+      // All in one transaction — no more 5 separate Firestore writes.
+      await container.read(linkCodeRepoProvider).redeem(
+            code,
+            profile: RedeemLinkCodeRequest(
+              phone: phone.isNotEmpty ? phone : null,
+            ),
+          );
 
-      // All Firestore documents are created. Force Riverpod to reload user data.
       container.invalidate(currentUserProvider);
 
-      // Poll until currentUserProvider returns valid data with academy context (max 10 seconds)
+      // Poll until currentUserProvider returns valid data with academy context (max 10s).
       for (int i = 0; i < 20; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         final userAsync = container.read(currentUserProvider);
-        if (userAsync.hasValue && userAsync.value != null) {
-          final user = userAsync.value!;
-          // Make sure the user has academy context (not just a "free user" from the race condition)
-          if (user.academyId != null) {
-            break;
-          }
-          // Still showing as free user - invalidate and retry
-          container.invalidate(currentUserProvider);
-        }
-        if (userAsync.hasError) {
+        if (userAsync.hasValue && userAsync.value?.academyId != null) break;
+        if (userAsync.hasError || (userAsync.hasValue && userAsync.value?.academyId == null)) {
           container.invalidate(currentUserProvider);
         }
       }
 
-      // Dismiss overlay - the router will naturally redirect to the dashboard
-      // since the user is authenticated and currentUserProvider has data
       container.read(isCreatingAccountProvider.notifier).state = false;
     } catch (e) {
-      // Dismiss overlay on error
       container.read(isCreatingAccountProvider.notifier).state = false;
-
       if (mounted) {
         setState(() {
           _errorMessage = _getErrorMessage(e);
@@ -609,7 +590,9 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
                       Text(
                         _isInstructorMode
                             ? 'Convite de ${_validatedInstructorCode!.createdByName}'
-                            : 'Aluno: ${_validatedLinkCode!.studentName}',
+                            : _validatedPreview?.studentName != null
+                                ? 'Aluno: ${_validatedPreview!.studentName}'
+                                : 'Academia: ${_validatedPreview?.academyName ?? ""}',
                         style: AppTheme.bodySmall.copyWith(
                           color: AppTheme.success,
                         ),
@@ -673,19 +656,21 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
           if (_errorMessage != null) const SizedBox(height: 24),
 
-          // Name field (read-only, from link code)
-          TextFormField(
-            initialValue: _validatedLinkCode!.studentName,
-            enabled: false,
-            decoration: InputDecoration(
-              labelText: 'Nome',
-              prefixIcon: const Icon(LucideIcons.user, size: 20),
-              filled: true,
-              fillColor: AppTheme.surface,
-            ),
-          ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.1),
-
-          const SizedBox(height: 16),
+          // Name field — read-only when the preview returned the student's
+          // pre-registered name; hidden otherwise (the name stays in the DB).
+          if (_isStudentMode && _validatedPreview?.studentName != null) ...[
+            TextFormField(
+              initialValue: _validatedPreview!.studentName,
+              enabled: false,
+              decoration: InputDecoration(
+                labelText: 'Nome',
+                prefixIcon: const Icon(LucideIcons.user, size: 20),
+                filled: true,
+                fillColor: AppTheme.surface,
+              ),
+            ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.1),
+            const SizedBox(height: 16),
+          ],
 
           // Instructor: full name field (student name comes from linkCode)
           if (_isInstructorMode) ...[
@@ -923,7 +908,9 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         const SizedBox(height: 8),
 
         Text(
-          'Sua conta foi vinculada ao aluno ${_validatedLinkCode!.studentName}',
+          _validatedPreview?.studentName != null
+              ? 'Sua conta foi vinculada ao aluno ${_validatedPreview!.studentName}'
+              : 'Sua conta foi criada com sucesso.',
           style: AppTheme.bodyMedium.copyWith(
             color: AppTheme.textSecondary,
           ),

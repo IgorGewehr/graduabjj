@@ -40,4 +40,24 @@ class WalletRemoteRepo {
     );
     return WalletTransactionsPage.fromJson(json);
   }
+
+  /// Solicita saque da wallet da academia.
+  /// [amountInCents] é o valor em centavos.
+  /// Retorna o id da transação gerada pelo backend.
+  Future<Map<String, dynamic>> requestWithdrawal(
+    String academyId, {
+    required double amountInCents,
+    required String pixKey,
+    required String pixKeyType,
+  }) async {
+    final json = await _api.post<Map<String, dynamic>>(
+      '/v1/academies/$academyId/wallet/withdrawals',
+      data: {
+        'amount': amountInCents.round(),
+        'pix_key': pixKey,
+        'pix_key_type': pixKeyType,
+      },
+    );
+    return json;
+  }
 }

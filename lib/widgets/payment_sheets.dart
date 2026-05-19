@@ -2,14 +2,16 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../api/dto/financial_dto.dart' as api_fin;
+import '../api/repositories.dart' as tatami_repos;
 import '../core/theme.dart';
 import '../services/firebase_service.dart';
-import '../services/abacate_pay_service.dart';
-import '../services/asaas_payment_service.dart';
+import '../services/abacate_pay_service.dart'; // PaymentLink type
 
 // ============================================
 // Modern PIX Payment Bottom Sheet
@@ -727,7 +729,7 @@ class _SuccessDialog extends StatelessWidget {
 // ============================================
 // Modern Card Payment Sheet
 // ============================================
-class CardPaymentSheet extends StatefulWidget {
+class CardPaymentSheet extends ConsumerStatefulWidget {
   final double amount;
   final String description;
   final String? orderId;
@@ -750,10 +752,10 @@ class CardPaymentSheet extends StatefulWidget {
   });
 
   @override
-  State<CardPaymentSheet> createState() => _CardPaymentSheetState();
+  ConsumerState<CardPaymentSheet> createState() => _CardPaymentSheetState();
 }
 
-class _CardPaymentSheetState extends State<CardPaymentSheet> {
+class _CardPaymentSheetState extends ConsumerState<CardPaymentSheet> {
   final _formKey = GlobalKey<FormState>();
   final _cardNumberController = TextEditingController();
   final _cardHolderController = TextEditingController();
@@ -824,96 +826,43 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
     final academyId = FirebaseService.academyId;
 
     try {
-      final expParts = _expirationController.text.split('/');
-      final cardData = CardData(
-        cardNumber: _cardNumberController.text,
-        cardHolder: _cardHolderController.text,
-        expirationMonth: expParts[0],
-        expirationYear: expParts.length > 1 ? expParts[1] : '',
-        cvv: _cvvController.text,
-        cpf: _cpfController.text,
-      );
-
-      // Check which provider is active
-      final asaasService = AsaasPaymentService(academyId);
-      final isAsaas = await asaasService.isEnabled();
-
-      CardPaymentResult result;
-
-      if (widget.orderId != null) {
-        if (isAsaas) {
-          result = await asaasService.createStoreOrderCardPayment(
-            amount: widget.amount,
-            orderId: widget.orderId!,
-            studentId: widget.studentId,
-            studentName: widget.studentName,
-            cardData: cardData,
-            description: widget.description,
-          );
-        } else {
-          final service = AbacatePayService(academyId);
-          result = await service.createStoreOrderCardPayment(
-            amount: widget.amount,
-            orderId: widget.orderId!,
-            studentId: widget.studentId,
-            studentName: widget.studentName,
-            cardData: cardData,
-            description: widget.description,
-          );
-        }
-      } else if (widget.financialId != null) {
-        if (isAsaas) {
-          result = await asaasService.createCardPayment(
-            amount: widget.amount,
-            financialId: widget.financialId!,
-            studentId: widget.studentId,
-            studentName: widget.studentName,
-            cardData: cardData,
-            description: widget.description,
-          );
-        } else {
-          final service = AbacatePayService(academyId);
-          result = await service.createCardPayment(
-            amount: widget.amount,
-            financialId: widget.financialId!,
-            studentId: widget.studentId,
-            studentName: widget.studentName,
-            cardData: cardData,
-            description: widget.description,
-          );
-        }
-      } else {
+      // Determina o financialId: orderId tem precedência, senão usa financialId.
+      final financialId = widget.orderId ?? widget.financialId;
+      if (financialId == null) {
         throw Exception('Order ID or Financial ID is required');
       }
 
-      if (result.success) {
-        HapticFeedback.heavyImpact();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(LucideIcons.check, color: Colors.white, size: 18),
-                  const SizedBox(width: 12),
-                  Text(result.message ?? 'Pagamento aprovado!'),
-                ],
-              ),
-              backgroundColor: AppTheme.success,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      await ref.read(tatami_repos.financialRepoProvider).payWithCard(
+            academyId,
+            financialId,
+            body: api_fin.PayIntentRequest(
+              customerName: widget.studentName,
             ),
           );
-          Navigator.pop(context);
-          widget.onPaymentSuccess?.call();
-        }
-      } else {
-        setState(() {
-          _errorMessage = result.message ?? 'Erro ao processar pagamento';
-        });
+
+      // Tatami: POST pay/card sem exceção = aprovado.
+      HapticFeedback.heavyImpact();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(LucideIcons.check, color: Colors.white, size: 18),
+                const SizedBox(width: 12),
+                const Text('Pagamento aprovado!'),
+              ],
+            ),
+            backgroundColor: AppTheme.success,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+        Navigator.pop(context);
+        widget.onPaymentSuccess?.call();
       }
     } catch (e) {
       setState(() {
-        _errorMessage = 'Erro: $e';
+        _errorMessage = 'Erro ao processar pagamento: $e';
       });
     } finally {
       if (mounted) {

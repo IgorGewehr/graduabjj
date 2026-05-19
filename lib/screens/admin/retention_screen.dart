@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -79,7 +78,7 @@ class _AdminRetentionScreenState
         for (final a in page.items) {
           m.putIfAbsent(a.studentId, () => []).add({
             'studentId': a.studentId,
-            'date': Timestamp.fromDate(a.date),
+            'date': a.date,
           });
         }
         return m;
@@ -98,7 +97,7 @@ class _AdminRetentionScreenState
           m.putIfAbsent(f.studentId, () => []).add({
             'studentId': f.studentId,
             'status': f.status.wire,
-            'dueDate': Timestamp.fromDate(f.dueDate),
+            'dueDate': f.dueDate,
           });
         }
         return m;
@@ -137,9 +136,8 @@ class _AdminRetentionScreenState
         final records = attendanceMap[student.id] ?? [];
         final last30 = records.where((r) {
           final raw = r['date'];
-          if (raw == null) return false;
-          final date = raw is Timestamp ? raw.toDate() : DateTime.now();
-          return now.difference(date).inDays <= 30;
+          if (raw is! DateTime) return false;
+          return now.difference(raw).inDays <= 30;
         }).length;
         totalFrequency += last30;
       }
@@ -327,7 +325,7 @@ class _AdminRetentionScreenState
               decoration: BoxDecoration(
                 color: isActive
                     ? AppTheme.textPrimary
-                    : AppTheme.textDisabled.withOpacity(0.3),
+                    : AppTheme.textDisabled.withValues(alpha: 0.3),
                 borderRadius: BorderRadius.circular(3),
               ),
             );
@@ -397,7 +395,7 @@ class _AdminRetentionScreenState
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(LucideIcons.shieldCheck,
-              size: 64, color: AppTheme.success.withOpacity(0.5)),
+              size: 64, color: AppTheme.success.withValues(alpha: 0.5)),
           const SizedBox(height: 16),
           Text(
             _selectedFilter != null
@@ -436,7 +434,7 @@ class _AdminRetentionScreenState
             border: Border.all(color: color, width: 2.5),
           ),
           child: CircleAvatar(
-            backgroundColor: color.withOpacity(0.1),
+            backgroundColor: color.withValues(alpha: 0.1),
             child: Text(
               riskScore.studentName.isNotEmpty
                   ? riskScore.studentName[0].toUpperCase()
@@ -510,7 +508,7 @@ class _AdminRetentionScreenState
                         ),
                         child: CircleAvatar(
                           radius: 28,
-                          backgroundColor: color.withOpacity(0.1),
+                          backgroundColor: color.withValues(alpha: 0.1),
                           child: Text(
                             riskScore.studentName.isNotEmpty
                                 ? riskScore.studentName[0].toUpperCase()
@@ -573,7 +571,7 @@ class _AdminRetentionScreenState
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: AppTheme.success.withOpacity(0.08),
+                        color: AppTheme.success.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
@@ -606,7 +604,7 @@ class _AdminRetentionScreenState
                               width: 40,
                               height: 40,
                               decoration: BoxDecoration(
-                                color: color.withOpacity(0.1),
+                                color: color.withValues(alpha: 0.1),
                                 borderRadius:
                                     BorderRadius.circular(8),
                               ),
@@ -656,10 +654,10 @@ class _AdminRetentionScreenState
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: color.withOpacity(0.05),
+                        color: color.withValues(alpha: 0.05),
                         borderRadius: BorderRadius.circular(10),
                         border:
-                            Border.all(color: color.withOpacity(0.2)),
+                            Border.all(color: color.withValues(alpha: 0.2)),
                       ),
                       child: Row(
                         children: [

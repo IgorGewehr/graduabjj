@@ -686,13 +686,12 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
                 onPressed: () async {
                   final planService = PlanService(FirebaseService.academyId);
                   await planService.removeCustomValue(plan.id, student.id);
-                  if (mounted) {
-                    Navigator.of(dialogContext).pop();
-                    parentContext.showSuccess(
-                      'Valor restaurado ao padrão do plano',
-                    );
-                    _refreshPlans();
-                  }
+                  if (!mounted || !dialogContext.mounted) return;
+                  Navigator.of(dialogContext).pop();
+                  parentContext.showSuccess(
+                    'Valor restaurado ao padrão do plano',
+                  );
+                  _refreshPlans();
                 },
                 icon: const Icon(LucideIcons.rotateCcw, size: 16),
                 label: const Text('Restaurar valor do plano'),
@@ -719,13 +718,12 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
                 onPressed: () async {
                   final planService = PlanService(FirebaseService.academyId);
                   await planService.removeCustomDueDay(plan.id, student.id);
-                  if (mounted) {
-                    Navigator.of(dialogContext).pop();
-                    parentContext.showSuccess(
-                      'Vencimento restaurado ao padrão do plano',
-                    );
-                    _refreshPlans();
-                  }
+                  if (!mounted || !dialogContext.mounted) return;
+                  Navigator.of(dialogContext).pop();
+                  parentContext.showSuccess(
+                    'Vencimento restaurado ao padrão do plano',
+                  );
+                  _refreshPlans();
                 },
                 icon: const Icon(LucideIcons.rotateCcw, size: 16),
                 label: const Text('Restaurar vencimento do plano'),
@@ -759,11 +757,10 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               } else {
                 await planService.setCustomDueDay(plan.id, student.id, dueDay);
               }
-              if (mounted) {
-                Navigator.of(dialogContext).pop();
-                parentContext.showSuccess('Valor e vencimento atualizados');
-                _refreshPlans();
-              }
+              if (!mounted || !dialogContext.mounted) return;
+              Navigator.of(dialogContext).pop();
+              parentContext.showSuccess('Valor e vencimento atualizados');
+              _refreshPlans();
             },
             child: const Text('Salvar'),
           ),

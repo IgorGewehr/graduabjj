@@ -1,12 +1,14 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../api/identity_repo.dart';
 import '../api/repositories.dart';
+import '../api/identity_repo.dart';
+import '../api/tatami_client.dart';
+import 'api_provider.dart';
 import '../models/user.dart';
-import '../services/firebase_service.dart';
 import '../services/global_user_service.dart';
 import 'selected_academy_provider.dart';
 
@@ -78,30 +80,40 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   );
 
   if (firebaseUser == null) {
-    print('[AUTH] No firebase user');
     return null;
   }
 
-  // Pós-Fase 1: Tatami é o único path. Se /v1/me falhar (rede / 5xx),
-  // propaga o erro para o consumer ao invés de cair em Firestore legacy.
+  // Pós-Fase 1: Tatami é o único path. Se /v1/me falhar com um erro de
+  // rede/conexão, cai no Firestore como fallback. Erros HTTP (4xx/5xx)
+  // são propagados — não queremos exibir dados obsoletos do Firestore
+  // quando o backend respondeu com um erro estruturado.
   try {
     final app = await loadCurrentUserFromTatami(
       repo: ref.read(identityRepoProvider),
       selectedAcademyId: selectedAcademyId,
     );
-    if (app.academyId != null) {
-      FirebaseService.setAcademyId(app.academyId!);
-    }
     return app;
+  } on DioException catch (e) {
+    // Only fall back to Firestore on network-level failures. HTTP errors
+    // (4xx/5xx) from the backend are real errors — rethrow so the UI
+    // shows an error state instead of serving stale Firestore data.
+    if (e.type == DioExceptionType.connectionError ||
+        e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.receiveTimeout) {
+      // Fall through to Firestore fallback below.
+    } else {
+      rethrow;
+    }
   } catch (e) {
-    print('[AUTH] Tatami /v1/me falhou ($e); usando caminho Firestore residual');
+    // Non-Dio exceptions (e.g. SocketException wrapped outside Dio,
+    // FormatException on an unexpected response) — fall through to the
+    // Firestore path which covers the "new user not yet in Tatami" edge case.
     // Caminho Firestore mantido aqui temporariamente porque cobre o
     // edge-case "usuário recém-criado sem global_user no Tatami". Esse
     // fluxo deve ser eliminado na Fase 3 (BE precisa auto-provisionar
     // ApiGlobalUser no primeiro /v1/me com Bearer Firebase).
   }
 
-  print('[AUTH] Loading user data for: ${firebaseUser.uid}');
   final firestore = ref.watch(firestoreProvider);
 
   // Step 1: Get or create global user
@@ -110,7 +122,6 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   );
 
   if (globalUser == null) {
-    print('[AUTH] Creating new global user...');
     // Create new global user (free account)
     globalUser = await globalUserService.createGlobalUser(
       userId: firebaseUser.uid,
@@ -136,9 +147,7 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
     } else {
       academyId = mapping.primaryAcademyId ?? mapping.academyIds.first;
     }
-    print('[AUTH] User is linked to academy: $academyId');
   } else {
-    print('[AUTH] User is a free user (not linked to any academy)');
     // Return as free user without academy context
     return AppUser(
       id: globalUser.id,
@@ -157,9 +166,6 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
     );
   }
 
-  // Set the academy context for FirebaseService
-  FirebaseService.setAcademyId(academyId);
-
   // Step 3: Get academy-specific user data
   final academyDetails = mapping.academyDetails?[academyId];
   final userDoc = await firestore
@@ -171,9 +177,6 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
 
   if (userDoc.exists) {
     final userData = userDoc.data()!;
-    print(
-      '[AUTH] Found user in academy subcollection: role=${userData['role']}',
-    );
 
     // Combine global user data with academy-specific data
     return AppUser.fromGlobalAndAcademy(
@@ -195,7 +198,6 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   }
 
   // Fallback: user is linked to academy but doesn't have academy user document yet
-  print('[AUTH] Creating academy user document...');
   return AppUser.fromGlobalAndAcademy(
     globalUser: globalUser,
     academyId: academyId,
@@ -242,17 +244,19 @@ Future<AppUser> loadCurrentUserFromTatami({
 
 /// Auth service provider
 final authServiceProvider = Provider<AuthService>((ref) {
-  final auth = ref.watch(firebaseAuthProvider);
+    final auth = ref.watch(firebaseAuthProvider);
   final firestore = ref.watch(firestoreProvider);
-  return AuthService(auth, firestore);
+  final client = ref.watch(tatamiClientProvider);
+  return AuthService(auth, firestore, client);
 });
 
 /// Auth Service Class
 class AuthService {
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
+  final TatamiClient _tatami;
 
-  AuthService(this._auth, this._firestore);
+  AuthService(this._auth, this._firestore, this._tatami);
 
   User? get currentUser => _auth.currentUser;
 
@@ -326,46 +330,50 @@ class AuthService {
     await user.updatePassword(newPassword);
   }
 
-  /// Delete user account and all associated data
-  /// This is required by Google Play Store policy
+  /// Delete user account and all associated data.
+  /// Required by Google Play Store policy (LGPD compliance).
+  ///
+  /// Flow:
+  ///   1. Fetch memberships from Go backend (/v1/me).
+  ///   2. For each academy: soft-delete student row + remove membership.
+  ///   3. Delete Firebase Auth user (must be last — invalidates the JWT
+  ///      used by the Go API calls above).
   Future<void> deleteAccount() async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('Usuario nao autenticado');
 
-    final uid = user.uid;
-
     try {
-      // 1. Get user's academy mappings to delete related data
-      final mapping = await globalUserService.getUserAcademyMapping(uid);
+      // 1. Fetch current memberships from Go backend.
+      final me = await _tatami.get<Map<String, dynamic>>('/v1/me');
+      final memberships = (me['memberships'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
 
-      // 3. Delete student records from each academy
-      if (mapping != null) {
-        for (final academyId in mapping.academyIds) {
-          final academyDetail = mapping.academyDetails?[academyId];
-          if (academyDetail?.studentId != null) {
-            // Mark student as deleted (soft delete for academy records)
-            await _firestore
-                .collection('academies/$academyId/students')
-                .doc(academyDetail!.studentId)
-                .update({
-                  'status': 'deleted',
-                  'deletedAt': FieldValue.serverTimestamp(),
-                  'deletedByUser': true,
-                });
-          }
+      // 2. For each academy: delete student row + remove membership.
+      //    Both calls are best-effort — a 404 means the record doesn't
+      //    exist anymore (already cleaned up), so we swallow it.
+      for (final m in memberships) {
+        final academyId = m['academy_id'] as String?;
+        final studentId = m['student_id'] as String?;
+        if (academyId == null) continue;
+
+        if (studentId != null) {
+          try {
+            await _tatami.delete(
+              '/v1/academies/$academyId/students/$studentId',
+            );
+          } catch (_) {}
         }
+
+        try {
+          await _tatami.delete(
+            '/v1/academies/$academyId/memberships/${user.uid}',
+          );
+        } catch (_) {}
       }
 
-      // 4. Delete userAcademyMapping
-      await _firestore.collection('userAcademyMapping').doc(uid).delete();
-
-      // 5. Delete global user document
-      await _firestore.collection('users').doc(uid).delete();
-
-      // 6. Delete Firebase Auth user (must be last)
+      // 3. Delete Firebase Auth user last (invalidates JWT).
       await user.delete();
     } catch (e) {
-      // If requires recent login, throw specific error
       if (e.toString().contains('requires-recent-login')) {
         throw Exception(
           'Por seguranca, faca login novamente antes de excluir sua conta',
@@ -529,9 +537,6 @@ class AuthService {
       userId: user.uid,
       academyId: newAcademyId,
     );
-
-    // Update FirebaseService context
-    FirebaseService.setAcademyId(newAcademyId);
   }
 
   /// Get user's academy IDs
@@ -542,8 +547,10 @@ class AuthService {
     return await globalUserService.getUserAcademyIds(user.uid);
   }
 
-  /// Create academy account (registers professor and creates academy)
-  /// Uses a Firestore auto-generated ID for the academy document.
+  /// Create academy account (registers professor and creates academy).
+  /// Writes to Go backend — Firestore is NOT used for the academy document.
+  /// The Go backend atomically creates: academy row, subscription trial,
+  /// and the owner's user_academy_mapping with role=admin.
   Future<UserCredential> createAcademyAccount({
     required String email,
     required String password,
@@ -552,73 +559,69 @@ class AuthService {
     String? documentType,
     String? documentNumber,
   }) async {
-    // Step 1: Create Firebase Auth user
+    // Step 1: Create Firebase Auth user (client-side — JWT needed for the
+    // subsequent Go API call).
     final credential = await _auth.createUserWithEmailAndPassword(
       email: email,
       password: password,
     );
-
-    // Step 2: Update display name in Firebase Auth
     await credential.user?.updateDisplayName(displayName);
 
-    // Step 3: Create global user document with accountType: linked
-    await globalUserService.createGlobalUser(
-      userId: credential.user!.uid,
-      email: email,
-      displayName: displayName,
-      accountType: AccountType.linked,
-    );
-
-    // Step 4: Create academy document with auto-generated ID
-    final academyRef = _firestore.collection('academies').doc();
-    final academyId = academyRef.id;
-
-    final academyData = <String, dynamic>{
-      'name': academyName,
-      'ownerId': credential.user!.uid,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'settings': {'allowStudentRegistration': true, 'requireApproval': false},
-      'subscription': {
-        'plan': 'free',
-        'status': 'active',
-        'trialEndsAt': DateTime.now().add(const Duration(days: 30)),
-      },
-      'storeEnabled': false,
-      'storePublished': false,
-      'abacatePayEnabled': false,
-      'autoGraduationEnabled': false,
-      'studentCheckinEnabled': true,
-    };
-
-    // Add document info if provided
-    if (documentType != null) academyData['ownerDocumentType'] = documentType;
-    if (documentNumber != null)
-      academyData['ownerDocumentNumber'] = documentNumber;
-
-    await academyRef.set(academyData);
-
-    // Step 5: Create academy user document (role: admin)
-    await globalUserService.upsertAcademyUser(
-      academyId: academyId,
-      userId: credential.user!.uid,
-      data: {
-        'email': email,
-        'displayName': displayName,
-        'role': 'admin',
-        'isActive': true,
-        'status': 'active',
-      },
-    );
-
-    // Step 6: Link user to academy via globalUserService
-    await globalUserService.linkUserToAcademy(
-      userId: credential.user!.uid,
-      academyId: academyId,
-      role: UserRole.admin,
-    );
+    // Step 2: POST /v1/academies — Go backend handles everything atomically:
+    // academy row, 7-day trial subscription, and owner membership (role=admin).
+    // On slug conflict, append a 4-digit suffix and retry once.
+    final baseSlug = _generateSlug(academyName);
+    try {
+      await _createAcademyOnBackend(
+        slug: baseSlug,
+        name: academyName,
+        documentType: documentType,
+        documentNumber: documentNumber,
+      );
+    } on Exception catch (e) {
+      if (e.toString().contains('409') || e.toString().contains('conflict')) {
+        final suffix = DateTime.now().millisecondsSinceEpoch % 10000;
+        await _createAcademyOnBackend(
+          slug: '${baseSlug}_$suffix',
+          name: academyName,
+          documentType: documentType,
+          documentNumber: documentNumber,
+        );
+      } else {
+        rethrow;
+      }
+    }
 
     return credential;
+  }
+
+  Future<void> _createAcademyOnBackend({
+    required String slug,
+    required String name,
+    String? documentType,
+    String? documentNumber,
+  }) async {
+    final body = <String, dynamic>{'name': name, 'slug': slug};
+    if (documentNumber != null && documentNumber.isNotEmpty) {
+      body['cnpj'] = documentNumber;
+    }
+    await _tatami.post<Map<String, dynamic>>('/v1/academies', data: body);
+  }
+
+  static String _generateSlug(String name) {
+    return name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[àáâãä]'), 'a')
+        .replaceAll(RegExp(r'[èéêë]'), 'e')
+        .replaceAll(RegExp(r'[ìíîï]'), 'i')
+        .replaceAll(RegExp(r'[òóôõö]'), 'o')
+        .replaceAll(RegExp(r'[ùúûü]'), 'u')
+        .replaceAll(RegExp(r'[ç]'), 'c')
+        .replaceAll(RegExp(r'[ñ]'), 'n')
+        .replaceAll(RegExp(r'[^a-z0-9\s-]'), '')
+        .trim()
+        .replaceAll(RegExp(r'\s+'), '-')
+        .replaceAll(RegExp(r'-+'), '-');
   }
 
   /// Create account with link code (registers and links to student in one step)

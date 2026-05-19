@@ -84,8 +84,8 @@ class _BackButtonHandlerState extends State<BackButtonHandler> {
             SystemNavigator.pop();
           } else {
             // Usa o GoRouter para navegar — evita dessincronia com o estado interno do router
-            if (context.canPop()) {
-              context.pop();
+            if (this.context.canPop()) {
+              this.context.pop();
             } else {
               SystemNavigator.pop();
             }

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/attendance_repo.dart';
 import '../api/dto/attendance_dto.dart' as api;
 import 'achievement_service.dart';
 import 'firebase_service.dart';
@@ -477,6 +478,8 @@ class AttendanceService {
     required String verifiedByName,
     DateTime? date,
     double? weight,
+    // When provided, writes go to the Go backend instead of Firestore.
+    AttendanceRemoteRepo? repo,
   }) async {
     final attendanceDate = date ?? DateTime.now();
     final now = DateTime.now();
@@ -494,43 +497,21 @@ class AttendanceService {
         .toList();
     if (toMark.isEmpty) return results;
 
-    // Shard into batches of 240 students (≤ 480 writes, under Firestore's 500 cap)
-    const int batchStudentLimit = 240;
-    for (int start = 0; start < toMark.length; start += batchStudentLimit) {
-      final end = (start + batchStudentLimit).clamp(0, toMark.length);
-      final shard = toMark.sublist(start, end);
+    if (repo != null) {
+      // ── Go backend path ──────────────────────────────────────────────────
+      // POST /v1/academies/{id}/attendance/bulk — one round trip for all
+      // students. The backend handles deduplication and counter updates.
+      await repo.bulkRecord(
+        academyId,
+        classId,
+        toMark.map((s) => s.studentId).toList(),
+      );
 
-      final batch = FirebaseService.firestore.batch();
-
-      for (final student in shard) {
-        // 1) Attendance doc
-        final docRef = _attendanceRef.doc();
-        final payload = <String, dynamic>{
-          'studentId': student.studentId,
-          'studentName': student.studentName,
-          'classId': classId,
-          'className': className,
-          'date': Timestamp.fromDate(attendanceDate),
-          'verifiedBy': verifiedBy,
-          'verifiedByName': verifiedByName,
-          'createdAt': FieldValue.serverTimestamp(),
-        };
-        if (weight != null && weight != 1.0) {
-          payload['weight'] = weight;
-        }
-        batch.set(docRef, payload);
-
-        // 2) Student counter increment — in the SAME batch (was a separate
-        // serial loop before, costing N extra round trips for a class of 30)
-        batch.update(_collections.student(student.studentId), {
-          'attendanceCount': FieldValue.increment(1),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-
-        // Build result locally — no doc.get() needed
+      // Build results locally for immediate UI feedback.
+      for (final student in toMark) {
         results.add(
           Attendance(
-            id: docRef.id,
+            id: '',
             studentId: student.studentId,
             studentName: student.studentName,
             classId: classId,
@@ -543,8 +524,60 @@ class AttendanceService {
           ),
         );
       }
+    } else {
+      // ── Firestore legacy path ────────────────────────────────────────────
+      // Shard into batches of 240 students (≤ 480 writes, under Firestore's 500 cap)
+      const int batchStudentLimit = 240;
+      for (int start = 0; start < toMark.length; start += batchStudentLimit) {
+        final end = (start + batchStudentLimit).clamp(0, toMark.length);
+        final shard = toMark.sublist(start, end);
 
-      await batch.commit();
+        final batch = FirebaseService.firestore.batch();
+
+        for (final student in shard) {
+          // 1) Attendance doc
+          final docRef = _attendanceRef.doc();
+          final payload = <String, dynamic>{
+            'studentId': student.studentId,
+            'studentName': student.studentName,
+            'classId': classId,
+            'className': className,
+            'date': Timestamp.fromDate(attendanceDate),
+            'verifiedBy': verifiedBy,
+            'verifiedByName': verifiedByName,
+            'createdAt': FieldValue.serverTimestamp(),
+          };
+          if (weight != null && weight != 1.0) {
+            payload['weight'] = weight;
+          }
+          batch.set(docRef, payload);
+
+          // 2) Student counter increment — in the SAME batch (was a separate
+          // serial loop before, costing N extra round trips for a class of 30)
+          batch.update(_collections.student(student.studentId), {
+            'attendanceCount': FieldValue.increment(1),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+          // Build result locally — no doc.get() needed
+          results.add(
+            Attendance(
+              id: docRef.id,
+              studentId: student.studentId,
+              studentName: student.studentName,
+              classId: classId,
+              className: className,
+              date: attendanceDate,
+              verifiedBy: verifiedBy,
+              verifiedByName: verifiedByName,
+              weight: (weight != null && weight != 1.0) ? weight : null,
+              createdAt: now,
+            ),
+          );
+        }
+
+        await batch.commit();
+      }
     }
 
     // Milestones: fire-and-forget after the batch is durable.

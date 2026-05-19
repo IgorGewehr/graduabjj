@@ -158,9 +158,9 @@ class _InputFieldState extends State<InputField> {
             suffixIcon: _buildSuffixIcon(hasError, hasSuccess),
             filled: true,
             fillColor: hasError
-                ? AppTheme.error.withOpacity(0.02)
+                ? AppTheme.error.withValues(alpha: 0.02)
                 : hasSuccess
-                    ? AppTheme.success.withOpacity(0.02)
+                    ? AppTheme.success.withValues(alpha: 0.02)
                     : AppTheme.surface,
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             border: OutlineInputBorder(
@@ -185,7 +185,7 @@ class _InputFieldState extends State<InputField> {
             ),
             disabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: AppTheme.divider.withOpacity(0.5)),
+              borderSide: BorderSide(color: AppTheme.divider.withValues(alpha: 0.5)),
             ),
           ),
         ),
@@ -638,7 +638,7 @@ class DateInput extends StatelessWidget {
           ),
           disabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: AppTheme.divider.withOpacity(0.5)),
+            borderSide: BorderSide(color: AppTheme.divider.withValues(alpha: 0.5)),
           ),
         ),
         child: Text(

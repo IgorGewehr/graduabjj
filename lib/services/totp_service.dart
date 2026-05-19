@@ -71,7 +71,6 @@ class TotpService {
       if (!doc.exists) return false;
       return doc.data()?['totpEnabled'] == true;
     } catch (e) {
-      print('[TOTP] isTotpEnabled error: $e');
       return false;
     }
   }
@@ -105,7 +104,6 @@ class TotpService {
         );
       }
     } catch (e) {
-      print('[TOTP] setupTotp exception: $e');
       return TotpSetupResult(
         success: false,
         message: 'Erro de conexao',
@@ -149,7 +147,6 @@ class TotpService {
         );
       }
     } catch (e) {
-      print('[TOTP] verifySetup exception: $e');
       return TotpVerifyResult(
         success: false,
         message: 'Erro de conexao',
@@ -185,7 +182,6 @@ class TotpService {
         );
       }
     } catch (e) {
-      print('[TOTP] validateCode exception: $e');
       return TotpValidateResult(
         success: false,
         message: 'Erro de conexao',
@@ -221,7 +217,6 @@ class TotpService {
         );
       }
     } catch (e) {
-      print('[TOTP] disableTotp exception: $e');
       return TotpValidateResult(
         success: false,
         message: 'Erro de conexao',

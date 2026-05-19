@@ -245,7 +245,7 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
                             vertical: 10,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.55),
+                            color: Colors.black.withValues(alpha: 0.55),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Row(
@@ -300,7 +300,7 @@ class _ReticleOverlay extends StatelessWidget {
           width: 240,
           height: 240,
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.white.withOpacity(0.8), width: 2),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 2),
             borderRadius: BorderRadius.circular(16),
           ),
         ),

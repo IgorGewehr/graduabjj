@@ -73,6 +73,12 @@ class CompetitionRemoteRepo {
     await _api.delete('/v1/academies/$academyId/competitions/$competitionId');
   }
 
+  Future<void> clearTeamResult(String academyId, String competitionId) async {
+    await _api.delete(
+      '/v1/academies/$academyId/competitions/$competitionId/team-result',
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Enrollments
   // ---------------------------------------------------------------------------

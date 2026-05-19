@@ -126,7 +126,7 @@ class _MenuItemTile extends StatelessWidget {
         color: isActive
             ? AppTheme.primary
             : isLogout
-                ? AppTheme.errorLight.withOpacity(0.5)
+                ? AppTheme.errorLight.withValues(alpha: 0.5)
                 : AppTheme.surfaceVariant,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
@@ -141,7 +141,7 @@ class _MenuItemTile extends StatelessWidget {
                   height: 40,
                   decoration: BoxDecoration(
                     color: isActive
-                        ? Colors.white.withOpacity(0.1)
+                        ? Colors.white.withValues(alpha: 0.1)
                         : isLogout
                             ? AppTheme.errorLight
                             : AppTheme.surface,

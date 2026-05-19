@@ -47,6 +47,55 @@ class AttendanceRemoteRepo {
     return RecordAttendanceResponse.fromJson(json);
   }
 
+  /// `POST /v1/academies/{id}/students/{sid}/attendance` — marca presença
+  /// individual de um aluno em uma turma. Duplicatas retornam 409 (já
+  /// presente). Admin/instructor only.
+  Future<ApiAttendance> markPresent(
+    String academyId,
+    String studentId,
+    AttendanceSingleRequest req,
+  ) async {
+    final json = await _api.post<Map<String, dynamic>>(
+      '/v1/academies/$academyId/students/$studentId/attendance',
+      data: req.toJson(),
+    );
+    return ApiAttendance.fromJson(json);
+  }
+
+  /// `DELETE /v1/academies/{id}/students/{sid}/attendance` — desmarca presença
+  /// individual. Passa class_id + date como query params (o backend aceita
+  /// body OU query — usamos query para compatibilidade máxima com Dio).
+  /// Admin/instructor only.
+  Future<void> unmarkPresent(
+    String academyId,
+    String studentId,
+    AttendanceSingleRequest req,
+  ) async {
+    await _api.delete(
+      '/v1/academies/$academyId/students/$studentId/attendance',
+      queryParameters: req.toJson(),
+    );
+  }
+
+  /// `POST /v1/academies/{id}/attendance/bulk` — bulk staff check-in with a
+  /// single class + list of student IDs. Simpler contract than [recordBulk]:
+  /// one class, many students, one timestamp. Duplicates are silently ignored
+  /// by the backend (status='duplicate' in results).
+  Future<void> bulkRecord(
+    String academyId,
+    String classId,
+    List<String> studentIds,
+  ) async {
+    await _api.post<Map<String, dynamic>>(
+      '/v1/academies/$academyId/attendance/bulk',
+      data: {
+        'class_id': classId,
+        'student_ids': studentIds,
+        'attended_at': DateTime.now().toUtc().toIso8601String(),
+      },
+    );
+  }
+
   /// `POST /v1/academies/{id}/attendance/self-checkin`.
   ///
   /// Se [SelfCheckinRequest.qrToken] estiver presente, o backend verifica

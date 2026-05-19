@@ -2,10 +2,44 @@ import 'dto/academy_dto.dart';
 import 'idempotency.dart';
 import 'tatami_client.dart';
 
+/// Preview de um link code sem consumi-lo.
+///
+/// Endpoint: GET /v1/link-codes/{code}
+class LinkCodePreview {
+  final String academyId;
+  final String academyName;
+  final String academyLogoUrl;
+  final String role;
+  final String? studentId;
+  final String? studentName;
+  final DateTime expiresAt;
+
+  const LinkCodePreview({
+    required this.academyId,
+    required this.academyName,
+    required this.academyLogoUrl,
+    required this.role,
+    required this.studentId,
+    required this.expiresAt,
+    this.studentName,
+  });
+
+  factory LinkCodePreview.fromJson(Map<String, dynamic> json) => LinkCodePreview(
+        academyId: json['academy_id'] as String,
+        academyName: json['academy_name'] as String,
+        academyLogoUrl: json['academy_logo_url'] as String? ?? '',
+        role: json['role'] as String,
+        studentId: json['student_id'] as String?,
+        studentName: json['student_name'] as String?,
+        expiresAt: DateTime.parse(json['expires_at'] as String),
+      );
+}
+
 /// Repositório remoto para link codes — códigos curtos pra
 /// vincular um Firebase user a uma academia.
 ///
 /// Endpoints:
+/// - GET  /v1/link-codes/{code}                       (preview sem consumir)
 /// - POST /v1/academies/{id}/link-codes              (aluno, TTL 24h default)
 /// - POST /v1/academies/{id}/instructor-link-codes   (instrutor, TTL 30min)
 /// - POST /v1/link-codes/{code}/redeem               (ATÔMICO — SELECT FOR UPDATE)
@@ -51,6 +85,13 @@ class LinkCodeRemoteRepo {
       key: key,
     );
     return ApiInstructorLinkCode.fromJson(json);
+  }
+
+  /// Retorna um preview do link code sem consumi-lo. Útil para exibir
+  /// nome/logo da academia antes do usuário confirmar o vínculo.
+  Future<LinkCodePreview> getPreview(String code) async {
+    final json = await _api.get<Map<String, dynamic>>('/v1/link-codes/$code');
+    return LinkCodePreview.fromJson(json);
   }
 
   /// Resgata um link code. Atômico server-side — se dois clientes resgatarem

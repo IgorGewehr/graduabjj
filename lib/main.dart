@@ -1,6 +1,6 @@
 import 'dart:io';
+import 'dart:ui';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -11,6 +11,7 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'api/feature_flags.dart';
 import 'core/firebase_options.dart';
+import 'core/logger.dart';
 import 'core/theme.dart';
 import 'app.dart';
 
@@ -19,16 +20,6 @@ void main() async {
 
   // Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  // Firestore offline persistence — mantido apenas enquanto chamadas
-  // residuais ao Firestore sobrevivem (auth fallback global_user, models
-  // como Timestamp helpers, retention/billing services). Pós-Fase 3 +
-  // wiring completo dos services Firestore restantes, este bloco e o
-  // import de cloud_firestore podem sair de main.dart.
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
-    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
-  );
 
   // Initialize date formatting for pt_BR
   await initializeDateFormatting('pt_BR', null);
@@ -49,6 +40,12 @@ void main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
+
+  FlutterError.onError = talker.handle;
+  PlatformDispatcher.instance.onError = (error, stack) {
+    talker.handle(error, stack);
+    return true;
+  };
 
   // Pós-Fase 1: Tatami é o único path e o `tatamiFlagsProvider` é um shim
   // @Deprecated (tudo já default `true`). Mantemos o bootstrap via Remote

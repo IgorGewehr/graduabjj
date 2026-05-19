@@ -92,7 +92,6 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
 
       await _selectAcademyInternal(academyId, mapping);
     } catch (e) {
-      print('[SelectedAcademy] Error selecting academy: $e');
       state = state.copyWith(isLoading: false);
       rethrow;
     }
@@ -102,9 +101,6 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
     String academyId,
     UserAcademyMapping mapping,
   ) async {
-    // Update FirebaseService context
-    FirebaseService.setAcademyId(academyId);
-
     // Load academy info if not cached
     Map<String, AcademyInfo> newCache = Map.from(state.academyInfoCache);
     if (!newCache.containsKey(academyId)) {
@@ -119,10 +115,13 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
     // rebuild.
     state = SelectedAcademyState(academyInfoCache: newCache, isLoading: false);
 
-    // This is the cheap operation that triggers the rebuild cascade for
-    // currentUserProvider, currentStudentProvider, academySettingsProvider
-    // (each one watches selectedAcademyIdProvider with `.select`).
+    // Single authoritative source-of-truth update: triggers the rebuild
+    // cascade for currentUserProvider, currentStudentProvider, etc.
     _ref.read(selectedAcademyIdProvider.notifier).state = academyId;
+
+    // Keep FirebaseService in sync for legacy services/screens that still
+    // read FirebaseService.academyId directly (phased out progressively).
+    FirebaseService.setAcademyId(academyId);
   }
 
   Future<AcademyInfo?> _loadAcademyInfo(
@@ -149,7 +148,6 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
         role: details?.role ?? UserRole.student,
       );
     } catch (e) {
-      print('[SelectedAcademy] Error loading academy info: $e');
       return null;
     }
   }

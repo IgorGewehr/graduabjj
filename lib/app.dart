@@ -420,13 +420,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isCreatingAcademy = state.matchedLocation == '/criar-academia';
       final isSplash = state.matchedLocation == '/';
 
-      print(
-        '[ROUTER] matchedLocation: ${state.matchedLocation}, isLoggedIn: $isLoggedIn, authLoading: ${authState.isLoading}, userLoading: ${currentUser.isLoading}, isCreatingAccount: $isCreatingAccount',
-      );
-
       // Don't redirect while account creation is in progress
       if (isCreatingAccount) {
-        print('[ROUTER] Account creation in progress, skipping redirect');
         return null;
       }
 
@@ -445,14 +440,10 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // If logged in, wait for user data to load before redirecting
       if (currentUser.isLoading) {
-        print('[ROUTER] Waiting for user data to load...');
         return isSplash ? null : '/';
       }
 
       final user = currentUser.valueOrNull;
-      print(
-        '[ROUTER] User loaded: ${user?.displayName}, role: ${user?.role}, isAdmin: ${user?.isAdmin}, isInstructor: ${user?.isInstructor}',
-      );
 
       // If logged in and on auth pages, redirect based on role
       if (isLoggingIn ||
@@ -461,10 +452,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           isCreatingAcademy ||
           isSplash) {
         if (user != null && (user.isAdmin || user.isInstructor)) {
-          print('[ROUTER] Redirecting admin/instructor to /admin');
           return '/admin';
         }
-        print('[ROUTER] Redirecting to /portal');
         return '/portal';
       }
 

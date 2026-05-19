@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/repositories.dart';
 import '../services/services.dart';
 import 'auth_provider.dart';
 import 'student_provider.dart';
@@ -8,47 +9,83 @@ import 'student_provider.dart';
 // Class Schedule Providers
 // ============================================
 
-/// Class service provider
-final classServiceProvider = Provider<ClassService?>((ref) {
-  final currentUser = ref.watch(currentUserProvider).valueOrNull;
-  if (currentUser?.academyId == null) return null;
-  return ClassService(currentUser!.academyId!);
-});
-
 /// All classes provider
 final classesProvider = FutureProvider<List<BJJClass>>((ref) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return [];
 
-  final service = ClassService(currentUser!.academyId!);
-  return await service.list();
+  final page = await ref.read(classRepoProvider).list(currentUser!.academyId!);
+  return page.items.map(BJJClass.fromApi).toList();
 });
 
 /// Today's classes provider
 final todayClassesProvider = FutureProvider<List<BJJClass>>((ref) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser?.academyId == null) return [];
-
-  final service = ClassService(currentUser!.academyId!);
-  return await service.getTodayClasses();
+  final allClasses = await ref.watch(classesProvider.future);
+  final dayOfWeek = DateTime.now().weekday % 7;
+  return allClasses
+      .where((cls) => cls.schedule.any((s) => s.dayOfWeek == dayOfWeek))
+      .toList();
 });
 
-/// Current class provider (class happening now)
+/// Current class provider (class happening now or starting soon)
 final currentClassProvider = FutureProvider<BJJClass?>((ref) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser?.academyId == null) return null;
+  final now = DateTime.now();
+  final dayOfWeek = now.weekday % 7;
+  final currentMinutes = now.hour * 60 + now.minute;
 
-  final service = ClassService(currentUser!.academyId!);
-  return await service.getCurrentClass();
+  final todayClasses = await ref.watch(todayClassesProvider.future);
+
+  for (final cls in todayClasses) {
+    for (final schedule in cls.schedule) {
+      if (schedule.dayOfWeek != dayOfWeek) continue;
+
+      final startParts = schedule.startTime.split(':').map(int.parse).toList();
+      final endParts = schedule.endTime.split(':').map(int.parse).toList();
+      final startMinutes = startParts[0] * 60 + startParts[1];
+      final endMinutes = endParts[0] * 60 + endParts[1];
+
+      // Check if within 30 min before start or during class
+      if (currentMinutes >= startMinutes - 30 && currentMinutes <= endMinutes) {
+        return cls;
+      }
+    }
+  }
+
+  return null;
 });
 
 /// Weekly schedule provider
 final weeklyScheduleProvider = FutureProvider<Map<int, List<BJJClass>>>((ref) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser?.academyId == null) return {};
+  final allClasses = await ref.watch(classesProvider.future);
 
-  final service = ClassService(currentUser!.academyId!);
-  return await service.getWeeklySchedule();
+  final schedule = <int, List<BJJClass>>{
+    0: [], // Sunday
+    1: [], // Monday
+    2: [], // Tuesday
+    3: [], // Wednesday
+    4: [], // Thursday
+    5: [], // Friday
+    6: [], // Saturday
+  };
+
+  for (final cls in allClasses) {
+    for (final s in cls.schedule) {
+      if (!schedule[s.dayOfWeek]!.any((c) => c.id == cls.id)) {
+        schedule[s.dayOfWeek]!.add(cls);
+      }
+    }
+  }
+
+  // Sort each day by start time
+  for (final day in schedule.keys) {
+    schedule[day]!.sort((a, b) {
+      final aTime = a.schedule.where((s) => s.dayOfWeek == day).firstOrNull?.startTime ?? '00:00';
+      final bTime = b.schedule.where((s) => s.dayOfWeek == day).firstOrNull?.startTime ?? '00:00';
+      return aTime.compareTo(bTime);
+    });
+  }
+
+  return schedule;
 });
 
 // ============================================
@@ -67,20 +104,21 @@ final competitionsProvider = FutureProvider<List<Competition>>((ref) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return [];
 
-  final service = CompetitionService(currentUser!.academyId!);
-  return await service.list();
+  final page = await ref.read(competitionRepoProvider).list(currentUser!.academyId!);
+  return page.items.map(Competition.fromApi).toList();
 });
 
 /// Upcoming competitions provider
 final upcomingCompetitionsProvider = FutureProvider<List<Competition>>((ref) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser?.academyId == null) return [];
-
-  final service = CompetitionService(currentUser!.academyId!);
-  return await service.getUpcoming();
+  final competitions = await ref.watch(competitionsProvider.future);
+  return competitions
+      .where((c) => c.status == CompetitionStatus.upcoming)
+      .toList()
+    ..sort((a, b) => a.date.compareTo(b.date));
 });
 
 /// Student competition results provider (returns competitions where student participated)
+/// NOTE: CompetitionRepo does not expose a getByStudent method — keeping service.
 final studentCompetitionResultsProvider = FutureProvider.family<List<Competition>, String>((ref, studentId) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return [];
@@ -90,6 +128,7 @@ final studentCompetitionResultsProvider = FutureProvider.family<List<Competition
 });
 
 /// Student results provider (returns all CompetitionResult for a student)
+/// NOTE: CompetitionRepo only has listResults per-competition — keeping service.
 final studentAllResultsProvider = FutureProvider.family<List<CompetitionResult>, String>((ref, studentId) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return [];
@@ -110,26 +149,24 @@ final competitionEnrollmentServiceProvider = Provider<CompetitionEnrollmentServi
 });
 
 /// Student enrollments provider
+/// NOTE: CompetitionRepo.listEnrollments requires competitionId — keeping service.
 final studentEnrollmentsProvider = FutureProvider.family<List<CompetitionEnrollment>, String>((ref, studentId) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) {
-    print('[ENROLLMENTS] No academyId found for current user');
     return [];
   }
 
   if (studentId.isEmpty) {
-    print('[ENROLLMENTS] Empty studentId provided');
     return [];
   }
 
-  print('[ENROLLMENTS] Fetching enrollments for studentId: $studentId in academy: ${currentUser!.academyId}');
-  final service = CompetitionEnrollmentService(currentUser.academyId!);
+  final service = CompetitionEnrollmentService(currentUser!.academyId!);
   final enrollments = await service.getByStudent(studentId);
-  print('[ENROLLMENTS] Found ${enrollments.length} enrollments for student $studentId');
   return enrollments;
 });
 
 /// Check if student is enrolled in competition
+/// NOTE: No repo equivalent — keeping service.
 final isStudentEnrolledProvider = FutureProvider.family<bool, ({String competitionId, String studentId})>((ref, params) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return false;
@@ -150,6 +187,7 @@ final settingsServiceProvider = Provider<SettingsService?>((ref) {
 });
 
 /// Academy settings provider
+/// NOTE: SettingsRepo.getAll returns Map<String, ApiAcademySetting>, not AcademySettings — keeping service.
 final academySettingsProvider = FutureProvider<AcademySettings?>((ref) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return null;
@@ -165,6 +203,7 @@ final academyNameProvider = FutureProvider<String>((ref) async {
 });
 
 /// PIX info provider
+/// NOTE: No repo equivalent — keeping service.
 final pixInfoProvider = FutureProvider<Map<String, String?>>((ref) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return {};
@@ -189,8 +228,11 @@ final activePlansProvider = FutureProvider<List<Plan>>((ref) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return [];
 
-  final service = PlanService(currentUser!.academyId!);
-  return await service.getActive();
+  final apiPlans = await ref.read(planRepoProvider).list(currentUser!.academyId!);
+  return apiPlans
+      .map(Plan.fromApi)
+      .where((p) => p.isActive)
+      .toList();
 });
 
 /// Student plan provider (legacy — returns first plan)
@@ -198,8 +240,9 @@ final studentPlanProvider = FutureProvider.family<Plan?, String>((ref, studentId
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return null;
 
-  final service = PlanService(currentUser!.academyId!);
-  return await service.getPlanForStudent(studentId);
+  final apiPlans = await ref.read(planRepoProvider).list(currentUser!.academyId!);
+  final plans = apiPlans.map(Plan.fromApi).toList();
+  return plans.where((p) => p.studentIds.contains(studentId)).firstOrNull;
 });
 
 /// Student plans provider (returns all plans for a student)
@@ -207,8 +250,11 @@ final studentPlansProvider = FutureProvider.family<List<Plan>, String>((ref, stu
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return [];
 
-  final service = PlanService(currentUser!.academyId!);
-  return await service.getPlansForStudent(studentId);
+  final apiPlans = await ref.read(planRepoProvider).list(currentUser!.academyId!);
+  return apiPlans
+      .map(Plan.fromApi)
+      .where((p) => p.studentIds.contains(studentId))
+      .toList();
 });
 
 /// Plan by ID provider
@@ -216,8 +262,8 @@ final planByIdProvider = FutureProvider.family<Plan?, String>((ref, planId) asyn
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return null;
 
-  final service = PlanService(currentUser!.academyId!);
-  return await service.getById(planId);
+  final apiPlan = await ref.read(planRepoProvider).getById(currentUser!.academyId!, planId);
+  return Plan.fromApi(apiPlan);
 });
 
 // ============================================
@@ -265,33 +311,52 @@ final beltProgressProvider = FutureProvider<double>((ref) async {
 // Notification Providers
 // ============================================
 
-/// Notification service provider
+/// Notification service provider — mantido para telas admin que ainda usam
+/// NotificationService diretamente (create, getByUser, etc.).
 final notificationServiceProvider = Provider<NotificationService?>((ref) {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
   if (currentUser?.academyId == null) return null;
   return NotificationService(currentUser!.academyId!);
 });
 
-/// User notifications provider (Real-time Stream)
+/// User notifications provider — SSE stream via Tatami.
+///
+/// Substitui o Firestore `.snapshots()` pelo endpoint
+/// `GET /v1/me/notifications/stream`. Cada evento SSE pode carregar uma ou
+/// mais notificações; o provider acumula a lista mais recente emitida pelo
+/// servidor (o SSE envia snapshots, não deltas).
 final userNotificationsProvider = StreamProvider<List<AppNotification>>((ref) {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
-  if (currentUser == null || currentUser.academyId == null) {
-    return Stream.value([]);
-  }
+  if (currentUser == null) return Stream.value([]);
 
-  final service = NotificationService(currentUser.academyId!);
-  return service.streamByUser(currentUser.id);
+  return ref
+      .read(notificationRepoProvider)
+      .streamNotifications()
+      .map((apiList) => apiList.map(AppNotification.fromApi).toList());
 });
 
-/// Unread notification count provider (Real-time Stream)
-final unreadNotificationCountProvider = StreamProvider<int>((ref) {
+/// Unread notification count provider — polling a cada 30 s via Tatami.
+///
+/// O endpoint dedicado `GET /v1/me/notifications/unread-count` é leve e
+/// evita leituras Firestore. O SSE stream não emite contagens separadas,
+/// por isso usamos polling periódico.
+final unreadNotificationCountProvider = StreamProvider<int>((ref) async* {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
-  if (currentUser == null || currentUser.academyId == null) {
-    return Stream.value(0);
+  if (currentUser == null) {
+    yield 0;
+    return;
   }
 
-  final service = NotificationService(currentUser.academyId!);
-  return service.streamUnreadCount(currentUser.id);
+  while (true) {
+    try {
+      final count =
+          await ref.read(notificationRepoProvider).getUnreadCount();
+      yield count;
+    } catch (_) {
+      yield 0;
+    }
+    await Future.delayed(const Duration(seconds: 30));
+  }
 });
 
 // ============================================

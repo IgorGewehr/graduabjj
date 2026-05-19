@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/dto/financial_dto.dart' as api_fin;
+import '../../api/repositories.dart';
 import '../../core/theme.dart';
 import '../../services/firebase_service.dart';
 import '../../services/financial_report_service.dart';
@@ -53,24 +55,141 @@ class _AdminFinancialReportsScreenState
 
     try {
       final academyId = FirebaseService.academyId;
-      final service = FinancialReportService(academyId);
+      final repo = ref.read(financialRepoProvider);
+      final now = DateTime.now();
 
-      // Load all data from Firestore once
-      await service.loadAll();
+      // Last 6 months in chronological order (oldest first)
+      final months = List.generate(6, (i) {
+        final d = DateTime(now.year, now.month - (5 - i), 1);
+        return '${d.year}-${d.month.toString().padLeft(2, '0')}';
+      });
 
-      // All methods below are now synchronous (use cached data)
-      final historical = service.getHistoricalData(months: 6);
-      final projections = service.projectRevenue(monthsAhead: 3);
-      final revenueByPlan = service.getRevenueByPlan(_monthKey);
-
-      // Get monthly report: check if it's in historical, otherwise generate
-      final report = historical.firstWhere(
-        (r) => r.month == _monthKey,
-        orElse: () => service.generateMonthlyReport(_monthKey),
+      final apiReports = await Future.wait(
+        months.map((m) => repo.getMonthlyReport(academyId, month: m)),
       );
 
-      final recommendations =
-          service.generateRecommendations(report, historical);
+      final historical = <MonthlyReportData>[];
+      for (int i = 0; i < apiReports.length; i++) {
+        final prevRevenue = i == 0
+            ? 0.0
+            : (double.tryParse(apiReports[i - 1].totalRevenue) ?? 0.0);
+        final api = apiReports[i];
+        final confirmed = double.tryParse(api.totalRevenue) ?? 0.0;
+        final outstanding = double.tryParse(api.outstanding) ?? 0.0;
+        final totalExpected = confirmed + outstanding;
+        final collectionRate =
+            totalExpected > 0 ? (confirmed / totalExpected) * 100 : 0.0;
+        final growthMoM = prevRevenue > 0
+            ? ((confirmed - prevRevenue) / prevRevenue) * 100
+            : 0.0;
+        historical.add(MonthlyReportData(
+          month: months[i],
+          confirmedRevenue: confirmed,
+          pendingRevenue: outstanding,
+          overdueRevenue: 0.0,
+          totalExpected: totalExpected,
+          collectionRate: collectionRate,
+          growthMoM: growthMoM,
+          totalPayments: api.paidCount + api.pendingCount + api.overdueCount,
+          paidCount: api.paidCount,
+          pendingCount: api.pendingCount,
+          overdueCount: api.overdueCount,
+        ));
+      }
+
+      // Projections (linear regression — kept client-side)
+      final revenues = historical.map((r) => r.confirmedRevenue).toList();
+      final sum = revenues.fold<double>(0, (a, v) => a + v);
+      final avg = revenues.isNotEmpty ? sum / revenues.length : 0.0;
+      final n = revenues.length;
+      double trend = 0;
+      if (n > 1) {
+        double sX = 0, sY = 0, sXY = 0, sX2 = 0;
+        for (int i = 0; i < n; i++) {
+          sX += i; sY += revenues[i]; sXY += i * revenues[i]; sX2 += i * i;
+        }
+        final denom = n * sX2 - sX * sX;
+        if (denom != 0) trend = (n * sXY - sX * sY) / denom;
+      }
+      final projections = List.generate(3, (i) {
+        final fd = DateTime(now.year, now.month + i + 1, 1);
+        final ms = '${fd.year}-${fd.month.toString().padLeft(2, '0')}';
+        final projected = avg + trend * (n + i);
+        return RevenueProjectionData(
+          month: ms,
+          projected: projected < 0 ? 0 : projected,
+          confidence: 'medium',
+          basis: 'Media movel de $n meses com tendencia linear',
+        );
+      });
+
+      // Report for selected month
+      MonthlyReportData report;
+      final inWindow = historical.where((r) => r.month == _monthKey);
+      if (inWindow.isNotEmpty) {
+        report = inWindow.first;
+      } else {
+        final api = await repo.getMonthlyReport(academyId, month: _monthKey);
+        final c = double.tryParse(api.totalRevenue) ?? 0.0;
+        final o = double.tryParse(api.outstanding) ?? 0.0;
+        final te = c + o;
+        report = MonthlyReportData(
+          month: _monthKey,
+          confirmedRevenue: c,
+          pendingRevenue: o,
+          overdueRevenue: 0.0,
+          totalExpected: te,
+          collectionRate: te > 0 ? (c / te) * 100 : 0.0,
+          growthMoM: 0.0,
+          totalPayments: api.paidCount + api.pendingCount + api.overdueCount,
+          paidCount: api.paidCount,
+          pendingCount: api.pendingCount,
+          overdueCount: api.overdueCount,
+        );
+      }
+
+      // Revenue by billing type (proxy for plan) — individual financials
+      final parts = _monthKey.split('-');
+      final yr = int.parse(parts[0]);
+      final mn = int.parse(parts[1]);
+      final page = await repo.list(
+        academyId,
+        filter: api_fin.FinancialFilter(
+          dueFrom: DateTime(yr, mn, 1),
+          dueTo: DateTime(yr, mn + 1, 1),
+          limit: 500,
+        ),
+      );
+      final groupRev = <String, double>{};
+      final groupStudents = <String, Set<String>>{};
+      for (final f in page.items) {
+        if (f.status == api_fin.ApiFinancialStatus.cancelled) continue;
+        final key = f.type.wire;
+        final amount = double.tryParse(f.amount) ?? 0.0;
+        groupRev[key] = (groupRev[key] ?? 0) + amount;
+        groupStudents.putIfAbsent(key, () => <String>{});
+        groupStudents[key]!.add(f.studentId);
+      }
+      final grandTotal = groupRev.values.fold<double>(0, (a, v) => a + v);
+      const labels = {
+        'monthly_tuition': 'Mensalidade',
+        'uniform': 'Kimono',
+        'seminar': 'Seminario',
+        'graduation': 'Graduacao',
+        'competition': 'Competicao',
+      };
+      final revenueByPlan = groupRev.entries.map((e) => RevenueByPlanData(
+            planId: e.key,
+            planName: labels[e.key] ?? 'Outros',
+            studentCount: groupStudents[e.key]?.length ?? 0,
+            totalRevenue: e.value,
+            percentage: grandTotal > 0 ? (e.value / grandTotal) * 100 : 0,
+          )).toList()
+        ..sort((a, b) => b.totalRevenue.compareTo(a.totalRevenue));
+
+      // Recommendations (client-side engine — same as FinancialReportService)
+      final service = FinancialReportService(academyId);
+      final recommendations = service.generateRecommendations(report, historical);
 
       setState(() {
         _monthlyReport = report;
@@ -304,9 +423,9 @@ class _AdminFinancialReportsScreenState
       width: 170,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -399,9 +518,9 @@ class _AdminFinancialReportsScreenState
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Column(
         children: [
@@ -423,7 +542,7 @@ class _AdminFinancialReportsScreenState
           Text(
             '$count pagamentos',
             style: AppTheme.labelSmall.copyWith(
-              color: color.withOpacity(0.7),
+              color: color.withValues(alpha: 0.7),
               fontSize: 9,
             ),
           ),
@@ -755,7 +874,7 @@ class _AdminFinancialReportsScreenState
                         padding: const EdgeInsets.symmetric(
                             horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: confidenceColor.withOpacity(0.1),
+                          color: confidenceColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(

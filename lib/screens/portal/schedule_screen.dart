@@ -90,9 +90,9 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: AppTheme.info.withOpacity(0.1),
+                      color: AppTheme.info.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.info.withOpacity(0.3)),
+                      border: Border.all(color: AppTheme.info.withValues(alpha: 0.3)),
                     ),
                     child: Row(
                       children: [
@@ -434,12 +434,12 @@ class _ScheduleCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: schedule.inWindow
-            ? AppTheme.success.withOpacity(0.05)
+            ? AppTheme.success.withValues(alpha: 0.05)
             : AppTheme.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: schedule.inWindow
-              ? AppTheme.success.withOpacity(0.3)
+              ? AppTheme.success.withValues(alpha: 0.3)
               : AppTheme.divider,
         ),
       ),
@@ -505,7 +505,7 @@ class _ScheduleCard extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: AppTheme.success.withOpacity(0.1),
+          color: AppTheme.success.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Row(

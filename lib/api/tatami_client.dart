@@ -111,8 +111,16 @@ class TatamiClient {
     return r.data as T;
   }
 
-  Future<void> delete(String path, {Options? options}) async {
-    await _dio.delete<dynamic>(path, options: options);
+  Future<void> delete(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+  }) async {
+    await _dio.delete<dynamic>(
+      path,
+      queryParameters: queryParameters,
+      options: options,
+    );
   }
 
   /// Health check útil em smoke tests e na splash screen.

@@ -792,7 +792,7 @@ class StoreService {
           orderId: order.id,
         );
       } catch (e) {
-        print('Failed to send store order notification: $e');
+        // ignore notification errors
       }
     }
 

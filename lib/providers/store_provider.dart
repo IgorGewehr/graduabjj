@@ -1,9 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/repositories.dart';
 import '../services/store_service.dart';
 import 'auth_provider.dart';
 
-/// Store Service Provider - uses current user's academyId for multi-tenant support
+/// Store Service Provider - kept only for getOrderStats which has no direct
+/// REST equivalent. All CRUD (products + orders) now goes through Tatami.
 final storeServiceProvider = Provider<StoreService?>((ref) {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
 
@@ -12,46 +14,109 @@ final storeServiceProvider = Provider<StoreService?>((ref) {
   return StoreService(currentUser!.academyId!);
 });
 
-/// Products Provider
+/// Products Provider — reads from Tatami REST via [storeRepoProvider].
 final productsProvider = FutureProvider<List<StoreProduct>>((ref) async {
-  final service = ref.watch(storeServiceProvider);
-  if (service == null) return [];
-  return service.getProducts();
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+  if (currentUser?.academyId == null) return [];
+  final page = await ref
+      .watch(storeRepoProvider)
+      .listProducts(currentUser!.academyId!);
+  return page.items.map(StoreProduct.fromApi).toList();
 });
 
-/// Active Products Provider (for portal)
+/// Active Products Provider (for portal) — reads from Tatami REST via
+/// [storeRepoProvider] with [activeOnly] filter pushed to the server.
 final activeProductsProvider = FutureProvider<List<StoreProduct>>((ref) async {
-  final service = ref.watch(storeServiceProvider);
-  if (service == null) return [];
-  return service.getActiveProducts();
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+  if (currentUser?.academyId == null) return [];
+  final page = await ref
+      .watch(storeRepoProvider)
+      .listProducts(currentUser!.academyId!, activeOnly: true);
+  return page.items.map(StoreProduct.fromApi).toList();
 });
 
-/// Orders Provider (Real-time Stream)
-final ordersProvider = StreamProvider<List<StoreOrder>>((ref) {
-  final service = ref.watch(storeServiceProvider);
-  if (service == null) return const Stream.empty();
-  return service.streamOrders();
+/// Orders Provider — reads from Tatami REST via [storeRepoProvider].
+/// Pull-to-refresh via `ref.invalidate(ordersProvider)`.
+final ordersProvider = FutureProvider<List<StoreOrder>>((ref) async {
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+  if (currentUser?.academyId == null) return [];
+  final page = await ref
+      .watch(storeRepoProvider)
+      .listOrders(currentUser!.academyId!);
+  return page.items.map(StoreOrder.fromApi).toList();
 });
 
-/// Student Orders Provider (Real-time Stream)
-final studentOrdersProvider = StreamProvider.family<List<StoreOrder>, String>((ref, studentId) {
-  final service = ref.watch(storeServiceProvider);
-  if (service == null) return const Stream.empty();
-  return service.streamOrdersByStudent(studentId);
+/// Student Orders Provider — filtered by studentId via Tatami REST.
+/// Pull-to-refresh via `ref.invalidate(studentOrdersProvider(studentId))`.
+final studentOrdersProvider =
+    FutureProvider.family<List<StoreOrder>, String>((ref, studentId) async {
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+  if (currentUser?.academyId == null) return [];
+  final page = await ref
+      .watch(storeRepoProvider)
+      .listOrders(currentUser!.academyId!, studentId: studentId);
+  return page.items.map(StoreOrder.fromApi).toList();
 });
 
-/// Pending Orders Provider (Real-time Stream)
-final pendingOrdersProvider = StreamProvider<List<StoreOrder>>((ref) {
-  final service = ref.watch(storeServiceProvider);
-  if (service == null) return const Stream.empty();
-  return service.streamPendingOrders();
+/// Pending Orders Provider — filters active orders client-side from
+/// [ordersProvider] (pending_payment, paid, preparing, ready).
+final pendingOrdersProvider = FutureProvider<List<StoreOrder>>((ref) async {
+  final orders = await ref.watch(ordersProvider.future);
+  return orders
+      .where((o) =>
+          o.status == StoreOrderStatus.pendingPayment ||
+          o.status == StoreOrderStatus.paid ||
+          o.status == StoreOrderStatus.preparing ||
+          o.status == StoreOrderStatus.ready)
+      .toList();
 });
 
-/// Store Stats Provider
+/// Store Stats Provider — derived from Tatami orders list.
 final storeStatsProvider = FutureProvider<Map<String, dynamic>>((ref) async {
-  final service = ref.watch(storeServiceProvider);
-  if (service == null) return {};
-  return service.getOrderStats();
+  final orders = await ref.watch(ordersProvider.future);
+
+  int pendingCount = 0;
+  int paidCount = 0;
+  int preparingCount = 0;
+  int readyCount = 0;
+  int deliveredCount = 0;
+  double totalRevenue = 0;
+
+  for (final order in orders) {
+    switch (order.status) {
+      case StoreOrderStatus.pendingPayment:
+        pendingCount++;
+        break;
+      case StoreOrderStatus.paid:
+        paidCount++;
+        totalRevenue += order.total;
+        break;
+      case StoreOrderStatus.preparing:
+        preparingCount++;
+        totalRevenue += order.total;
+        break;
+      case StoreOrderStatus.ready:
+        readyCount++;
+        totalRevenue += order.total;
+        break;
+      case StoreOrderStatus.delivered:
+        deliveredCount++;
+        totalRevenue += order.total;
+        break;
+      case StoreOrderStatus.cancelled:
+        break;
+    }
+  }
+
+  return {
+    'pending': pendingCount,
+    'paid': paidCount,
+    'preparing': preparingCount,
+    'ready': readyCount,
+    'delivered': deliveredCount,
+    'totalOrders': orders.length,
+    'totalRevenue': totalRevenue,
+  };
 });
 
 /// Cart State Notifier

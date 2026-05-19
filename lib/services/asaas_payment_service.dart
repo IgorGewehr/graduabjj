@@ -80,10 +80,8 @@ class AsaasPaymentService {
         );
       }
 
-      print('[Asaas] createPixPayment error: ${body['error']}');
       return null;
     } catch (e) {
-      print('[Asaas] createPixPayment exception: $e');
       return null;
     }
   }
@@ -130,10 +128,8 @@ class AsaasPaymentService {
         );
       }
 
-      print('[Asaas] createStoreOrderPayment error: ${body['error']}');
       return null;
     } catch (e) {
-      print('[Asaas] createStoreOrderPayment exception: $e');
       return null;
     }
   }
@@ -191,7 +187,6 @@ class AsaasPaymentService {
         message: body['error'] ?? 'Erro ao processar pagamento',
       );
     } catch (e) {
-      print('[Asaas] createCardPayment exception: $e');
       return CardPaymentResult(
         success: false,
         message: 'Erro de conexao',
@@ -252,7 +247,6 @@ class AsaasPaymentService {
         message: body['error'] ?? 'Erro ao processar pagamento',
       );
     } catch (e) {
-      print('[Asaas] createStoreOrderCardPayment exception: $e');
       return CardPaymentResult(
         success: false,
         message: 'Erro de conexao',
@@ -307,7 +301,6 @@ class AsaasPaymentService {
         );
       }
     } catch (e) {
-      print('[Asaas] requestWithdrawal exception: $e');
       return WithdrawalResult(
         success: false,
         message: 'Erro de conexao',

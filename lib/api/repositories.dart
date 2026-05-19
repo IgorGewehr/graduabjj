@@ -7,7 +7,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/api_provider.dart';
+import 'achievement_repo.dart';
+import 'assessment_repo.dart';
 import 'attendance_repo.dart';
+import 'belt_progression_repo.dart';
 import 'class_repo.dart';
 import 'competition_repo.dart';
 import 'financial_repo.dart';
@@ -15,6 +18,7 @@ import 'identity_repo.dart';
 import 'link_code_repo.dart';
 import 'notification_repo.dart';
 import 'plan_repo.dart';
+import 'retention_repo.dart';
 import 'settings_repo.dart';
 import 'store_repo.dart';
 import 'student_repo.dart';
@@ -84,4 +88,24 @@ final competitionRepoProvider = Provider<CompetitionRemoteRepo>(
 // Uploads (/v1/uploads/sign + /v1/uploads/finalize — 2-step signed URL flow)
 final uploadsRepoProvider = Provider<UploadsRemoteRepo>(
   (ref) => UploadsRemoteRepo(ref.watch(tatamiClientProvider)),
+);
+
+// Achievement (/v1/academies/{id}/students/{studentId}/achievements)
+final achievementRepoProvider = Provider<AchievementRemoteRepo>(
+  (ref) => AchievementRemoteRepo(ref.watch(tatamiClientProvider)),
+);
+
+// Assessment (/v1/academies/{id}/students/{studentId}/assessments)
+final assessmentRepoProvider = Provider<AssessmentRemoteRepo>(
+  (ref) => AssessmentRemoteRepo(ref.watch(tatamiClientProvider)),
+);
+
+// BeltProgression (/v1/academies/{id}/students/{studentId}/belt-progressions + graduation-eligibility)
+final beltProgressionRepoProvider = Provider<BeltProgressionRemoteRepo>(
+  (ref) => BeltProgressionRemoteRepo(ref.watch(tatamiClientProvider)),
+);
+
+// Retention (/v1/academies/{id}/risk-scores + /v1/academies/{id}/stats)
+final retentionRepoProvider = Provider<RetentionRemoteRepo>(
+  (ref) => RetentionRemoteRepo(ref.watch(tatamiClientProvider)),
 );

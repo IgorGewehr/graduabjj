@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +8,6 @@ import '../../api/repositories.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
-import '../../services/firebase_service.dart';
 import '../../widgets/cached_image.dart';
 
 /// Add Academy Screen
@@ -374,52 +372,13 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
     });
 
     try {
-      final firestore = FirebaseService.firestore;
-
-      // Search for the code in all academies' linkCodes subcollection
-      final academiesSnapshot = await firestore.collection('academies').get();
-
-      String? foundAcademyId;
-      String? foundStudentId;
-      Map<String, dynamic>? codeData;
-
-      for (final academyDoc in academiesSnapshot.docs) {
-        final codeQuery = await academyDoc.reference
-            .collection('linkCodes')
-            .where('code', isEqualTo: code.toUpperCase())
-            .where('usedAt', isNull: true)
-            .limit(1)
-            .get();
-
-        if (codeQuery.docs.isNotEmpty) {
-          foundAcademyId = academyDoc.id;
-          codeData = codeQuery.docs.first.data();
-          foundStudentId = codeData['studentId'] as String?;
-          break;
-        }
-      }
-
-      if (foundAcademyId == null || codeData == null) {
-        setState(() {
-          _isValidating = false;
-          _errorMessage = 'Codigo invalido ou ja utilizado';
-        });
-        return;
-      }
-
-      // Check if code is expired
-      final expiresAt = (codeData['expiresAt'] as Timestamp?)?.toDate();
-      if (expiresAt != null && DateTime.now().isAfter(expiresAt)) {
-        setState(() {
-          _isValidating = false;
-          _errorMessage = 'Codigo expirado';
-        });
-        return;
-      }
+      final preview = await ref
+          .read(linkCodeRepoProvider)
+          .getPreview(code.toUpperCase());
 
       // Check if already linked to this academy
       final mapping = ref.read(userAcademyMappingProvider).valueOrNull;
-      if (mapping?.academyIds.contains(foundAcademyId) == true) {
+      if (mapping?.academyIds.contains(preview.academyId) == true) {
         setState(() {
           _isValidating = false;
           _errorMessage = 'Voce ja esta vinculado a esta academia';
@@ -427,36 +386,27 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
         return;
       }
 
-      // Get academy info
-      final academyDoc = await firestore
-          .collection('academies')
-          .doc(foundAcademyId)
-          .get();
-      final academyData = academyDoc.data();
-
-      // Get student info if available
-      String? studentName;
-      if (foundStudentId != null) {
-        final studentDoc = await firestore
-            .collection('academies/$foundAcademyId/students')
-            .doc(foundStudentId)
-            .get();
-        if (studentDoc.exists) {
-          studentName = studentDoc.data()?['fullName'] as String?;
-        }
-      }
-
       setState(() {
         _isValidating = false;
-        _academyId = foundAcademyId;
-        _academyName = academyData?['name'] ?? 'Academia';
-        _academyLogoUrl = academyData?['logoUrl'];
-        _studentName = studentName;
+        _academyId = preview.academyId;
+        _academyName = preview.academyName;
+        // Trata logo vazio como ausente — _buildAcademyConfirmation usa null
+        // para decidir entre AppCachedImage e _buildDefaultLogo.
+        _academyLogoUrl =
+            preview.academyLogoUrl.isNotEmpty ? preview.academyLogoUrl : null;
+        // studentId vem do preview mas o nome não está disponível nesse
+        // endpoint — exibe null (a UI omite a linha "Aluno:" graciosamente).
+        _studentName = null;
       });
     } catch (e) {
+      // O problemInterceptor converte 404/410 em TatamiException com mensagem
+      // legível. Para os demais casos mostramos mensagem genérica.
+      final msg = e.toString().replaceAll('Exception: ', '');
       setState(() {
         _isValidating = false;
-        _errorMessage = 'Erro ao validar codigo. Tente novamente.';
+        _errorMessage = msg.isNotEmpty
+            ? msg
+            : 'Erro ao validar codigo. Tente novamente.';
       });
     }
   }

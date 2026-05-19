@@ -16,19 +16,15 @@ import '../../providers/providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import '../../services/abacate_pay_service.dart';
-import '../../services/asaas_payment_service.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
-/// Payment enabled provider (either AbacatePay or Asaas)
-final abacatePayEnabledProvider = FutureProvider<bool>((ref) async {
-  final academyId = FirebaseService.academyId;
-
-  final service = AbacatePayService(academyId);
-  final abacateEnabled = await service.isEnabled();
-  if (abacateEnabled) return true;
-
-  final settingsService = SettingsService(academyId);
-  return settingsService.isAsaasEnabled();
+/// Payment enabled provider — lê direto do academySettingsProvider (Tatami/
+/// Firestore-backed via portal_providers). Elimina as chamadas diretas a
+/// AbacatePayService.isEnabled() e SettingsService.isAsaasEnabled() que
+/// faziam round-trips individuais ao Firestore.
+final abacatePayEnabledProvider = Provider<bool>((ref) {
+  final settings = ref.watch(academySettingsProvider).valueOrNull;
+  return settings?.isPaymentEnabled ?? false;
 });
 
 /// Financial Screen - Pagamentos (Simplified)
@@ -67,8 +63,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
   Widget build(BuildContext context) {
     final studentAsync = ref.watch(currentStudentProvider);
     final pixInfoAsync = ref.watch(pixInfoProvider);
-    final abacatePayEnabled =
-        ref.watch(abacatePayEnabledProvider).valueOrNull ?? false;
+    final abacatePayEnabled = ref.watch(abacatePayEnabledProvider);
 
     return studentAsync.when(
       data: (student) {
@@ -86,7 +81,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
             HapticFeedback.mediumImpact();
             ref.invalidate(studentPaymentsProvider(student.id));
             ref.invalidate(pixInfoProvider);
-            ref.invalidate(abacatePayEnabledProvider);
+            ref.invalidate(academySettingsProvider);
           },
           child: paymentsAsync.when(
             data: (payments) {

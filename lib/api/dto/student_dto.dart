@@ -411,6 +411,70 @@ class AssessmentsPage {
       );
 }
 
+/// Um aluno elegível para graduação, retornado pelo endpoint
+/// `GET /v1/academies/{academyId}/belt-progressions/eligible`.
+///
+/// Cada item é um snapshot do aluno + sua elegibilidade calculada
+/// server-side (mesmos campos de [ApiEligibilityView]).
+class ApiEligibleStudent {
+  const ApiEligibleStudent({
+    required this.studentId,
+    required this.academyId,
+    required this.fullName,
+    required this.currentBelt,
+    required this.currentStripes,
+    required this.eligibility,
+    this.photoUrl,
+  });
+
+  final String studentId;
+  final String academyId;
+  final String fullName;
+  final String? photoUrl;
+  final ApiBelt currentBelt;
+  final int currentStripes;
+
+  /// Dados completos de elegibilidade — mesma estrutura de
+  /// [ApiEligibilityView] retornada por `/graduation-eligibility`.
+  final ApiEligibilityView eligibility;
+
+  factory ApiEligibleStudent.fromJson(Map<String, dynamic> j) =>
+      ApiEligibleStudent(
+        studentId: j['student_id'] as String,
+        academyId: j['academy_id'] as String,
+        fullName: j['full_name'] as String,
+        photoUrl: j['photo_url'] as String?,
+        currentBelt: ApiBeltX.fromWire(j['current_belt'] as String?),
+        currentStripes: (j['current_stripes'] as num?)?.toInt() ?? 0,
+        eligibility: ApiEligibilityView.fromJson(
+          j['eligibility'] as Map<String, dynamic>? ?? const {},
+        ),
+      );
+}
+
+/// Página paginada de [ApiEligibleStudent].
+class EligibleStudentsPage {
+  const EligibleStudentsPage({
+    required this.items,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  final List<ApiEligibleStudent> items;
+  final String? nextCursor;
+  final bool hasMore;
+
+  factory EligibleStudentsPage.fromJson(Map<String, dynamic> j) =>
+      EligibleStudentsPage(
+        items: (j['items'] as List? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(ApiEligibleStudent.fromJson)
+            .toList(),
+        nextCursor: j['next_cursor'] as String?,
+        hasMore: j['has_more'] as bool? ?? false,
+      );
+}
+
 class ApiEligibilityView {
   const ApiEligibilityView({
     required this.eligible,

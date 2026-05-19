@@ -14,7 +14,6 @@ import '../../core/validators.dart';
 import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/firebase_service.dart';
-import '../../services/abacate_pay_service.dart';
 import '../../services/totp_service.dart';
 import '../../providers/providers.dart';
 
@@ -272,20 +271,22 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
       builder: (context) => _WithdrawalBottomSheet(
         maxAmount: _wallet?.availableBalance ?? 0,
         onWithdraw: (amount, pixKey, pixKeyType) async {
-          final service = AbacatePayService(academyId);
-          final result = await service.requestWithdrawal(
-            amountInCents: amount,
-            pixKey: pixKey,
-            pixKeyType: pixKeyType,
-          );
+          try {
+            final walletRepo = ref.read(tatami_repos.walletRepoProvider);
+            await walletRepo.requestWithdrawal(
+              academyId,
+              amountInCents: amount,
+              pixKey: pixKey,
+              pixKeyType: pixKeyType,
+            );
 
-          if (!mounted) return;
-          Navigator.pop(context);
-
-          if (result.success) {
+            if (!mounted || !context.mounted) return;
+            Navigator.pop(context);
             context.showSuccess('Saque solicitado com sucesso!');
-          } else {
-            context.showError(result.message ?? 'Erro ao solicitar saque');
+          } catch (e) {
+            if (!mounted || !context.mounted) return;
+            Navigator.pop(context);
+            context.showError('Erro ao solicitar saque: $e');
           }
           _handleRefresh();
         },
@@ -311,7 +312,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
 
           if (isDisable) {
             final result = await service.disableTotp(code);
-            if (!mounted) return result.success;
+            if (!mounted || !sheetContext.mounted) return result.success;
             Navigator.pop(sheetContext);
             if (result.success) {
               context.showSuccess('2FA desativado com sucesso');
@@ -322,7 +323,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
             return result.success;
           } else {
             final result = await service.validateCode(code);
-            if (!mounted) return result.success;
+            if (!mounted || !sheetContext.mounted) return result.success;
             if (result.success) {
               Navigator.pop(sheetContext);
               onValidated();
@@ -407,7 +408,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF09090B),
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.white.withOpacity(0.05)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
                   ),
                   child: Column(
                     children: [
@@ -427,7 +428,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                               width: 180,
                               margin: const EdgeInsets.symmetric(vertical: 4),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.1),
+                                color: Colors.white.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                             )
@@ -478,8 +479,8 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
                             ),
-                            disabledBackgroundColor: Colors.white.withOpacity(0.1),
-                            disabledForegroundColor: Colors.white.withOpacity(0.3),
+                            disabledBackgroundColor: Colors.white.withValues(alpha: 0.1),
+                            disabledForegroundColor: Colors.white.withValues(alpha: 0.3),
                           ),
                         ),
                       ),

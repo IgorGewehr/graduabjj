@@ -189,6 +189,25 @@ class RecordAttendanceResponse {
       );
 }
 
+/// Payload para marcar/desmarcar presença individual de um aluno.
+/// Usado nos endpoints:
+///   POST   /v1/academies/{id}/students/{sid}/attendance
+///   DELETE /v1/academies/{id}/students/{sid}/attendance  (mesmo body)
+class AttendanceSingleRequest {
+  const AttendanceSingleRequest({
+    required this.classId,
+    required this.date,
+  });
+
+  final String classId;
+  final DateTime date;
+
+  Map<String, dynamic> toJson() => {
+        'class_id': classId,
+        'date': _formatDate(date),
+      };
+}
+
 /// Self check-in pelo aluno via QR scan.
 ///
 /// Pós PR 5: o [qrToken] é exigido no fluxo correto. Para builds antigos do

@@ -179,7 +179,7 @@ class _CheckinConfirmDialogState extends State<CheckinConfirmDialog> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: AppTheme.success.withOpacity(0.1),
+              color: AppTheme.success.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(Icons.how_to_reg, color: AppTheme.success, size: 20),
@@ -485,7 +485,7 @@ class _CheckinItem extends StatelessWidget {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: AppTheme.success.withOpacity(0.1),
+                color: AppTheme.success.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Icon(Icons.check, size: 16, color: AppTheme.success),

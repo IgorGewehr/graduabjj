@@ -172,6 +172,14 @@ class FinancialRemoteRepo {
     return ApiMonthlyReport.fromJson(json);
   }
 
+  /// Dashboard de receita: retorna histórico mensal (MoM, totais).
+  /// Cobre `GET /v1/academies/{academyId}/reports/revenue`.
+  Future<Map<String, dynamic>> getRevenueReport(String academyId) async {
+    return await _api.get<Map<String, dynamic>>(
+      '/v1/academies/$academyId/reports/revenue',
+    );
+  }
+
   /// Lista contatos de cobrança ligados a um financial específico.
   Future<BillingContactsPage> listBillingContactsForFinancial(
     String academyId,

@@ -1,10 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/billing_reminder_service.dart';
-import '../services/firebase_service.dart';
+import 'selected_academy_provider.dart';
 
 /// Billing reminder service provider
 final billingReminderServiceProvider = Provider<BillingReminderService>((ref) {
-  return BillingReminderService(FirebaseService.academyId);
+  final academyId = ref.watch(selectedAcademyIdProvider) ?? '';
+  return BillingReminderService(academyId);
 });
 
 /// Overdue payments grouped by stage

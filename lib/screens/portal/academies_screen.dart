@@ -312,6 +312,9 @@ class AcademiesScreen extends ConsumerWidget {
       final authService = ref.read(authServiceProvider);
       await authService.switchPrimaryAcademy(academy.id);
 
+      // Switch active academy in Riverpod — propagates to all reactive providers.
+      await ref.read(selectedAcademyProvider.notifier).selectAcademy(academy.id);
+
       // Refresh data
       ref.invalidate(userAcademyMappingProvider);
 

@@ -181,7 +181,7 @@ class _FormSectionState extends State<FormSection> with SingleTickerProviderStat
       child: Container(
         padding: EdgeInsets.all(hasDecoration ? _paddingValue : 0),
         decoration: BoxDecoration(
-          color: hasDecoration ? AppTheme.surfaceVariant.withOpacity(0.5) : Colors.transparent,
+          color: hasDecoration ? AppTheme.surfaceVariant.withValues(alpha: 0.5) : Colors.transparent,
           border: hasDecoration && !_isCollapsed
               ? Border(bottom: BorderSide(color: AppTheme.divider))
               : null,

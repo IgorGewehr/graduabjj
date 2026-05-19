@@ -177,7 +177,7 @@ class _IntroCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.infoLight,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.info.withOpacity(0.25)),
+        border: Border.all(color: AppTheme.info.withValues(alpha: 0.25)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

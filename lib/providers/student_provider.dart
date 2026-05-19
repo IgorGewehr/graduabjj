@@ -1,6 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/domain_providers.dart' as tatami;
+import '../api/dto/attendance_dto.dart' as api_att;
+import '../api/dto/financial_dto.dart' as api_fin;
+import '../api/repositories.dart';
 import '../models/student.dart';
 import '../services/services.dart';
 import 'auth_provider.dart';
@@ -17,7 +20,6 @@ final currentStudentProvider = FutureProvider<Student?>((ref) async {
 
   // If user has a studentId, fetch the student via Tatami
   if (currentUser.studentId != null && currentUser.academyId != null) {
-    FirebaseService.setAcademyId(currentUser.academyId!);
     try {
       return await ref.read(
         tatami.tatamiStudentByIdLegacyProvider(
@@ -31,7 +33,6 @@ final currentStudentProvider = FutureProvider<Student?>((ref) async {
 
   // Fallback by linkedUserId (Firestore-only — Tatami não tem o endpoint).
   if (currentUser.academyId != null) {
-    FirebaseService.setAcademyId(currentUser.academyId!);
     final service = StudentService(currentUser.academyId!);
     return await service.getByLinkedUserId(currentUser.id);
   }
@@ -50,29 +51,32 @@ final studentServiceProvider = Provider<StudentService?>((ref) {
 
 /// Student attendance history provider
 ///
-/// Sprint 5 — uses the paginated overload (`getByStudentPaginated`) for the
-/// first page only. The portal screen displays a bounded "histórico recente"
-/// of 15 rows, so loading the entire collection is wasteful. The exact total
-/// count is still served by `studentAttendanceCountProvider` (separate query).
-/// Falls back to the legacy unpaginated read on missing-index errors so an
-/// older project without the composite index keeps working.
+/// Migrado para Tatami (repo): usa `tatamiAttendanceLegacyProvider` com
+/// `AttendanceFilter(studentId:, limit: 15)` — equivalente ao antigo
+/// `getByStudentPaginated(limit: 15)`. O índice composto do Firestore não
+/// é mais necessário; a REST API não tem esse problema.
 final studentAttendanceProvider =
     FutureProvider.family<List<Attendance>, String>((ref, studentId) async {
       final currentUser = await ref.watch(currentUserProvider.future);
 
       if (currentUser?.academyId == null) return [];
 
-      final service = AttendanceService(currentUser!.academyId!);
-      try {
-        final page = await service.getByStudentPaginated(studentId, limit: 15);
-        return page.items;
-      } catch (_) {
-        // Composite index missing? Fall back to client-side sorting.
-        return await service.getByStudent(studentId, limit: 15);
-      }
+      final academyId = currentUser!.academyId!;
+      return await ref.watch(
+        tatami.tatamiAttendanceLegacyProvider(
+          tatami.AttendanceQuery(
+            academyId: academyId,
+            filter: api_att.AttendanceFilter(studentId: studentId, limit: 15),
+          ),
+        ).future,
+      );
     });
 
 /// Student attendance count provider
+///
+/// Sem endpoint de count no AttendanceRemoteRepo — mantém Firestore via
+/// `AttendanceService.getStudentAttendanceCount()`. Gap registrado para BE
+/// (endpoint `/v1/academies/{id}/attendance/count?studentId=...`).
 final studentAttendanceCountProvider = FutureProvider.family<int, String>((
   ref,
   studentId,
@@ -86,14 +90,19 @@ final studentAttendanceCountProvider = FutureProvider.family<int, String>((
 });
 
 /// Student achievements provider
+///
+/// Migrado para Tatami (repo): usa `achievementRepoProvider.getByStudent`.
+/// `Achievement.fromApi` adapta `ApiAchievement` → modelo legado.
 final studentAchievementsProvider =
     FutureProvider.family<List<Achievement>, String>((ref, studentId) async {
       final currentUser = await ref.watch(currentUserProvider.future);
 
       if (currentUser?.academyId == null) return [];
 
-      final service = AchievementService(currentUser!.academyId!);
-      return await service.getByStudent(studentId);
+      final academyId = currentUser!.academyId!;
+      final repo = ref.read(achievementRepoProvider);
+      final page = await repo.getByStudent(academyId, studentId);
+      return page.items.map((a) => Achievement.fromApiRepo(a)).toList();
     });
 
 /// Student medal count provider
@@ -123,50 +132,102 @@ final studentTimelineProvider =
       return await service.getTimeline(studentId);
     });
 
-/// Student payments provider (Real-time Stream)
-final studentPaymentsProvider = StreamProvider.family<List<Payment>, String>((
-  ref,
-  studentId,
-) {
-  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+/// Student payments provider.
+///
+/// Migrado para Tatami (repo): usa `tatamiPaymentsLegacyProvider` com
+/// `FinancialFilter(studentId:, limit: 200)`. Substituiu o antigo
+/// `PaymentService.streamByStudent` (Firestore real-time). O tipo de retorno
+/// permanece `List<Payment>` para não quebrar o widget tree existente.
+final studentPaymentsProvider =
+    FutureProvider.family<List<Payment>, String>((ref, studentId) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
 
-  if (currentUser?.academyId == null) {
-    return Stream.value([]);
-  }
+  if (currentUser?.academyId == null) return [];
 
-  final service = PaymentService(currentUser!.academyId!);
-  return service.streamByStudent(studentId);
+  final academyId = currentUser!.academyId!;
+  return ref.watch(
+    tatami.tatamiPaymentsLegacyProvider(
+      tatami.FinancialsQuery(
+        academyId: academyId,
+        filter: api_fin.FinancialFilter(studentId: studentId, limit: 200),
+      ),
+    ).future,
+  );
 });
 
-/// Student payment stats provider (Real-time Stream)
+/// Student payment stats provider.
+///
+/// Migrado para Tatami (repo): computa stats localmente a partir dos dados
+/// retornados por `tatamiPaymentsLegacyProvider`. Substituiu o antigo
+/// `PaymentService.streamStatsByStudent` (Firestore real-time).
 final studentPaymentStatsProvider =
-    StreamProvider.family<Map<String, dynamic>, String>((ref, studentId) {
-      final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    FutureProvider.family<Map<String, dynamic>, String>((
+  ref,
+  studentId,
+) async {
+  final payments = await ref.watch(
+    studentPaymentsProvider(studentId).future,
+  );
 
-      if (currentUser?.academyId == null) {
-        return Stream.value({
-          'pending': {'count': 0, 'total': 0.0},
-          'overdue': {'count': 0, 'total': 0.0},
-          'paid': {'count': 0, 'total': 0.0},
-        });
-      }
+  int pendingCount = 0;
+  int overdueCount = 0;
+  int paidCount = 0;
+  double pendingTotal = 0;
+  double overdueTotal = 0;
+  double paidTotal = 0;
 
-      final service = PaymentService(currentUser!.academyId!);
-      return service.streamStatsByStudent(studentId);
-    });
+  for (final p in payments) {
+    switch (p.status) {
+      case PaymentStatus.pending:
+        if (p.isOverdue) {
+          overdueCount++;
+          overdueTotal += p.value;
+        } else {
+          pendingCount++;
+          pendingTotal += p.value;
+        }
+        break;
+      case PaymentStatus.paid:
+        paidCount++;
+        paidTotal += p.value;
+        break;
+      case PaymentStatus.overdue:
+        overdueCount++;
+        overdueTotal += p.value;
+        break;
+      case PaymentStatus.cancelled:
+        break;
+    }
+  }
+
+  return {
+    'pending': {'count': pendingCount, 'total': pendingTotal},
+    'overdue': {'count': overdueCount, 'total': overdueTotal},
+    'paid': {'count': paidCount, 'total': paidTotal},
+  };
+});
 
 /// Student assessments provider
+///
+/// Migrado para Tatami (repo): usa `assessmentRepoProvider.getByStudent`.
+/// `Assessment.fromApi` adapta `ApiAssessment` → modelo legado.
 final studentAssessmentsProvider =
     FutureProvider.family<List<Assessment>, String>((ref, studentId) async {
       final currentUser = await ref.watch(currentUserProvider.future);
 
       if (currentUser?.academyId == null) return [];
 
-      final service = AssessmentService(currentUser!.academyId!);
-      return await service.getByStudent(studentId);
+      final academyId = currentUser!.academyId!;
+      final repo = ref.read(assessmentRepoProvider);
+      final page = await repo.getByStudent(academyId, studentId);
+      return page.items.map(Assessment.fromApi).toList();
     });
 
 /// Latest assessment provider
+///
+/// Migrado para Tatami (repo): usa `assessmentRepoProvider.getByStudent` com
+/// `limit: 1` e retorna o primeiro item. Substituiu `AssessmentService.getLatest`
+/// (Firestore).
 final latestAssessmentProvider = FutureProvider.family<Assessment?, String>((
   ref,
   studentId,
@@ -175,11 +236,19 @@ final latestAssessmentProvider = FutureProvider.family<Assessment?, String>((
 
   if (currentUser?.academyId == null) return null;
 
-  final service = AssessmentService(currentUser!.academyId!);
-  return await service.getLatest(studentId);
+  final academyId = currentUser!.academyId!;
+  final repo = ref.read(assessmentRepoProvider);
+  final page = await repo.getByStudent(academyId, studentId, limit: 1);
+  if (page.items.isEmpty) return null;
+  return Assessment.fromApi(page.items.first);
 });
 
 /// Assessment averages provider
+///
+/// Migrado para Tatami (repo): busca a lista completa via
+/// `assessmentRepoProvider.getByStudent` e computa as médias por categoria
+/// localmente (o tatami retorna scores em cada item). Substituiu
+/// `AssessmentService.getAveragesByCategory` (Firestore).
 final assessmentAveragesProvider =
     FutureProvider.family<Map<AssessmentCategory, double>, String>((
       ref,
@@ -187,21 +256,53 @@ final assessmentAveragesProvider =
     ) async {
       final currentUser = await ref.watch(currentUserProvider.future);
 
-      if (currentUser?.academyId == null) {
-        return {
-          AssessmentCategory.respeito: 0,
-          AssessmentCategory.disciplina: 0,
-          AssessmentCategory.pontualidade: 0,
-          AssessmentCategory.tecnica: 0,
-          AssessmentCategory.esforco: 0,
-        };
+      final emptyResult = {
+        AssessmentCategory.respeito: 0.0,
+        AssessmentCategory.disciplina: 0.0,
+        AssessmentCategory.pontualidade: 0.0,
+        AssessmentCategory.tecnica: 0.0,
+        AssessmentCategory.esforco: 0.0,
+      };
+
+      if (currentUser?.academyId == null) return emptyResult;
+
+      final academyId = currentUser!.academyId!;
+      final repo = ref.read(assessmentRepoProvider);
+      final page = await repo.getByStudent(academyId, studentId, limit: 100);
+
+      if (page.items.isEmpty) return emptyResult;
+
+      final totals = <AssessmentCategory, int>{};
+      final counts = <AssessmentCategory, int>{};
+
+      for (final item in page.items) {
+        final s = item.scores;
+        final entries = [
+          (AssessmentCategory.respeito, s.respeito),
+          (AssessmentCategory.disciplina, s.disciplina),
+          (AssessmentCategory.pontualidade, s.pontualidade),
+          (AssessmentCategory.tecnica, s.tecnica),
+          (AssessmentCategory.esforco, s.esforco),
+        ];
+        for (final (cat, score) in entries) {
+          totals[cat] = (totals[cat] ?? 0) + score;
+          counts[cat] = (counts[cat] ?? 0) + 1;
+        }
       }
 
-      final service = AssessmentService(currentUser!.academyId!);
-      return await service.getAveragesByCategory(studentId);
+      return {
+        for (final cat in AssessmentCategory.values)
+          cat: counts[cat] != null && counts[cat]! > 0
+              ? totals[cat]! / counts[cat]!
+              : 0.0,
+      };
     });
 
 /// Student attendance streak provider (consecutive training days)
+///
+/// `getStudentStreak` é lógica computada client-side em cima de uma lista
+/// completa — sem endpoint de streak no AttendanceRemoteRepo. Mantém
+/// Firestore via `AttendanceService`. Gap registrado para BE.
 final studentStreakProvider = FutureProvider.family<int, String>((
   ref,
   studentId,
@@ -215,6 +316,11 @@ final studentStreakProvider = FutureProvider.family<int, String>((
 });
 
 /// Student monthly attendance count provider
+///
+/// Migrado para Tatami (repo): usa `tatamiAttendanceLegacyProvider` com
+/// filtros `dateFrom`/`dateTo` + `studentId`. Limite de 100 é suficiente
+/// para um mês de treinos (máximo ~31 dias úteis). Se `hasMore` for true,
+/// a contagem retorna o total de itens recebidos (conservativo).
 final studentMonthlyAttendanceProvider = FutureProvider.family<int, String>((
   ref,
   studentId,
@@ -223,14 +329,22 @@ final studentMonthlyAttendanceProvider = FutureProvider.family<int, String>((
 
   if (currentUser?.academyId == null) return 0;
 
+  final academyId = currentUser!.academyId!;
   final now = DateTime.now();
   final startOfMonth = DateTime(now.year, now.month, 1);
 
-  final service = AttendanceService(currentUser!.academyId!);
-  final attendance = await service.getByDateRange(
-    startOfMonth,
-    now,
-    studentId: studentId,
+  final attendance = await ref.watch(
+    tatami.tatamiAttendanceLegacyProvider(
+      tatami.AttendanceQuery(
+        academyId: academyId,
+        filter: api_att.AttendanceFilter(
+          studentId: studentId,
+          dateFrom: startOfMonth,
+          dateTo: now,
+          limit: 100,
+        ),
+      ),
+    ).future,
   );
   return attendance.length;
 });

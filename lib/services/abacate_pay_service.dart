@@ -147,11 +147,9 @@ class AbacatePayService {
 
       final data = Map<String, dynamic>.from(result.data);
       return PaymentLink.fromMap(data);
-    } on FirebaseFunctionsException catch (e) {
-      print('[AbacatePay] createPixPayment error: ${e.code} - ${e.message}');
+    } on FirebaseFunctionsException catch (_) {
       return null;
     } catch (e) {
-      print('[AbacatePay] createPixPayment exception: $e');
       return null;
     }
   }
@@ -178,11 +176,9 @@ class AbacatePayService {
 
       final data = Map<String, dynamic>.from(result.data);
       return PaymentLink.fromMap(data);
-    } on FirebaseFunctionsException catch (e) {
-      print('[AbacatePay] createStoreOrderPayment error: ${e.code} - ${e.message}');
+    } on FirebaseFunctionsException catch (_) {
       return null;
     } catch (e) {
-      print('[AbacatePay] createStoreOrderPayment exception: $e');
       return null;
     }
   }
@@ -270,11 +266,9 @@ class AbacatePayService {
 
       final data = Map<String, dynamic>.from(result.data);
       return data['status'] as String? ?? 'PENDING';
-    } on FirebaseFunctionsException catch (e) {
-      print('[AbacatePay] checkPaymentStatus error: ${e.code} - ${e.message}');
+    } on FirebaseFunctionsException catch (_) {
       return 'PENDING';
     } catch (e) {
-      print('[AbacatePay] checkPaymentStatus exception: $e');
       return 'PENDING';
     }
   }
@@ -336,7 +330,6 @@ class AbacatePayService {
         );
       }
     } catch (e) {
-      print('[AbacatePay] requestWithdrawal exception: $e');
       return WithdrawalResult(
         success: false,
         message: 'Erro de conexao',

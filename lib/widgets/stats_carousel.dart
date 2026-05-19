@@ -83,7 +83,7 @@ class _StatsCarouselState extends State<StatsCarousel> {
                 decoration: BoxDecoration(
                   color: _currentPage == index
                       ? const Color(0xFF1A1A1A)
-                      : Colors.grey.withOpacity(0.3),
+                      : Colors.grey.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
@@ -106,10 +106,10 @@ class MinimalStatCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey.withOpacity(0.1)),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -121,7 +121,7 @@ class MinimalStatCard extends StatelessWidget {
             width: 50,
             height: 50,
             decoration: BoxDecoration(
-              color: data.color.withOpacity(0.1),
+              color: data.color.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(data.icon, color: data.color, size: 24),

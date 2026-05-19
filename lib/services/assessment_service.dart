@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/student_dto.dart' as api;
 import 'firebase_service.dart';
 
 /// Assessment Category
@@ -149,6 +150,32 @@ class Assessment {
       assessedBy: data['evaluatedBy'] ?? data['assessedBy'] ?? '',
       assessedByName: data['evaluatedByName'] ?? data['assessedByName'] ?? '',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    );
+  }
+
+  /// Adapter `ApiAssessment` → `Assessment` legacy.
+  ///
+  /// Notas:
+  /// - `studentName`/`assessedByName` não vêm na resposta REST — default ''.
+  /// - `scores` são derivados campo a campo de `ApiAssessmentScores`.
+  factory Assessment.fromApi(api.ApiAssessment a) {
+    final s = a.scores;
+    return Assessment(
+      id: a.id,
+      studentId: a.studentId,
+      studentName: '',
+      date: a.date,
+      scores: [
+        AssessmentScore(category: AssessmentCategory.respeito, score: s.respeito),
+        AssessmentScore(category: AssessmentCategory.disciplina, score: s.disciplina),
+        AssessmentScore(category: AssessmentCategory.pontualidade, score: s.pontualidade),
+        AssessmentScore(category: AssessmentCategory.tecnica, score: s.tecnica),
+        AssessmentScore(category: AssessmentCategory.esforco, score: s.esforco),
+      ],
+      notes: a.notes,
+      assessedBy: a.evaluatedByUid,
+      assessedByName: '',
+      createdAt: a.createdAt ?? a.date,
     );
   }
 

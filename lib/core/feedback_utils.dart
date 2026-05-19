@@ -172,7 +172,7 @@ class FeedbackUtils {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: (confirmColor ?? AppTheme.error).withOpacity(0.1),
+                  color: (confirmColor ?? AppTheme.error).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(icon, color: confirmColor ?? AppTheme.error, size: 24),

@@ -4,11 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/dto/store_dto.dart';
+import '../../api/repositories.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
-import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/store_service.dart';
 import '../../widgets/loading_button.dart';
 
 /// Portal Cart Screen
@@ -265,17 +267,34 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final service = ref.read(storeServiceProvider);
-      if (service == null) {
+      final academyId = currentUser.academyId;
+      if (academyId == null) {
         context.showError('Erro ao acessar a loja');
         return;
       }
-      // Server validates prices and stock
-      await service.createOrder(
+
+      // Build order line items from cart. size/color are not supported by
+      // the Tatami API (legacy-only fields) — they are intentionally dropped.
+      final lines = cart
+          .map((item) => OrderLineRequest(
+                productId: item.productId,
+                quantity: item.quantity,
+              ))
+          .toList();
+
+      final req = CreateOrderRequest(
         studentId: currentUser.studentId!,
-        studentName: currentUser.displayName,
-        items: cart,
+        items: lines,
       );
+
+      // Tatami validates prices and stock atomically (race → 409).
+      await ref
+          .read(storeRepoProvider)
+          .createOrder(academyId, req);
+
+      // Invalidate orders cache so the orders list reflects the new order.
+      ref.invalidate(ordersProvider);
+      ref.invalidate(studentOrdersProvider(currentUser.studentId!));
 
       // Clear cart after successful order
       cartNotifier.clear();
