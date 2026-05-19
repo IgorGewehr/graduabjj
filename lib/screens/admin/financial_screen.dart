@@ -104,9 +104,14 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
             .read(tatami.tatamiMonthlyReportLegacyProvider(key).future);
       }
 
+      final plansList = await ref
+          .read(planRepoProvider)
+          .list(academyId)
+          .then((apiPlans) => apiPlans.map(Plan.fromApi).toList());
+
       final results = await Future.wait([
         paymentsFuture(),
-        PlanService(academyId).list(),
+        Future.value(plansList),
         studentsFuture(),
         monthlyFuture(),
       ]);

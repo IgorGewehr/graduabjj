@@ -32,22 +32,14 @@ final currentStudentProvider = FutureProvider<Student?>((ref) async {
     }
   }
 
-  // Fallback by linkedUserId (Firestore-only — Tatami não tem o endpoint).
+  // TODO(tatami): GET /v1/students?linked_user_id={userId} — endpoint não existe ainda.
+  // Mantém Firestore via StudentService como fallback temporário.
   if (currentUser.academyId != null) {
     final service = StudentService(currentUser.academyId!);
     return await service.getByLinkedUserId(currentUser.id);
   }
 
   return null;
-});
-
-/// Student service provider
-final studentServiceProvider = Provider<StudentService?>((ref) {
-  final currentUser = ref.watch(currentUserProvider).valueOrNull;
-
-  if (currentUser?.academyId == null) return null;
-
-  return StudentService(currentUser!.academyId!);
 });
 
 /// Student attendance history provider

@@ -78,7 +78,6 @@ class _AdminStudentDetailScreenState
 
     try {
       final academyId = FirebaseService.academyId;
-      final planService = PlanService(academyId);
 
       Future<Student?> studentFuture() async {
         try {
@@ -158,7 +157,15 @@ class _AdminStudentDetailScreenState
         progressionsFuture(),
         achievementsFuture(),
         assessmentsFuture(),
-        planService.getPlansForStudent(widget.studentId),
+        ref
+            .read(tatami_repos.planRepoProvider)
+            .list(academyId)
+            .then(
+              (apiPlans) => apiPlans
+                  .map(Plan.fromApi)
+                  .where((p) => p.studentIds.contains(widget.studentId))
+                  .toList(),
+            ),
       ]);
 
       final student = futures[0] as Student?;

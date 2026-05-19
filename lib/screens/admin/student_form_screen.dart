@@ -142,8 +142,10 @@ class _AdminStudentFormScreenState
     setState(() => _isLoading = true);
     try {
       final academyId = FirebaseService.academyId;
-      final planService = PlanService(academyId);
-      _availablePlans = await planService.list();
+      final apiPlans = await ref
+          .read(tatami_repos.planRepoProvider)
+          .list(academyId);
+      _availablePlans = apiPlans.map(Plan.fromApi).toList();
 
       if (isEditing) {
         try {
@@ -539,7 +541,7 @@ class _AdminStudentFormScreenState
       }
 
       try {
-        final planService = PlanService(academyId);
+        final planRepo = ref.read(tatami_repos.planRepoProvider);
         final selectedPlanIds = _selectedPlans.map((p) => p.id).toSet();
         final currentPlanIds = _availablePlans
             .where((p) => p.studentIds.contains(studentId))
@@ -547,10 +549,10 @@ class _AdminStudentFormScreenState
             .toSet();
 
         for (final planId in selectedPlanIds.difference(currentPlanIds)) {
-          await planService.addStudent(planId, studentId);
+          await planRepo.assignStudents(academyId, planId, [studentId]);
         }
         for (final planId in currentPlanIds.difference(selectedPlanIds)) {
-          await planService.removeStudent(planId, studentId);
+          await planRepo.unassignStudent(academyId, planId, studentId);
         }
       } catch (planError) {
         debugPrint('Warning: Failed to sync plans: $planError');

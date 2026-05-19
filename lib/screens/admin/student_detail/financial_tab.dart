@@ -240,12 +240,14 @@ class StudentFinancialTab extends StatelessWidget {
               TextButton.icon(
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
+                  // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_value=null
                   final planService = PlanService(FirebaseService.academyId);
                   await planService.removeCustomValue(plan.id, studentId);
-                  if (parentContext.mounted)
+                  if (parentContext.mounted) {
                     parentContext.showSuccess(
                       'Valor restaurado ao padrão do plano',
                     );
+                  }
                   onRefresh();
                 },
                 icon: const Icon(LucideIcons.rotateCcw, size: 16),
@@ -272,12 +274,14 @@ class StudentFinancialTab extends StatelessWidget {
               TextButton.icon(
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
+                  // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_due_day=null
                   final planService = PlanService(FirebaseService.academyId);
                   await planService.removeCustomDueDay(plan.id, studentId);
-                  if (parentContext.mounted)
+                  if (parentContext.mounted) {
                     parentContext.showSuccess(
                       'Vencimento restaurado ao padrão do plano',
                     );
+                  }
                   onRefresh();
                 },
                 icon: const Icon(LucideIcons.rotateCcw, size: 16),
@@ -300,6 +304,7 @@ class StudentFinancialTab extends StatelessWidget {
               final dueDay = int.tryParse(dueDayController.text);
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;
               Navigator.of(dialogContext).pop();
+              // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_value + custom_due_day
               final planService = PlanService(FirebaseService.academyId);
               // Save value
               if (value == plan.monthlyValue) {
@@ -313,8 +318,9 @@ class StudentFinancialTab extends StatelessWidget {
               } else {
                 await planService.setCustomDueDay(plan.id, studentId, dueDay);
               }
-              if (parentContext.mounted)
+              if (parentContext.mounted) {
                 parentContext.showSuccess('Valor e vencimento atualizados');
+              }
               onRefresh();
             },
             child: const Text('Salvar'),

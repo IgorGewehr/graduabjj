@@ -6,7 +6,7 @@ import '../../api/domain_providers.dart' as tatami;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
-import '../../services/plan_service.dart';
+import '../../services/plan_service.dart' show Plan, PlanService;
 import '../../services/firebase_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/belt_badge.dart';
@@ -684,6 +684,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: () async {
+                  // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_value=null
                   final planService = PlanService(FirebaseService.academyId);
                   await planService.removeCustomValue(plan.id, student.id);
                   if (!mounted || !dialogContext.mounted) return;
@@ -716,6 +717,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: () async {
+                  // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_due_day=null
                   final planService = PlanService(FirebaseService.academyId);
                   await planService.removeCustomDueDay(plan.id, student.id);
                   if (!mounted || !dialogContext.mounted) return;
@@ -744,6 +746,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               if (value == null || value <= 0) return;
               final dueDay = int.tryParse(dueDayController.text);
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;
+              // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_value + custom_due_day
               final planService = PlanService(FirebaseService.academyId);
               // Save value
               if (value == plan.monthlyValue) {

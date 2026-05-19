@@ -255,8 +255,8 @@ Future<void> showEnrollmentsSheet({
 }
 
 /// Exibe o bottom sheet para adicionar uma inscrição manual.
-/// [studentRepo] busca alunos ativos via Tatami. Quando nulo, usa
-/// [StudentService] legado como fallback.
+/// [studentRepo] busca alunos ativos via Tatami. Quando nulo, retorna lista vazia
+/// (TODO: caller deve sempre fornecer [studentRepo]).
 /// [competitionRepo] realiza a inscrição via Tatami.
 Future<void> showAddEnrollmentSheet({
   required BuildContext context,
@@ -274,8 +274,8 @@ Future<void> showAddEnrollmentSheet({
     );
     students = studentsPage.items.map(Student.fromApi).toList();
   } else {
-    // Fallback legado.
-    students = await StudentService(academyId).getActive();
+    // TODO(tatami): caller should always pass studentRepo — legacy fallback removed.
+    students = const [];
   }
 
   if (!context.mounted) return;
