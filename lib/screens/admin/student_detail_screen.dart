@@ -6,6 +6,8 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/attendance_dto.dart' as api_att;
 import '../../api/dto/financial_dto.dart' as api_fin;
+import '../../api/dto/student_dto.dart'
+    show UpdateStudentRequest, ApiStudentStatusX;
 import '../../api/repositories.dart' as tatami_repos;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
@@ -76,7 +78,6 @@ class _AdminStudentDetailScreenState
 
     try {
       final academyId = FirebaseService.academyId;
-      final storeService = StoreService(academyId);
       final planService = PlanService(academyId);
 
       Future<Student?> studentFuture() async {
@@ -142,11 +143,18 @@ class _AdminStudentDetailScreenState
         return page.items.map(Assessment.fromApi).toList();
       }
 
+      Future<List<StoreOrder>> storeOrdersFuture() async {
+        final page = await ref
+            .read(tatami_repos.storeRepoProvider)
+            .listOrders(academyId, studentId: widget.studentId, limit: 50);
+        return page.items.map(StoreOrder.fromApi).toList();
+      }
+
       final futures = await Future.wait<dynamic>([
         studentFuture(),
         attendanceFuture(),
         paymentsFuture(),
-        storeService.getOrdersByStudent(widget.studentId),
+        storeOrdersFuture(),
         progressionsFuture(),
         achievementsFuture(),
         assessmentsFuture(),
@@ -227,12 +235,19 @@ class _AdminStudentDetailScreenState
 
   void _toggleStatus() async {
     try {
-      final service = StudentService(FirebaseService.academyId);
+      final currentUser = ref.read(currentUserProvider).valueOrNull;
+      final academyId = currentUser?.academyId ?? FirebaseService.academyId;
       final newStatus = _student!.status == StudentStatus.active
           ? StudentStatus.inactive
           : StudentStatus.active;
 
-      await service.updateStatus(_student!.id, newStatus);
+      await ref.read(tatami_repos.studentRepoProvider).update(
+            academyId,
+            _student!.id,
+            UpdateStudentRequest(
+              status: ApiStudentStatusX.fromWire(newStatus.value),
+            ),
+          );
 
       if (mounted) {
         context.showSuccess(
@@ -264,8 +279,13 @@ class _AdminStudentDetailScreenState
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
               try {
-                final service = StudentService(FirebaseService.academyId);
-                await service.delete(_student!.id);
+                final currentUser =
+                    ref.read(currentUserProvider).valueOrNull;
+                final academyId =
+                    currentUser?.academyId ?? FirebaseService.academyId;
+                await ref
+                    .read(tatami_repos.studentRepoProvider)
+                    .delete(academyId, _student!.id);
                 if (!mounted || !ctx.mounted) return;
                 Navigator.pop(ctx);
                 context.showSuccess('Aluno excluído!');

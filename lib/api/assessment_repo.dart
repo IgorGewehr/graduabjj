@@ -57,4 +57,42 @@ class AssessmentRemoteRepo {
     );
     return ApiAssessment.fromJson(json);
   }
+
+  /// `PATCH /v1/academies/{academyId}/students/{studentId}/assessments/{assessmentId}`
+  ///
+  /// Atualização parcial de uma avaliação existente. Campos null em [data]
+  /// não são enviados ao backend — somente campos presentes são modificados.
+  ///
+  /// Erros relevantes:
+  ///   - 404 → avaliação ou aluno não encontrado
+  ///   - 422 → dados inválidos (ex: score fora do range 1-5)
+  Future<ApiAssessment> update(
+    String academyId,
+    String studentId,
+    String assessmentId,
+    Map<String, dynamic> data,
+  ) async {
+    final json = await _api.patch<Map<String, dynamic>>(
+      '/v1/academies/$academyId/students/$studentId/assessments/$assessmentId',
+      data: data,
+    );
+    return ApiAssessment.fromJson(json);
+  }
+
+  /// `DELETE /v1/academies/{academyId}/students/{studentId}/assessments/{assessmentId}`
+  ///
+  /// Remove permanentemente uma avaliação. Esta operação não tem soft-delete
+  /// — o registro é apagado do banco imediatamente.
+  ///
+  /// Erros relevantes:
+  ///   - 404 → avaliação ou aluno não encontrado
+  Future<void> delete(
+    String academyId,
+    String studentId,
+    String assessmentId,
+  ) async {
+    await _api.delete(
+      '/v1/academies/$academyId/students/$studentId/assessments/$assessmentId',
+    );
+  }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/achievement_repo.dart' show ApiAchievementType;
 import '../api/domain_providers.dart' as tatami;
 import '../api/dto/attendance_dto.dart' as api_att;
 import '../api/dto/financial_dto.dart' as api_fin;
@@ -74,8 +75,10 @@ final studentAttendanceProvider =
 
 /// Student attendance count provider
 ///
-/// Sem endpoint de count no AttendanceRemoteRepo — mantém Firestore via
-/// `AttendanceService.getStudentAttendanceCount()`. Gap registrado para BE
+/// Migrado para Tatami (repo): busca a lista paginada de presenças via
+/// `attendanceRepoProvider.list` com filtro `studentId` e `limit: 200`
+/// e retorna o número de itens. Para alunos com mais de 200 presenças,
+/// o count será conservativo — gap registrado para BE
 /// (endpoint `/v1/academies/{id}/attendance/count?studentId=...`).
 final studentAttendanceCountProvider = FutureProvider.family<int, String>((
   ref,
@@ -85,8 +88,13 @@ final studentAttendanceCountProvider = FutureProvider.family<int, String>((
 
   if (currentUser?.academyId == null) return 0;
 
-  final service = AttendanceService(currentUser!.academyId!);
-  return await service.getStudentAttendanceCount(studentId);
+  final academyId = currentUser!.academyId!;
+  final repo = ref.read(attendanceRepoProvider);
+  final page = await repo.list(
+    academyId,
+    filter: api_att.AttendanceFilter(studentId: studentId, limit: 200),
+  );
+  return page.items.length;
 });
 
 /// Student achievements provider
@@ -106,6 +114,10 @@ final studentAchievementsProvider =
     });
 
 /// Student medal count provider
+///
+/// Migrado para Tatami (repo): usa `achievementRepoProvider.getByStudent`
+/// e computa os contadores de medalhas localmente a partir dos itens
+/// retornados. Substitui `AchievementService.getMedalCount` (Firestore).
 final studentMedalCountProvider =
     FutureProvider.family<Map<String, int>, String>((ref, studentId) async {
       final currentUser = await ref.watch(currentUserProvider.future);
@@ -114,11 +126,41 @@ final studentMedalCountProvider =
         return {'gold': 0, 'silver': 0, 'bronze': 0, 'total': 0};
       }
 
-      final service = AchievementService(currentUser!.academyId!);
-      return await service.getMedalCount(studentId);
+      final academyId = currentUser!.academyId!;
+      final repo = ref.read(achievementRepoProvider);
+      final page = await repo.getByStudent(academyId, studentId, limit: 200);
+
+      int gold = 0, silver = 0, bronze = 0;
+      for (final a in page.items) {
+        if (a.type == ApiAchievementType.competition) {
+          switch (a.position) {
+            case 'gold':
+              gold++;
+              break;
+            case 'silver':
+              silver++;
+              break;
+            case 'bronze':
+              bronze++;
+              break;
+            default:
+              break;
+          }
+        }
+      }
+      return {
+        'gold': gold,
+        'silver': silver,
+        'bronze': bronze,
+        'total': gold + silver + bronze,
+      };
     });
 
 /// Student timeline provider (achievements grouped by year)
+///
+/// Migrado para Tatami (repo): usa `achievementRepoProvider.getByStudent`
+/// e agrupa por ano client-side. Substitui `AchievementService.getTimeline`
+/// (Firestore).
 final studentTimelineProvider =
     FutureProvider.family<Map<int, List<Achievement>>, String>((
       ref,
@@ -128,8 +170,18 @@ final studentTimelineProvider =
 
       if (currentUser?.academyId == null) return {};
 
-      final service = AchievementService(currentUser!.academyId!);
-      return await service.getTimeline(studentId);
+      final academyId = currentUser!.academyId!;
+      final repo = ref.read(achievementRepoProvider);
+      final page = await repo.getByStudent(academyId, studentId, limit: 200);
+
+      final achievements =
+          page.items.map((a) => Achievement.fromApiRepo(a)).toList();
+      final timeline = <int, List<Achievement>>{};
+      for (final a in achievements) {
+        final year = a.date.year;
+        timeline.putIfAbsent(year, () => []).add(a);
+      }
+      return timeline;
     });
 
 /// Student payments provider.
@@ -350,6 +402,10 @@ final studentMonthlyAttendanceProvider = FutureProvider.family<int, String>((
 });
 
 /// Next class for student provider
+///
+/// Migrado para Tatami (repo): usa `classRepoProvider.list` para buscar
+/// turmas ativas e calcula a próxima aula client-side.
+/// Substitui `ClassService.list` (Firestore).
 final studentNextClassProvider =
     FutureProvider.family<
       ({BJJClass? classInfo, ClassSchedule? schedule, DateTime? nextDate})?,
@@ -359,8 +415,10 @@ final studentNextClassProvider =
 
       if (currentUser?.academyId == null) return null;
 
-      final classService = ClassService(currentUser!.academyId!);
-      final allClasses = await classService.list();
+      final academyId = currentUser!.academyId!;
+      final repo = ref.read(classRepoProvider);
+      final page = await repo.list(academyId, isActive: true);
+      final allClasses = page.items.map(BJJClass.fromApi).toList();
 
       // Filter classes where student is enrolled or classes have no restrictions
       final studentClasses = allClasses

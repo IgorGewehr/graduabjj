@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../api/dto/student_dto.dart' show StudentFilter;
 import '../../../api/repositories.dart';
 import '../../../core/feedback_utils.dart';
 import '../../../core/sports.dart';
@@ -71,8 +72,12 @@ class _ManageStudentsSheetState extends ConsumerState<ManageStudentsSheet> {
         setState(() => _isLoading = false);
         return;
       }
-      final service = StudentService(currentUser!.academyId!);
-      final students = await service.getAll();
+      final academyId = currentUser!.academyId!;
+      final repo = ref.read(studentRepoProvider);
+      // Busca até 500 alunos (active + inactive) para o gerenciamento de turma.
+      // limit:500 é conservativo — academias raramente ultrapassam esse número.
+      final page = await repo.list(academyId, filter: const StudentFilter(limit: 500));
+      final students = page.items.map(Student.fromApi).toList();
 
       // Order: enrolled first, then students who already practice this sport,
       // then everyone else — alphabetical inside each group.

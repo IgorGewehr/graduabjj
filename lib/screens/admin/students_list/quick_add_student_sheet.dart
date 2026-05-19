@@ -1,27 +1,33 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../api/dto/student_dto.dart'
+    show CreateStudentRequest, ApiStudentCategoryX, ApiBeltX;
+import '../../../api/repositories.dart';
 import '../../../core/feedback_utils.dart';
 import '../../../core/sports.dart';
 import '../../../core/theme.dart';
 import '../../../models/student.dart';
+import '../../../providers/auth_provider.dart' show currentUserProvider;
 import '../../../services/services.dart';
 
 /// Cadastro rápido de aluno. Pede apenas Nome + Modalidades (+ categoria
-/// opcional) e usa `StudentService.quickCreate` para gravar — a primeira
-/// modalidade selecionada vira primária. Inclui link para o cadastro
-/// completo (form de várias abas) se o admin precisar dos campos extras.
-class QuickAddStudentSheet extends StatefulWidget {
+/// opcional) e usa `StudentRemoteRepo.create` via Tatami para gravar —
+/// a primeira modalidade selecionada vira primária. Inclui link para o
+/// cadastro completo (form de várias abas) se o admin precisar dos campos extras.
+class QuickAddStudentSheet extends ConsumerStatefulWidget {
   final void Function(Student) onCreated;
 
   const QuickAddStudentSheet({super.key, required this.onCreated});
 
   @override
-  State<QuickAddStudentSheet> createState() => _QuickAddStudentSheetState();
+  ConsumerState<QuickAddStudentSheet> createState() =>
+      _QuickAddStudentSheetState();
 }
 
-class _QuickAddStudentSheetState extends State<QuickAddStudentSheet> {
+class _QuickAddStudentSheetState extends ConsumerState<QuickAddStudentSheet> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   StudentCategory _category = StudentCategory.adult;
@@ -71,19 +77,46 @@ class _QuickAddStudentSheetState extends State<QuickAddStudentSheet> {
     });
 
     try {
-      final service = StudentService(FirebaseService.academyId);
+      final currentUser = ref.read(currentUserProvider).valueOrNull;
+      final academyId = currentUser?.academyId ?? FirebaseService.academyId;
+      final repo = ref.read(studentRepoProvider);
+
       final orderedSports = [
         _primarySport ?? _selectedSports.first,
         ..._selectedSports.where((s) => s != _primarySport),
       ];
-      final student = await service.quickCreate(
-        fullName: name,
-        sports: orderedSports,
-        phone: _phoneController.text.trim().isEmpty
-            ? null
-            : _phoneController.text.trim(),
-        category: _category,
+      final primary = orderedSports.first;
+
+      // Seed the primary sport's initial grade (lowest for this category).
+      final grades = getGradesForSport(primary, category: _category.value);
+      final firstGradeId = grades.isNotEmpty ? grades.first.id : 'white';
+
+      // Build sportData map for all selected sports.
+      final sportData = <String, dynamic>{};
+      for (final sport in orderedSports) {
+        final sg = getGradesForSport(sport, category: _category.value);
+        final defaultGrade = sg.isNotEmpty ? sg.first.id : 'white';
+        sportData[sport.value] = {
+          'currentGrade': defaultGrade,
+          'currentStripes': 0,
+        };
+      }
+
+      final phone = _phoneController.text.trim();
+      final apiStudent = await repo.create(
+        academyId,
+        CreateStudentRequest(
+          fullName: name,
+          phone: phone.isEmpty ? null : phone,
+          category: ApiStudentCategoryX.fromWire(_category.value),
+          currentBelt: ApiBeltX.fromWire(firstGradeId),
+          currentStripes: 0,
+          primarySport: primary.value,
+          sportsList: orderedSports.map((s) => s.value).toList(),
+          sportData: sportData,
+        ),
       );
+      final student = Student.fromApi(apiStudent);
       if (!mounted) return;
       Navigator.pop(context);
       widget.onCreated(student);

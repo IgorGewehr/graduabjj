@@ -9,12 +9,13 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 
+import '../../api/dto/student_dto.dart' show StudentFilter, ApiStudentStatus;
 import '../../api/dto/upload_dto.dart' as api_upload;
 import '../../api/repositories.dart' as tatami_repos;
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
-import '../../models/student.dart';
+import '../../providers/auth_provider.dart' show currentUserProvider;
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import 'settings/academy_tab.dart';
@@ -115,6 +116,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     setState(() => _isLoading = true);
 
     try {
+      // TODO(tatami): migrar para settingsRepoProvider quando tatami expor
+      //   GET /v1/academies/{id} (academy entity completo com branding + PIX).
+      //   Atualmente SettingsRepo.getAll() retorna key/value genérico, sem
+      //   adaptar para AcademySettings. Manter Firestore enquanto endpoint
+      //   não existir.
       final service = SettingsService(FirebaseService.academyId);
       final settings = await service.getAcademySettings();
 
@@ -167,15 +173,22 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
   Future<void> _loadLinkedStudents() async {
     try {
-      final studentService = StudentService(FirebaseService.academyId);
-      final allStudents = await studentService.getAll();
-
-      final linked = allStudents
-          .where(
-            (s) => s.linkedUserId != null && s.status == StudentStatus.active,
-          )
+      final currentUser = ref.read(currentUserProvider).valueOrNull;
+      final academyId = currentUser?.academyId ?? FirebaseService.academyId;
+      final repo = ref.read(tatami_repos.studentRepoProvider);
+      // Busca apenas alunos ativos com conta vinculada via filtro Tatami.
+      final page = await repo.list(
+        academyId,
+        filter: const StudentFilter(status: ApiStudentStatus.active, limit: 500),
+      );
+      final linked = page.items
+          .where((s) => s.linkedUserUid != null && s.linkedUserUid!.isNotEmpty)
           .map(
-            (s) => {'id': s.id, 'fullName': s.fullName, 'nickname': s.nickname},
+            (s) => {
+              'id': s.id,
+              'fullName': s.fullName,
+              'nickname': s.nickname,
+            },
           )
           .toList();
 
@@ -225,6 +238,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     setState(() => _isSaving = true);
 
     try {
+      // TODO(tatami): migrar writes para settingsRepoProvider.set(key, value)
+      //   ou PATCH /v1/academies/{id} quando o backend expor esse endpoint.
+      //   Atualmente SettingsService escreve direto no Firestore academy doc.
       final service = SettingsService(FirebaseService.academyId);
 
       await service.updateBasicInfo(

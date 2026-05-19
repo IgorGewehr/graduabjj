@@ -159,9 +159,13 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
   Future<void> _sendReminder(Payment payment) async {
     try {
-      final studentService = StudentService(FirebaseService.academyId);
-      final student = await studentService.getById(payment.studentId);
-      if (student?.phone == null) {
+      final currentUser = ref.read(currentUserProvider).valueOrNull;
+      final academyId = currentUser?.academyId ?? FirebaseService.academyId;
+      final apiStudent = await ref
+          .read(studentRepoProvider)
+          .getById(academyId, payment.studentId);
+      final phone = apiStudent.phone;
+      if (phone == null) {
         if (mounted) {
           context.showWarning('Aluno nao possui telefone cadastrado');
         }
@@ -169,7 +173,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
       }
 
       final whatsappLink = _buildWhatsAppReminderLink(
-        phone: student!.phone!,
+        phone: phone,
         studentName: payment.studentName,
         amount: payment.value,
         dueDate: payment.dueDate,

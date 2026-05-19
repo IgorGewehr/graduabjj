@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../api/domain_providers.dart' as tatami;
+import '../../api/repositories.dart' show beltProgressionRepoProvider;
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -77,12 +78,26 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       // Eligibility snapshot — only loaded when the academy has auto-graduation
       // enabled. Reading the academy settings is cheap (single doc) and lets
       // us skip the expensive batch query otherwise.
+      // Migrado para Tatami (repo): `getEligibleStudents` calcula elegibilidade
+      // server-side em batch, substituindo `BeltProgressionService.getEligibilitySnapshot`
+      // (Firestore — N reads por aluno ativo).
       final settings = ref.read(academySettingsProvider).valueOrNull;
       Map<String, EligibilitySnapshotEntry> eligibility = {};
       if (settings?.autoGraduationEnabled == true) {
-        final beltService = BeltProgressionService(FirebaseService.academyId);
-        final snapshot = await beltService.getEligibilitySnapshot();
-        eligibility = {for (final e in snapshot) e.studentId: e};
+        final eligiblePage = await ref
+            .read(beltProgressionRepoProvider)
+            .getEligibleStudents(academyId, limit: 500);
+        eligibility = {
+          for (final e in eligiblePage.items)
+            e.studentId: EligibilitySnapshotEntry(
+              studentId: e.studentId,
+              eligible: e.eligibility.eligible,
+              currentClasses: e.eligibility.currentCount,
+              requiredClasses: e.eligibility.requiredCount,
+              missingClasses: e.eligibility.attendancesNeeded,
+              weighted: false, // pesos são calculados server-side pelo Tatami
+            ),
+        };
       }
 
       setState(() {
