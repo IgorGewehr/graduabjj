@@ -378,6 +378,7 @@ class _AdminStudentDetailScreenState
                     storeOrders: _storeOrders,
                     studentPlans: _studentPlans,
                     onRefresh: _loadData,
+                    ref: ref,
                   ),
                   StudentBehaviorTab(
                     student: _student!,

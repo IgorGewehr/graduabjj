@@ -94,4 +94,44 @@ class PlanRemoteRepo {
       '/v1/academies/$academyId/plans/$planId/students/$studentId',
     );
   }
+
+  /// `PATCH /v1/academies/{academyId}/plans/{planId}/students/{studentId}`
+  ///
+  /// Atualiza valor customizado e/ou dia de vencimento de um aluno no plano.
+  /// Campos null não são enviados — somente os campos presentes são alterados.
+  /// Para remover um override (voltar ao padrão do plano), passe `null` como
+  /// valor — o backend interpreta campos ausentes como "manter" e campos
+  /// explicitamente `null` como "remover override".
+  Future<void> setStudentCustomValue(
+    String academyId,
+    String planId,
+    String studentId, {
+    double? customValue,
+    int? customDueDay,
+  }) async {
+    final body = <String, dynamic>{};
+    if (customValue != null) {
+      body['custom_value'] = customValue;
+    }
+    if (customDueDay != null) {
+      body['custom_due_day'] = customDueDay;
+    }
+    await _api.patch<dynamic>(
+      '/v1/academies/$academyId/plans/$planId/students/$studentId',
+      data: body,
+    );
+  }
+
+  /// Alias semântico que envia `custom_value: null` e `custom_due_day: null`
+  /// para remover todos os overrides do aluno e voltar ao padrão do plano.
+  Future<void> clearStudentCustomValues(
+    String academyId,
+    String planId,
+    String studentId,
+  ) async {
+    await _api.patch<dynamic>(
+      '/v1/academies/$academyId/plans/$planId/students/$studentId',
+      data: {'custom_value': null, 'custom_due_day': null},
+    );
+  }
 }

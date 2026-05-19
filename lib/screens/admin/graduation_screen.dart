@@ -39,20 +39,18 @@ class _AdminGraduationScreenState
 
     try {
       final academyId = FirebaseService.academyId;
-      final service = BeltProgressionService(academyId);
       final beltRepo = ref.read(tatami_repos.beltProgressionRepoProvider);
 
       final results = await Future.wait([
         beltRepo
             .getEligibleStudents(academyId, limit: 100)
             .then(_adaptEligibleStudents),
-        // TODO(tatami): migrar para beltProgressionRepoProvider quando
-        // o endpoint GET /belt-progressions/recent ou equivalente for
-        // adicionado ao BeltProgressionRemoteRepo.
-        service.getRecentPromotions(limit: 20),
-        // TODO(tatami): migrar para beltProgressionRepoProvider quando
-        // o endpoint GET /belt-progressions/distribution for adicionado.
-        service.getBeltDistribution(),
+        beltRepo
+            .getRecentProgressions(academyId, limit: 20)
+            .then(_adaptRecentProgressions),
+        beltRepo
+            .getBeltDistribution(academyId)
+            .then(_adaptBeltDistribution),
       ]);
 
       setState(() {
@@ -64,6 +62,34 @@ class _AdminGraduationScreenState
     } catch (e) {
       setState(() => _isLoading = false);
     }
+  }
+
+  /// Adapta [List<ApiRecentProgression>] para [List<BeltProgression>]
+  /// para compatibilidade com [PromotionHistoryCard].
+  List<BeltProgression> _adaptRecentProgressions(
+    List<api_student.ApiRecentProgression> items,
+  ) {
+    return items.map((p) {
+      return BeltProgression(
+        id: p.progressionId,
+        studentId: p.studentId,
+        previousBelt: p.previousBelt.wire,
+        previousStripes: p.previousStripes,
+        newBelt: p.newBelt.wire,
+        newStripes: p.newStripes,
+        promotionDate: p.promotionDate,
+        totalClasses: 0, // não retornado neste endpoint
+        notes: p.notes,
+        createdAt: p.promotionDate,
+      );
+    }).toList();
+  }
+
+  /// Adapta [List<ApiBeltCount>] para [Map<String, int>] (wire-name → count).
+  Map<String, int> _adaptBeltDistribution(
+    List<api_student.ApiBeltCount> items,
+  ) {
+    return {for (final b in items) b.belt.wire: b.count};
   }
 
   /// Adapta [EligibleStudentsPage] para a estrutura Map que os widgets

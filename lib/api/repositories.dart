@@ -7,6 +7,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/api_provider.dart';
+import 'academy_events_repo.dart';
 import 'achievement_repo.dart';
 import 'assessment_repo.dart';
 import 'attendance_repo.dart';
@@ -16,6 +17,7 @@ import 'competition_repo.dart';
 import 'financial_repo.dart';
 import 'identity_repo.dart';
 import 'link_code_repo.dart';
+import 'news_repo.dart';
 import 'notification_repo.dart';
 import 'plan_repo.dart';
 import 'retention_repo.dart';
@@ -108,4 +110,14 @@ final beltProgressionRepoProvider = Provider<BeltProgressionRemoteRepo>(
 // Retention (/v1/academies/{id}/risk-scores + /v1/academies/{id}/stats)
 final retentionRepoProvider = Provider<RetentionRemoteRepo>(
   (ref) => RetentionRemoteRepo(ref.watch(tatamiClientProvider)),
+);
+
+// AcademyEvents (/v1/academies/{id}/events CRUD)
+final academyEventsRepoProvider = Provider<AcademyEventsRemoteRepo>(
+  (ref) => AcademyEventsRemoteRepo(ref.watch(tatamiClientProvider)),
+);
+
+// News (/v1/academies/{id}/news CRUD)
+final newsRepoProvider = Provider<NewsRemoteRepo>(
+  (ref) => NewsRemoteRepo(ref.watch(tatamiClientProvider)),
 );

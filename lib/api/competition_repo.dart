@@ -221,6 +221,40 @@ class CompetitionRemoteRepo {
   }
 
   // ---------------------------------------------------------------------------
+  // Student Enrollments (cross-competition — todas as inscrições de um aluno).
+  // ---------------------------------------------------------------------------
+
+  /// `GET /v1/academies/{academyId}/students/{studentId}/enrollments`
+  ///
+  /// Retorna todas as inscrições de um aluno em competições da academia,
+  /// independente da competição. Substitui o loop client-side que buscava
+  /// todas as competições e cruzava inscrições localmente.
+  Future<List<ApiEnrollment>> listStudentEnrollments(
+    String academyId,
+    String studentId, {
+    int limit = 50,
+  }) async {
+    final params = <String, dynamic>{'limit': limit};
+    final json = await _api.get<dynamic>(
+      '/v1/academies/$academyId/students/$studentId/enrollments',
+      queryParameters: params,
+    );
+    if (json is List) {
+      return json
+          .whereType<Map<String, dynamic>>()
+          .map(ApiEnrollment.fromJson)
+          .toList();
+    }
+    if (json is Map<String, dynamic>) {
+      return (json['items'] as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(ApiEnrollment.fromJson)
+          .toList();
+    }
+    return const [];
+  }
+
+  // ---------------------------------------------------------------------------
   // Achievements (vivem no contexto Competition por proximidade).
   // ---------------------------------------------------------------------------
 

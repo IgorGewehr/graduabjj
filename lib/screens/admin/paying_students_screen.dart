@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../api/domain_providers.dart' as tatami;
+import '../../api/repositories.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -684,9 +685,18 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: () async {
-                  // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_value=null
-                  final planService = PlanService(FirebaseService.academyId);
-                  await planService.removeCustomValue(plan.id, student.id);
+                  final academyId = FirebaseService.academyId;
+                  try {
+                    await ref.read(planRepoProvider).setStudentCustomValue(
+                      academyId,
+                      plan.id,
+                      student.id,
+                      customValue: plan.monthlyValue,
+                    );
+                  } catch (_) {
+                    final planService = PlanService(academyId);
+                    await planService.removeCustomValue(plan.id, student.id);
+                  }
                   if (!mounted || !dialogContext.mounted) return;
                   Navigator.of(dialogContext).pop();
                   parentContext.showSuccess(
@@ -717,9 +727,18 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: () async {
-                  // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_due_day=null
-                  final planService = PlanService(FirebaseService.academyId);
-                  await planService.removeCustomDueDay(plan.id, student.id);
+                  final academyId = FirebaseService.academyId;
+                  try {
+                    await ref.read(planRepoProvider).setStudentCustomValue(
+                      academyId,
+                      plan.id,
+                      student.id,
+                      customDueDay: plan.defaultDueDay,
+                    );
+                  } catch (_) {
+                    final planService = PlanService(academyId);
+                    await planService.removeCustomDueDay(plan.id, student.id);
+                  }
                   if (!mounted || !dialogContext.mounted) return;
                   Navigator.of(dialogContext).pop();
                   parentContext.showSuccess(
@@ -746,19 +765,31 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               if (value == null || value <= 0) return;
               final dueDay = int.tryParse(dueDayController.text);
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;
-              // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_value + custom_due_day
-              final planService = PlanService(FirebaseService.academyId);
-              // Save value
-              if (value == plan.monthlyValue) {
-                await planService.removeCustomValue(plan.id, student.id);
-              } else {
-                await planService.setCustomValue(plan.id, student.id, value);
-              }
-              // Save due day
-              if (dueDay == plan.defaultDueDay) {
-                await planService.removeCustomDueDay(plan.id, student.id);
-              } else {
-                await planService.setCustomDueDay(plan.id, student.id, dueDay);
+              final academyId = FirebaseService.academyId;
+              try {
+                await ref.read(planRepoProvider).setStudentCustomValue(
+                  academyId,
+                  plan.id,
+                  student.id,
+                  customValue: value != plan.monthlyValue ? value : null,
+                  customDueDay:
+                      dueDay != plan.defaultDueDay ? dueDay : null,
+                );
+              } catch (_) {
+                // Fallback: Firestore legado
+                final planService = PlanService(academyId);
+                if (value == plan.monthlyValue) {
+                  await planService.removeCustomValue(plan.id, student.id);
+                } else {
+                  await planService.setCustomValue(
+                      plan.id, student.id, value);
+                }
+                if (dueDay == plan.defaultDueDay) {
+                  await planService.removeCustomDueDay(plan.id, student.id);
+                } else {
+                  await planService.setCustomDueDay(
+                      plan.id, student.id, dueDay);
+                }
               }
               if (!mounted || !dialogContext.mounted) return;
               Navigator.of(dialogContext).pop();

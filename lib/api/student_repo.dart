@@ -160,6 +160,23 @@ class StudentRemoteRepo {
     return ApiBeltProgression.fromJson(json);
   }
 
+  /// `GET /v1/academies/{academyId}/students?linked_user_uid={linkedUserId}`
+  ///
+  /// Busca o aluno associado a um UID do Firebase Auth. Retorna o primeiro
+  /// item da lista (um usuário só pode estar vinculado a um aluno por academia).
+  /// Retorna `null` se não encontrado.
+  Future<ApiStudent?> getByLinkedUserId(
+    String academyId,
+    String linkedUserId,
+  ) async {
+    final json = await _api.get<Map<String, dynamic>>(
+      '/v1/academies/$academyId/students',
+      queryParameters: {'linked_user_uid': linkedUserId, 'limit': 1},
+    );
+    final page = StudentsPage.fromJson(json);
+    return page.items.firstOrNull;
+  }
+
   /// `POST /v1/academies/{academyId}/students/{studentId}/assessments`.
   /// Avaliação (kids) — 5 scores 1-5 + notas. Idempotent.
   Future<ApiAssessment> createAssessment(

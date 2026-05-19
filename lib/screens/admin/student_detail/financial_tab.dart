@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../api/repositories.dart';
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
 import '../../../services/services.dart';
@@ -13,6 +15,7 @@ class StudentFinancialTab extends StatelessWidget {
   final List<StoreOrder> storeOrders;
   final List<Plan> studentPlans;
   final VoidCallback onRefresh;
+  final WidgetRef ref;
 
   const StudentFinancialTab({
     super.key,
@@ -21,6 +24,7 @@ class StudentFinancialTab extends StatelessWidget {
     required this.storeOrders,
     required this.studentPlans,
     required this.onRefresh,
+    required this.ref,
   });
 
   @override
@@ -240,9 +244,21 @@ class StudentFinancialTab extends StatelessWidget {
               TextButton.icon(
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
-                  // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_value=null
-                  final planService = PlanService(FirebaseService.academyId);
-                  await planService.removeCustomValue(plan.id, studentId);
+                  final academyId = FirebaseService.academyId;
+                  try {
+                    await ref
+                        .read(planRepoProvider)
+                        .setStudentCustomValue(
+                          academyId,
+                          plan.id,
+                          studentId,
+                          customValue: plan.monthlyValue, // volta ao padrão
+                        );
+                  } catch (_) {
+                    // Fallback: Firestore legado
+                    final planService = PlanService(academyId);
+                    await planService.removeCustomValue(plan.id, studentId);
+                  }
                   if (parentContext.mounted) {
                     parentContext.showSuccess(
                       'Valor restaurado ao padrão do plano',
@@ -274,9 +290,21 @@ class StudentFinancialTab extends StatelessWidget {
               TextButton.icon(
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
-                  // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_due_day=null
-                  final planService = PlanService(FirebaseService.academyId);
-                  await planService.removeCustomDueDay(plan.id, studentId);
+                  final academyId = FirebaseService.academyId;
+                  try {
+                    await ref
+                        .read(planRepoProvider)
+                        .setStudentCustomValue(
+                          academyId,
+                          plan.id,
+                          studentId,
+                          customDueDay: plan.defaultDueDay, // volta ao padrão
+                        );
+                  } catch (_) {
+                    // Fallback: Firestore legado
+                    final planService = PlanService(academyId);
+                    await planService.removeCustomDueDay(plan.id, studentId);
+                  }
                   if (parentContext.mounted) {
                     parentContext.showSuccess(
                       'Vencimento restaurado ao padrão do plano',
@@ -304,19 +332,29 @@ class StudentFinancialTab extends StatelessWidget {
               final dueDay = int.tryParse(dueDayController.text);
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;
               Navigator.of(dialogContext).pop();
-              // TODO(tatami): PATCH /plans/{id}/students/{studentId} custom_value + custom_due_day
-              final planService = PlanService(FirebaseService.academyId);
-              // Save value
-              if (value == plan.monthlyValue) {
-                await planService.removeCustomValue(plan.id, studentId);
-              } else {
-                await planService.setCustomValue(plan.id, studentId, value);
-              }
-              // Save due day
-              if (dueDay == plan.defaultDueDay) {
-                await planService.removeCustomDueDay(plan.id, studentId);
-              } else {
-                await planService.setCustomDueDay(plan.id, studentId, dueDay);
+              final academyId = FirebaseService.academyId;
+              try {
+                await ref.read(planRepoProvider).setStudentCustomValue(
+                  academyId,
+                  plan.id,
+                  studentId,
+                  customValue: value != plan.monthlyValue ? value : null,
+                  customDueDay: dueDay != plan.defaultDueDay ? dueDay : null,
+                );
+              } catch (_) {
+                // Fallback: Firestore legado
+                final planService = PlanService(academyId);
+                if (value == plan.monthlyValue) {
+                  await planService.removeCustomValue(plan.id, studentId);
+                } else {
+                  await planService.setCustomValue(plan.id, studentId, value);
+                }
+                if (dueDay == plan.defaultDueDay) {
+                  await planService.removeCustomDueDay(plan.id, studentId);
+                } else {
+                  await planService.setCustomDueDay(
+                      plan.id, studentId, dueDay);
+                }
               }
               if (parentContext.mounted) {
                 parentContext.showSuccess('Valor e vencimento atualizados');

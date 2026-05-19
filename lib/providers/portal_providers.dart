@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/dto/competition_dto.dart' show ApiTransportPreference;
 import '../api/link_code_repo.dart';
 import '../api/repositories.dart';
 import '../services/services.dart';
@@ -152,10 +153,7 @@ final competitionEnrollmentServiceProvider = Provider<CompetitionEnrollmentServi
 });
 
 /// Student enrollments provider — migrado para Tatami.
-/// Busca todas as competições e faz cross-reference de inscrições.
-/// NOTE: O tatami não expõe GET enrollments por studentId globalmente;
-/// usa-se o serviço legado por ora.
-/// TODO(tatami): expor GET /v1/academies/{id}/students/{sid}/enrollments
+/// Usa GET /v1/academies/{id}/students/{sid}/enrollments (endpoint novo).
 final studentEnrollmentsProvider = FutureProvider.family<List<CompetitionEnrollment>, String>((ref, studentId) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) {
@@ -166,9 +164,27 @@ final studentEnrollmentsProvider = FutureProvider.family<List<CompetitionEnrollm
     return [];
   }
 
-  final service = CompetitionEnrollmentService(currentUser!.academyId!);
-  final enrollments = await service.getByStudent(studentId);
-  return enrollments;
+  final apiEnrollments = await ref
+      .read(competitionRepoProvider)
+      .listStudentEnrollments(currentUser!.academyId!, studentId);
+
+  return apiEnrollments.map((e) {
+    final tp = switch (e.transportPreference) {
+      ApiTransportPreference.need_transport => TransportPreference.needTransport,
+      ApiTransportPreference.own_transport => TransportPreference.ownTransport,
+      _ => TransportPreference.undecided,
+    };
+    return CompetitionEnrollment(
+      id: e.id,
+      competitionId: e.competitionId,
+      studentId: e.studentId,
+      studentName: e.studentId, // nome não retornado neste endpoint
+      ageCategory: e.ageCategory,
+      weightCategory: e.weightCategory,
+      transportPreference: tp,
+      enrolledAt: e.enrolledAt,
+    );
+  }).toList();
 });
 
 /// Check if student is enrolled in competition — via Tatami listEnrollments.

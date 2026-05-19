@@ -73,6 +73,58 @@ class BeltProgressionRemoteRepo {
     return EligibleStudentsPage.fromJson(json);
   }
 
+  /// `GET /v1/academies/{academyId}/students/belt-distribution`
+  ///
+  /// Retorna a contagem de alunos ativos por faixa, calculada server-side.
+  /// Substitui a agregação client-side que buscava todos os alunos e
+  /// contabilizava localmente.
+  Future<List<ApiBeltCount>> getBeltDistribution(String academyId) async {
+    final json = await _api.get<dynamic>(
+      '/v1/academies/$academyId/students/belt-distribution',
+    );
+    if (json is List) {
+      return json
+          .whereType<Map<String, dynamic>>()
+          .map(ApiBeltCount.fromJson)
+          .toList();
+    }
+    if (json is Map<String, dynamic>) {
+      return (json['items'] as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(ApiBeltCount.fromJson)
+          .toList();
+    }
+    return const [];
+  }
+
+  /// `GET /v1/academies/{academyId}/belt-progressions/recent?limit={N}`
+  ///
+  /// Retorna as N promoções mais recentes da academia, com dados básicos
+  /// do aluno embutidos. Substitui a busca Firestore paginada que requeria
+  /// leituras extras para montar o nome/foto de cada aluno.
+  Future<List<ApiRecentProgression>> getRecentProgressions(
+    String academyId, {
+    int limit = 20,
+  }) async {
+    final json = await _api.get<dynamic>(
+      '/v1/academies/$academyId/belt-progressions/recent',
+      queryParameters: {'limit': limit},
+    );
+    if (json is List) {
+      return json
+          .whereType<Map<String, dynamic>>()
+          .map(ApiRecentProgression.fromJson)
+          .toList();
+    }
+    if (json is Map<String, dynamic>) {
+      return (json['items'] as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(ApiRecentProgression.fromJson)
+          .toList();
+    }
+    return const [];
+  }
+
   /// `POST /v1/academies/{academyId}/students/{studentId}/belt-progressions`
   ///
   /// Cria a promoção E atualiza `current_belt/current_stripes` do aluno na

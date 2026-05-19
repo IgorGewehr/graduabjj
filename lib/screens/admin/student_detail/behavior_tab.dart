@@ -9,7 +9,6 @@ import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
 import '../../../models/student.dart';
 import '../../../providers/auth_provider.dart';
-import '../../../services/assessment_service.dart';
 
 /// Behavior tab content for student detail screen.
 ///
@@ -463,37 +462,34 @@ class StudentBehaviorTab extends StatelessWidget {
                 onPressed: () async {
                   Navigator.pop(dialogContext);
 
-                  // O tatami não expõe PATCH /assessments — o histórico é
-                  // append-only. A edição cria um novo registro com os dados
-                  // corrigidos (mesmo workaround do marcusjj).
                   try {
                     final currentUser =
                         ref.read(currentUserProvider).valueOrNull;
                     final academyId = currentUser?.academyId;
                     if (academyId == null) throw Exception('academyId ausente');
 
-                    final req = api.CreateAssessmentRequest(
-                      date: selectedDate,
-                      notes: notesController.text.trim().isNotEmpty
-                          ? notesController.text.trim()
-                          : null,
-                      scores: api.ApiAssessmentScores(
-                        respeito: scores[AssessmentCategory.respeito]!,
-                        disciplina: scores[AssessmentCategory.disciplina]!,
-                        pontualidade: scores[AssessmentCategory.pontualidade]!,
-                        tecnica: scores[AssessmentCategory.tecnica]!,
-                        esforco: scores[AssessmentCategory.esforco]!,
-                      ),
-                    );
+                    final data = <String, dynamic>{
+                      'date': '${selectedDate.year.toString().padLeft(4, '0')}-'
+                          '${selectedDate.month.toString().padLeft(2, '0')}-'
+                          '${selectedDate.day.toString().padLeft(2, '0')}',
+                      'scores': {
+                        'respeito': scores[AssessmentCategory.respeito],
+                        'disciplina': scores[AssessmentCategory.disciplina],
+                        'pontualidade':
+                            scores[AssessmentCategory.pontualidade],
+                        'tecnica': scores[AssessmentCategory.tecnica],
+                        'esforco': scores[AssessmentCategory.esforco],
+                      },
+                      if (notesController.text.trim().isNotEmpty)
+                        'notes': notesController.text.trim(),
+                    };
 
                     await ref
                         .read(tatami_repos.assessmentRepoProvider)
-                        .create(academyId, student.id, req);
+                        .update(academyId, student.id, assessment.id, data);
 
                     if (parentContext.mounted) {
-                      parentContext.showSuccess(
-                        'Nova avaliação registrada com os dados atualizados.',
-                      );
+                      parentContext.showSuccess('Avaliação atualizada!');
                       onRefresh();
                     }
                   } catch (e) {
@@ -531,14 +527,27 @@ class StudentBehaviorTab extends StatelessWidget {
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(dialogContext);
-              // O tatami não expõe DELETE /assessments — o histórico é
-              // append-only por design. Remoção não está disponível via API.
-              if (parentContext.mounted) {
-                parentContext.showError(
-                  'Exclusão não disponível: avaliações são registros permanentes.',
-                );
+
+              try {
+                final currentUser =
+                    ref.read(currentUserProvider).valueOrNull;
+                final academyId = currentUser?.academyId;
+                if (academyId == null) throw Exception('academyId ausente');
+
+                await ref
+                    .read(tatami_repos.assessmentRepoProvider)
+                    .delete(academyId, student.id, assessment.id);
+
+                if (parentContext.mounted) {
+                  parentContext.showSuccess('Avaliação excluída.');
+                  onRefresh();
+                }
+              } catch (e) {
+                if (parentContext.mounted) {
+                  parentContext.showError('Erro ao excluir: $e');
+                }
               }
             },
             child: const Text('Excluir'),

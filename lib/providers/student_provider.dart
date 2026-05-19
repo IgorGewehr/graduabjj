@@ -32,11 +32,20 @@ final currentStudentProvider = FutureProvider<Student?>((ref) async {
     }
   }
 
-  // TODO(tatami): GET /v1/students?linked_user_id={userId} — endpoint não existe ainda.
-  // Mantém Firestore via StudentService como fallback temporário.
+  // Fallback: busca por linked_user_uid via StudentRemoteRepo.
+  // Endpoint: GET /v1/academies/{academyId}/students?linked_user_uid={userId}
   if (currentUser.academyId != null) {
-    final service = StudentService(currentUser.academyId!);
-    return await service.getByLinkedUserId(currentUser.id);
+    try {
+      return await ref
+          .read(studentRepoProvider)
+          .getByLinkedUserId(currentUser.academyId!, currentUser.id)
+          .then((apiStudent) =>
+              apiStudent != null ? Student.fromApi(apiStudent) : null);
+    } catch (_) {
+      // Fallback para Firestore se o endpoint falhar.
+      final service = StudentService(currentUser.academyId!);
+      return await service.getByLinkedUserId(currentUser.id);
+    }
   }
 
   return null;

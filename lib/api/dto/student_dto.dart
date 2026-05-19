@@ -896,6 +896,71 @@ DateTime? _parseDate(dynamic v) {
   return null;
 }
 
+/// Contagem de alunos por faixa ativa — retornada pelo endpoint
+/// `GET /v1/academies/{id}/students/belt-distribution`.
+class ApiBeltCount {
+  const ApiBeltCount({
+    required this.belt,
+    required this.count,
+  });
+
+  final ApiBelt belt;
+  final int count;
+
+  factory ApiBeltCount.fromJson(Map<String, dynamic> j) => ApiBeltCount(
+        belt: ApiBeltX.fromWire(j['belt'] as String?),
+        count: (j['count'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// Snapshot de promoção recente retornado pelo endpoint
+/// `GET /v1/academies/{id}/belt-progressions/recent`.
+///
+/// Inclui dados básicos do aluno (nome, foto) para renderização direta
+/// sem chamada adicional ao aluno.
+class ApiRecentProgression {
+  const ApiRecentProgression({
+    required this.progressionId,
+    required this.studentId,
+    required this.studentName,
+    required this.newBelt,
+    required this.newStripes,
+    required this.previousBelt,
+    required this.previousStripes,
+    required this.promotionDate,
+    this.studentPhotoUrl,
+    this.notes,
+    this.academyId,
+  });
+
+  final String progressionId;
+  final String studentId;
+  final String studentName;
+  final String? studentPhotoUrl;
+  final ApiBelt newBelt;
+  final int newStripes;
+  final ApiBelt previousBelt;
+  final int previousStripes;
+  final DateTime promotionDate;
+  final String? notes;
+  final String? academyId;
+
+  factory ApiRecentProgression.fromJson(Map<String, dynamic> j) =>
+      ApiRecentProgression(
+        progressionId: j['progression_id'] as String? ?? j['id'] as String? ?? '',
+        studentId: j['student_id'] as String? ?? '',
+        studentName: j['student_name'] as String? ?? j['full_name'] as String? ?? '',
+        studentPhotoUrl: j['student_photo_url'] as String? ?? j['photo_url'] as String?,
+        newBelt: ApiBeltX.fromWire(j['new_belt'] as String?),
+        newStripes: (j['new_stripes'] as num?)?.toInt() ?? 0,
+        previousBelt: ApiBeltX.fromWire(j['previous_belt'] as String?),
+        previousStripes: (j['previous_stripes'] as num?)?.toInt() ?? 0,
+        promotionDate: _parseDate(j['promotion_date']) ?? DateTime.now(),
+        notes: j['notes'] as String?,
+        academyId: j['academy_id'] as String?,
+      );
+}
+
 /// Coerção defensiva: aceita `Map<String, dynamic>` vindo de jsonDecode,
 /// `Map<dynamic, dynamic>` de literais Dart em testes, ou null.
 Map<String, dynamic> _asStringMap(dynamic v) {
