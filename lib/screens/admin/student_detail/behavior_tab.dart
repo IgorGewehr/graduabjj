@@ -9,6 +9,7 @@ import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
 import '../../../models/student.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../services/assessment_service.dart' show Assessment, AssessmentCategory, AssessmentCategoryExtension;
 
 /// Behavior tab content for student detail screen.
 ///
