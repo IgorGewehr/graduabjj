@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/repositories.dart';
 import '../../core/theme.dart';
 import '../../models/competition_photo.dart';
 import '../../providers/providers.dart';
-import '../../services/competition_photo_service.dart';
 import 'photo_card.dart';
 import 'photo_fullscreen_viewer.dart';
 
@@ -28,17 +28,60 @@ class _TeamGalleryViewState extends ConsumerState<TeamGalleryView> {
     _loadPhotos();
   }
 
+  /// Load team photos from Tatami.
+  ///
+  /// The tatami backend does not expose a cross-competition "list all photos"
+  /// endpoint, so we:
+  ///   1. List all competitions via [competitionRepoProvider.list].
+  ///   2. Fan-out: fetch photos for each competition concurrently.
+  ///   3. Filter client-side for team photos (studentId == '__team__' ||
+  ///      student_id is null — tatami omits studentId for team uploads).
+  ///
+  /// TODO(tatami): when a GET /v1/academies/{id}/photos?type=team endpoint
+  /// is available, replace the fan-out with a single call.
   Future<void> _loadPhotos() async {
     final academyId = ref.read(selectedAcademyIdProvider);
     if (academyId == null) return;
 
     setState(() => _isLoading = true);
     try {
-      final photoService = CompetitionPhotoService();
-      final allPhotos = await photoService.getAllPhotos(academyId: academyId);
+      final competitionRepo = ref.read(competitionRepoProvider);
+
+      // Step 1 — list all competitions (up to 200; edge case for large academies).
+      final competitionsPage = await competitionRepo.list(academyId, limit: 200);
+      final competitions = competitionsPage.items;
+
+      if (competitions.isEmpty) {
+        if (mounted) setState(() { _photos = []; _isLoading = false; });
+        return;
+      }
+
+      // Step 2 — fan-out: list photos for each competition in parallel.
+      final photoFutures = competitions.map(
+        (comp) => competitionRepo
+            .listPhotos(academyId, comp.id, limit: 200)
+            .then((page) => page.items
+                .map((p) => CompetitionPhoto.fromApi(
+                      p,
+                      competitionName: comp.name,
+                    ))
+                .toList())
+            .catchError((_) => <CompetitionPhoto>[]),
+      );
+      final nested = await Future.wait(photoFutures);
+      final allPhotos = nested.expand((list) => list).toList();
+
+      // Step 3 — filter for team photos. Tatami uses null/empty studentId for
+      // team uploads; the legacy Firestore path used '__team__' sentinel.
       final teamPhotos = allPhotos
-          .where((p) => p.studentId == '__team__' || p.photoType == 'team')
+          .where((p) =>
+              p.studentId.isEmpty ||
+              p.studentId == '__team__' ||
+              p.photoType == 'team')
           .toList();
+
+      // Sort by most recent first.
+      teamPhotos.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
       if (mounted) {
         setState(() {

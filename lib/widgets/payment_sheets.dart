@@ -117,6 +117,13 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
       return;
     }
 
+    // TODO(tatami): substituir este listener Firestore por um mecanismo
+    // orientado a eventos do tatami quando disponível. Opções candidatas:
+    //   1. NotificationRemoteRepo.streamNotifications() (SSE) — escutar
+    //      eventos do tipo 'payment_confirmed' vindos do backend.
+    //   2. Polling leve via financialRepoProvider.getById() com Timer.periodic.
+    // Por ora, o listener Firestore é mantido pois é o único canal real-time
+    // confiável para confirmar pagamentos PIX imediatamente ao aluno.
     _paymentListener = FirebaseFirestore.instance
         .collection('academies')
         .doc(academyId)

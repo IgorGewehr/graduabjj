@@ -4,16 +4,6 @@ import '../api/repositories.dart';
 import '../services/store_service.dart';
 import 'auth_provider.dart';
 
-/// Store Service Provider - kept only for getOrderStats which has no direct
-/// REST equivalent. All CRUD (products + orders) now goes through Tatami.
-final storeServiceProvider = Provider<StoreService?>((ref) {
-  final currentUser = ref.watch(currentUserProvider).valueOrNull;
-
-  if (currentUser?.academyId == null) return null;
-
-  return StoreService(currentUser!.academyId!);
-});
-
 /// Products Provider — reads from Tatami REST via [storeRepoProvider].
 final productsProvider = FutureProvider<List<StoreProduct>>((ref) async {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;

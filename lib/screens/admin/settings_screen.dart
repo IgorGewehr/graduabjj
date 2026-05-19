@@ -18,6 +18,11 @@ import '../../core/theme.dart';
 import '../../providers/auth_provider.dart' show currentUserProvider;
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
+// TODO(tatami): SettingsService ainda usado em _loadSettings / _saveSettings
+// porque o tatami não expõe PATCH /v1/academies/{id} (branding, PIX, store
+// flags) nem GET do academy doc completo. Quando esses endpoints existirem,
+// substituir por settingsRepoProvider.getAll / settingsRepoProvider.set.
+// _addMonitor / _removeMonitor já foram migrados para settingsRepoProvider.set.
 import 'settings/academy_tab.dart';
 import 'settings/features_tab.dart';
 import 'settings/financial_tab.dart';
@@ -203,11 +208,16 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   Future<void> _addMonitor(String studentId) async {
     setState(() => _isLoadingMonitors = true);
     try {
-      final service = SettingsService(FirebaseService.academyId);
-      await service.addMonitor(studentId);
-      setState(() {
-        _monitorIds = [..._monitorIds, studentId];
-      });
+      final currentUser = ref.read(currentUserProvider).valueOrNull;
+      final academyId = currentUser?.academyId ?? FirebaseService.academyId;
+      final updatedIds = [..._monitorIds, studentId];
+      // Tatami: PUT /v1/academies/{id}/settings/monitor_ids
+      await ref.read(tatami_repos.settingsRepoProvider).set(
+            academyId,
+            'monitor_ids',
+            updatedIds,
+          );
+      setState(() => _monitorIds = updatedIds);
       ref.invalidate(academySettingsProvider);
       if (mounted) context.showSuccess('Monitor adicionado!');
     } catch (e) {
@@ -220,11 +230,16 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   Future<void> _removeMonitor(String studentId) async {
     setState(() => _isLoadingMonitors = true);
     try {
-      final service = SettingsService(FirebaseService.academyId);
-      await service.removeMonitor(studentId);
-      setState(() {
-        _monitorIds = _monitorIds.where((id) => id != studentId).toList();
-      });
+      final currentUser = ref.read(currentUserProvider).valueOrNull;
+      final academyId = currentUser?.academyId ?? FirebaseService.academyId;
+      final updatedIds = _monitorIds.where((id) => id != studentId).toList();
+      // Tatami: PUT /v1/academies/{id}/settings/monitor_ids
+      await ref.read(tatami_repos.settingsRepoProvider).set(
+            academyId,
+            'monitor_ids',
+            updatedIds,
+          );
+      setState(() => _monitorIds = updatedIds);
       ref.invalidate(academySettingsProvider);
       if (mounted) context.showSuccess('Monitor removido!');
     } catch (e) {
