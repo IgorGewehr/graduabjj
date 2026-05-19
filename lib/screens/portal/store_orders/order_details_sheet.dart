@@ -4,13 +4,13 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../api/dto/financial_dto.dart' as api_fin;
+import '../../../api/dto/store_dto.dart' as api_store;
 import '../../../api/repositories.dart' as tatami_repos;
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/store_provider.dart';
 import '../../../services/abacate_pay_service.dart'; // PaymentLink type
-import '../../../services/firebase_service.dart';
 import '../../../services/store_service.dart';
 import 'order_pix_payment_sheet.dart';
 import 'order_status_timeline.dart';
@@ -35,13 +35,20 @@ class _OrderDetailsSheetState extends ConsumerState<OrderDetailsSheet> {
   bool _isUpdatingStatus = false;
 
   Future<void> _updateStatus(StoreOrderStatus newStatus) async {
-    final academyId = FirebaseService.academyId;
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    final academyId = currentUser?.academyId;
+    if (academyId == null) return;
 
     setState(() => _isUpdatingStatus = true);
 
     try {
-      final storeService = StoreService(academyId);
-      await storeService.updateOrderStatus(widget.order.id, newStatus);
+      await ref
+          .read(tatami_repos.storeRepoProvider)
+          .updateOrderStatus(
+            academyId,
+            widget.order.id,
+            _toApiOrderStatus(newStatus),
+          );
       if (mounted) {
         Navigator.pop(context);
         context.showSuccess('Status atualizado!');
@@ -55,6 +62,23 @@ class _OrderDetailsSheetState extends ConsumerState<OrderDetailsSheet> {
       if (mounted) {
         setState(() => _isUpdatingStatus = false);
       }
+    }
+  }
+
+  api_store.ApiOrderStatus _toApiOrderStatus(StoreOrderStatus s) {
+    switch (s) {
+      case StoreOrderStatus.pendingPayment:
+        return api_store.ApiOrderStatus.pending_payment;
+      case StoreOrderStatus.paid:
+        return api_store.ApiOrderStatus.paid;
+      case StoreOrderStatus.preparing:
+        return api_store.ApiOrderStatus.preparing;
+      case StoreOrderStatus.ready:
+        return api_store.ApiOrderStatus.ready;
+      case StoreOrderStatus.delivered:
+        return api_store.ApiOrderStatus.delivered;
+      case StoreOrderStatus.cancelled:
+        return api_store.ApiOrderStatus.cancelled;
     }
   }
 
@@ -101,10 +125,9 @@ class _OrderDetailsSheetState extends ConsumerState<OrderDetailsSheet> {
   }
 
   Future<void> _handlePixPayment() async {
-    final academyId = FirebaseService.academyId;
-
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     if (currentUser == null) return;
+    final academyId = currentUser.academyId ?? '';
 
     setState(() => _isLoadingPayment = true);
 

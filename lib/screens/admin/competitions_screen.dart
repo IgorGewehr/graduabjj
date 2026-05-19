@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../api/domain_providers.dart' as tatami;
+import '../../api/repositories.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
@@ -300,6 +301,7 @@ class _AdminCompetitionsScreenState
       context: context,
       academyId: _academyId!,
       competition: competition,
+      repo: ref.read(competitionRepoProvider),
       onDeleted: _loadCompetitions,
     );
   }
@@ -310,6 +312,8 @@ class _AdminCompetitionsScreenState
       context: context,
       academyId: _academyId!,
       competition: competition,
+      competitionRepo: ref.read(competitionRepoProvider),
+      studentRepo: ref.read(studentRepoProvider),
       onChanged: _loadCompetitions,
     );
   }

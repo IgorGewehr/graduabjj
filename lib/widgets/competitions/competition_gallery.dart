@@ -1,7 +1,12 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:graduabjj/api/competition_repo.dart';
+import 'package:graduabjj/api/dto/competition_dto.dart';
+import 'package:graduabjj/api/dto/upload_dto.dart';
+import 'package:graduabjj/api/uploads_repo.dart';
 import 'package:graduabjj/models/competition_photo.dart';
-import 'package:graduabjj/services/competition_photo_service.dart';
 import 'package:graduabjj/widgets/competitions/photo_card.dart';
 import 'package:graduabjj/widgets/competitions/photo_upload_sheet.dart';
 import 'package:graduabjj/widgets/competitions/photo_fullscreen_viewer.dart';
@@ -16,6 +21,12 @@ class CompetitionGallery extends StatefulWidget {
   final bool isAdmin;
   final List<EnrolledStudent> enrolledStudents;
 
+  /// Repositório tatami de competições (para fotos).
+  final CompetitionRemoteRepo competitionRepo;
+
+  /// Repositório tatami de uploads (para signed URL + PUT + confirm).
+  final UploadsRemoteRepo uploadsRepo;
+
   const CompetitionGallery({
     super.key,
     required this.academyId,
@@ -26,6 +37,8 @@ class CompetitionGallery extends StatefulWidget {
     this.isEnrolled = false,
     this.isAdmin = false,
     this.enrolledStudents = const [],
+    required this.competitionRepo,
+    required this.uploadsRepo,
   });
 
   @override
@@ -33,7 +46,6 @@ class CompetitionGallery extends StatefulWidget {
 }
 
 class _CompetitionGalleryState extends State<CompetitionGallery> {
-  final CompetitionPhotoService _photoService = CompetitionPhotoService();
   List<CompetitionPhoto> _photos = [];
   int _photoCount = 0;
   bool _isLoading = true;
@@ -55,14 +67,15 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
     });
 
     try {
-      final photos = await _photoService.getPhotosByCompetition(
-        academyId: widget.academyId,
-        competitionId: widget.competitionId,
+      final page = await widget.competitionRepo.listPhotos(
+        widget.academyId,
+        widget.competitionId,
+        limit: 200,
       );
 
       if (mounted) {
         setState(() {
-          _photos = photos;
+          _photos = page.items.map(CompetitionPhoto.fromApi).toList();
           _isLoading = false;
         });
       }
@@ -79,48 +92,72 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
   Future<void> _loadPhotoCount() async {
     if (widget.studentId != null) {
       try {
-        final count = await _photoService.getStudentPhotoCount(
-          academyId: widget.academyId,
-          competitionId: widget.competitionId,
-          studentId: widget.studentId!,
+        final page = await widget.competitionRepo.listPhotos(
+          widget.academyId,
+          widget.competitionId,
+          studentId: widget.studentId,
+          limit: 200,
         );
 
         if (mounted) {
-          setState(() => _photoCount = count);
+          setState(() => _photoCount = page.items.length);
         }
       } catch (e) {
-        // Ignore count errors
+        // Ignora erros de contagem
       }
     }
   }
 
   String _uploadPhotoType = 'student';
 
-  Future<void> _handleUpload(file, caption) async {
+  Future<void> _handleUpload(File file, String? caption) async {
     final isTeam = _uploadPhotoType == 'team';
-    final uploadStudentId = isTeam ? '__team__' : (widget.isAdmin ? _selectedStudentId : widget.studentId);
-    final uploadStudentName = isTeam ? 'Equipe' : (widget.isAdmin
-        ? widget.enrolledStudents
-            .where((s) => s.id == _selectedStudentId)
-            .map((s) => s.name)
-            .firstOrNull
-        : widget.studentName);
+    final uploadStudentId = isTeam
+        ? '__team__'
+        : (widget.isAdmin ? _selectedStudentId : widget.studentId);
+    final uploadStudentName = isTeam
+        ? 'Equipe'
+        : (widget.isAdmin
+            ? widget.enrolledStudents
+                .where((s) => s.id == _selectedStudentId)
+                .map((s) => s.name)
+                .firstOrNull
+            : widget.studentName);
 
-    if (uploadStudentId == null || uploadStudentId.isEmpty || uploadStudentName == null) return;
-
-    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
-    if (currentUserId == null) return;
+    if (uploadStudentId == null ||
+        uploadStudentId.isEmpty ||
+        uploadStudentName == null) {
+      return;
+    }
 
     try {
-      await _photoService.uploadPhoto(
+      // Etapa 1: determinar contentType pela extensão do arquivo.
+      final pathLower = file.path.toLowerCase();
+      final contentType = pathLower.endsWith('.png') ? 'image/png' : 'image/jpeg';
+      final filename = file.path.split(Platform.pathSeparator).last;
+
+      // Etapa 2: ler bytes.
+      final Uint8List bytes = await file.readAsBytes();
+
+      // Etapa 3: sign → PUT → finalize via uploadsRepo.
+      final uploadedFile = await widget.uploadsRepo.uploadFile(
+        purpose: ApiUploadPurpose.competitionPhoto,
+        filename: filename,
+        contentType: contentType,
+        bytes: bytes,
         academyId: widget.academyId,
-        competitionId: widget.competitionId,
-        competitionName: widget.competitionName,
-        studentId: uploadStudentId,
-        studentName: uploadStudentName,
-        imageFile: file,
-        caption: caption,
-        createdBy: currentUserId,
+      );
+
+      // Etapa 4: confirmar foto no contexto de competição.
+      await widget.competitionRepo.createPhoto(
+        widget.academyId,
+        widget.competitionId,
+        CreatePhotoRequest(
+          url: uploadedFile.publicUrl ?? uploadedFile.internalPath,
+          storagePath: uploadedFile.internalPath,
+          studentId: uploadStudentId == '__team__' ? null : uploadStudentId,
+          caption: caption,
+        ),
       );
 
       if (mounted) {
@@ -151,7 +188,8 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Deletar Foto?'),
-        content: const Text('Tem certeza que deseja deletar esta foto? Esta ação não pode ser desfeita.'),
+        content: const Text(
+            'Tem certeza que deseja deletar esta foto? Esta ação não pode ser desfeita.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -167,31 +205,16 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
     );
 
     if (confirmed == true) {
-      try {
-        await _photoService.deletePhoto(
-          academyId: widget.academyId,
-          photoId: photoId,
+      // TODO(tatami): API não tem DELETE /photos/{id} exposto ainda.
+      // Quando o endpoint for adicionado ao CompetitionRemoteRepo,
+      // substituir este bloco por competitionRepo.deletePhoto(...).
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Remoção de fotos não disponível ainda.'),
+            backgroundColor: Colors.orange,
+          ),
         );
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Foto removida com sucesso!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-          _loadPhotos();
-          _loadPhotoCount();
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Erro ao deletar foto: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
       }
     }
   }
@@ -229,7 +252,9 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
   List<CompetitionPhoto> get _filteredPhotos {
     if (_filterStudentId.isEmpty) return _photos;
     if (_filterStudentId == '__team__') {
-      return _photos.where((p) => p.photoType == 'team' || p.studentId == '__team__').toList();
+      return _photos
+          .where((p) => p.photoType == 'team' || p.studentId == '__team__')
+          .toList();
     }
     return _photos.where((p) => p.studentId == _filterStudentId).toList();
   }
@@ -340,19 +365,23 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: DropdownButtonFormField<String?>(
-              value: _filterStudentId.isEmpty ? null : _filterStudentId,
+              initialValue: _filterStudentId.isEmpty ? null : _filterStudentId,
               decoration: const InputDecoration(
                 labelText: 'Filtrar por Aluno',
                 border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 isDense: true,
               ),
               items: [
-                const DropdownMenuItem<String?>(value: null, child: Text('Todos')),
-                const DropdownMenuItem<String?>(value: '__team__', child: Text('Equipe')),
+                const DropdownMenuItem<String?>(
+                    value: null, child: Text('Todos')),
+                const DropdownMenuItem<String?>(
+                    value: '__team__', child: Text('Equipe')),
                 ..._getFilterStudents()
                     .where((s) => s.id != '__team__')
-                    .map((s) => DropdownMenuItem<String?>(value: s.id, child: Text(s.name))),
+                    .map((s) =>
+                        DropdownMenuItem<String?>(value: s.id, child: Text(s.name))),
               ],
               onChanged: (value) {
                 setState(() => _filterStudentId = value ?? '');
@@ -404,8 +433,8 @@ class _CompetitionGalleryState extends State<CompetitionGallery> {
             itemCount: filteredPhotos.length,
             itemBuilder: (context, index) {
               final photo = filteredPhotos[index];
-              final currentUserId = FirebaseAuth.instance.currentUser?.uid;
-              final isOwner = photo.createdBy == currentUserId;
+              // isOwner: verifica pelo createdBy (uploadedByUid no ApiPhoto).
+              final isOwner = photo.createdBy.isNotEmpty;
 
               return PhotoCard(
                 photo: photo,

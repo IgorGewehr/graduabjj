@@ -1,22 +1,61 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../api/competition_repo.dart';
+import '../../../api/dto/competition_dto.dart';
+import '../../../api/dto/student_dto.dart';
+import '../../../api/student_repo.dart';
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
 import '../../../models/student.dart';
 import '../../../services/services.dart';
 import 'competition_form_sheet.dart';
 
+/// Converte [ApiEnrollment] para [CompetitionEnrollment] (modelo legado).
+CompetitionEnrollment _apiEnrollmentToLegacy(ApiEnrollment e) {
+  return CompetitionEnrollment(
+    id: e.id,
+    competitionId: e.competitionId,
+    studentId: e.studentId,
+    studentName: e.studentId, // studentName não vem na API — preenchido depois
+    ageCategory: e.ageCategory,
+    weightCategory: e.weightCategory,
+    transportPreference: e.transportPreference == null
+        ? TransportPreference.undecided
+        : _apiTransportToLegacy(e.transportPreference!),
+    enrolledAt: e.enrolledAt,
+  );
+}
+
+TransportPreference _apiTransportToLegacy(ApiTransportPreference p) {
+  switch (p) {
+    case ApiTransportPreference.need_transport:
+      return TransportPreference.needTransport;
+    case ApiTransportPreference.own_transport:
+      return TransportPreference.ownTransport;
+    case ApiTransportPreference.undecided:
+      return TransportPreference.undecided;
+  }
+}
+
 /// Exibe o bottom sheet de gerenciamento de inscrições de um campeonato.
+/// [competitionRepo] é o repositório Tatami para inscrições.
+/// [studentRepo] (opcional) é usado ao adicionar nova inscrição manual.
 /// [onChanged] é chamado após qualquer alteração para recarregar dados.
 Future<void> showEnrollmentsSheet({
   required BuildContext context,
   required String academyId,
   required Competition competition,
+  required CompetitionRemoteRepo competitionRepo,
+  StudentRemoteRepo? studentRepo,
   required VoidCallback onChanged,
 }) async {
-  final enrollmentService = CompetitionEnrollmentService(academyId);
-  final enrollments = await enrollmentService.getByCompetition(competition.id);
+  final page = await competitionRepo.listEnrollments(
+    academyId,
+    competition.id,
+    limit: 200,
+  );
+  final enrollments = page.items.map(_apiEnrollmentToLegacy).toList();
 
   if (!context.mounted) return;
 
@@ -90,6 +129,8 @@ Future<void> showEnrollmentsSheet({
                             context: context,
                             academyId: academyId,
                             competition: competition,
+                            studentRepo: studentRepo,
+                            competitionRepo: competitionRepo,
                             onEnrolled: onChanged,
                           );
                         },
@@ -214,14 +255,28 @@ Future<void> showEnrollmentsSheet({
 }
 
 /// Exibe o bottom sheet para adicionar uma inscrição manual.
+/// [studentRepo] busca alunos ativos via Tatami. Quando nulo, usa
+/// [StudentService] legado como fallback.
+/// [competitionRepo] realiza a inscrição via Tatami.
 Future<void> showAddEnrollmentSheet({
   required BuildContext context,
   required String academyId,
   required Competition competition,
+  StudentRemoteRepo? studentRepo,
+  required CompetitionRemoteRepo competitionRepo,
   required VoidCallback onEnrolled,
 }) async {
-  final studentService = StudentService(academyId);
-  final students = await studentService.getActive();
+  late final List<Student> students;
+  if (studentRepo != null) {
+    final studentsPage = await studentRepo.list(
+      academyId,
+      filter: const StudentFilter(status: ApiStudentStatus.active, limit: 200),
+    );
+    students = studentsPage.items.map(Student.fromApi).toList();
+  } else {
+    // Fallback legado.
+    students = await StudentService(academyId).getActive();
+  }
 
   if (!context.mounted) return;
 
@@ -302,7 +357,7 @@ Future<void> showAddEnrollmentSheet({
                     border: Border.all(color: AppTheme.divider),
                   ),
                   child: DropdownButtonFormField<Student>(
-                    value: selectedStudent,
+                    initialValue: selectedStudent,
                     items: students.map((s) {
                       return DropdownMenuItem(
                         value: s,
@@ -348,18 +403,19 @@ Future<void> showAddEnrollmentSheet({
                       }
 
                       try {
-                        final service = CompetitionEnrollmentService(academyId);
-                        await service.enroll(
-                          competitionId: competition.id,
-                          competitionName: competition.name,
-                          studentId: selectedStudent!.id,
-                          studentName: selectedStudent!.fullName,
-                          ageCategory: categoryController.text.isEmpty
-                              ? null
-                              : categoryController.text,
-                          weightCategory: weightController.text.isEmpty
-                              ? null
-                              : weightController.text,
+                        await competitionRepo.enroll(
+                          academyId,
+                          competition.id,
+                          CreateEnrollmentRequest(
+                            studentId: selectedStudent!.id,
+                            modality: ApiModality.gi,
+                            ageCategory: categoryController.text.isEmpty
+                                ? null
+                                : categoryController.text,
+                            weightCategory: weightController.text.isEmpty
+                                ? null
+                                : weightController.text,
+                          ),
                         );
 
                         if (!sheetContext.mounted) return;

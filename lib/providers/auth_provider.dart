@@ -36,6 +36,9 @@ final isCreatingAccountProvider = StateProvider<bool>((ref) => false);
 final creatingAccountStudentNameProvider = StateProvider<String>((ref) => '');
 
 /// Global user provider - fetches from ROOT /users collection
+// TODO(tatami): substituir por identityRepoProvider.getMe() que retorna
+//   CurrentUserResponse com GlobalUser + memberships em uma única round-trip.
+//   Bloqueado por: GlobalUser.fromApi adapter + testes de regressão no login flow.
 final globalUserProvider = FutureProvider<GlobalUser?>((ref) async {
   final authState = ref.watch(authStateProvider);
   final firebaseUser = authState.valueOrNull;
@@ -46,6 +49,9 @@ final globalUserProvider = FutureProvider<GlobalUser?>((ref) async {
 });
 
 /// User academy mapping provider - fetches from userAcademyMapping collection
+// TODO(tatami): substituir por identityRepoProvider.listMemberships() quando
+//   UserAcademyMapping.fromApiMemberships adapter for implementado. Tatami
+//   retorna memberships paginadas em vez de doc único.
 final userAcademyMappingProvider = FutureProvider<UserAcademyMapping?>((
   ref,
 ) async {

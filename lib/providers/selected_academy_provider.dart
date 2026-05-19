@@ -129,7 +129,9 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
     UserAcademyMapping mapping,
   ) async {
     try {
-      // Get academy document for name/logo
+      // TODO(tatami): substituir por identityRepoProvider.getMe() ou um
+      //   endpoint GET /v1/academies/{id} quando tatami expor o entity de academia
+      //   com name/logoUrl. Por ora lê direto do Firestore (academy doc).
       final academyDoc = await FirebaseService.firestore
           .collection('academies')
           .doc(academyId)

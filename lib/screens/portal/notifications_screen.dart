@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/notification_repo.dart';
+import '../../api/repositories.dart' as tatami_repos;
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
 import '../../services/notification_service.dart';
@@ -63,7 +65,7 @@ class NotificationsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final notificationsAsync = ref.watch(userNotificationsProvider);
-    final notificationService = ref.watch(notificationServiceProvider);
+    final notificationRepo = ref.read(tatami_repos.notificationRepoProvider);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -85,8 +87,10 @@ class NotificationsScreen extends ConsumerWidget {
               onPressed: () async {
                 HapticFeedback.selectionClick();
                 final currentUser = ref.read(currentUserProvider).valueOrNull;
-                if (currentUser != null && notificationService != null) {
-                  await notificationService.markAllAsRead(currentUser.id);
+                if (currentUser != null) {
+                  await notificationRepo.markAllRead(
+                    academyId: currentUser.academyId,
+                  );
                 }
               },
               child: Text(
@@ -157,7 +161,7 @@ class NotificationsScreen extends ConsumerWidget {
                 'notifications-${notifications.length}-${notifications.where((n) => !n.read).length}',
               ),
               notifications: notifications,
-              notificationService: notificationService,
+              notificationRepo: notificationRepo,
               getIconForType: _getIconForType,
               getColorForPriority: _getColorForPriority,
             ),
@@ -173,14 +177,14 @@ class NotificationsScreen extends ConsumerWidget {
 /// fade) instead of re-running through every item's transition machinery.
 class _NotificationListBody extends StatelessWidget {
   final List<AppNotification> notifications;
-  final NotificationService? notificationService;
+  final NotificationRemoteRepo notificationRepo;
   final IconData Function(NotificationType type) getIconForType;
   final Color Function(NotificationPriority priority) getColorForPriority;
 
   const _NotificationListBody({
     super.key,
     required this.notifications,
-    required this.notificationService,
+    required this.notificationRepo,
     required this.getIconForType,
     required this.getColorForPriority,
   });
@@ -208,7 +212,7 @@ class _NotificationListBody extends StatelessWidget {
           onDismissed: (_) {
             // Sprint 6 — light haptic confirms the swipe-to-delete.
             HapticFeedback.lightImpact();
-            notificationService?.delete(notification.id);
+            notificationRepo.delete(notification.id);
           },
           child: ListTile(
             contentPadding: const EdgeInsets.symmetric(
@@ -275,7 +279,7 @@ class _NotificationListBody extends StatelessWidget {
                 : null,
             onTap: () async {
               if (!notification.read) {
-                await notificationService?.markAsRead(notification.id);
+                await notificationRepo.markRead(notification.id);
               }
               if (notification.actionUrl != null && context.mounted) {
                 context.push(notification.actionUrl!);

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/dto/competition_dto.dart';
 import '../../api/repositories.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -60,6 +61,57 @@ class _CompetitionDetailScreenState
   // Data loading
   // ============================================
 
+  /// Converte [ApiResult] para [CompetitionResult] (modelo legado).
+  CompetitionResult _apiResultToLegacy(
+    ApiResult r,
+    String competitionName,
+  ) {
+    return CompetitionResult(
+      id: r.id,
+      competitionId: r.competitionId,
+      competitionName: competitionName,
+      studentId: r.studentId,
+      // studentName não vem na API — usa studentId como fallback.
+      studentName: r.studentId,
+      position: r.position.wire,
+      beltCategory: r.beltCategory,
+      ageCategory: r.ageCategory,
+      weightCategory: r.weightCategory,
+      modality: r.modality.wire,
+      notes: null,
+      date: r.recordedAt,
+      createdAt: r.recordedAt,
+    );
+  }
+
+  /// Converte [ApiEnrollment] para [CompetitionEnrollment] (modelo legado).
+  CompetitionEnrollment _apiEnrollmentToLegacy(ApiEnrollment e) {
+    return CompetitionEnrollment(
+      id: e.id,
+      competitionId: e.competitionId,
+      // studentName não vem na API — usa studentId como fallback.
+      studentName: e.studentId,
+      studentId: e.studentId,
+      ageCategory: e.ageCategory,
+      weightCategory: e.weightCategory,
+      transportPreference: _apiTransportToLegacy(
+        e.transportPreference ?? ApiTransportPreference.undecided,
+      ),
+      enrolledAt: e.enrolledAt,
+    );
+  }
+
+  TransportPreference _apiTransportToLegacy(ApiTransportPreference p) {
+    switch (p) {
+      case ApiTransportPreference.need_transport:
+        return TransportPreference.needTransport;
+      case ApiTransportPreference.own_transport:
+        return TransportPreference.ownTransport;
+      case ApiTransportPreference.undecided:
+        return TransportPreference.undecided;
+    }
+  }
+
   Future<void> _loadData() async {
     final academyId = ref.read(selectedAcademyIdProvider);
     if (academyId == null) {
@@ -71,32 +123,30 @@ class _CompetitionDetailScreenState
     }
 
     try {
-      final competitionService = CompetitionService(academyId);
-      final enrollmentService = CompetitionEnrollmentService(academyId);
+      final repo = ref.read(competitionRepoProvider);
 
-      Future<Competition?> competitionFuture() async {
-        final api = await ref
-            .read(competitionRepoProvider)
-            .getById(academyId, widget.competitionId);
-        return Competition.fromApi(api);
-      }
-
-      final futures = await Future.wait<dynamic>([
-        competitionFuture(),
-        competitionService
-            .getResultsForCompetition(widget.competitionId)
-            .catchError((_) => <CompetitionResult>[]),
-        enrollmentService
-            .getByCompetition(widget.competitionId)
-            .catchError((_) => <CompetitionEnrollment>[]),
+      final results = await Future.wait<dynamic>([
+        repo.getById(academyId, widget.competitionId),
+        repo
+            .listResults(academyId, widget.competitionId, limit: 200)
+            .catchError((_) => ResultsPage(items: [])),
+        repo
+            .listEnrollments(academyId, widget.competitionId, limit: 200)
+            .catchError((_) => EnrollmentsPage(items: [])),
       ]);
 
       if (!mounted) return;
 
+      final competition = Competition.fromApi(results[0] as ApiCompetition);
+      final apiResults = (results[1] as ResultsPage).items;
+      final apiEnrollments = (results[2] as EnrollmentsPage).items;
+
       setState(() {
-        _competition = futures[0] as Competition?;
-        _results = futures[1] as List<CompetitionResult>;
-        _enrollments = futures[2] as List<CompetitionEnrollment>;
+        _competition = competition;
+        _results = apiResults
+            .map((r) => _apiResultToLegacy(r, competition.name))
+            .toList();
+        _enrollments = apiEnrollments.map(_apiEnrollmentToLegacy).toList();
         _isLoading = false;
       });
     } catch (e) {
@@ -120,6 +170,7 @@ class _CompetitionDetailScreenState
       academyId: academyId,
       competition: _competition!,
       student: student,
+      competitionRepo: ref.read(competitionRepoProvider),
       onSetLoading: (v) { if (mounted) setState(() => _isEnrolling = v); },
       onSuccess: (enrollment) {
         if (mounted) setState(() => _enrollments = [..._enrollments, enrollment]);
@@ -136,6 +187,7 @@ class _CompetitionDetailScreenState
       competition: _competition!,
       studentId: studentId,
       enrollments: _enrollments,
+      competitionRepo: ref.read(competitionRepoProvider),
       onSetLoading: (v) { if (mounted) setState(() => _isEnrolling = v); },
       onSuccess: (deletedId) {
         if (mounted) {
@@ -160,7 +212,9 @@ class _CompetitionDetailScreenState
     if (academyId == null) return;
 
     try {
-      await CompetitionService(academyId).deleteResult(result.id);
+      await ref
+          .read(competitionRepoProvider)
+          .deleteResult(academyId, _competition!.id, result.id);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -196,56 +250,67 @@ class _CompetitionDetailScreenState
     final academyId = ref.read(selectedAcademyIdProvider);
     if (academyId == null || _competition == null) return;
 
-    final competitionService = CompetitionService(academyId);
+    final repo = ref.read(competitionRepoProvider);
 
     try {
       if (existingResult != null) {
-        await competitionService.updateResult(existingResult.id, {
-          'position': position,
-          'ageCategory': ageCategory,
-          'weightCategory': weightCategory,
-          'modality': modality,
-          'divisionType': divisionType,
-          'notes': notes,
-        });
+        // TODO(tatami): API não tem updateResult — recria deletando e
+        // inserindo novamente, ou aguarda endpoint PATCH /results/{id}.
+        await repo.deleteResult(academyId, _competition!.id, existingResult.id);
+        await repo.recordResult(
+          academyId,
+          _competition!.id,
+          CreateResultRequest(
+            studentId: studentId,
+            position: ApiPositionX.fromWire(position),
+            modality: modality == 'nogi' ? ApiModality.nogi : ApiModality.gi,
+            beltCategory: null,
+            ageCategory: ageCategory.isEmpty ? null : ageCategory,
+            weightCategory: weightCategory.isEmpty ? null : weightCategory,
+          ),
+        );
       } else {
-        await competitionService.addResult(
-          competitionId: _competition!.id,
-          competitionName: _competition!.name,
-          studentId: studentId,
-          studentName: studentName,
-          position: position,
-          ageCategory: ageCategory,
-          weightCategory: weightCategory,
-          modality: modality,
-          divisionType: divisionType,
-          notes: notes,
-          date: _competition!.date,
+        await repo.recordResult(
+          academyId,
+          _competition!.id,
+          CreateResultRequest(
+            studentId: studentId,
+            position: ApiPositionX.fromWire(position),
+            modality: modality == 'nogi' ? ApiModality.nogi : ApiModality.gi,
+            beltCategory: null,
+            ageCategory: ageCategory.isEmpty ? null : ageCategory,
+            weightCategory: weightCategory.isEmpty ? null : weightCategory,
+          ),
         );
 
         // Achievement is created server-side automatically when a result is recorded.
 
-        // Auto-enroll if not already enrolled
+        // Auto-enroll via Tatami se ainda não estiver inscrito.
         final alreadyEnrolled =
             _enrollments.any((e) => e.studentId == studentId);
         if (!alreadyEnrolled) {
           try {
-            final enrollmentService = CompetitionEnrollmentService(academyId);
-            final enrollment = await enrollmentService.enroll(
-              competitionId: _competition!.id,
-              competitionName: _competition!.name,
-              studentId: studentId,
+            final apiEnrollment = await repo.enroll(
+              academyId,
+              _competition!.id,
+              CreateEnrollmentRequest(
+                studentId: studentId,
+                modality: modality == 'nogi' ? ApiModality.nogi : ApiModality.gi,
+                ageCategory: ageCategory.isEmpty ? null : ageCategory,
+                weightCategory: weightCategory.isEmpty ? null : weightCategory,
+              ),
+            );
+            final enrollment = CompetitionEnrollment(
+              id: apiEnrollment.id,
+              competitionId: apiEnrollment.competitionId,
+              studentId: apiEnrollment.studentId,
               studentName: studentName,
-              ageCategory: ageCategory,
-              weightCategory: weightCategory,
+              ageCategory: apiEnrollment.ageCategory,
+              weightCategory: apiEnrollment.weightCategory,
               transportPreference: TransportPreference.undecided,
+              enrolledAt: apiEnrollment.enrolledAt,
             );
             _enrollments = [..._enrollments, enrollment];
-
-            try {
-              await CompetitionService(academyId)
-                  .enrollStudent(_competition!.id, studentId);
-            } catch (_) {}
           } catch (_) {}
         }
       }
@@ -506,6 +571,8 @@ class _CompetitionDetailScreenState
         isEnrolled: isEnrolled,
         isAdmin: widget.isAdmin,
         enrolledStudents: enrolledStudents,
+        competitionRepo: ref.read(competitionRepoProvider),
+        uploadsRepo: ref.read(uploadsRepoProvider),
       ),
     );
   }

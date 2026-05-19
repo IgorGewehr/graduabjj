@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../api/competition_repo.dart';
+import '../../../api/dto/competition_dto.dart';
 import '../../../models/student.dart';
 import '../../../services/services.dart';
 
-/// Enrolls [student] in [competition] and calls [onSuccess] with the new
-/// enrollment so the caller can update its state.
+/// Enrolls [student] in [competition] via the Tatami [competitionRepo] and
+/// calls [onSuccess] with the new [CompetitionEnrollment] so the caller can
+/// update its state.
 ///
 /// All UI feedback is shown through [context].  [onSetLoading] should update
 /// the isEnrolling flag in the parent widget.
@@ -14,28 +17,36 @@ Future<void> selfEnroll({
   required String academyId,
   required Competition competition,
   required Student student,
+  required CompetitionRemoteRepo competitionRepo,
   required void Function(bool) onSetLoading,
   required void Function(CompetitionEnrollment) onSuccess,
 }) async {
   HapticFeedback.selectionClick();
   onSetLoading(true);
   try {
-    final enrollmentService = CompetitionEnrollmentService(academyId);
-    final enrollment = await enrollmentService.enroll(
-      competitionId: competition.id,
-      competitionName: competition.name,
-      studentId: student.id,
-      studentName: student.fullName,
-      ageCategory: 'adult',
-      weightCategory: '',
-      transportPreference: TransportPreference.undecided,
+    final apiEnrollment = await competitionRepo.enroll(
+      academyId,
+      competition.id,
+      CreateEnrollmentRequest(
+        studentId: student.id,
+        modality: ApiModality.gi,
+        ageCategory: 'adult',
+        transportPreference: ApiTransportPreference.undecided,
+      ),
     );
 
-    // Also update legacy enrolledStudentIds
-    try {
-      final competitionService = CompetitionService(academyId);
-      await competitionService.enrollStudent(competition.id, student.id);
-    } catch (_) {}
+    // Adapta para o modelo legado usado pelo caller.
+    final enrollment = CompetitionEnrollment(
+      id: apiEnrollment.id,
+      competitionId: apiEnrollment.competitionId,
+      competitionName: competition.name,
+      studentId: apiEnrollment.studentId,
+      studentName: student.fullName,
+      ageCategory: apiEnrollment.ageCategory,
+      weightCategory: apiEnrollment.weightCategory,
+      transportPreference: TransportPreference.undecided,
+      enrolledAt: apiEnrollment.enrolledAt,
+    );
 
     onSuccess(enrollment);
 
@@ -60,15 +71,16 @@ Future<void> selfEnroll({
   }
 }
 
-/// Cancels the enrollment of [studentId] in [competition] and calls
-/// [onSuccess] with the deleted enrollment's id so the caller can update its
-/// state list.
+/// Cancels the enrollment of [studentId] in [competition] via Tatami and
+/// calls [onSuccess] with the deleted enrollment's id so the caller can
+/// update its state list.
 Future<void> cancelEnrollment({
   required BuildContext context,
   required String academyId,
   required Competition competition,
   required String studentId,
   required List<CompetitionEnrollment> enrollments,
+  required CompetitionRemoteRepo competitionRepo,
   required void Function(bool) onSetLoading,
   required void Function(String deletedEnrollmentId) onSuccess,
 }) async {
@@ -78,14 +90,7 @@ Future<void> cancelEnrollment({
 
   onSetLoading(true);
   try {
-    final enrollmentService = CompetitionEnrollmentService(academyId);
-    await enrollmentService.delete(myEnrollment.id);
-
-    // Also remove from legacy array
-    try {
-      final competitionService = CompetitionService(academyId);
-      await competitionService.unenrollStudent(competition.id, studentId);
-    } catch (_) {}
+    await competitionRepo.unenroll(academyId, competition.id, myEnrollment.id);
 
     onSuccess(myEnrollment.id);
 

@@ -149,6 +149,9 @@ class _MonitorStudentDetailScreenState
     setState(() => _isLoadingGlobal = true);
 
     try {
+      // TODO(tatami): CrossAcademyService.getStudentGlobalHistory faz queries
+      //   multi-academia direto no Firestore. Migrar para endpoint tatami quando
+      //   backend expor GET /v1/users/{uid}/global-history (cross-academy).
       final history = await crossAcademyService.getStudentGlobalHistory(
         _student!.linkedUserId!,
         currentAcademyId: FirebaseService.academyId,

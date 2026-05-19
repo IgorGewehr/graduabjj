@@ -83,6 +83,12 @@ class _AdminBillingRemindersScreenState
       _billingService = BillingReminderService(academyId);
 
       // Fan-out: contacts + stats + settings in parallel, then build stages.
+      // TODO(tatami): getStudentContacts usa Firestore students — migrar para
+      //   studentRepoProvider.list quando tatami expor phone/email/guardian.
+      // TODO(tatami): getCollectionStats usa Firestore payments — migrar para
+      //   financialRepoProvider.getMonthlyReport quando backend expor métricas.
+      // TODO(tatami): getNotificationSettings usa Firestore settings —
+      //   migrar para settingsRepoProvider.getAll quando tatami expor billing_reminders.
       final contactsAndExtras = await Future.wait([
         _billingService.getStudentContacts(),
         _billingService.getCollectionStats(),

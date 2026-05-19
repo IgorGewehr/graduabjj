@@ -46,7 +46,12 @@ class _AdminGraduationScreenState
         beltRepo
             .getEligibleStudents(academyId, limit: 100)
             .then(_adaptEligibleStudents),
+        // TODO(tatami): migrar para beltProgressionRepoProvider quando
+        // o endpoint GET /belt-progressions/recent ou equivalente for
+        // adicionado ao BeltProgressionRemoteRepo.
         service.getRecentPromotions(limit: 20),
+        // TODO(tatami): migrar para beltProgressionRepoProvider quando
+        // o endpoint GET /belt-progressions/distribution for adicionado.
         service.getBeltDistribution(),
       ]);
 

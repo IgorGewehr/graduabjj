@@ -1,13 +1,15 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../services/photo_upload_service.dart';
+import '../../api/dto/upload_dto.dart';
+import '../../api/repositories.dart';
 import '../../core/theme.dart';
 import 'image_crop_screen.dart';
 
 /// Widget for displaying and picking student profile photos
-class ProfilePhotoPicker extends StatefulWidget {
+class ProfilePhotoPicker extends ConsumerStatefulWidget {
   final String academyId;
   final String studentId;
   final String? photoUrl;
@@ -30,11 +32,10 @@ class ProfilePhotoPicker extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<ProfilePhotoPicker> createState() => _ProfilePhotoPickerState();
+  ConsumerState<ProfilePhotoPicker> createState() => _ProfilePhotoPickerState();
 }
 
-class _ProfilePhotoPickerState extends State<ProfilePhotoPicker> {
-  final PhotoUploadService _uploadService = PhotoUploadService();
+class _ProfilePhotoPickerState extends ConsumerState<ProfilePhotoPicker> {
   final ImagePicker _picker = ImagePicker();
   bool _uploading = false;
 
@@ -214,13 +215,15 @@ class _ProfilePhotoPickerState extends State<ProfilePhotoPicker> {
       final confirmed = await _showPhotoConfirmation(croppedFile);
       if (confirmed != true) return;
 
-      // Upload cropped image
+      // Upload cropped image via tatami uploads (sign → PUT GCS → finalize)
       setState(() => _uploading = true);
 
-      await _uploadService.uploadStudentPhoto(
+      await ref.read(uploadsRepoProvider).uploadFileFromDisk(
+        purpose: ApiUploadPurpose.studentPhoto,
+        file: croppedFile,
+        contentType: 'image/jpeg',
         academyId: widget.academyId,
-        studentId: widget.studentId,
-        imageFile: croppedFile,
+        targetId: widget.studentId,
       );
 
       if (mounted) {
@@ -268,34 +271,15 @@ class _ProfilePhotoPickerState extends State<ProfilePhotoPicker> {
 
     if (confirmed != true) return;
 
-    try {
-      setState(() => _uploading = true);
-
-      await _uploadService.deleteStudentPhoto(
-        academyId: widget.academyId,
-        studentId: widget.studentId,
+    // TODO(tatami): tatami não expõe endpoint DELETE /v1/uploads/{fileId}
+    // ainda. Exibir mensagem de não suportado até o endpoint existir.
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Remoção de foto ainda não suportada. Contate o suporte.'),
+          backgroundColor: Colors.orange,
+        ),
       );
-
-      if (mounted) {
-        setState(() => _uploading = false);
-        widget.onPhotoUpdated?.call();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Foto removida com sucesso!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _uploading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao remover foto: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
   }
 

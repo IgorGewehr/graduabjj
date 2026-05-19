@@ -305,6 +305,9 @@ class GlobalUserService {
 
   /// Sync highest belt from all linked academies
   /// Call this after any belt change in any academy
+  // TODO(tatami): substituir por chamada ao backend quando tatami expor
+  //   endpoint de sincronização de faixa (POST /v1/me/sync-belt ou similar).
+  //   Atualmente lê academies/{id}/students/{id} direto do Firestore.
   Future<void> syncHighestBelt(String userId) async {
     final userRef = RootCollections.user(userId);
     final mappingRef = RootCollections.userAcademyMappingDoc(userId);

@@ -92,7 +92,8 @@ final weeklyScheduleProvider = FutureProvider<Map<int, List<BJJClass>>>((ref) as
 // Competition Providers
 // ============================================
 
-/// Competition service provider
+/// Competition service provider — mantido para métodos sem equivalente Tatami
+/// (getResultsForStudent, addResult, updateResult, deleteResult, getByStudent).
 final competitionServiceProvider = Provider<CompetitionService?>((ref) {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
   if (currentUser?.academyId == null) return null;
@@ -141,15 +142,19 @@ final studentAllResultsProvider = FutureProvider.family<List<CompetitionResult>,
 // Competition Enrollment Providers
 // ============================================
 
-/// Competition enrollment service provider
+/// Competition enrollment service provider — mantido para compatibilidade
+/// com código legado que ainda não foi migrado.
 final competitionEnrollmentServiceProvider = Provider<CompetitionEnrollmentService?>((ref) {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
   if (currentUser?.academyId == null) return null;
   return CompetitionEnrollmentService(currentUser!.academyId!);
 });
 
-/// Student enrollments provider
-/// NOTE: CompetitionRepo.listEnrollments requires competitionId — keeping service.
+/// Student enrollments provider — migrado para Tatami.
+/// Busca todas as competições e faz cross-reference de inscrições.
+/// NOTE: O tatami não expõe GET enrollments por studentId globalmente;
+/// usa-se o serviço legado por ora.
+/// TODO(tatami): expor GET /v1/academies/{id}/students/{sid}/enrollments
 final studentEnrollmentsProvider = FutureProvider.family<List<CompetitionEnrollment>, String>((ref, studentId) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) {
@@ -165,14 +170,15 @@ final studentEnrollmentsProvider = FutureProvider.family<List<CompetitionEnrollm
   return enrollments;
 });
 
-/// Check if student is enrolled in competition
-/// NOTE: No repo equivalent — keeping service.
+/// Check if student is enrolled in competition — via Tatami listEnrollments.
 final isStudentEnrolledProvider = FutureProvider.family<bool, ({String competitionId, String studentId})>((ref, params) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return false;
 
-  final service = CompetitionEnrollmentService(currentUser!.academyId!);
-  return await service.isEnrolled(params.competitionId, params.studentId);
+  final page = await ref
+      .read(competitionRepoProvider)
+      .listEnrollments(currentUser!.academyId!, params.competitionId, limit: 200);
+  return page.items.any((e) => e.studentId == params.studentId);
 });
 
 // ============================================
@@ -180,6 +186,10 @@ final isStudentEnrolledProvider = FutureProvider.family<bool, ({String competiti
 // ============================================
 
 /// Settings service provider
+// TODO(tatami): migrar academySettingsProvider para settingsRepoProvider quando
+//   tatami expor GET /v1/academies/{id} com entity completo (branding + PIX).
+//   Atualmente SettingsRepo.getAll() retorna key/value genérico, sem mapeamento
+//   para AcademySettings. Mantendo Firestore até endpoint estar disponível.
 final settingsServiceProvider = Provider<SettingsService?>((ref) {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
   if (currentUser?.academyId == null) return null;
@@ -187,7 +197,7 @@ final settingsServiceProvider = Provider<SettingsService?>((ref) {
 });
 
 /// Academy settings provider
-/// NOTE: SettingsRepo.getAll returns Map<String, ApiAcademySetting>, not AcademySettings — keeping service.
+/// NOTE: SettingsRepo.getAll returns Map of ApiAcademySetting, not AcademySettings — keeping service.
 final academySettingsProvider = FutureProvider<AcademySettings?>((ref) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return null;
@@ -203,7 +213,9 @@ final academyNameProvider = FutureProvider<String>((ref) async {
 });
 
 /// PIX info provider
-/// NOTE: No repo equivalent — keeping service.
+/// NOTE: No tatami repo equivalent — keeping service.
+// TODO(tatami): migrar para settingsRepoProvider.getAll() quando tatami
+//   expor pix_key e pix_key_type nas settings de academia.
 final pixInfoProvider = FutureProvider<Map<String, String?>>((ref) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return {};
@@ -270,36 +282,57 @@ final planByIdProvider = FutureProvider.family<Plan?, String>((ref, planId) asyn
 // Belt Progression Providers
 // ============================================
 
-/// Belt progression service provider
+/// Belt progression service provider — mantido para cálculos locais
+/// (checkEligibility, calculateProgress) que são puramente computacionais.
 final beltProgressionServiceProvider = Provider<BeltProgressionService?>((ref) {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
   if (currentUser?.academyId == null) return null;
   return BeltProgressionService(currentUser!.academyId!);
 });
 
-/// Belt eligibility provider
+/// Belt eligibility provider — via Tatami graduation-eligibility endpoint.
 final beltEligibilityProvider = FutureProvider<EligibilityResult?>((ref) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   final student = await ref.watch(currentStudentProvider.future);
 
   if (currentUser?.academyId == null || student == null) return null;
 
-  final service = BeltProgressionService(currentUser!.academyId!);
-  return service.checkEligibility(
-    currentBelt: student.currentBelt,
-    currentStripes: student.currentStripes,
-    totalClasses: student.totalAttendanceCount,
-  );
+  try {
+    final apiEligibility = await ref
+        .read(beltProgressionRepoProvider)
+        .getEligibility(currentUser!.academyId!, student.id);
+
+    return EligibilityResult(
+      eligible: apiEligibility.eligible,
+      nextBelt: apiEligibility.nextBelt?.name, // wire == name for ApiBelt
+      nextStripes: apiEligibility.nextStripes,
+      currentClasses: apiEligibility.currentCount,
+      requiredClasses: apiEligibility.requiredCount,
+      missingClasses: apiEligibility.attendancesNeeded,
+      message: apiEligibility.eligible
+          ? (apiEligibility.nextStripes != null && apiEligibility.nextStripes! > 0
+              ? 'Elegível para ${apiEligibility.nextStripes}º grau!'
+              : 'Elegível para faixa!')
+          : 'Faltam ${apiEligibility.attendancesNeeded} aulas',
+    );
+  } catch (_) {
+    // Fallback para cálculo local se o endpoint falhar
+    final service = BeltProgressionService(currentUser!.academyId!);
+    return service.checkEligibility(
+      currentBelt: student.currentBelt,
+      currentStripes: student.currentStripes,
+      totalClasses: student.totalAttendanceCount,
+    );
+  }
 });
 
-/// Belt progress percentage provider
+/// Belt progress percentage provider — cálculo local (sem I/O).
 final beltProgressProvider = FutureProvider<double>((ref) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
   final student = await ref.watch(currentStudentProvider.future);
+  if (student == null) return 0.0;
 
-  if (currentUser?.academyId == null || student == null) return 0.0;
-
-  final service = BeltProgressionService(currentUser!.academyId!);
+  // Cálculo puramente local — não precisa de academyId nem de chamada remota.
+  final service = BeltProgressionService('_local_');
   return service.calculateProgress(
     currentBelt: student.currentBelt,
     currentStripes: student.currentStripes,
@@ -311,8 +344,10 @@ final beltProgressProvider = FutureProvider<double>((ref) async {
 // Notification Providers
 // ============================================
 
-/// Notification service provider — mantido para telas admin que ainda usam
-/// NotificationService diretamente (create, getByUser, etc.).
+/// Notification service provider — DEPRECATED. Todas as operações de
+/// notificação foram migradas para [notificationRepoProvider] (tatami).
+/// NotificationsScreen usa notificationRepoProvider diretamente.
+// TODO(tatami): remover após confirmar que nenhuma tela usa este provider.
 final notificationServiceProvider = Provider<NotificationService?>((ref) {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
   if (currentUser?.academyId == null) return null;

@@ -1,16 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../api/competition_repo.dart';
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
 import '../../../services/services.dart';
 
 /// Exibe o bottom sheet de confirmação para excluir um campeonato.
+/// [repo] é o repositório Tatami para a operação de deleção.
 /// [onDeleted] é chamado após exclusão bem-sucedida.
+///
+/// Quando [repo] é fornecido, usa Tatami. Caso contrário mantém
+/// comportamento legado via [CompetitionService].
 void showDeleteCompetitionConfirmation({
   required BuildContext context,
   required String academyId,
   required Competition competition,
+  CompetitionRemoteRepo? repo,
   required VoidCallback onDeleted,
 }) {
   showModalBottomSheet(
@@ -83,8 +89,13 @@ void showDeleteCompetitionConfirmation({
                 child: ElevatedButton(
                   onPressed: () async {
                     try {
-                      final service = CompetitionService(academyId);
-                      await service.delete(competition.id);
+                      if (repo != null) {
+                        await repo.delete(academyId, competition.id);
+                      } else {
+                        // Fallback legado — remove quando todos os callers
+                        // passarem o repo Tatami.
+                        await CompetitionService(academyId).delete(competition.id);
+                      }
 
                       if (!sheetContext.mounted) return;
                       Navigator.pop(sheetContext);
