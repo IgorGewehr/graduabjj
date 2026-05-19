@@ -12,7 +12,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../api/repositories.dart';
 import '../../providers/portal_providers.dart';
-import '../../services/checkin_service.dart';
+import '../../services/checkin_service.dart'; // TODO(tatami): remove when pending-queue endpoints are available
 import '../../services/class_service.dart';
 import '../../widgets/checkin_confirm_dialog.dart';
 import 'monitor_attendance/attendance_action_buttons.dart';
@@ -147,6 +147,8 @@ class _MonitorAttendanceScreenState
       final currentUser = ref.read(currentUserProvider).valueOrNull;
       if (currentUser?.academyId == null) return;
 
+      // TODO(tatami): replace with attendanceRepoProvider when
+      // GET /v1/academies/{id}/pending-checkins is available in tatami.
       final checkinService = CheckinService(currentUser!.academyId!);
       final checkins = await checkinService.getPendingByClassAndDate(
         _selectedClass!.id,
@@ -187,6 +189,8 @@ class _MonitorAttendanceScreenState
 
     setState(() => _isRemovingCheckin = true);
     try {
+      // TODO(tatami): replace with attendanceRepoProvider.delete when
+      // DELETE /v1/academies/{id}/pending-checkins/{id} exists in tatami.
       final checkinService = CheckinService(currentUser!.academyId!);
       await checkinService.removeCheckin(checkinId);
       await _loadPendingCheckins();
@@ -244,7 +248,8 @@ class _MonitorAttendanceScreenState
           ),
         );
       }
-      // Remove confirmed checkins from Firestore pending queue.
+      // TODO(tatami): remove Firestore pending-queue cleanup once tatami
+      // manages the pending-checkin lifecycle end-to-end.
       final checkinService = CheckinService(academyId);
       for (final id in checkinIds) {
         await checkinService.removeCheckin(id);

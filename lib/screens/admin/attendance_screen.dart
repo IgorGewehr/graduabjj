@@ -13,7 +13,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
-import '../../services/checkin_service.dart';
+import '../../services/checkin_service.dart'; // TODO(tatami): remove when pending-queue endpoints are available
 import '../../widgets/checkin_confirm_dialog.dart';
 import 'attendance/attendance_action_buttons.dart';
 import 'attendance/attendance_calendar_sheet.dart';
@@ -161,6 +161,8 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       final currentUser = ref.read(currentUserProvider).valueOrNull;
       if (currentUser?.academyId == null) return;
 
+      // TODO(tatami): replace with attendanceRepoProvider when
+      // GET /v1/academies/{id}/pending-checkins is available in tatami.
       final checkinService = CheckinService(currentUser!.academyId!);
       final checkins = await checkinService.getPendingByClassAndDate(
         _selectedClass!.id,
@@ -207,6 +209,8 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
 
     setState(() => _isRemovingCheckin = true);
     try {
+      // TODO(tatami): replace with attendanceRepoProvider.delete when
+      // DELETE /v1/academies/{id}/pending-checkins/{id} exists in tatami.
       final checkinService = CheckinService(currentUser!.academyId!);
       await checkinService.removeCheckin(checkinId);
       await _loadPendingCheckins();
@@ -223,24 +227,18 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
 
     setState(() => _isAddingCheckin = true);
     try {
-      final checkinService = CheckinService(currentUser!.academyId!);
-      final dayOfWeek = _selectedDate.weekday % 7;
-      final schedule = _selectedClass!.schedule.firstWhere(
-        (s) => s.dayOfWeek == dayOfWeek,
-        orElse: () => _selectedClass!.schedule.first,
+      // Tatami: POST /v1/academies/{id}/students/{sid}/attendance
+      // Manual check-in is treated as a direct attendance record (no pending queue).
+      final repo = ref.read(attendanceRepoProvider);
+      await repo.markPresent(
+        currentUser!.academyId!,
+        student.id,
+        api_att.AttendanceSingleRequest(
+          classId: _selectedClass!.id,
+          date: _selectedDate,
+        ),
       );
-
-      await checkinService.addManualCheckin(
-        studentId: student.id,
-        studentName: student.fullName,
-        classId: _selectedClass!.id,
-        className: _selectedClass!.name,
-        scheduleStartTime: schedule.startTime,
-        scheduleEndTime: schedule.endTime,
-        scheduleDayOfWeek: dayOfWeek,
-        date: _selectedDate,
-      );
-      await _loadPendingCheckins();
+      await _loadAttendanceForClass();
     } catch (e) {
       if (mounted) {
         context.showError(e.toString().replaceAll('Exception: ', ''));
@@ -256,15 +254,36 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
 
     setState(() => _isConfirmingCheckins = true);
     try {
-      final checkinService = CheckinService(currentUser!.academyId!);
-      final result = await checkinService.confirmCheckins(
-        checkinIds,
-        'admin',
-        'Administrador',
-      );
+      final repo = ref.read(attendanceRepoProvider);
+      final academyId = currentUser!.academyId!;
+      // Resolve full Checkin objects from the loaded pending list.
+      final toConfirm =
+          _pendingCheckins.where((c) => checkinIds.contains(c.id)).toList();
+
+      int success = 0;
+      for (final checkin in toConfirm) {
+        try {
+          // Tatami: POST /v1/academies/{id}/students/{sid}/attendance
+          await repo.markPresent(
+            academyId,
+            checkin.studentId,
+            api_att.AttendanceSingleRequest(
+              classId: checkin.classId,
+              date: checkin.scheduleDate,
+            ),
+          );
+          // TODO(tatami): remove Firestore pending-queue cleanup once tatami
+          // manages the pending-checkin lifecycle end-to-end.
+          final checkinService = CheckinService(academyId);
+          await checkinService.removeCheckin(checkin.id);
+          success++;
+        } catch (_) {
+          // Student may already be present (duplicate) — skip silently.
+        }
+      }
 
       if (mounted) {
-        context.showSuccess('${result['success']} presenca(s) confirmada(s)!');
+        context.showSuccess('$success presenca(s) confirmada(s)!');
       }
 
       await _loadAttendanceForClass();
@@ -290,27 +309,21 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       final currentUser = ref.read(currentUserProvider).valueOrNull;
       if (currentUser?.academyId == null) return;
 
-      final attendanceService = AttendanceService(currentUser!.academyId!);
+      final repo = ref.read(attendanceRepoProvider);
+      final academyId = currentUser!.academyId!;
+      final req = api_att.AttendanceSingleRequest(
+        classId: _selectedClass!.id,
+        date: _selectedDate,
+      );
       final wasPresent = _presentStudentIds.contains(student.id);
 
       if (wasPresent) {
-        await attendanceService.unmarkPresent(
-          student.id,
-          _selectedClass!.id,
-          _selectedDate,
-        );
+        // Tatami: DELETE /v1/academies/{id}/students/{sid}/attendance
+        await repo.unmarkPresent(academyId, student.id, req);
         setState(() => _presentStudentIds.remove(student.id));
       } else {
-        await attendanceService.markPresent(
-          studentId: student.id,
-          studentName: student.fullName,
-          classId: _selectedClass!.id,
-          className: _selectedClass!.name,
-          verifiedBy: 'admin',
-          verifiedByName: 'Administrador',
-          date: _selectedDate,
-          weight: _selectedClass!.effectiveWeight(),
-        );
+        // Tatami: POST /v1/academies/{id}/students/{sid}/attendance
+        await repo.markPresent(academyId, student.id, req);
         setState(() => _presentStudentIds.add(student.id));
       }
     } catch (e) {
@@ -339,7 +352,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       final currentUser = ref.read(currentUserProvider).valueOrNull;
       if (currentUser?.academyId == null) return;
 
-      final attendanceService = AttendanceService(currentUser!.academyId!);
+      final repo = ref.read(attendanceRepoProvider);
       final studentsToMark = filteredStudents
           .where((s) => !_presentStudentIds.contains(s.id))
           .toList();
@@ -349,17 +362,11 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
         return;
       }
 
-      await attendanceService.bulkMarkPresent(
-        students: studentsToMark
-            .map((s) => (studentId: s.id, studentName: s.fullName))
-            .toList(),
-        classId: _selectedClass!.id,
-        className: _selectedClass!.name,
-        verifiedBy: 'admin',
-        verifiedByName: 'Administrador',
-        date: _selectedDate,
-        weight: _selectedClass!.effectiveWeight(),
-        repo: ref.read(attendanceRepoProvider),
+      // Tatami: POST /v1/academies/{id}/attendance/bulk
+      await repo.bulkRecord(
+        currentUser!.academyId!,
+        _selectedClass!.id,
+        studentsToMark.map((s) => s.id).toList(),
       );
 
       _presentStudentIds.addAll(studentsToMark.map((s) => s.id));
@@ -390,11 +397,19 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       final currentUser = ref.read(currentUserProvider).valueOrNull;
       if (currentUser?.academyId == null) return;
 
-      final attendanceService = AttendanceService(currentUser!.academyId!);
-      final removed = await attendanceService.bulkUnmarkPresent(
+      // Tatami: DELETE /v1/academies/{id}/students/{sid}/attendance per student.
+      // No bulk-unmark endpoint exists yet — iterate present IDs.
+      // TODO(tatami): replace with a single bulk-delete call when available.
+      final repo = ref.read(attendanceRepoProvider);
+      final academyId = currentUser!.academyId!;
+      final req = api_att.AttendanceSingleRequest(
         classId: _selectedClass!.id,
         date: _selectedDate,
       );
+      for (final studentId in _presentStudentIds.toList()) {
+        await repo.unmarkPresent(academyId, studentId, req);
+      }
+      final removed = _presentStudentIds.length;
 
       setState(() => _presentStudentIds.clear());
 
