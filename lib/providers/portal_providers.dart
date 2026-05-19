@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/link_code_repo.dart';
 import '../api/repositories.dart';
 import '../services/services.dart';
 import 'auth_provider.dart';
@@ -185,11 +186,10 @@ final isStudentEnrolledProvider = FutureProvider.family<bool, ({String competiti
 // Settings Providers
 // ============================================
 
-/// Settings service provider
-// TODO(tatami): migrar academySettingsProvider para settingsRepoProvider quando
-//   tatami expor GET /v1/academies/{id} com entity completo (branding + PIX).
-//   Atualmente SettingsRepo.getAll() retorna key/value genérico, sem mapeamento
-//   para AcademySettings. Mantendo Firestore até endpoint estar disponível.
+// TODO(tatami): remover settingsServiceProvider quando SettingsRepo.getAll()
+//   expor campos tipados de AcademySettings (branding, PIX, toggles).
+//   Hoje retorna Map<String,ApiAcademySetting> genérico — sem fábrica
+//   AcademySettings.fromApi. Manter Firestore provisoriamente.
 final settingsServiceProvider = Provider<SettingsService?>((ref) {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
   if (currentUser?.academyId == null) return null;
@@ -197,13 +197,15 @@ final settingsServiceProvider = Provider<SettingsService?>((ref) {
 });
 
 /// Academy settings provider
-/// NOTE: SettingsRepo.getAll returns Map of ApiAcademySetting, not AcademySettings — keeping service.
+// TODO(tatami): migrar para settingsRepoProvider.getAll() quando tatami
+//   expor GET /v1/academies/{id}/settings com campos tipados (name, logoUrl,
+//   pixKey, etc.) mapeáveis para AcademySettings.fromApi. Blocker: o endpoint
+//   atual devolve chave/valor genérico sem cobertura de todos os campos de
+//   AcademySettings (branding, integrations, store, etc.).
 final academySettingsProvider = FutureProvider<AcademySettings?>((ref) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser?.academyId == null) return null;
-
-  final service = SettingsService(currentUser!.academyId!);
-  return await service.getAcademySettings();
+  final service = ref.watch(settingsServiceProvider);
+  if (service == null) return null;
+  return service.getAcademySettings();
 });
 
 /// Academy name provider
@@ -213,27 +215,17 @@ final academyNameProvider = FutureProvider<String>((ref) async {
 });
 
 /// PIX info provider
-/// NOTE: No tatami repo equivalent — keeping service.
 // TODO(tatami): migrar para settingsRepoProvider.getAll() quando tatami
 //   expor pix_key e pix_key_type nas settings de academia.
 final pixInfoProvider = FutureProvider<Map<String, String?>>((ref) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser?.academyId == null) return {};
-
-  final service = SettingsService(currentUser!.academyId!);
-  return await service.getPixInfo();
+  final service = ref.watch(settingsServiceProvider);
+  if (service == null) return {};
+  return service.getPixInfo();
 });
 
 // ============================================
 // Plan Providers
 // ============================================
-
-/// Plan service provider
-final planServiceProvider = Provider<PlanService?>((ref) {
-  final currentUser = ref.watch(currentUserProvider).valueOrNull;
-  if (currentUser?.academyId == null) return null;
-  return PlanService(currentUser!.academyId!);
-});
 
 /// Active plans provider
 final activePlansProvider = FutureProvider<List<Plan>>((ref) async {
@@ -344,16 +336,6 @@ final beltProgressProvider = FutureProvider<double>((ref) async {
 // Notification Providers
 // ============================================
 
-/// Notification service provider — DEPRECATED. Todas as operações de
-/// notificação foram migradas para [notificationRepoProvider] (tatami).
-/// NotificationsScreen usa notificationRepoProvider diretamente.
-// TODO(tatami): remover após confirmar que nenhuma tela usa este provider.
-final notificationServiceProvider = Provider<NotificationService?>((ref) {
-  final currentUser = ref.watch(currentUserProvider).valueOrNull;
-  if (currentUser?.academyId == null) return null;
-  return NotificationService(currentUser!.academyId!);
-});
-
 /// User notifications provider — SSE stream via Tatami.
 ///
 /// Substitui o Firestore `.snapshots()` pelo endpoint
@@ -398,10 +380,14 @@ final unreadNotificationCountProvider = StreamProvider<int>((ref) async* {
 // Link Code Providers
 // ============================================
 
-/// Link code service provider
-final linkCodeServiceProvider = Provider<LinkCodeService?>((ref) {
-  final currentUser = ref.watch(currentUserProvider).valueOrNull;
-  if (currentUser?.academyId == null) return null;
-  return LinkCodeService(currentUser!.academyId!);
-});
+/// Link code repo provider — acesso ao LinkCodeRemoteRepo (tatami).
+///
+/// Expõe createForStudent, createForInstructor, getPreview, redeem.
+/// O serviço legado [LinkCodeService] (Firestore) não é mais necessário
+/// neste escopo; as telas de auth usam este provider ou chamam o repo
+/// diretamente via [linkCodeRepoProvider].
+// ignore: unused_element — mantido para call-sites futuros.
+final linkCodeProvider = Provider<LinkCodeRemoteRepo>(
+  (ref) => ref.watch(linkCodeRepoProvider),
+);
 
