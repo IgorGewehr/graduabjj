@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/financial_dto.dart' as api_fin;
+import '../../api/dto/student_dto.dart' show StudentFilter;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/api_provider.dart';
@@ -83,21 +84,32 @@ class _AdminBillingRemindersScreenState
       final academyId = ref.read(safeAcademyIdProvider) ?? '';
       _billingService = BillingReminderService(academyId);
 
-      // Fan-out: contacts + stats + settings in parallel, then build stages.
-      // TODO(tatami): getStudentContacts usa Firestore students — migrar para
-      //   studentRepoProvider.list quando tatami expor phone/email/guardian.
-      // TODO(tatami): getCollectionStats usa Firestore payments — migrar para
-      //   financialRepoProvider.getMonthlyReport quando backend expor métricas.
-      // TODO(tatami): getNotificationSettings usa Firestore settings —
-      //   migrar para settingsRepoProvider.getAll quando tatami expor billing_reminders.
-      final contactsAndExtras = await Future.wait([
-        _billingService.getStudentContacts(),
-        _billingService.getCollectionStats(),
-        _billingService.getNotificationSettings(),
-      ]);
-      final contacts = contactsAndExtras[0] as Map<String, StudentContact>;
+      // Load all data from Tatami — no Firestore reads.
+      // 1. Students (for contact info) via Tatami
+      final studentsPage = await ref.read(
+        tatami.tatamiStudentsProvider(tatami.StudentsQuery(
+          academyId: academyId,
+          filter: const StudentFilter(limit: 500),
+        )).future,
+      );
+      final contacts = <String, StudentContact>{};
+      for (final s in studentsPage.items) {
+        contacts[s.id] = StudentContact(
+          studentId: s.id,
+          studentName: s.fullName,
+          phone: s.phone,
+          email: s.email,
+          guardianPhone: s.guardian?.phone,
+          guardianEmail: s.guardian?.email,
+          category: s.category?.name ?? 'adult',
+          photoUrl: s.photoUrl,
+        );
+      }
 
-      // Tatami overdue + pending in parallel.
+      // 2. Notification settings via Tatami
+      final notifSettings = await _billingService.getNotificationSettings();
+
+      // 3. Financials (overdue + pending) via Tatami
       final overdueQ = tatami.FinancialsQuery(
         academyId: academyId,
         filter: const api_fin.FinancialFilter(
@@ -118,10 +130,11 @@ class _AdminBillingRemindersScreenState
         ref.read(tatami.tatamiPaymentsLegacyProvider(overdueQ).future),
         ref.read(tatami.tatamiPaymentsLegacyProvider(pendingQ).future),
       ]);
-      final stages = buildStagesFromPayments(
-        <Payment>[...paymentLists[0], ...paymentLists[1]],
-        contacts,
-      );
+      final allPayments = <Payment>[...paymentLists[0], ...paymentLists[1]];
+      final stages = buildStagesFromPayments(allPayments, contacts);
+
+      // 4. Compute stats from the loaded payments (no extra Firestore call)
+      final computedStats = _computeStatsFromPayments(allPayments, stages);
 
       // Academy name from cache (avoids extra Firestore round-trip).
       String academyName = ref.read(currentAcademyInfoProvider)?.name ?? '';
@@ -132,11 +145,9 @@ class _AdminBillingRemindersScreenState
         academyName = info?.name ?? 'Academia';
       }
 
-      final notifSettings = contactsAndExtras[2] as BillingNotificationSettings;
-
       setState(() {
         _overdueStages = stages;
-        _stats = contactsAndExtras[1] as CollectionStats;
+        _stats = computedStats;
         _studentContacts = contacts;
         _notificationSettings = notifSettings;
         _notificationService = BillingNotificationService(
@@ -153,6 +164,51 @@ class _AdminBillingRemindersScreenState
   }
 
   int _stageCount(BillingStage stage) => _overdueStages[stage]?.length ?? 0;
+
+  /// Compute collection stats from already-loaded payments (no Firestore).
+  CollectionStats _computeStatsFromPayments(
+    List<Payment> payments,
+    Map<BillingStage, List<Map<String, dynamic>>> stages,
+  ) {
+    int totalOverdue = 0;
+    double totalAmount = 0;
+    int totalDays = 0;
+    final uniqueStudents = <String>{};
+
+    final stageCounts = <BillingStage, int>{};
+    final stageAmounts = <BillingStage, double>{};
+    for (final stage in BillingStage.values) {
+      final items = stages[stage] ?? [];
+      stageCounts[stage] = items.length;
+      double amt = 0;
+      for (final item in items) {
+        amt += (item['amount'] as num?)?.toDouble() ?? 0;
+        uniqueStudents.add(item['studentId'] as String? ?? '');
+        totalDays += (item['daysOverdue'] as int?) ?? 0;
+      }
+      stageAmounts[stage] = amt;
+      totalOverdue += items.length;
+      totalAmount += amt;
+    }
+
+    final byStage = <BillingStage, CollectionStageData>{};
+    for (final stage in BillingStage.values) {
+      byStage[stage] = CollectionStageData(
+        count: stageCounts[stage] ?? 0,
+        amount: stageAmounts[stage] ?? 0,
+      );
+    }
+
+    return CollectionStats(
+      totalOverdue: totalOverdue,
+      totalOverdueAmount: totalAmount,
+      totalStudentsOverdue: uniqueStudents.length,
+      recoveryRate: 0,
+      averageDaysOverdue:
+          totalOverdue > 0 ? (totalDays / totalOverdue).round() : 0,
+      byStage: byStage,
+    );
+  }
 
   BillingStage get _currentStage => BillingStage.values[_tabController.index];
 
