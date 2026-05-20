@@ -411,7 +411,7 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-/// Admin Bottom Navigation (for mobile) - Fintech style matching webapp
+/// Admin Bottom Navigation (for mobile)
 class AdminBottomNav extends ConsumerStatefulWidget {
   final String currentPath;
 
@@ -422,17 +422,11 @@ class AdminBottomNav extends ConsumerStatefulWidget {
 }
 
 class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
-  // Navigation items for bottom nav (first 4 + "Mais")
   static const List<_AdminNavItem> _bottomNavItems = [
     _AdminNavItem(
       label: 'Dashboard',
       icon: LucideIcons.layoutDashboard,
       path: '/admin',
-    ),
-    _AdminNavItem(
-      label: 'Chamada',
-      icon: LucideIcons.clipboardCheck,
-      path: '/admin/chamada',
     ),
     _AdminNavItem(
       label: 'Alunos',
@@ -445,54 +439,76 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       path: '/admin/financeiro',
     ),
     _AdminNavItem(
+      label: 'Operações',
+      icon: LucideIcons.clipboardCheck,
+      path: '/admin/chamada',
+    ),
+    _AdminNavItem(
       label: 'Mais',
-      icon: LucideIcons.moreHorizontal,
-      path: '', // Special case for bottom sheet
+      icon: LucideIcons.grid,
+      path: '',
     ),
   ];
 
-  // Items for "Mais" menu
   static const List<_AdminNavItem> _moreMenuItems = [
+    _AdminNavItem(label: 'Loja', icon: LucideIcons.store, path: '/admin/loja'),
+    _AdminNavItem(
+      label: 'Pedidos',
+      icon: LucideIcons.shoppingBag,
+      path: '/admin/loja/pedidos',
+    ),
     _AdminNavItem(
       label: 'Turmas',
       icon: LucideIcons.calendar,
       path: '/admin/turmas',
     ),
     _AdminNavItem(
-      label: 'Competicoes',
+      label: 'Competições',
       icon: LucideIcons.trophy,
       path: '/admin/campeonatos',
     ),
     _AdminNavItem(
-      label: 'Cobranca',
+      label: 'Graduação',
+      icon: LucideIcons.award,
+      path: '/admin/graduacao',
+    ),
+    _AdminNavItem(
+      label: 'Cobrança',
       icon: LucideIcons.receipt,
       path: '/admin/cobranca',
     ),
     _AdminNavItem(
-      label: 'Relatorios',
+      label: 'Retenção',
+      icon: LucideIcons.userCheck,
+      path: '/admin/retencao',
+    ),
+    _AdminNavItem(
+      label: 'Relatórios',
       icon: LucideIcons.barChart3,
       path: '/admin/relatorios',
     ),
-    _AdminNavItem(label: 'Loja', icon: LucideIcons.store, path: '/admin/loja'),
+    _AdminNavItem(
+      label: 'Equipe',
+      icon: LucideIcons.users2,
+      path: '/admin/equipe',
+    ),
+    _AdminNavItem(
+      label: 'Configurações',
+      icon: LucideIcons.settings,
+      path: '/admin/configuracoes',
+    ),
     _AdminNavItem(
       label: 'Carteira',
       icon: LucideIcons.wallet,
       path: '/admin/carteira',
-    ),
-    _AdminNavItem(
-      label: 'Configuracoes',
-      icon: LucideIcons.settings,
-      path: '/admin/configuracoes',
     ),
   ];
 
   int _getSelectedIndex() {
     final location = widget.currentPath;
 
-    // Check bottom nav items (except "Mais")
     for (int i = 0; i < _bottomNavItems.length - 1; i++) {
       final path = _bottomNavItems[i].path;
-      // Exact match for /admin, prefix match for others
       if (path == '/admin') {
         if (location == path) return i;
       } else if (location == path || location.startsWith('$path/')) {
@@ -500,10 +516,9 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       }
     }
 
-    // Check if any "more" item is active
     for (final item in _moreMenuItems) {
       if (location == item.path || location.startsWith('${item.path}/')) {
-        return 4; // "Mais" index
+        return 4;
       }
     }
 
@@ -522,7 +537,6 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     final currentLocation = widget.currentPath;
     final navigator = GoRouter.of(context);
 
-    // Get academy settings to check if store/abacatepay is enabled
     final settings = ref.read(academySettingsProvider).valueOrNull;
     final isStoreEnabled = settings?.storeEnabled ?? false;
     final isPaymentEnabled =
@@ -531,28 +545,33 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
 
     final user = ref.read(currentUserProvider).valueOrNull;
 
-    // Filter menu items based on conditions. Mesma matriz da sidebar: cada
-    // item exige a permission Tatami correspondente. Loja/Carteira também
-    // dependem das settings da academia (store enabled, payment provider
-    // configurado) — combinamos AND.
     final filteredItems = _moreMenuItems.where((item) {
       switch (item.path) {
+        case '/admin/loja':
+          return isStoreEnabled &&
+              (user?.hasPermission(TatamiPermissions.storeWrite) ?? false);
+        case '/admin/loja/pedidos':
+          return isStoreEnabled &&
+              (user?.hasPermission(TatamiPermissions.storeWrite) ?? false);
         case '/admin/turmas':
           return user?.hasPermission(TatamiPermissions.attendanceRead) ?? false;
         case '/admin/campeonatos':
           return user?.isInstructor ?? false;
+        case '/admin/graduacao':
+          return user?.hasPermission(TatamiPermissions.studentsRead) ?? false;
         case '/admin/cobranca':
           return user?.hasPermission(TatamiPermissions.financialWrite) ?? false;
+        case '/admin/retencao':
+          return user?.hasPermission(TatamiPermissions.studentsRead) ?? false;
         case '/admin/relatorios':
           return user?.hasPermission(TatamiPermissions.financialRead) ?? false;
-        case '/admin/loja':
-          return isStoreEnabled &&
-              (user?.hasPermission(TatamiPermissions.storeWrite) ?? false);
+        case '/admin/equipe':
+          return user?.isAdmin ?? false;
+        case '/admin/configuracoes':
+          return user?.isAdmin ?? false;
         case '/admin/carteira':
           return isPaymentEnabled &&
               (user?.hasPermission(TatamiPermissions.financialWrite) ?? false);
-        case '/admin/configuracoes':
-          return user?.isAdmin ?? false;
         default:
           return true;
       }
@@ -590,28 +609,17 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
   Widget build(BuildContext context) {
     final selectedIndex = _getSelectedIndex();
 
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface.withValues(alpha: 0.95),
-        border: const Border(
-          top: BorderSide(color: AppTheme.divider, width: 1),
-        ),
-      ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: Row(
-            children: List.generate(
-              _bottomNavItems.length,
-              (index) => _AdminBottomNavItem(
-                item: _bottomNavItems[index],
-                isSelected: selectedIndex == index,
-                onTap: () => _onItemTapped(index),
-              ),
+    return NavigationBar(
+      selectedIndex: selectedIndex,
+      onDestinationSelected: _onItemTapped,
+      destinations: _bottomNavItems
+          .map(
+            (item) => NavigationDestination(
+              icon: Icon(item.icon),
+              label: item.label,
             ),
-          ),
-        ),
-      ),
+          )
+          .toList(),
     );
   }
 }
@@ -627,69 +635,6 @@ class _AdminNavItem {
     required this.icon,
     required this.path,
   });
-}
-
-/// Bottom nav item widget - Fintech style with pill indicator
-class _AdminBottomNavItem extends StatelessWidget {
-  final _AdminNavItem item;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _AdminBottomNavItem({
-    required this.item,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Icon with pill background when selected
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: isSelected ? AppTheme.textPrimary : Colors.transparent,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(
-                  item.icon,
-                  size: 20,
-                  color: isSelected ? Colors.white : AppTheme.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 3),
-              // Label
-              Text(
-                item.label,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isSelected
-                      ? AppTheme.textPrimary
-                      : AppTheme.textSecondary,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// Admin notification bell with unread badge

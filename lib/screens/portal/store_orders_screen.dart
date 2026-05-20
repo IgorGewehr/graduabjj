@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -139,7 +140,10 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                           ),
                           showStudentName: isAdminOrInstructor,
                         ),
-                      ),
+                      )
+                          .animate(delay: (index * 50).ms)
+                          .fadeIn(duration: 200.ms)
+                          .slideY(begin: 0.08),
                       childCount: orders.length,
                     ),
                   ),
@@ -225,28 +229,21 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                LucideIcons.shoppingBag,
-                size: 48,
-                color: AppTheme.textSecondary,
-              ),
+            Icon(
+              LucideIcons.packageSearch,
+              size: 64,
+              color: AppTheme.textDisabled,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
             Text(
-              'Nenhum pedido ainda',
+              'Nenhum registro encontrado',
               style: AppTheme.titleMedium,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              'Seus pedidos aparecerao aqui',
-              style: AppTheme.bodyMedium.copyWith(
+              'Seus pedidos aparecerao aqui apos a primeira compra',
+              style: AppTheme.bodySmall.copyWith(
                 color: AppTheme.textSecondary,
               ),
               textAlign: TextAlign.center,
@@ -258,7 +255,9 @@ class _EmptyState extends StatelessWidget {
               label: const Text('Ir para Loja'),
             ),
           ],
-        ),
+        ).animate().fadeIn(duration: 600.ms).scale(
+              begin: const Offset(0.8, 0.8),
+            ),
       ),
     );
   }

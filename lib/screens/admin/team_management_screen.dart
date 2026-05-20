@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
@@ -120,21 +121,55 @@ class _TeamManagementScreenState extends ConsumerState<TeamManagementScreen> {
                 )
               : RefreshIndicator(
                   onRefresh: _load,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    itemCount: _memberships.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (_, i) => _MembershipRow(
-                      membership: _memberships[i],
-                      isSelf: _memberships[i].uid == user.id,
-                      onEdit: () => _openEdit(_memberships[i]),
-                      onToggleStatus: () => _toggleStatus(_memberships[i]),
-                      onRemove: () => _confirmRemove(_memberships[i]),
-                    ),
-                  ),
+                  child: _memberships.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  LucideIcons.users,
+                                  size: 64,
+                                  color: Theme.of(context).disabledColor,
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Nenhum registro encontrado',
+                                  style: Theme.of(context).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Nenhum membro encontrado nesta academia',
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: AppTheme.textSecondary,
+                                      ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ).animate().fadeIn(duration: 600.ms).scale(
+                                  begin: const Offset(0.8, 0.8),
+                                ),
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          itemCount: _memberships.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          itemBuilder: (_, i) => _MembershipRow(
+                            membership: _memberships[i],
+                            isSelf: _memberships[i].uid == user.id,
+                            onEdit: () => _openEdit(_memberships[i]),
+                            onToggleStatus: () => _toggleStatus(_memberships[i]),
+                            onRemove: () => _confirmRemove(_memberships[i]),
+                          )
+                              .animate(delay: (i * 40).ms)
+                              .fadeIn(duration: 200.ms)
+                              .slideX(begin: -0.04),
+                        ),
                 ),
     );
   }
@@ -237,7 +272,7 @@ class _TeamManagementScreenState extends ConsumerState<TeamManagementScreen> {
   }
 }
 
-class _MembershipRow extends StatelessWidget {
+class _MembershipRow extends StatefulWidget {
   final ApiMembership membership;
   final bool isSelf;
   final VoidCallback onEdit;
@@ -251,6 +286,13 @@ class _MembershipRow extends StatelessWidget {
     required this.onToggleStatus,
     required this.onRemove,
   });
+
+  @override
+  State<_MembershipRow> createState() => _MembershipRowState();
+}
+
+class _MembershipRowState extends State<_MembershipRow> {
+  bool _pressed = false;
 
   String _roleLabel(ApiRole r) {
     switch (r) {
@@ -268,7 +310,7 @@ class _MembershipRow extends StatelessWidget {
   }
 
   Color _statusColor() {
-    switch (membership.status) {
+    switch (widget.membership.status) {
       case ApiMembershipStatus.active:
         return AppTheme.success;
       case ApiMembershipStatus.suspended:
@@ -279,7 +321,7 @@ class _MembershipRow extends StatelessWidget {
   }
 
   String _statusLabel() {
-    switch (membership.status) {
+    switch (widget.membership.status) {
       case ApiMembershipStatus.active:
         return 'Ativo';
       case ApiMembershipStatus.suspended:
@@ -291,7 +333,14 @@ class _MembershipRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedScale(
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 100),
+        child: Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppTheme.surface,
@@ -321,7 +370,7 @@ class _MembershipRow extends StatelessWidget {
                       // Não temos display_name aqui (response é só a
                       // membership); mostramos o uid abreviado. Quando o
                       // BE incluir `display_name` denormalizado, trocamos.
-                      membership.uid,
+                      widget.membership.uid,
                       style: AppTheme.bodyMedium.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
@@ -339,7 +388,7 @@ class _MembershipRow extends StatelessWidget {
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
-                            _roleLabel(membership.role),
+                            _roleLabel(widget.membership.role),
                             style: AppTheme.labelSmall,
                           ),
                         ),
@@ -367,18 +416,18 @@ class _MembershipRow extends StatelessWidget {
               // Bloqueio defensivo: admin não pode auto-suspender/remover —
               // evita ficar "sem ninguém" no comando da academia.
               PopupMenuButton<String>(
-                enabled: !isSelf,
-                tooltip: isSelf ? 'Você mesmo' : 'Ações',
+                enabled: !widget.isSelf,
+                tooltip: widget.isSelf ? 'Você mesmo' : 'Ações',
                 onSelected: (v) {
                   switch (v) {
                     case 'edit':
-                      onEdit();
+                      widget.onEdit();
                       break;
                     case 'toggle':
-                      onToggleStatus();
+                      widget.onToggleStatus();
                       break;
                     case 'remove':
-                      onRemove();
+                      widget.onRemove();
                       break;
                   }
                 },
@@ -390,7 +439,7 @@ class _MembershipRow extends StatelessWidget {
                   PopupMenuItem(
                     value: 'toggle',
                     child: Text(
-                      membership.status == ApiMembershipStatus.active
+                      widget.membership.status == ApiMembershipStatus.active
                           ? 'Suspender'
                           : 'Reativar',
                     ),
@@ -406,12 +455,12 @@ class _MembershipRow extends StatelessWidget {
               ),
             ],
           ),
-          if (membership.extraPermissions.isNotEmpty) ...[
+          if (widget.membership.extraPermissions.isNotEmpty) ...[
             const SizedBox(height: 8),
             Wrap(
               spacing: 6,
               runSpacing: 6,
-              children: membership.extraPermissions
+              children: widget.membership.extraPermissions
                   .map(
                     (p) => Container(
                       padding: const EdgeInsets.symmetric(
@@ -436,6 +485,8 @@ class _MembershipRow extends StatelessWidget {
             ),
           ],
         ],
+      ),
+      ),
       ),
     );
   }

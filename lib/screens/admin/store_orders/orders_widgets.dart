@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../core/theme.dart';
@@ -151,32 +152,27 @@ class OrdersEmptyState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                LucideIcons.shoppingCart,
-                size: 48,
-                color: AppTheme.textSecondary,
-              ),
+            Icon(
+              LucideIcons.packageSearch,
+              size: 64,
+              color: AppTheme.textDisabled,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
             Text(
-              'Nenhum pedido encontrado',
+              'Nenhum registro encontrado',
               style: AppTheme.titleMedium,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              'Pedidos dos alunos aparecerao aqui',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              'Nenhum pedido corresponde aos filtros aplicados',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
               textAlign: TextAlign.center,
             ),
           ],
-        ),
+        ).animate().fadeIn(duration: 600.ms).scale(
+              begin: const Offset(0.8, 0.8),
+            ),
       ),
     );
   }

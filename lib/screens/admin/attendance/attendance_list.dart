@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../core/theme.dart';
@@ -88,18 +89,32 @@ class AttendanceStudentSliverList extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(LucideIcons.userX, size: 48, color: AppTheme.textDisabled),
+              Icon(
+                LucideIcons.clipboardList,
+                size: 64,
+                color: AppTheme.textDisabled,
+              ),
               const SizedBox(height: 16),
               Text(
-                searchQuery.isNotEmpty
-                    ? 'Nenhum aluno encontrado'
-                    : 'Nenhum aluno nesta turma',
-                style: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.textSecondary,
+                'Nenhum registro encontrado',
+                style: AppTheme.titleMedium.copyWith(
+                  color: AppTheme.textPrimary,
                 ),
               ),
+              const SizedBox(height: 8),
+              Text(
+                searchQuery.isNotEmpty
+                    ? 'Nenhum aluno corresponde à busca'
+                    : 'Nenhum aluno matriculado nesta turma',
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+                textAlign: TextAlign.center,
+              ),
             ],
-          ),
+          ).animate().fadeIn(duration: 600.ms).scale(
+                begin: const Offset(0.8, 0.8),
+              ),
         ),
       );
     }
@@ -115,7 +130,10 @@ class AttendanceStudentSliverList extends StatelessWidget {
               student: student,
               isPresent: isPresent,
               onTap: () => onToggleAttendance(student),
-            );
+            )
+                .animate(delay: (index * 40).ms)
+                .fadeIn(duration: 200.ms)
+                .slideX(begin: -0.04);
           },
           childCount: filteredStudents.length,
         ),

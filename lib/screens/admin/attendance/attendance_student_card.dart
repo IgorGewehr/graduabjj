@@ -6,7 +6,7 @@ import '../../../models/student.dart';
 
 /// Single student row in the attendance list.
 /// Tapping toggles the student's presence for the selected session.
-class AttendanceStudentCard extends StatelessWidget {
+class AttendanceStudentCard extends StatefulWidget {
   final Student student;
   final bool isPresent;
   final VoidCallback onTap;
@@ -19,20 +19,33 @@ class AttendanceStudentCard extends StatelessWidget {
   });
 
   @override
+  State<AttendanceStudentCard> createState() => _AttendanceStudentCardState();
+}
+
+class _AttendanceStudentCardState extends State<AttendanceStudentCard> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
+      onTap: widget.onTap,
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedScale(
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 100),
+        child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isPresent
+          color: widget.isPresent
               ? AppTheme.success.withValues(alpha: 0.05)
               : AppTheme.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isPresent ? AppTheme.success : AppTheme.divider,
-            width: isPresent ? 2 : 1,
+            color: widget.isPresent ? AppTheme.success : AppTheme.divider,
+            width: widget.isPresent ? 2 : 1,
           ),
         ),
         child: Row(
@@ -42,12 +55,12 @@ class AttendanceStudentCard extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: isPresent ? AppTheme.success : AppTheme.surfaceVariant,
+                color: widget.isPresent ? AppTheme.success : AppTheme.surfaceVariant,
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                isPresent ? LucideIcons.checkCircle : LucideIcons.circle,
-                color: isPresent ? Colors.white : AppTheme.textDisabled,
+                widget.isPresent ? LucideIcons.checkCircle : LucideIcons.circle,
+                color: widget.isPresent ? Colors.white : AppTheme.textDisabled,
                 size: 22,
               ),
             ),
@@ -63,7 +76,7 @@ class AttendanceStudentCard extends StatelessWidget {
               ),
               child: Center(
                 child: Text(
-                  student.fullName[0].toUpperCase(),
+                  widget.student.fullName[0].toUpperCase(),
                   style: AppTheme.bodyMedium.copyWith(
                     fontWeight: FontWeight.w600,
                     color: AppTheme.textSecondary,
@@ -79,16 +92,16 @@ class AttendanceStudentCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    student.nickname ?? student.fullName.split(' ').first,
+                    widget.student.nickname ?? widget.student.fullName.split(' ').first,
                     style: AppTheme.bodyMedium.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: isPresent
+                      color: widget.isPresent
                           ? AppTheme.success
                           : AppTheme.textPrimary,
                     ),
                   ),
                   Text(
-                    student.fullName,
+                    widget.student.fullName,
                     style: AppTheme.bodySmall.copyWith(
                       color: AppTheme.textSecondary,
                     ),
@@ -103,12 +116,13 @@ class AttendanceStudentCard extends StatelessWidget {
           ],
         ),
       ),
+      ),
     );
   }
 
   Widget _buildBeltIndicator() {
-    final beltColor = _getBeltColor(student.currentBelt);
-    final stripes = student.currentStripes.clamp(0, 4);
+    final beltColor = _getBeltColor(widget.student.currentBelt);
+    final stripes = widget.student.currentStripes.clamp(0, 4);
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -120,7 +134,7 @@ class AttendanceStudentCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: beltColor,
             borderRadius: BorderRadius.circular(2),
-            border: student.currentBelt == 'white'
+            border: widget.student.currentBelt == 'white'
                 ? Border.all(color: AppTheme.divider)
                 : null,
           ),
