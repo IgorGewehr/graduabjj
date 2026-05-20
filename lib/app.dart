@@ -443,6 +443,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         return isSplash ? null : '/';
       }
 
+      // If user data failed to load, redirect to login
+      if (currentUser.hasError) {
+        return '/login';
+      }
+
       final user = currentUser.valueOrNull;
 
       // If logged in and on auth pages, redirect based on role

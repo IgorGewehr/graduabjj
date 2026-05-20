@@ -9,7 +9,7 @@ import '../api/tatami_client.dart';
 /// Production:   --dart-define=TATAMI_BASE_URL=https://api.tatami.dev
 const _defaultBaseUrl = String.fromEnvironment(
   'TATAMI_BASE_URL',
-  defaultValue: 'https://api.staging.tatami.dev',
+  defaultValue: 'https://tatami.tensorroot.com',
 );
 
 /// Cliente HTTP único compartilhado pela app.
