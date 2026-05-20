@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
+import '../api/settings_repo.dart';
 import 'firebase_service.dart';
 
 /// Contact type for billing reminders
@@ -183,7 +184,11 @@ class BillingReminderService {
   final String academyId;
   late final Collections _collections;
 
-  BillingReminderService(this.academyId) {
+  /// Optional Tatami settings repo for reading/writing billing reminder
+  /// settings via the Go backend instead of Firestore.
+  final SettingsRemoteRepo? settingsRepo;
+
+  BillingReminderService(this.academyId, {this.settingsRepo}) {
     _collections = Collections(academyId);
   }
 
@@ -438,49 +443,67 @@ class BillingReminderService {
   // ============================================
   // Get Billing Reminder Settings
   // ============================================
+  /// Reads billing reminder settings from Tatami
+  /// `GET /v1/academies/{id}/settings` (key: `billing_reminders`).
   Future<BillingNotificationSettings> getNotificationSettings() async {
-    final doc = await FirebaseFirestore.instance
-        .collection('academies')
-        .doc(academyId)
-        .collection('settings')
-        .doc('billingReminders')
-        .get();
-
-    if (!doc.exists) {
+    if (settingsRepo == null || academyId.isEmpty) {
       return BillingNotificationSettings(
         whatsappEnabled: false,
         emailEnabled: false,
       );
     }
 
-    final data = doc.data()!;
-    return BillingNotificationSettings(
-      whatsappEnabled: data['whatsappEnabled'] as bool? ?? false,
-      emailEnabled: data['emailEnabled'] as bool? ?? false,
-      messageTemplates: BillingMessageTemplates.fromMap(
-        data['messageTemplates'] as Map<String, dynamic>?,
-      ),
-    );
+    try {
+      final allSettings = await settingsRepo!.getAll(academyId);
+      final setting = allSettings['billing_reminders'];
+      if (setting == null || setting.value == null) {
+        return BillingNotificationSettings(
+          whatsappEnabled: false,
+          emailEnabled: false,
+        );
+      }
+
+      final data = setting.value is Map<String, dynamic>
+          ? setting.value as Map<String, dynamic>
+          : <String, dynamic>{};
+
+      return BillingNotificationSettings(
+        whatsappEnabled: data['whatsappEnabled'] as bool? ?? false,
+        emailEnabled: data['emailEnabled'] as bool? ?? false,
+        messageTemplates: BillingMessageTemplates.fromMap(
+          data['messageTemplates'] as Map<String, dynamic>?,
+        ),
+      );
+    } catch (e) {
+      // On error, return defaults so the UI renders without crashing.
+      return BillingNotificationSettings(
+        whatsappEnabled: false,
+        emailEnabled: false,
+      );
+    }
   }
 
   // ============================================
   // Save Notification Settings (Toggles)
   // ============================================
+  /// Persists billing reminder settings via Tatami
+  /// `PUT /v1/academies/{id}/settings/billing_reminders`.
   Future<void> saveNotificationSettings(BillingNotificationSettings settings) async {
+    if (settingsRepo == null || academyId.isEmpty) {
+      throw Exception(
+        'Settings repo not available. Cannot save notification settings.',
+      );
+    }
+
     final data = <String, dynamic>{
       'whatsappEnabled': settings.whatsappEnabled,
       'emailEnabled': settings.emailEnabled,
-      'updatedAt': Timestamp.fromDate(DateTime.now()),
     };
     if (settings.messageTemplates != null) {
       data['messageTemplates'] = settings.messageTemplates!.toMap();
     }
-    await FirebaseFirestore.instance
-        .collection('academies')
-        .doc(academyId)
-        .collection('settings')
-        .doc('billingReminders')
-        .set(data, SetOptions(merge: true));
+
+    await settingsRepo!.set(academyId, 'billing_reminders', data);
   }
 }
 

@@ -19,11 +19,9 @@ import '../../providers/auth_provider.dart' show currentUserProvider;
 import '../../providers/portal_providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
-// TODO(tatami): SettingsService ainda usado em _loadSettings / _saveSettings
-// porque o tatami não expõe PATCH /v1/academies/{id} (branding, PIX, store
-// flags) nem GET do academy doc completo. Quando esses endpoints existirem,
-// substituir por settingsRepoProvider.getAll / settingsRepoProvider.set.
-// _addMonitor / _removeMonitor já foram migrados para settingsRepoProvider.set.
+// SettingsService (Firestore) fully replaced by settingsRepoProvider
+// (Tatami key/value API). AcademySettings model is still used as in-memory
+// representation for form state.
 import 'settings/academy_tab.dart';
 import 'settings/features_tab.dart';
 import 'settings/financial_tab.dart';
@@ -122,48 +120,89 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // TODO(tatami): migrar para settingsRepoProvider quando tatami expor
-      //   GET /v1/academies/{id} (academy entity completo com branding + PIX).
-      //   Atualmente SettingsRepo.getAll() retorna key/value genérico, sem
-      //   adaptar para AcademySettings. Manter Firestore enquanto endpoint
-      //   não existir.
-      final service = SettingsService(ref.read(safeAcademyIdProvider) ?? '');
-      final settings = await service.getAcademySettings();
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
+      final settingsMap =
+          await ref.read(tatami_repos.settingsRepoProvider).getAll(academyId);
 
-      if (settings != null) {
-        setState(() {
-          _settings = settings;
-          _nameController.text = settings.name;
-          _sloganController.text = settings.portalSlogan ?? '';
-          _cnpjController.text = settings.cnpj ?? '';
-          _emailController.text = settings.email ?? '';
-          _phoneController.text = settings.phone ?? '';
-          _addressController.text = settings.address ?? '';
-          _cityController.text = settings.city ?? '';
-          _stateController.text = settings.state ?? '';
-          _zipCodeController.text = settings.zipCode ?? '';
-          _birthDateController.text = settings.responsibleBirthDate ?? '';
-          _pixKeyController.text = settings.pixKey ?? '';
-          _storeWelcomeController.text = settings.storeWelcomeMessage ?? '';
-          _storeMinAmountController.text =
-              settings.storeMinOrderAmount?.toStringAsFixed(2) ?? '';
-          _pixKeyType = settings.pixKeyType;
-          _abacatePayEnabled = settings.abacatePayEnabled;
-          _asaasEnabled = settings.asaasEnabled;
-          _storeEnabled = settings.storeEnabled;
-          _storePublished = settings.storePublished;
-          _storeCreditCardEnabled = settings.storeCreditCardEnabled;
-          _studentCheckinEnabled = settings.studentCheckinEnabled;
-          _autoGraduationEnabled = settings.autoGraduationEnabled;
-          _useClassWeights = settings.useClassWeights;
-          if (settings.autoGraduationAttendances != null) {
-            _autoGraduationAttendancesController.text = settings
-                .autoGraduationAttendances
-                .toString();
-          }
-          _monitorIds = settings.monitorIds;
-        });
+      // Helper to read a typed value from the key/value map.
+      T? _val<T>(String key) {
+        final s = settingsMap[key];
+        if (s == null) return null;
+        final v = s.value;
+        if (v is T) return v;
+        return null;
       }
+
+      // Build an AcademySettings from the Tatami key/value pairs. Keys
+      // follow snake_case convention from the backend.
+      final settings = AcademySettings(
+        name: _val<String>('name') ?? 'Minha Academia',
+        slug: _val<String>('slug'),
+        cnpj: _val<String>('cnpj'),
+        email: _val<String>('email'),
+        phone: _val<String>('phone'),
+        address: _val<String>('address'),
+        city: _val<String>('city'),
+        state: _val<String>('state'),
+        zipCode: _val<String>('zip_code'),
+        responsibleBirthDate: _val<String>('responsible_birth_date'),
+        logoUrl: _val<String>('logo_url'),
+        portalSlogan: _val<String>('portal_slogan'),
+        pixKey: _val<String>('pix_key'),
+        pixKeyType: _val<String>('pix_key_type') != null
+            ? PixKeyType.values.firstWhere(
+                (e) => e.value == _val<String>('pix_key_type'),
+                orElse: () => PixKeyType.cpf,
+              )
+            : null,
+        abacatePayEnabled: _val<bool>('abacate_pay_enabled') ?? false,
+        asaasEnabled: _val<bool>('asaas_enabled') ?? false,
+        autoGraduationEnabled: _val<bool>('auto_graduation_enabled') ?? false,
+        autoGraduationAttendances: _val<num>('auto_graduation_attendances')?.toInt(),
+        useClassWeights: _val<bool>('use_class_weights') ?? false,
+        storeEnabled: _val<bool>('store_enabled') ?? false,
+        storePublished: _val<bool>('store_published') ?? false,
+        storeCreditCardEnabled: _val<bool>('store_credit_card_enabled') ?? false,
+        storeWelcomeMessage: _val<String>('store_welcome_message'),
+        storeMinOrderAmount: _val<num>('store_min_order_amount')?.toDouble(),
+        studentCheckinEnabled: _val<bool>('student_checkin_enabled') ?? false,
+        monitorIds: (_val<List>('monitor_ids') ?? [])
+            .map((e) => e.toString())
+            .toList(),
+      );
+
+      setState(() {
+        _settings = settings;
+        _nameController.text = settings.name;
+        _sloganController.text = settings.portalSlogan ?? '';
+        _cnpjController.text = settings.cnpj ?? '';
+        _emailController.text = settings.email ?? '';
+        _phoneController.text = settings.phone ?? '';
+        _addressController.text = settings.address ?? '';
+        _cityController.text = settings.city ?? '';
+        _stateController.text = settings.state ?? '';
+        _zipCodeController.text = settings.zipCode ?? '';
+        _birthDateController.text = settings.responsibleBirthDate ?? '';
+        _pixKeyController.text = settings.pixKey ?? '';
+        _storeWelcomeController.text = settings.storeWelcomeMessage ?? '';
+        _storeMinAmountController.text =
+            settings.storeMinOrderAmount?.toStringAsFixed(2) ?? '';
+        _pixKeyType = settings.pixKeyType;
+        _abacatePayEnabled = settings.abacatePayEnabled;
+        _asaasEnabled = settings.asaasEnabled;
+        _storeEnabled = settings.storeEnabled;
+        _storePublished = settings.storePublished;
+        _storeCreditCardEnabled = settings.storeCreditCardEnabled;
+        _studentCheckinEnabled = settings.studentCheckinEnabled;
+        _autoGraduationEnabled = settings.autoGraduationEnabled;
+        _useClassWeights = settings.useClassWeights;
+        if (settings.autoGraduationAttendances != null) {
+          _autoGraduationAttendancesController.text = settings
+              .autoGraduationAttendances
+              .toString();
+        }
+        _monitorIds = settings.monitorIds;
+      });
 
       await _loadLinkedStudents();
 
@@ -251,63 +290,109 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // TODO(tatami): migrar writes para settingsRepoProvider.set(key, value)
-      //   ou PATCH /v1/academies/{id} quando o backend expor esse endpoint.
-      //   Atualmente SettingsService escreve direto no Firestore academy doc.
-      final service = SettingsService(ref.read(safeAcademyIdProvider) ?? '');
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
+      final repo = ref.read(tatami_repos.settingsRepoProvider);
 
-      await service.updateBasicInfo(
-        name: _nameController.text,
-        cnpj: _cnpjController.text.isEmpty ? null : _cnpjController.text,
-        email: _emailController.text.isEmpty ? null : _emailController.text,
-        phone: _phoneController.text.isEmpty ? null : _phoneController.text,
-        address: _addressController.text.isEmpty
-            ? null
-            : _addressController.text,
-        city: _cityController.text.isEmpty ? null : _cityController.text,
-        state: _stateController.text.isEmpty ? null : _stateController.text,
-        zipCode: _zipCodeController.text.isEmpty
-            ? null
-            : _zipCodeController.text,
-        responsibleBirthDate: _birthDateController.text.isEmpty
-            ? null
-            : _birthDateController.text,
-      );
+      // Save all settings as individual key/value pairs via Tatami.
+      // Each call is a PUT /v1/academies/{id}/settings/{key} — idempotent.
+      final futures = <Future>[];
 
-      if (_pixKeyController.text.isNotEmpty && _pixKeyType != null) {
-        await service.updatePixInfo(_pixKeyController.text, _pixKeyType!);
+      // Basic info
+      futures.add(repo.set(academyId, 'name', _nameController.text));
+      if (_cnpjController.text.isNotEmpty) {
+        futures.add(repo.set(academyId, 'cnpj', _cnpjController.text));
+      }
+      if (_emailController.text.isNotEmpty) {
+        futures.add(repo.set(academyId, 'email', _emailController.text));
+      }
+      if (_phoneController.text.isNotEmpty) {
+        futures.add(repo.set(academyId, 'phone', _phoneController.text));
+      }
+      if (_addressController.text.isNotEmpty) {
+        futures.add(repo.set(academyId, 'address', _addressController.text));
+      }
+      if (_cityController.text.isNotEmpty) {
+        futures.add(repo.set(academyId, 'city', _cityController.text));
+      }
+      if (_stateController.text.isNotEmpty) {
+        futures.add(repo.set(academyId, 'state', _stateController.text));
+      }
+      if (_zipCodeController.text.isNotEmpty) {
+        futures.add(repo.set(academyId, 'zip_code', _zipCodeController.text));
+      }
+      if (_birthDateController.text.isNotEmpty) {
+        futures.add(repo.set(
+          academyId,
+          'responsible_birth_date',
+          _birthDateController.text,
+        ));
       }
 
-      await service.updateBranding(
-        portalSlogan: _sloganController.text.isEmpty
-            ? null
-            : _sloganController.text,
+      // PIX
+      if (_pixKeyController.text.isNotEmpty && _pixKeyType != null) {
+        futures.add(repo.set(academyId, 'pix_key', _pixKeyController.text));
+        futures.add(repo.set(academyId, 'pix_key_type', _pixKeyType!.value));
+      }
+
+      // Branding
+      if (_sloganController.text.isNotEmpty) {
+        futures.add(
+          repo.set(academyId, 'portal_slogan', _sloganController.text),
+        );
+      }
+
+      // Store settings
+      futures.add(repo.set(academyId, 'store_enabled', _storeEnabled));
+      futures.add(repo.set(academyId, 'store_published', _storePublished));
+      futures.add(repo.set(
+        academyId,
+        'store_credit_card_enabled',
+        _storeCreditCardEnabled,
+      ));
+      if (_storeWelcomeController.text.isNotEmpty) {
+        futures.add(repo.set(
+          academyId,
+          'store_welcome_message',
+          _storeWelcomeController.text,
+        ));
+      }
+      if (_storeMinAmountController.text.isNotEmpty) {
+        final minAmount = double.tryParse(_storeMinAmountController.text);
+        if (minAmount != null) {
+          futures.add(
+            repo.set(academyId, 'store_min_order_amount', minAmount),
+          );
+        }
+      }
+
+      // Integration toggles
+      futures.add(
+        repo.set(academyId, 'abacate_pay_enabled', _abacatePayEnabled),
+      );
+      futures.add(repo.set(academyId, 'asaas_enabled', _asaasEnabled));
+      futures.add(
+        repo.set(academyId, 'student_checkin_enabled', _studentCheckinEnabled),
       );
 
-      await service.updateStoreSettings(
-        enabled: _storeEnabled,
-        published: _storePublished,
-        creditCardEnabled: _storeCreditCardEnabled,
-        welcomeMessage: _storeWelcomeController.text.isEmpty
-            ? null
-            : _storeWelcomeController.text,
-        minOrderAmount: _storeMinAmountController.text.isNotEmpty
-            ? double.tryParse(_storeMinAmountController.text)
-            : null,
+      // Auto-graduation
+      futures.add(
+        repo.set(academyId, 'auto_graduation_enabled', _autoGraduationEnabled),
       );
-
-      await service.toggleAbacatePay(_abacatePayEnabled);
-      await service.toggleAsaas(_asaasEnabled);
-      await service.toggleStudentCheckin(_studentCheckinEnabled);
-
       final attendancesValue = int.tryParse(
         _autoGraduationAttendancesController.text,
       );
-      await service.updateAutoGraduation(
-        _autoGraduationEnabled,
-        attendances: attendancesValue,
+      if (attendancesValue != null) {
+        futures.add(repo.set(
+          academyId,
+          'auto_graduation_attendances',
+          attendancesValue,
+        ));
+      }
+      futures.add(
+        repo.set(academyId, 'use_class_weights', _useClassWeights),
       );
-      await service.updateUseClassWeights(_useClassWeights);
+
+      await Future.wait(futures);
 
       ref.invalidate(academySettingsProvider);
       ref.invalidate(academyNameProvider);
@@ -436,8 +521,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         return;
       }
 
-      final service = SettingsService(academyId);
-      await service.updateLogo(downloadUrl);
+      await ref.read(tatami_repos.settingsRepoProvider).set(
+        academyId,
+        'logo_url',
+        downloadUrl,
+      );
 
       ref.invalidate(academySettingsProvider);
       await _loadSettings();

@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../api/dto/academy_dto.dart' show RedeemLinkCodeRequest;
 import '../api/repositories.dart';
 import '../api/identity_repo.dart';
+import '../api/link_code_repo.dart';
 import '../api/tatami_client.dart';
 import 'api_provider.dart';
 import '../models/user.dart';
@@ -440,108 +442,61 @@ class AuthService {
     }
   }
 
-  /// Link student account with code (multi-tenant)
+  /// Link student account with code (multi-tenant).
+  ///
+  /// Uses Tatami `POST /v1/link-codes/{code}/redeem` which atomically:
+  ///   - validates the code (not expired, not already used)
+  ///   - creates/links the user_academy_mapping
+  ///   - links the student record to the Firebase user
+  ///   - marks the code as consumed
+  /// No Firestore writes needed — the backend handles everything in one
+  /// transactional call.
   Future<void> linkStudentAccount(String linkCode, String academyId) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('Usuario nao autenticado');
 
-    final academyRef = _firestore.collection('academies').doc(academyId);
-
-    // Find link code document in academy's linkCodes subcollection
-    final codeQuery = await academyRef
-        .collection('linkCodes')
-        .where('code', isEqualTo: linkCode.toUpperCase())
-        .where('usedAt', isNull: true)
-        .limit(1)
-        .get();
-
-    if (codeQuery.docs.isEmpty) {
-      throw Exception('Codigo invalido ou ja utilizado');
+    try {
+      final linkCodeRepo = LinkCodeRemoteRepo(_tatami);
+      await linkCodeRepo.redeem(linkCode.toUpperCase());
+    } on Exception catch (e) {
+      // Map backend errors to user-friendly Portuguese messages
+      final msg = e.toString();
+      if (msg.contains('409') || msg.contains('already-used')) {
+        throw Exception('Codigo invalido ou ja utilizado');
+      }
+      if (msg.contains('410') || msg.contains('expired')) {
+        throw Exception('Codigo expirado');
+      }
+      if (msg.contains('404')) {
+        throw Exception('Codigo invalido ou ja utilizado');
+      }
+      rethrow;
     }
-
-    final codeDoc = codeQuery.docs.first;
-    final codeData = codeDoc.data();
-
-    // Check if code is expired
-    final expiresAt = (codeData['expiresAt'] as Timestamp).toDate();
-    if (DateTime.now().isAfter(expiresAt)) {
-      throw Exception('Codigo expirado');
-    }
-
-    final studentId = codeData['studentId'] as String;
-
-    // Link user to academy using globalUserService
-    await globalUserService.linkUserToAcademy(
-      userId: user.uid,
-      academyId: academyId,
-      studentId: studentId,
-      role: UserRole.student,
-    );
-
-    // Update/create academy user document
-    await globalUserService.upsertAcademyUser(
-      academyId: academyId,
-      userId: user.uid,
-      data: {
-        'studentId': studentId,
-        'role': 'student',
-        'email': user.email,
-        'displayName': user.displayName,
-        'approvedAt': DateTime.now(),
-        'status': 'active',
-      },
-    );
-
-    // Update student document in academy's students subcollection
-    await academyRef.collection('students').doc(studentId).update({
-      'linkedUserId': user.uid,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    // Mark code as used
-    await codeDoc.reference.update({
-      'usedAt': FieldValue.serverTimestamp(),
-      'usedBy': user.uid,
-    });
-
-    // Sync highest belt from all linked academies
-    await globalUserService.syncHighestBelt(user.uid);
   }
 
-  /// Unlink from academy
+  /// Unlink from academy.
+  ///
+  /// Uses Tatami `DELETE /v1/academies/{academyId}/memberships/{uid}` which
+  /// atomically removes the membership, unlinks the student record, and
+  /// cleans up academy user data server-side.
   Future<void> unlinkFromAcademy(String academyId) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('Usuario nao autenticado');
 
-    // Get the mapping to find studentId
-    final mapping = await globalUserService.getUserAcademyMapping(user.uid);
-    final academyDetail = mapping?.academyDetails?[academyId];
-    final studentId = academyDetail?.studentId;
-
-    // Unlink student from user
-    if (studentId != null) {
-      await _firestore
-          .collection('academies')
-          .doc(academyId)
-          .collection('students')
-          .doc(studentId)
-          .update({
-            'linkedUserId': FieldValue.delete(),
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
+    try {
+      final identityRepo = IdentityRemoteRepo(_tatami);
+      await identityRepo.removeMembership(academyId, user.uid);
+    } on Exception catch (e) {
+      final msg = e.toString();
+      if (msg.contains('412')) {
+        throw Exception('Confirmacao necessaria para desvincular da academia');
+      }
+      if (msg.contains('404')) {
+        // Membership already removed — treat as success
+        return;
+      }
+      rethrow;
     }
-
-    // Remove academy user document
-    await globalUserService.deleteAcademyUser(
-      academyId: academyId,
-      userId: user.uid,
-    );
-
-    // Unlink user from academy
-    await globalUserService.unlinkUserFromAcademy(
-      userId: user.uid,
-      academyId: academyId,
-    );
   }
 
   /// Switch primary academy (for multi-academy users)
@@ -640,19 +595,33 @@ class AuthService {
         .replaceAll(RegExp(r'-+'), '-');
   }
 
-  /// Create account with link code (registers and links to student in one step)
+  /// Create account with link code (registers and links to student in one step).
+  ///
   /// CRITICAL: academyId must be passed explicitly (from link code validation)
-  /// to ensure multi-tenant correctness during registration
+  /// to ensure multi-tenant correctness during registration.
+  ///
+  /// Flow:
+  ///   1. Create Firebase Auth user (client-side — JWT needed for Tatami).
+  ///   2. POST /v1/link-codes/{code}/redeem — the backend atomically:
+  ///      - auto-provisions the global_user (first /v1/me with Bearer)
+  ///      - creates/links membership + student record
+  ///      - marks the code as consumed
+  ///
+  /// The [linkCode] parameter is the raw code string that was previously
+  /// validated via `getPreview`. [studentId] and [academyId] are kept in
+  /// the signature for backward compatibility but are no longer used
+  /// directly — the backend resolves them from the code itself.
   Future<UserCredential> createAccountWithLinkCode(
     String email,
     String password,
     String displayName,
     String studentId,
-    String academyId, // Must be passed from validated link code
-    String? cpf, { // Optional CPF to save with student
-    String? phone, // Optional WhatsApp phone to save with student
+    String academyId, // Kept for backward compatibility; backend resolves from code
+    String? cpf, { // Optional CPF to save with student profile
+    String? phone, // Optional WhatsApp phone to save with student profile
+    String? linkCode, // The raw link code string for redeem
   }) async {
-    // Create Firebase Auth account
+    // Step 1: Create Firebase Auth account
     final credential = await _auth.createUserWithEmailAndPassword(
       email: email,
       password: password,
@@ -661,78 +630,42 @@ class AuthService {
     // Update display name in Firebase Auth
     await credential.user?.updateDisplayName(displayName);
 
-    // Create global user document
-    await globalUserService.createGlobalUser(
-      userId: credential.user!.uid,
-      email: email,
-      displayName: displayName,
-      accountType: AccountType.linked, // Already linked to academy
-    );
-
-    // Link user to academy
-    await globalUserService.linkUserToAcademy(
-      userId: credential.user!.uid,
-      academyId: academyId,
-      studentId: studentId,
-      role: UserRole.student,
-    );
-
-    // Create academy user document
-    await globalUserService.upsertAcademyUser(
-      academyId: academyId,
-      userId: credential.user!.uid,
-      data: {
-        'studentId': studentId,
-        'role': 'student',
-        'email': email,
-        'displayName': displayName,
-        'approvedAt': DateTime.now(),
-        'status': 'active',
-      },
-    );
-
-    // Update student document with linkedUserId and CPF (with retry logic)
-    // This MUST complete before returning to avoid race conditions on first login
-    bool studentUpdated = false;
-    for (int attempt = 0; attempt < 3 && !studentUpdated; attempt++) {
-      try {
-        final updateData = <String, dynamic>{
-          'linkedUserId': credential.user!.uid,
-          'email': email,
-          'updatedAt': FieldValue.serverTimestamp(),
-        };
-
-        // Only add CPF if provided
-        if (cpf != null && cpf.isNotEmpty) {
-          updateData['cpf'] = cpf;
-        }
-
-        // Only add phone if provided
-        if (phone != null && phone.isNotEmpty) {
-          updateData['phone'] = phone;
-        }
-
-        await _firestore
-            .collection('academies')
-            .doc(academyId)
-            .collection('students')
-            .doc(studentId)
-            .update(updateData);
-
-        studentUpdated = true;
-      } catch (e) {
-        debugPrint('Student update attempt ${attempt + 1} failed: $e');
-        if (attempt < 2) {
-          await Future.delayed(Duration(milliseconds: 500));
-        } else {
-          // On final attempt failure, log error but continue
-          // User can still login, but profile linking might fail
-          debugPrint('CRITICAL: Failed to update student after 3 attempts');
-          throw Exception(
-            'Falha ao vincular perfil do aluno. Tente novamente.',
-          );
-        }
+    // Step 2: Redeem the link code via Tatami. The backend auto-provisions
+    // the global_user on first authenticated request, creates the membership,
+    // and links the student — all atomically.
+    try {
+      final linkCodeRepo = LinkCodeRemoteRepo(_tatami);
+      final code = linkCode ?? '';
+      if (code.isEmpty) {
+        // Fallback: if linkCode was not passed, we cannot redeem.
+        // This handles the legacy call-site that may not pass the code yet.
+        throw Exception(
+          'Codigo de vinculacao nao informado. Tente novamente.',
+        );
       }
+
+      await linkCodeRepo.redeem(
+        code.toUpperCase(),
+        profile: RedeemLinkCodeRequest(
+          fullName: displayName,
+          phone: phone,
+        ),
+      );
+    } on Exception catch (e) {
+      // If the redeem fails after account creation, the user exists in
+      // Firebase Auth but is not linked. They can retry linking later
+      // via linkStudentAccount().
+      final msg = e.toString();
+      if (msg.contains('409') || msg.contains('already-used')) {
+        throw Exception('Codigo invalido ou ja utilizado');
+      }
+      if (msg.contains('410') || msg.contains('expired')) {
+        throw Exception('Codigo expirado');
+      }
+      debugPrint('Link code redeem failed after account creation: $e');
+      throw Exception(
+        'Falha ao vincular perfil do aluno. Tente novamente.',
+      );
     }
 
     return credential;

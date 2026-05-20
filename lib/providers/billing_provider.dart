@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// TODO(tatami): descomentar quando contactLogProvider for migrado para tatami.
-// import '../api/repositories.dart';
+import '../api/repositories.dart';
 import '../services/billing_reminder_service.dart';
 import 'selected_academy_provider.dart';
 
@@ -9,20 +8,23 @@ import 'selected_academy_provider.dart';
 /// Mantido para operações sem equivalente direto no tatami:
 ///   - getStudentContacts (leitura de students com phone/email/guardian)
 ///   - getCollectionStats (métricas agregadas de inadimplência)
-///   - getNotificationSettings / saveNotificationSettings (billingReminders subcol)
 ///   - logContactAttempt (escrita em billingContactLog — callers em
 ///     billing_reminders/ ainda dependem do BillingContactLog model)
+///
+/// getNotificationSettings / saveNotificationSettings agora usam
+/// settingsRepoProvider (PUT /v1/academies/{id}/settings/billing_reminders).
 ///
 /// TODO(tatami): quando o backend expor:
 ///   - GET /v1/academies/{id}/financials/reports/monthly com métricas de
 ///     inadimplência → migrar getCollectionStats para financialRepoProvider.getMonthlyReport
 ///   - GET /v1/academies/{id}/billing-contacts com filtro student_id →
 ///     migrar contactLogProvider para financialRepoProvider.listBillingContactsForFinancial
-///   - PUT /v1/academies/{id}/settings/billing_reminders →
-///     migrar getNotificationSettings/saveNotificationSettings para settingsRepoProvider
 final billingReminderServiceProvider = Provider<BillingReminderService>((ref) {
   final academyId = ref.watch(safeAcademyIdProvider) ?? '';
-  return BillingReminderService(academyId);
+  return BillingReminderService(
+    academyId,
+    settingsRepo: ref.watch(settingsRepoProvider),
+  );
 });
 
 /// Overdue payments grouped by stage.

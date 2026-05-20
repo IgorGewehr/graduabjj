@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
@@ -44,7 +43,7 @@ class _PixPaymentSheetState extends ConsumerState<PixPaymentSheet>
     with SingleTickerProviderStateMixin {
   bool _paymentConfirmed = false;
   bool _copied = false;
-  StreamSubscription<DocumentSnapshot>? _paymentListener;
+  Timer? _paymentPollTimer;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
@@ -101,48 +100,66 @@ class _PixPaymentSheetState extends ConsumerState<PixPaymentSheet>
     });
   }
 
+  /// Polls the Tatami API every 3 seconds to check if the payment status
+  /// changed to "paid". Replaces the previous Firestore snapshots() listener
+  /// since Tatami does not expose real-time streams for individual financials.
+  ///
+  /// Stops polling after payment confirmation or after 10 minutes (timeout).
   void _setupPaymentListener() {
     final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
-    String collection;
-    String docId;
+    // Only financials are supported for polling; store orders use a
+    // different flow. If neither ID is present, skip.
+    if (widget.financialId == null && widget.orderId == null) return;
 
-    if (widget.orderId != null) {
-      collection = 'storeOrders';
-      docId = widget.orderId!;
-    } else if (widget.financialId != null) {
-      collection = 'financials';
-      docId = widget.financialId!;
-    } else {
-      return;
-    }
+    final isFinancial = widget.financialId != null;
+    final docId = isFinancial ? widget.financialId! : widget.orderId!;
 
-    // TODO(tatami): substituir este listener Firestore por um mecanismo
-    // orientado a eventos do tatami quando disponível. Opções candidatas:
-    //   1. NotificationRemoteRepo.streamNotifications() (SSE) — escutar
-    //      eventos do tipo 'payment_confirmed' vindos do backend.
-    //   2. Polling leve via financialRepoProvider.getById() com Timer.periodic.
-    // Por ora, o listener Firestore é mantido pois é o único canal real-time
-    // confiável para confirmar pagamentos PIX imediatamente ao aluno.
-    _paymentListener = FirebaseFirestore.instance
-        .collection('academies')
-        .doc(academyId)
-        .collection(collection)
-        .doc(docId)
-        .snapshots()
-        .listen((snapshot) {
-      if (!mounted) return;
+    // Timeout: stop polling after 10 minutes to avoid draining battery.
+    final deadline = DateTime.now().add(const Duration(minutes: 10));
 
-      final data = snapshot.data();
-      final status = data?['status'] as String?;
-      final isPaid = status == 'paid' ||
-          (collection == 'financials' && data?['paymentDate'] != null);
+    _paymentPollTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      if (!mounted || _paymentConfirmed) {
+        timer.cancel();
+        return;
+      }
 
-      if (isPaid && !_paymentConfirmed) {
-        setState(() => _paymentConfirmed = true);
-        HapticFeedback.heavyImpact();
-        _showSuccessDialog();
-        if (mounted) widget.onPaymentConfirmed?.call();
+      if (DateTime.now().isAfter(deadline)) {
+        timer.cancel();
+        return;
+      }
+
+      try {
+        if (isFinancial) {
+          final repo = ref.read(tatami_repos.financialRepoProvider);
+          final financial = await repo.getById(academyId, docId);
+          final isPaid = financial.status == api_fin.ApiFinancialStatus.paid;
+
+          if (isPaid && !_paymentConfirmed) {
+            timer.cancel();
+            if (!mounted) return;
+            setState(() => _paymentConfirmed = true);
+            HapticFeedback.heavyImpact();
+            _showSuccessDialog();
+            if (mounted) widget.onPaymentConfirmed?.call();
+          }
+        } else {
+          // Store orders: poll via store repo
+          final storeRepo = ref.read(tatami_repos.storeRepoProvider);
+          final order = await storeRepo.getOrder(academyId, docId);
+          final isPaid = order.status.name == 'paid';
+
+          if (isPaid && !_paymentConfirmed) {
+            timer.cancel();
+            if (!mounted) return;
+            setState(() => _paymentConfirmed = true);
+            HapticFeedback.heavyImpact();
+            _showSuccessDialog();
+            if (mounted) widget.onPaymentConfirmed?.call();
+          }
+        }
+      } catch (_) {
+        // Swallow errors during polling — next tick will retry.
       }
     });
   }
@@ -150,7 +167,7 @@ class _PixPaymentSheetState extends ConsumerState<PixPaymentSheet>
   @override
   void dispose() {
     _animationController.dispose();
-    _paymentListener?.cancel();
+    _paymentPollTimer?.cancel();
     _expirationTimer?.cancel();
     super.dispose();
   }
