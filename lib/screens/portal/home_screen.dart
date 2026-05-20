@@ -65,7 +65,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               data: (s) {
                 if (s == null) {
                   return WelcomeHeader(
-                    userName: currentUser.valueOrNull?.displayName ?? 'Aluno',
+                    userName: currentUser.valueOrNull?.displayName.trim().isNotEmpty == true
+                        ? currentUser.valueOrNull!.displayName
+                        : 'Aluno',
                   );
                 }
                 return WelcomeHeaderWithBelt(
@@ -75,10 +77,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 );
               },
               loading: () => WelcomeHeader(
-                userName: currentUser.valueOrNull?.displayName ?? 'Aluno',
+                userName: currentUser.valueOrNull?.displayName.trim().isNotEmpty == true
+                        ? currentUser.valueOrNull!.displayName
+                        : 'Aluno',
               ),
               error: (_, __) => WelcomeHeader(
-                userName: currentUser.valueOrNull?.displayName ?? 'Aluno',
+                userName: currentUser.valueOrNull?.displayName.trim().isNotEmpty == true
+                        ? currentUser.valueOrNull!.displayName
+                        : 'Aluno',
               ),
             ),
 

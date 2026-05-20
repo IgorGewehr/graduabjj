@@ -153,7 +153,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   Widget build(BuildContext context) {
     final currentUser = ref.watch(currentUserProvider);
     final user = currentUser.valueOrNull;
-    final userName = user?.displayName.split(' ').first ?? 'Admin';
+    final userName = (user?.displayName.trim().isNotEmpty == true)
+        ? user!.displayName.split(' ').first
+        : 'Admin';
     // Cards de KPI financeiro requerem `financial.read` — instrutor default
     // tem (vê read-only). Monitor não vê. Cards de Loja não existem aqui
     // hoje; quando vierem, gate-amos com `store.read`.

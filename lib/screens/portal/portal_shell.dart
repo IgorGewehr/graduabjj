@@ -67,7 +67,6 @@ class _PortalShellState extends ConsumerState<PortalShell> {
 
     return BackButtonHandler(
       isRootRoute: isRootRoute,
-      exitMessage: 'Pressione voltar novamente para sair',
       child: Scaffold(
         backgroundColor: AppTheme.background,
         appBar: AppBar(

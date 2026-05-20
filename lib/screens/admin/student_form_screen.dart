@@ -578,7 +578,11 @@ class _AdminStudentFormScreenState
         context.showSuccess(
           isEditing ? 'Aluno atualizado!' : 'Aluno cadastrado!',
         );
-        context.go('/admin/alunos');
+        if (isEditing) {
+          context.pop();
+        } else {
+          context.go('/admin/alunos/$studentId');
+        }
       }
     } catch (e) {
       if (mounted) context.showError('Erro: $e');

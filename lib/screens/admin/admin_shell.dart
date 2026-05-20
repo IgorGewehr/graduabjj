@@ -29,7 +29,6 @@ class AdminShell extends ConsumerWidget {
 
     return BackButtonHandler(
       isRootRoute: isRootRoute,
-      exitMessage: 'Pressione voltar novamente para sair',
       child: Scaffold(
         backgroundColor: AppTheme.background,
         appBar: MediaQuery.of(context).size.width < 768

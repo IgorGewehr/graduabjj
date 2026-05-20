@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../api/dto/academy_dto.dart' show RedeemLinkCodeRequest;
+import '../api/dto/identity_dto.dart' show UpdateUserRequest;
 import '../api/repositories.dart';
 import '../api/identity_repo.dart';
 import '../api/link_code_repo.dart';
@@ -322,6 +323,12 @@ class AuthService {
       accountType: AccountType.free, // New users start as free
     );
 
+    // Sync display_name to Tatami (auto-provision creates user with empty name)
+    try {
+      await IdentityRemoteRepo(_tatami)
+          .updateMe(UpdateUserRequest(displayName: displayName));
+    } catch (_) {}
+
     return credential;
   }
 
@@ -574,6 +581,12 @@ class AuthService {
       }
     }
 
+    // Sync display_name to Tatami (academy creation auto-provisions user with empty name)
+    try {
+      await IdentityRemoteRepo(_tatami)
+          .updateMe(UpdateUserRequest(displayName: displayName));
+    } catch (_) {}
+
     return credential;
   }
 
@@ -678,6 +691,12 @@ class AuthService {
         'Falha ao vincular perfil do aluno. Tente novamente.',
       );
     }
+
+    // Sync display_name to Tatami after redeem (auto-provision creates user with empty name)
+    try {
+      await IdentityRemoteRepo(_tatami)
+          .updateMe(UpdateUserRequest(displayName: displayName));
+    } catch (_) {}
 
     return credential;
   }
