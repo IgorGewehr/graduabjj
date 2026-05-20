@@ -7,8 +7,7 @@ import '../../api/repositories.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
-import '../../services/plan_service.dart' show Plan, PlanService;
-import '../../services/firebase_service.dart';
+import '../../services/plan_service.dart' show Plan;
 import '../../providers/selected_academy_provider.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/belt_badge.dart';
@@ -694,9 +693,11 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
                       student.id,
                       customValue: plan.monthlyValue,
                     );
-                  } catch (_) {
-                    final planService = PlanService(academyId);
-                    await planService.removeCustomValue(plan.id, student.id);
+                  } catch (e) {
+                    if (!mounted || !dialogContext.mounted) return;
+                    Navigator.of(dialogContext).pop();
+                    parentContext.showError('Erro ao restaurar valor');
+                    return;
                   }
                   if (!mounted || !dialogContext.mounted) return;
                   Navigator.of(dialogContext).pop();
@@ -736,9 +737,11 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
                       student.id,
                       customDueDay: plan.defaultDueDay,
                     );
-                  } catch (_) {
-                    final planService = PlanService(academyId);
-                    await planService.removeCustomDueDay(plan.id, student.id);
+                  } catch (e) {
+                    if (!mounted || !dialogContext.mounted) return;
+                    Navigator.of(dialogContext).pop();
+                    parentContext.showError('Erro ao restaurar vencimento');
+                    return;
                   }
                   if (!mounted || !dialogContext.mounted) return;
                   Navigator.of(dialogContext).pop();
@@ -776,21 +779,11 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
                   customDueDay:
                       dueDay != plan.defaultDueDay ? dueDay : null,
                 );
-              } catch (_) {
-                // Fallback: Firestore legado
-                final planService = PlanService(academyId);
-                if (value == plan.monthlyValue) {
-                  await planService.removeCustomValue(plan.id, student.id);
-                } else {
-                  await planService.setCustomValue(
-                      plan.id, student.id, value);
-                }
-                if (dueDay == plan.defaultDueDay) {
-                  await planService.removeCustomDueDay(plan.id, student.id);
-                } else {
-                  await planService.setCustomDueDay(
-                      plan.id, student.id, dueDay);
-                }
+              } catch (e) {
+                if (!mounted || !dialogContext.mounted) return;
+                Navigator.of(dialogContext).pop();
+                parentContext.showError('Erro ao salvar valores');
+                return;
               }
               if (!mounted || !dialogContext.mounted) return;
               Navigator.of(dialogContext).pop();

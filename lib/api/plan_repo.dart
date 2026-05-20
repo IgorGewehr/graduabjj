@@ -71,16 +71,39 @@ class PlanRemoteRepo {
     await _api.delete('/v1/academies/$academyId/plans/$planId');
   }
 
-  /// Assina N alunos no plano em uma única chamada (transação no backend).
-  /// Substitui o loop FE-side de N writes que o app legacy fazia.
+  /// Atribui um único aluno ao plano.
+  ///
+  /// `POST /v1/academies/{academyId}/plans/{planId}/students/{studentId}`
+  ///
+  /// O backend NÃO tem rota bulk sem studentId no path — cada aluno deve
+  /// ser atribuído individualmente. Para N alunos use [assignStudents].
+  Future<void> assignStudent(
+    String academyId,
+    String planId,
+    String studentId,
+  ) async {
+    await _api.post<dynamic>(
+      '/v1/academies/$academyId/plans/$planId/students/$studentId',
+    );
+  }
+
+  /// Atribui N alunos ao plano chamando o endpoint individual por aluno.
+  ///
+  /// Cada chamada vai para
+  /// `POST /v1/academies/{academyId}/plans/{planId}/students/{studentId}`.
+  /// As chamadas são feitas em paralelo via [Future.wait] para minimizar
+  /// latência percebida.
   Future<void> assignStudents(
     String academyId,
     String planId,
     List<String> studentIds,
   ) async {
-    await _api.post<dynamic>(
-      '/v1/academies/$academyId/plans/$planId/students',
-      data: {'student_ids': studentIds},
+    await Future.wait(
+      studentIds.map(
+        (sid) => _api.post<dynamic>(
+          '/v1/academies/$academyId/plans/$planId/students/$sid',
+        ),
+      ),
     );
   }
 

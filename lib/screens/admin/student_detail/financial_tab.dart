@@ -255,10 +255,11 @@ class StudentFinancialTab extends StatelessWidget {
                           studentId,
                           customValue: plan.monthlyValue, // volta ao padrão
                         );
-                  } catch (_) {
-                    // Fallback: Firestore legado
-                    final planService = PlanService(academyId);
-                    await planService.removeCustomValue(plan.id, studentId);
+                  } catch (e) {
+                    if (parentContext.mounted) {
+                      parentContext.showError('Erro ao restaurar valor');
+                    }
+                    return;
                   }
                   if (parentContext.mounted) {
                     parentContext.showSuccess(
@@ -301,10 +302,11 @@ class StudentFinancialTab extends StatelessWidget {
                           studentId,
                           customDueDay: plan.defaultDueDay, // volta ao padrão
                         );
-                  } catch (_) {
-                    // Fallback: Firestore legado
-                    final planService = PlanService(academyId);
-                    await planService.removeCustomDueDay(plan.id, studentId);
+                  } catch (e) {
+                    if (parentContext.mounted) {
+                      parentContext.showError('Erro ao restaurar vencimento');
+                    }
+                    return;
                   }
                   if (parentContext.mounted) {
                     parentContext.showSuccess(
@@ -342,20 +344,11 @@ class StudentFinancialTab extends StatelessWidget {
                   customValue: value != plan.monthlyValue ? value : null,
                   customDueDay: dueDay != plan.defaultDueDay ? dueDay : null,
                 );
-              } catch (_) {
-                // Fallback: Firestore legado
-                final planService = PlanService(academyId);
-                if (value == plan.monthlyValue) {
-                  await planService.removeCustomValue(plan.id, studentId);
-                } else {
-                  await planService.setCustomValue(plan.id, studentId, value);
+              } catch (e) {
+                if (parentContext.mounted) {
+                  parentContext.showError('Erro ao salvar valores');
                 }
-                if (dueDay == plan.defaultDueDay) {
-                  await planService.removeCustomDueDay(plan.id, studentId);
-                } else {
-                  await planService.setCustomDueDay(
-                      plan.id, studentId, dueDay);
-                }
+                return;
               }
               if (parentContext.mounted) {
                 parentContext.showSuccess('Valor e vencimento atualizados');
