@@ -10,7 +10,7 @@ import '../../api/repositories.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
-import '../../providers/selected_academy_provider.dart' show selectedAcademyIdProvider;
+import '../../providers/selected_academy_provider.dart' show selectedAcademyIdProvider, safeAcademyIdProvider;
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import 'monitor_student_detail/student_detail_helpers.dart';
