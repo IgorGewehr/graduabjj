@@ -221,7 +221,7 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
       case ApiRole.instructor:
         return UserRole.instructor;
       case ApiRole.monitor:
-        return UserRole.monitor;
+        return UserRole.instructor;
       case ApiRole.guardian:
         return UserRole.guardian;
       case ApiRole.student:
