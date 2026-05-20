@@ -99,58 +99,96 @@ class _AdminStudentDetailScreenState
       }
 
       Future<List<Attendance>> attendanceFuture() async {
-        final q = tatami.AttendanceQuery(
-          academyId: academyId,
-          filter: api_att.AttendanceFilter(
-            studentId: widget.studentId,
-            limit: 200,
-          ),
-        );
-        ref.invalidate(tatami.tatamiAttendanceLegacyProvider(q));
-        return ref.read(tatami.tatamiAttendanceLegacyProvider(q).future);
+        try {
+          final q = tatami.AttendanceQuery(
+            academyId: academyId,
+            filter: api_att.AttendanceFilter(
+              studentId: widget.studentId,
+              limit: 200,
+            ),
+          );
+          ref.invalidate(tatami.tatamiAttendanceLegacyProvider(q));
+          return await ref.read(tatami.tatamiAttendanceLegacyProvider(q).future);
+        } catch (_) {
+          return [];
+        }
       }
 
       Future<List<Payment>> paymentsFuture() async {
-        final q = tatami.FinancialsQuery(
-          academyId: academyId,
-          filter: api_fin.FinancialFilter(
-            studentId: widget.studentId,
-            limit: 100,
-          ),
-        );
-        ref.invalidate(tatami.tatamiPaymentsLegacyProvider(q));
-        return ref.read(tatami.tatamiPaymentsLegacyProvider(q).future);
+        try {
+          final q = tatami.FinancialsQuery(
+            academyId: academyId,
+            filter: api_fin.FinancialFilter(
+              studentId: widget.studentId,
+              limit: 100,
+            ),
+          );
+          ref.invalidate(tatami.tatamiPaymentsLegacyProvider(q));
+          return await ref.read(tatami.tatamiPaymentsLegacyProvider(q).future);
+        } catch (_) {
+          return [];
+        }
       }
 
       Future<List<BeltProgression>> progressionsFuture() async {
-        final page = await ref
-            .read(tatami_repos.beltProgressionRepoProvider)
-            .getHistory(academyId, widget.studentId, limit: 100);
-        return page.items.map(BeltProgression.fromApi).toList()
-          ..sort((a, b) => b.promotionDate.compareTo(a.promotionDate));
+        try {
+          final page = await ref
+              .read(tatami_repos.beltProgressionRepoProvider)
+              .getHistory(academyId, widget.studentId, limit: 100);
+          return page.items.map(BeltProgression.fromApi).toList()
+            ..sort((a, b) => b.promotionDate.compareTo(a.promotionDate));
+        } catch (_) {
+          return [];
+        }
       }
 
       Future<List<Achievement>> achievementsFuture() async {
-        final page = await ref
-            .read(tatami_repos.achievementRepoProvider)
-            .getByStudent(academyId, widget.studentId, limit: 100);
-        return page.items
-            .map((a) => Achievement.fromApiRepo(a))
-            .toList();
+        try {
+          final page = await ref
+              .read(tatami_repos.achievementRepoProvider)
+              .getByStudent(academyId, widget.studentId, limit: 100);
+          return page.items
+              .map((a) => Achievement.fromApiRepo(a))
+              .toList();
+        } catch (_) {
+          return [];
+        }
       }
 
       Future<List<Assessment>> assessmentsFuture() async {
-        final page = await ref
-            .read(tatami_repos.assessmentRepoProvider)
-            .getByStudent(academyId, widget.studentId, limit: 100);
-        return page.items.map(Assessment.fromApi).toList();
+        try {
+          final page = await ref
+              .read(tatami_repos.assessmentRepoProvider)
+              .getByStudent(academyId, widget.studentId, limit: 100);
+          return page.items.map(Assessment.fromApi).toList();
+        } catch (_) {
+          return [];
+        }
       }
 
       Future<List<StoreOrder>> storeOrdersFuture() async {
-        final page = await ref
-            .read(tatami_repos.storeRepoProvider)
-            .listOrders(academyId, studentId: widget.studentId, limit: 50);
-        return page.items.map(StoreOrder.fromApi).toList();
+        try {
+          final page = await ref
+              .read(tatami_repos.storeRepoProvider)
+              .listOrders(academyId, studentId: widget.studentId, limit: 50);
+          return page.items.map(StoreOrder.fromApi).toList();
+        } catch (_) {
+          return [];
+        }
+      }
+
+      Future<List<Plan>> plansFuture() async {
+        try {
+          final apiPlans = await ref
+              .read(tatami_repos.planRepoProvider)
+              .list(academyId);
+          return apiPlans
+              .map(Plan.fromApi)
+              .where((p) => p.studentIds.contains(widget.studentId))
+              .toList();
+        } catch (_) {
+          return [];
+        }
       }
 
       final futures = await Future.wait<dynamic>([
@@ -161,15 +199,7 @@ class _AdminStudentDetailScreenState
         progressionsFuture(),
         achievementsFuture(),
         assessmentsFuture(),
-        ref
-            .read(tatami_repos.planRepoProvider)
-            .list(academyId)
-            .then(
-              (apiPlans) => apiPlans
-                  .map(Plan.fromApi)
-                  .where((p) => p.studentIds.contains(widget.studentId))
-                  .toList(),
-            ),
+        plansFuture(),
       ]);
 
       final student = futures[0] as Student?;

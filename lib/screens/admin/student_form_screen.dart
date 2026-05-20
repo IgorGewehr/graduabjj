@@ -405,7 +405,9 @@ class _AdminStudentFormScreenState
   }
 
   Future<void> _saveStudent() async {
-    final isFormValid = _formKey.currentState!.validate();
+    final formState = _formKey.currentState;
+    if (formState == null) return;
+    final isFormValid = formState.validate();
     final hasNoSport = _grades.isEmpty;
 
     if (!isFormValid || hasNoSport) {

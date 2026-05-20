@@ -92,7 +92,7 @@ class _PortalShellState extends ConsumerState<PortalShell> {
           width: 56,
           height: 56,
           child: FloatingActionButton(
-            onPressed: () => context.go('/portal/qr-scan'),
+            onPressed: () => context.push('/portal/qr-code'),
             backgroundColor: AppTheme.primary,
             foregroundColor: Colors.white,
             elevation: 4,

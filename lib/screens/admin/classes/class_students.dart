@@ -10,6 +10,7 @@ import '../../../core/sports.dart';
 import '../../../core/theme.dart';
 import '../../../models/student.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/selected_academy_provider.dart';
 import '../../../services/services.dart';
 import '../../../widgets/cached_image.dart';
 import '../../../widgets/common/grade_display.dart';
@@ -67,12 +68,11 @@ class _ManageStudentsSheetState extends ConsumerState<ManageStudentsSheet> {
 
   Future<void> _load() async {
     try {
-      final currentUser = ref.read(currentUserProvider).valueOrNull;
-      if (currentUser?.academyId == null) {
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
+      if (academyId.isEmpty) {
         setState(() => _isLoading = false);
         return;
       }
-      final academyId = currentUser!.academyId!;
       final repo = ref.read(studentRepoProvider);
       // Busca até 500 alunos (active + inactive) para o gerenciamento de turma.
       // limit:500 é conservativo — academias raramente ultrapassam esse número.
@@ -120,8 +120,8 @@ class _ManageStudentsSheetState extends ConsumerState<ManageStudentsSheet> {
   }
 
   Future<void> _toggle(Student student) async {
-    final currentUser = ref.read(currentUserProvider).valueOrNull;
-    if (currentUser?.academyId == null) return;
+    final academyId = ref.read(safeAcademyIdProvider) ?? '';
+    if (academyId.isEmpty) return;
     if (_pendingIds.contains(student.id)) return;
 
     final wasEnrolled = _enrolledIds.contains(student.id);
@@ -135,7 +135,6 @@ class _ManageStudentsSheetState extends ConsumerState<ManageStudentsSheet> {
     });
 
     try {
-      final academyId = currentUser!.academyId!;
       final repo = ref.read(classRepoProvider);
       if (wasEnrolled) {
         await repo.removeStudent(academyId, widget.bjjClass.id, student.id);

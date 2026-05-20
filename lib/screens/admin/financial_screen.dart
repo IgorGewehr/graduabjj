@@ -67,52 +67,70 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
       final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
       Future<List<Payment>> paymentsFuture() async {
-        final first =
-            DateTime(_selectedMonth.year, _selectedMonth.month, 1);
-        final last =
-            DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
-        final q = tatami.FinancialsQuery(
-          academyId: academyId,
-          filter: api_fin.FinancialFilter(
-            dueFrom: first,
-            dueTo: last,
-            limit: 500,
-          ),
-        );
-        ref.invalidate(tatami.tatamiPaymentsLegacyProvider(q));
-        return ref.read(tatami.tatamiPaymentsLegacyProvider(q).future);
+        try {
+          final first =
+              DateTime(_selectedMonth.year, _selectedMonth.month, 1);
+          final last =
+              DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
+          final q = tatami.FinancialsQuery(
+            academyId: academyId,
+            filter: api_fin.FinancialFilter(
+              dueFrom: first,
+              dueTo: last,
+              limit: 500,
+            ),
+          );
+          ref.invalidate(tatami.tatamiPaymentsLegacyProvider(q));
+          return await ref.read(tatami.tatamiPaymentsLegacyProvider(q).future);
+        } catch (_) {
+          return [];
+        }
       }
 
       Future<List<Student>> studentsFuture() async {
-        final q = tatami.StudentsQuery(academyId: academyId);
-        ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
-        final all =
-            await ref.read(tatami.tatamiStudentsLegacyProvider(q).future);
-        return all
-            .where((s) =>
-                s.status == StudentStatus.active ||
-                s.status == StudentStatus.injured)
-            .toList();
+        try {
+          final q = tatami.StudentsQuery(academyId: academyId);
+          ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
+          final all =
+              await ref.read(tatami.tatamiStudentsLegacyProvider(q).future);
+          return all
+              .where((s) =>
+                  s.status == StudentStatus.active ||
+                  s.status == StudentStatus.injured)
+              .toList();
+        } catch (_) {
+          return [];
+        }
       }
 
       Future<Map<String, dynamic>> monthlyFuture() async {
-        final key = tatami.AcademyMonth(
-          academyId: academyId,
-          month: _currentMonthKey,
-        );
-        ref.invalidate(tatami.tatamiMonthlyReportLegacyProvider(key));
-        return ref
-            .read(tatami.tatamiMonthlyReportLegacyProvider(key).future);
+        try {
+          final key = tatami.AcademyMonth(
+            academyId: academyId,
+            month: _currentMonthKey,
+          );
+          ref.invalidate(tatami.tatamiMonthlyReportLegacyProvider(key));
+          return await ref
+              .read(tatami.tatamiMonthlyReportLegacyProvider(key).future);
+        } catch (_) {
+          return <String, dynamic>{};
+        }
       }
 
-      final plansList = await ref
-          .read(planRepoProvider)
-          .list(academyId)
-          .then((apiPlans) => apiPlans.map(Plan.fromApi).toList());
+      Future<List<Plan>> plansFuture() async {
+        try {
+          final apiPlans = await ref
+              .read(planRepoProvider)
+              .list(academyId);
+          return apiPlans.map(Plan.fromApi).toList();
+        } catch (_) {
+          return [];
+        }
+      }
 
       final results = await Future.wait([
         paymentsFuture(),
-        Future.value(plansList),
+        plansFuture(),
         studentsFuture(),
         monthlyFuture(),
       ]);

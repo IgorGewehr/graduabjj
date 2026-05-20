@@ -689,6 +689,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
+      // QR code route alias (used by navigation buttons)
+      GoRoute(
+        path: '/portal/qr-code',
+        pageBuilder: (context, state) => _buildPageWithPushTransition(
+          context: context,
+          state: state,
+          child: const QrScanScreen(),
+        ),
+      ),
+
       // Portal Notifications (outside shell for full-screen overlay)
       GoRoute(
         path: '/portal/notificacoes',

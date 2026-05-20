@@ -7,6 +7,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import 'classes/class_detail.dart';
 import 'classes/class_form.dart';
@@ -46,12 +47,11 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
   Future<void> _loadClasses() async {
     setState(() => _isLoading = true);
     try {
-      final currentUser = ref.read(currentUserProvider).valueOrNull;
-      if (currentUser?.academyId == null) {
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
+      if (academyId.isEmpty) {
         setState(() => _isLoading = false);
         return;
       }
-      final academyId = currentUser!.academyId!;
       final q = tatami.ClassesQuery(academyId: academyId);
       ref.invalidate(tatami.tatamiClassesLegacyProvider(q));
       final classes =
