@@ -562,6 +562,19 @@ class _AdminStudentFormScreenState
       }
 
       if (mounted) {
+        // Invalidate cached student data so list/detail screens refresh.
+        ref.invalidate(
+          tatami.tatamiStudentsLegacyProvider(
+            tatami.StudentsQuery(academyId: academyId),
+          ),
+        );
+        if (isEditing) {
+          ref.invalidate(
+            tatami.tatamiStudentByIdLegacyProvider(
+              tatami.studentRef(academyId, widget.studentId!),
+            ),
+          );
+        }
         context.showSuccess(
           isEditing ? 'Aluno atualizado!' : 'Aluno cadastrado!',
         );

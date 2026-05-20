@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart' show DioException;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,6 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/attendance_dto.dart' as api_att;
 import '../../api/repositories.dart';
+import '../../api/tatami_exception.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/checkin.dart';
@@ -327,7 +329,13 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
         setState(() => _presentStudentIds.add(student.id));
       }
     } catch (e) {
-      if (mounted) context.showError('Erro: $e');
+      if (mounted) {
+        String msg = 'Erro ao registrar presenca';
+        if (e is DioException && e.error is TatamiException) {
+          msg = (e.error as TatamiException).forUser(fallback: msg);
+        }
+        context.showError(msg);
+      }
     } finally {
       setState(() => _isSaving = false);
     }

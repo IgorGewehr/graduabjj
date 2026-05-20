@@ -557,9 +557,11 @@ class _ManageStudentsSheetState extends State<ManageStudentsSheet> {
       if (_enrolledIds.contains(student.id)) {
         await planRepo.unassignStudent(academyId, widget.plan.id, student.id);
         setState(() => _enrolledIds.remove(student.id));
+        if (mounted) context.showSuccess('Aluno removido do plano');
       } else {
         await planRepo.assignStudents(academyId, widget.plan.id, [student.id]);
         setState(() => _enrolledIds.add(student.id));
+        if (mounted) context.showSuccess('Aluno adicionado ao plano');
       }
     } catch (e) {
       if (mounted) {

@@ -76,7 +76,7 @@ class _TeamManagementScreenState extends ConsumerState<TeamManagementScreen> {
           try {
             final user = await repo.getUserByUid(m.uid);
             return m.withUserInfo(
-              displayName: user.displayName,
+              displayName: user.displayName ?? user.email,
               email: user.email,
             );
           } catch (_) {

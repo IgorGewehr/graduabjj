@@ -434,7 +434,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                             )
                           : Text(
                               currencyFormat
-                                  .format((_wallet?.availableBalance ?? 0) / 100),
+                                  .format((_wallet?.availableBalance ?? 0)),
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 42,
@@ -447,7 +447,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
-                            'A receber: ${currencyFormat.format((_wallet?.pendingBalance ?? 0) / 100)}',
+                            'A receber: ${currencyFormat.format((_wallet?.pendingBalance ?? 0))}',
                             style: const TextStyle(
                               color: Colors.white38,
                               fontSize: 13,
@@ -467,7 +467,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                                               ?.hasPermission(TatamiPermissions
                                                   .financialWrite) ??
                                           false) &&
-                                      (_wallet?.availableBalance ?? 0) >= 100)
+                                      (_wallet?.availableBalance ?? 0) >= 1)
                                   ? _showWithdrawalSheet
                                   : null,
                           icon: const Icon(LucideIcons.arrowUpRight, size: 18),
@@ -953,7 +953,7 @@ class _TransactionCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '${transaction.isCredit ? '+' : '-'} ${currencyFormat.format(transaction.amount / 100)}',
+                '${transaction.isCredit ? '+' : '-'} ${currencyFormat.format(transaction.amount)}',
                 style: AppTheme.titleSmall.copyWith(
                   fontWeight: FontWeight.w700,
                   color: transaction.isCredit
@@ -1132,7 +1132,7 @@ class _WithdrawalBottomSheetState extends State<_WithdrawalBottomSheet> {
                           ),
                         ),
                         Text(
-                          'Disponivel: ${currencyFormat.format(widget.maxAmount / 100)}',
+                          'Disponivel: ${currencyFormat.format(widget.maxAmount)}',
                           style: AppTheme.bodySmall.copyWith(
                             color: AppTheme.textSecondary,
                           ),

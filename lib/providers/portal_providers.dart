@@ -2,7 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/dto/competition_dto.dart' show ApiTransportPreference;
 import '../api/link_code_repo.dart';
+import '../api/dto/academy_dto.dart';
 import '../api/repositories.dart';
+import 'api_provider.dart';
 import '../services/services.dart';
 import 'auth_provider.dart';
 import 'student_provider.dart';
@@ -224,8 +226,18 @@ final academySettingsProvider = FutureProvider<AcademySettings?>((ref) async {
   final academyId = currentUser!.academyId!;
 
   try {
-    final settingsMap =
-        await ref.read(settingsRepoProvider).getAll(academyId);
+    // Fetch settings key-value store AND the academy entity in parallel.
+    // The academy entity (GET /v1/academies/{id}) holds canonical fields
+    // like name, slug, phone, email, cnpj that are NOT stored in the
+    // settings key-value table. Using both sources ensures the UI shows
+    // the correct academy name/logo even when settings are sparse.
+    final client = ref.read(tatamiClientProvider);
+    final results = await Future.wait<dynamic>([
+      ref.read(settingsRepoProvider).getAll(academyId),
+      client.get<Map<String, dynamic>>('/v1/academies/$academyId'),
+    ]);
+    final settingsMap = results[0] as Map<String, ApiAcademySetting>;
+    final academy = ApiAcademy.fromJson(results[1] as Map<String, dynamic>);
 
     T? _val<T>(String key) {
       final s = settingsMap[key];
@@ -236,11 +248,11 @@ final academySettingsProvider = FutureProvider<AcademySettings?>((ref) async {
     }
 
     return AcademySettings(
-      name: _val<String>('name') ?? 'Minha Academia',
-      slug: _val<String>('slug'),
-      cnpj: _val<String>('cnpj'),
-      email: _val<String>('email'),
-      phone: _val<String>('phone'),
+      name: _val<String>('name') ?? academy.name,
+      slug: _val<String>('slug') ?? academy.slug,
+      cnpj: _val<String>('cnpj') ?? academy.cnpj,
+      email: _val<String>('email') ?? academy.email,
+      phone: _val<String>('phone') ?? academy.phone,
       address: _val<String>('address'),
       city: _val<String>('city'),
       state: _val<String>('state'),
