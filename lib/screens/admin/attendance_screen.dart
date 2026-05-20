@@ -32,6 +32,9 @@ class AdminAttendanceScreen extends ConsumerStatefulWidget {
 }
 
 class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
+  // Persists across widget rebuilds caused by shell navigation
+  static String? _lastSelectedClassId;
+
   List<BJJClass> _classes = [];
   List<Student> _students = [];
   Set<String> _presentStudentIds = {};
@@ -102,12 +105,21 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
         studentsFuture(),
       ]);
 
+      final classes = results[0] as List<BJJClass>;
+      final restoredClass = _lastSelectedClassId != null
+          ? classes.where((c) => c.id == _lastSelectedClassId).firstOrNull
+          : null;
+
       setState(() {
-        _classes = results[0] as List<BJJClass>;
+        _classes = classes;
         _students = results[1] as List<Student>;
-        _selectedClass = null;
+        _selectedClass = restoredClass;
         _isLoading = false;
       });
+
+      if (restoredClass != null) {
+        await _loadAttendanceForClass();
+      }
     } catch (e) {
       setState(() => _isLoading = false);
     }
@@ -371,17 +383,24 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       }
 
       // Tatami: POST /v1/academies/{id}/attendance/bulk
-      await repo.bulkRecord(
+      final recorded = await repo.bulkRecord(
         currentUser!.academyId!,
         _selectedClass!.id,
         studentsToMark.map((s) => s.id).toList(),
       );
 
-      _presentStudentIds.addAll(studentsToMark.map((s) => s.id));
-      setState(() {});
+      // Only mark locally the ones the backend actually saved
+      await _loadAttendanceForClass();
 
       if (mounted) {
-        context.showSuccess('${studentsToMark.length} alunos marcados!');
+        if (recorded == studentsToMark.length) {
+          context.showSuccess('$recorded alunos marcados!');
+        } else {
+          final skipped = studentsToMark.length - recorded;
+          context.showInfo(
+            '$recorded marcados, $skipped ignorados (modalidade incompatível)',
+          );
+        }
       }
     } catch (e) {
       if (mounted) context.showError('Erro: $e');
@@ -535,6 +554,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                                   classes: _classes,
                                   selectedClass: _selectedClass,
                                   onChanged: (value) {
+                                    _lastSelectedClassId = value?.id;
                                     setState(() => _selectedClass = value);
                                     _loadAttendanceForClass();
                                   },

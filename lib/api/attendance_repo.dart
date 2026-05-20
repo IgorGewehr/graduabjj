@@ -77,16 +77,15 @@ class AttendanceRemoteRepo {
     );
   }
 
-  /// `POST /v1/academies/{id}/attendance/bulk` — bulk staff check-in with a
-  /// single class + list of student IDs. Simpler contract than [recordBulk]:
-  /// one class, many students, one timestamp. Duplicates are silently ignored
-  /// by the backend (status='duplicate' in results).
-  Future<void> bulkRecord(
+  /// `POST /v1/academies/{id}/attendance/bulk` — bulk staff check-in.
+  /// Returns the count of students actually recorded (excluding sport_mismatch
+  /// and duplicates). Callers can use this to warn when not all students saved.
+  Future<int> bulkRecord(
     String academyId,
     String classId,
     List<String> studentIds,
   ) async {
-    await _api.post<Map<String, dynamic>>(
+    final json = await _api.post<Map<String, dynamic>>(
       '/v1/academies/$academyId/attendance/bulk',
       data: {
         'class_id': classId,
@@ -94,6 +93,8 @@ class AttendanceRemoteRepo {
         'attended_at': DateTime.now().toUtc().toIso8601String(),
       },
     );
+    final results = (json['results'] as List? ?? []);
+    return results.where((r) => r['status'] == 'recorded').length;
   }
 
   /// `POST /v1/academies/{id}/attendance/self-checkin`.

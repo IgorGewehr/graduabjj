@@ -274,7 +274,7 @@ class UpdateFinancialRequest {
     if (dueDate != null) m['due_date'] = _formatDate(dueDate!);
     if (status != null) m['status'] = status!.wire;
     if (method != null) m['method'] = method!.wire;
-    if (paymentDate != null) m['payment_date'] = paymentDate!.toUtc().toIso8601String();
+    if (paymentDate != null) m['payment_date'] = _formatDate(paymentDate!);
     if (referenceMonth != null) m['reference_month'] = referenceMonth;
     if (description != null) m['description'] = description;
     return m;
