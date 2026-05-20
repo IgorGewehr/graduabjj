@@ -252,8 +252,7 @@ class _AcademySelectorSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final academiesAsync = ref.watch(userAcademiesInfoProvider);
     final selectedId = ref.watch(selectedAcademyIdProvider);
-    final mapping = ref.watch(userAcademyMappingProvider).valueOrNull;
-    final primaryId = mapping?.primaryAcademyId;
+    final primaryId = ref.watch(primaryAcademyIdProvider);
 
     return Container(
       decoration: const BoxDecoration(

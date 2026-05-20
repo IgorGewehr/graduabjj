@@ -17,8 +17,7 @@ class ProfileAcademiesSection extends ConsumerWidget {
     final hasMultiple = ref.watch(hasMultipleAcademiesProvider);
     final academiesAsync = ref.watch(userAcademiesInfoProvider);
     final selectedId = ref.watch(selectedAcademyIdProvider);
-    final mapping = ref.watch(userAcademyMappingProvider).valueOrNull;
-    final primaryId = mapping?.primaryAcademyId;
+    final primaryId = ref.watch(primaryAcademyIdProvider);
 
     // Only show section if user has academies (show even for single academy)
     return academiesAsync.when(

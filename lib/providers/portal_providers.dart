@@ -373,6 +373,12 @@ final userNotificationsProvider = StreamProvider<List<AppNotification>>((ref) {
 /// O endpoint dedicado `GET /v1/me/notifications/unread-count` é leve e
 /// evita leituras Firestore. O SSE stream não emite contagens separadas,
 /// por isso usamos polling periódico.
+///
+/// The provider watches [currentUserProvider] so Riverpod rebuilds it when the
+/// auth state changes. Inside the loop we also re-check the user on every
+/// iteration — if the user logs out while `Future.delayed` is pending the loop
+/// breaks immediately on the next tick instead of firing a request with a stale
+/// token.
 final unreadNotificationCountProvider = StreamProvider<int>((ref) async* {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
   if (currentUser == null) {
@@ -381,6 +387,14 @@ final unreadNotificationCountProvider = StreamProvider<int>((ref) async* {
   }
 
   while (true) {
+    // Re-check auth state before each poll — the user may have logged out
+    // while we were sleeping.
+    final user = ref.read(currentUserProvider).valueOrNull;
+    if (user == null) {
+      yield 0;
+      return;
+    }
+
     try {
       final count =
           await ref.read(notificationRepoProvider).getUnreadCount();

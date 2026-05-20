@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/domain_providers.dart';
 import '../../api/repositories.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
@@ -376,9 +377,9 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
           .read(linkCodeRepoProvider)
           .getPreview(code.toUpperCase());
 
-      // Check if already linked to this academy
-      final mapping = ref.read(userAcademyMappingProvider).valueOrNull;
-      if (mapping?.academyIds.contains(preview.academyId) == true) {
+      // Check if already linked to this academy (Tatami-sourced)
+      final linkedIds = ref.read(userAcademyIdsProvider);
+      if (linkedIds.contains(preview.academyId)) {
         setState(() {
           _isValidating = false;
           _errorMessage = 'Voce ja esta vinculado a esta academia';
@@ -440,7 +441,7 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
 
       // Refresh providers
       ref.invalidate(userAcademiesInfoProvider);
-      ref.invalidate(userAcademyMappingProvider);
+      ref.invalidate(currentTatamiUserProvider);
       await ref.read(selectedAcademyProvider.notifier).refreshAcademyCache();
 
       if (mounted) {

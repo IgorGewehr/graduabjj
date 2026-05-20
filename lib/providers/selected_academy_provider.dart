@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/domain_providers.dart';
 import '../api/dto/academy_dto.dart';
 import '../api/dto/identity_dto.dart';
 import '../api/repositories.dart';
@@ -125,6 +126,10 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
           SelectedAcademyState(academyInfoCache: newCache, isLoading: false);
       _ref.read(selectedAcademyIdProvider.notifier).state = academyId;
       FirebaseService.setAcademyId(academyId);
+
+      // Invalidate non-family providers that cache data scoped to the old
+      // academy so they re-fetch for the newly selected one.
+      _ref.invalidate(currentTatamiUserProvider);
     } catch (e) {
       state = state.copyWith(isLoading: false);
       rethrow;
@@ -219,6 +224,12 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
   void clear() {
     state = const SelectedAcademyState();
     _ref.read(selectedAcademyIdProvider.notifier).state = null;
+
+    // Invalidate non-family providers so the next login starts with fresh data
+    // instead of serving stale results from the previous session.
+    _ref.invalidate(currentTatamiUserProvider);
+    _ref.invalidate(globalUserProvider);
+    _ref.invalidate(userAcademyMappingProvider);
   }
 
   String? getCurrentStudentId() {
@@ -319,4 +330,23 @@ final currentAcademyDataProvider = FutureProvider<AcademyInfo?>((ref) async {
   final id = ref.watch(selectedAcademyIdProvider);
   if (id == null) return null;
   return ref.read(selectedAcademyProvider.notifier).getAcademyInfo(id);
+});
+
+/// Primary academy ID sourced from Tatami `/v1/me`.
+///
+/// Replaces the Firestore-based `userAcademyMappingProvider.primaryAcademyId`.
+/// Returns null when the user has no memberships or /v1/me hasn't loaded yet.
+final primaryAcademyIdProvider = Provider<String?>((ref) {
+  final tatamiUser = ref.watch(currentTatamiUserProvider).valueOrNull;
+  return tatamiUser?.primaryAcademyId;
+});
+
+/// List of academy IDs the user belongs to, sourced from Tatami `/v1/me`.
+///
+/// Replaces `userAcademyMappingProvider.academyIds`. Returns empty list when
+/// the user has no memberships or /v1/me hasn't loaded yet.
+final userAcademyIdsProvider = Provider<List<String>>((ref) {
+  final tatamiUser = ref.watch(currentTatamiUserProvider).valueOrNull;
+  if (tatamiUser == null) return const [];
+  return tatamiUser.activeMemberships.map((m) => m.academyId).toList();
 });

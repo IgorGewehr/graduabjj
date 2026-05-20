@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/domain_providers.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/instructor_link_code_service.dart';
@@ -86,8 +87,8 @@ class _InstructorCodeScreenState extends ConsumerState<InstructorCodeScreen> {
         userEmail: user.email,
         userDisplayName: user.displayName,
       );
-      // Refresh user-academy mapping so the new academy shows up
-      ref.invalidate(userAcademyMappingProvider);
+      // Refresh Tatami user so the new academy membership shows up
+      ref.invalidate(currentTatamiUserProvider);
       ref.invalidate(currentUserProvider);
       if (!mounted) return;
       setState(() {

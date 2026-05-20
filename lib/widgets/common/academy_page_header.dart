@@ -42,14 +42,8 @@ class AcademyPageHeader extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Only watch the small derived bits we actually render — `.select` keeps
-    // this header (used on most pages) inert when other fields of the
-    // mapping/info change.
-    final academyIds = ref.watch(
-      userAcademyMappingProvider.select(
-        (m) => m.valueOrNull?.academyIds ?? const <String>[],
-      ),
-    );
+    // Tatami-sourced list of academy IDs the user belongs to.
+    final academyIds = ref.watch(userAcademyIdsProvider);
     final hasMultiple = academyIds.length > 1;
     final academyName = ref.watch(
       currentAcademyInfoProvider.select((info) => info?.name),
@@ -159,7 +153,7 @@ class AcademyPageHeader extends ConsumerWidget {
 class _AcademySwitcherSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final mapping = ref.watch(userAcademyMappingProvider).valueOrNull;
+    final primaryId = ref.watch(primaryAcademyIdProvider);
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
     final academiesAsync = ref.watch(userAcademiesInfoProvider);
 
@@ -191,9 +185,8 @@ class _AcademySwitcherSheet extends ConsumerWidget {
               ),
               data: (infos) => Column(
                 children: infos.map((info) {
-                  final detail = mapping?.academyDetails?[info.id];
                   final isCurrent = currentUser?.academyId == info.id;
-                  final isPrimary = mapping?.primaryAcademyId == info.id;
+                  final isPrimary = primaryId == info.id;
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: AppCachedAvatar(
@@ -218,7 +211,7 @@ class _AcademySwitcherSheet extends ConsumerWidget {
                       ),
                     ),
                     subtitle: Text(
-                      '${detail != null ? detail.role.value : 'aluno'}${isPrimary ? ' • Principal' : ''}',
+                      '${info.role.label}${isPrimary ? ' • Principal' : ''}',
                       style: AppTheme.labelSmall.copyWith(
                         color: AppTheme.textSecondary,
                       ),

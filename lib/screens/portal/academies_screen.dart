@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../api/domain_providers.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/user.dart';
@@ -19,9 +20,8 @@ class AcademiesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final academiesAsync = ref.watch(userAcademiesInfoProvider);
-    final mapping = ref.watch(userAcademyMappingProvider).valueOrNull;
     final selectedId = ref.watch(selectedAcademyIdProvider);
-    final primaryId = mapping?.primaryAcademyId;
+    final primaryId = ref.watch(primaryAcademyIdProvider);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -44,7 +44,7 @@ class AcademiesScreen extends ConsumerWidget {
         onRefresh: () async {
           HapticFeedback.mediumImpact();
           ref.invalidate(userAcademiesInfoProvider);
-          ref.invalidate(userAcademyMappingProvider);
+          ref.invalidate(currentTatamiUserProvider);
           await ref
               .read(selectedAcademyProvider.notifier)
               .refreshAcademyCache();
@@ -315,8 +315,8 @@ class AcademiesScreen extends ConsumerWidget {
       // Switch active academy in Riverpod — propagates to all reactive providers.
       await ref.read(selectedAcademyProvider.notifier).selectAcademy(academy.id);
 
-      // Refresh data
-      ref.invalidate(userAcademyMappingProvider);
+      // Refresh data — currentTatamiUserProvider carries primaryAcademyId.
+      ref.invalidate(currentTatamiUserProvider);
 
       if (context.mounted) {
         FeedbackUtils.showSuccess(
@@ -403,7 +403,7 @@ class AcademiesScreen extends ConsumerWidget {
 
       // Refresh data
       ref.invalidate(userAcademiesInfoProvider);
-      ref.invalidate(userAcademyMappingProvider);
+      ref.invalidate(currentTatamiUserProvider);
       await ref.read(selectedAcademyProvider.notifier).refreshAcademyCache();
 
       if (context.mounted) {
