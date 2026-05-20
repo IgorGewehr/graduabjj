@@ -1,3 +1,4 @@
+import '../../../api/tatami_client.dart';
 import '../../../services/billing_reminder_service.dart';
 import '../../../services/firebase_service.dart';
 
@@ -14,13 +15,11 @@ class BulkSendExecutionResult {
   bool get hasError => error != null;
 }
 
-/// Executes the bulk send loop for [stage].
+/// Executes the bulk send loop for [stage] via Tatami
+/// `POST /v1/academies/{academyId}/billing/messages/bulk`.
 ///
-/// Sends WhatsApp and/or Email to each student according to [notificationSettings],
-/// personalizing [messageTemplate] and [subjectTemplate] per student.
-/// Logs each contact attempt via [billingService].
-///
-/// Returns a [BulkSendExecutionResult] — never throws.
+/// Builds a list of recipients and sends them all in one request. The
+/// backend fans out to WhatsApp/Email via its own notification gateways.
 Future<BulkSendExecutionResult> executeBulkSend({
   required BillingStage stage,
   required String messageTemplate,
@@ -30,12 +29,17 @@ Future<BulkSendExecutionResult> executeBulkSend({
   required BillingNotificationSettings notificationSettings,
   required BillingNotificationService notificationService,
   required BillingReminderService billingService,
+  required TatamiClient tatamiClient,
+  required String academyId,
 }) async {
   int waSent = 0, waFailed = 0, waTotal = 0;
   int emSent = 0, emFailed = 0, emTotal = 0;
   final failures = <BulkFailure>[];
 
   try {
+    // Build all recipients for the bulk request.
+    final recipients = <Map<String, dynamic>>[];
+
     for (final item in items) {
       final studentId = item['studentId'] as String? ?? '';
       final contact = studentContacts[studentId];
@@ -63,79 +67,103 @@ Future<BulkSendExecutionResult> executeBulkSend({
       );
 
       final phone = contact.effectivePhone;
-      if ((notificationSettings.whatsappEnabled) &&
+      if (notificationSettings.whatsappEnabled &&
           phone != null &&
           phone.isNotEmpty) {
         waTotal++;
-        final result = await notificationService.sendWhatsApp(
-          phone: phone,
-          studentName: studentName,
-          studentId: studentId,
-          financialId: financialId,
-          amount: amount,
-          dueDate: dueDate,
-          daysOverdue: daysOverdue,
-          stage: stage,
-          message: personalizedMessage,
-        );
-        if (result.success) {
-          waSent++;
-        } else {
-          waFailed++;
-          failures.add(
-            BulkFailure(
-              type: 'whatsapp',
-              recipient: phone,
-              error: result.error ?? '',
-            ),
-          );
-        }
+        recipients.add({
+          'financial_id': financialId,
+          'channel': 'whatsapp',
+          'phone': phone,
+          'message': personalizedMessage,
+        });
       }
 
       final email = contact.effectiveEmail;
-      if ((notificationSettings.emailEnabled) &&
+      if (notificationSettings.emailEnabled &&
           email != null &&
           email.isNotEmpty) {
         emTotal++;
-        final result = await notificationService.sendEmail(
-          email: email,
-          studentName: studentName,
-          studentId: studentId,
-          financialId: financialId,
-          amount: amount,
-          dueDate: dueDate,
-          daysOverdue: daysOverdue,
-          stage: stage,
-          subject: personalizedSubject,
-          message: personalizedMessage,
-        );
-        if (result.success) {
+        recipients.add({
+          'financial_id': financialId,
+          'channel': 'email',
+          'email': email,
+          'subject': personalizedSubject,
+          'message': personalizedMessage,
+        });
+      }
+    }
+
+    if (recipients.isEmpty) {
+      return BulkSendExecutionResult(
+        serverResult: BulkServerResult(
+          success: true,
+          scheduled: false,
+          whatsapp: BulkChannelSummary(total: 0, sent: 0, failed: 0),
+          email: BulkChannelSummary(total: 0, sent: 0, failed: 0),
+          failures: [],
+        ),
+      );
+    }
+
+    // Single bulk request to Tatami.
+    final resp = await tatamiClient.post<Map<String, dynamic>>(
+      '/v1/academies/$academyId/billing/messages/bulk',
+      data: {'recipients': recipients},
+    );
+
+    final results =
+        (resp['results'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+
+    // Tally results per channel.
+    for (final r in results) {
+      final channel = r['channel'] as String? ?? '';
+      final ok = r['ok'] as bool? ?? false;
+      if (channel == 'whatsapp') {
+        if (ok) {
+          waSent++;
+        } else {
+          waFailed++;
+          failures.add(BulkFailure(
+            type: 'whatsapp',
+            recipient: r['phone'] as String? ?? '',
+            error: r['error'] as String? ?? 'Falha',
+          ));
+        }
+      } else if (channel == 'email') {
+        if (ok) {
           emSent++;
         } else {
           emFailed++;
-          failures.add(
-            BulkFailure(
-              type: 'email',
-              recipient: email,
-              error: result.error ?? '',
-            ),
-          );
+          failures.add(BulkFailure(
+            type: 'email',
+            recipient: r['email'] as String? ?? '',
+            error: r['error'] as String? ?? 'Falha',
+          ));
         }
       }
+    }
 
-      final sentWhatsApp =
-          notificationSettings.whatsappEnabled && phone != null && phone.isNotEmpty;
-      final sentEmail =
-          notificationSettings.emailEnabled && email != null && email.isNotEmpty;
-      if (sentWhatsApp || sentEmail) {
+    // Log contact attempts for successfully sent items.
+    for (final item in items) {
+      final studentId = item['studentId'] as String? ?? '';
+      final contact = studentContacts[studentId];
+      if (contact == null) continue;
+
+      final sentWa = notificationSettings.whatsappEnabled &&
+          (contact.effectivePhone?.isNotEmpty ?? false);
+      final sentEm = notificationSettings.emailEnabled &&
+          (contact.effectiveEmail?.isNotEmpty ?? false);
+
+      if (sentWa || sentEm) {
         await billingService.logContactAttempt(
-          financialId: financialId,
+          financialId: item['id'] as String? ?? '',
           studentId: studentId,
-          studentName: studentName,
-          type: sentWhatsApp ? ContactType.whatsapp : ContactType.email,
-          notes: 'Cobranca em massa (personalizada)',
+          studentName: item['studentName'] as String? ?? '',
+          type: sentWa ? ContactType.whatsapp : ContactType.email,
+          notes: 'Cobranca em massa (via Tatami)',
           stage: stage.value,
-          daysOverdue: daysOverdue,
+          daysOverdue: item['daysOverdue'] as int? ?? 0,
           contactedBy: FirebaseService.currentUserId ?? '',
           contactedByName: 'Admin',
         );

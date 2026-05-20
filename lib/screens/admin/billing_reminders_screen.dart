@@ -7,6 +7,7 @@ import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/financial_dto.dart' as api_fin;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../providers/api_provider.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/billing_reminder_service.dart';
 import '../../services/firebase_service.dart';
@@ -209,6 +210,8 @@ class _AdminBillingRemindersScreenState
           subject: subject,
           notificationService: _notificationService!,
           billingService: _billingService,
+          tatamiClient: ref.read(tatamiClientProvider),
+          academyId: ref.read(safeAcademyIdProvider) ?? '',
         );
         setState(() => _isSending = false);
         if (!mounted) return;
@@ -270,6 +273,8 @@ class _AdminBillingRemindersScreenState
           notificationSettings: _notificationSettings!,
           notificationService: _notificationService!,
           billingService: _billingService,
+          tatamiClient: ref.read(tatamiClientProvider),
+          academyId: ref.read(safeAcademyIdProvider) ?? '',
         );
         setState(() => _isSending = false);
         if (!mounted) return;
