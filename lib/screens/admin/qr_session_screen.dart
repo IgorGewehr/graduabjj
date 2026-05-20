@@ -72,10 +72,18 @@ class _AdminQrSessionScreenState extends ConsumerState<AdminQrSessionScreen> {
 
       final entries = <_ClassWithSchedule>[];
       for (final cls in all) {
+        // Show classes scheduled for today first, then all others.
+        // This ensures the admin can always generate a QR for any class,
+        // even when testing on a day without scheduled classes.
+        bool addedForToday = false;
         for (final s in cls.schedule) {
           if (s.dayOfWeek == dayOfWeek) {
             entries.add(_ClassWithSchedule(cls: cls, schedule: s));
+            addedForToday = true;
           }
+        }
+        if (!addedForToday && cls.schedule.isNotEmpty) {
+          entries.add(_ClassWithSchedule(cls: cls, schedule: cls.schedule.first));
         }
       }
       entries.sort((a, b) => a.schedule.startTime.compareTo(b.schedule.startTime));
