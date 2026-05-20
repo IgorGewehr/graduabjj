@@ -20,9 +20,18 @@ class AdminShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final location = GoRouterState.of(context).uri.path;
-    ref.watch(currentUserProvider);
+    final userAsync = ref.watch(currentUserProvider);
     final settingsAsync = ref.watch(academySettingsProvider);
     final settings = settingsAsync.valueOrNull;
+
+    // Wait for auth before mounting child screens — avoids race condition where
+    // screens call ref.read(safeAcademyIdProvider) before currentUser resolves,
+    // resulting in empty academyId and silent empty lists.
+    if (userAsync.isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
     // Check if this is the root route (/admin)
     final isRootRoute = location == '/admin';

@@ -59,7 +59,13 @@ class _PortalShellState extends ConsumerState<PortalShell> {
 
   @override
   Widget build(BuildContext context) {
-    ref.watch(currentUserProvider);
+    final userAsync = ref.watch(currentUserProvider);
+
+    if (userAsync.isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
     final location = GoRouterState.of(context).matchedLocation;
     final selectedIndex = _getSelectedIndex(location);
