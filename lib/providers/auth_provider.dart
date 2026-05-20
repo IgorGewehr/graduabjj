@@ -98,6 +98,13 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
       repo: ref.read(identityRepoProvider),
       selectedAcademyId: selectedAcademyId,
     );
+    // Ensure selectedAcademyIdProvider is populated before screens read it.
+    // The SelectedAcademyNotifier._initialize() is async and may not have
+    // completed yet — this guarantees the id is available on the first frame.
+    if (app.academyId != null &&
+        ref.read(selectedAcademyIdProvider) == null) {
+      ref.read(selectedAcademyIdProvider.notifier).state = app.academyId;
+    }
     return app;
   } on DioException catch (e) {
     // Only fall back to Firestore on network-level failures. HTTP errors
