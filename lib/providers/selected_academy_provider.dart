@@ -1,19 +1,17 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/dto/academy_dto.dart';
+import '../api/dto/identity_dto.dart';
+import '../api/repositories.dart';
+import 'api_provider.dart';
 import '../models/user.dart';
 import '../services/firebase_service.dart';
 import 'auth_provider.dart';
 
 /// Source of truth for the currently selected academy id.
 ///
-/// This is intentionally a `StateProvider<String?>` so that flipping the id is
-/// cheap (no Firebase queries) and any provider that watches it via
-/// `ref.watch(selectedAcademyIdProvider.select((id) => id))` will automatically
-/// rebuild on change — eliminating the previous `ref.invalidate` cascade in
-/// `selectAcademy()`.
-///
-/// Initialised by [SelectedAcademyNotifier] from `userAcademyMappingProvider`,
-/// or set by `selectAcademy(id)` when the user switches academies.
+/// Post-migration (Fase 1): the id stored here is always a Postgres UUID
+/// returned by Tatami `/v1/me`, NOT a Firestore document ID.
 final selectedAcademyIdProvider = StateProvider<String?>((ref) => null);
 
 /// State for the selected academy (kept for backwards compatibility — exposes
@@ -56,9 +54,10 @@ class AcademyInfo {
 }
 
 /// StateNotifier for managing the academy info cache + bootstrap of the
-/// initial selected academy. Mutations to the selected id go through
-/// [selectedAcademyIdProvider] (no manual invalidations of dependent
-/// providers — they auto-react via `.select` on the id).
+/// initial selected academy.
+///
+/// Post-migration: initialises from Tatami `/v1/me` (not Firestore), so the
+/// academy id is always the Postgres UUID used by all subsequent API calls.
 class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
   final Ref _ref;
 
@@ -66,18 +65,63 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
     _initialize();
   }
 
-  /// Initialize with user's primary academy
+  /// Initialize from Tatami `/v1/me` — the single source of truth for
+  /// memberships post-migration. Falls back to Firestore only on network error.
   Future<void> _initialize() async {
-    final mapping = await _ref.read(userAcademyMappingProvider.future);
-    if (mapping != null && mapping.academyIds.isNotEmpty) {
-      final primaryId = mapping.primaryAcademyId ?? mapping.academyIds.first;
-      await _selectAcademyInternal(primaryId, mapping);
+    try {
+      final repo = _ref.read(identityRepoProvider);
+      final me = await repo.getMe();
+
+      final actives = me.activeMemberships;
+      if (actives.isEmpty) return;
+
+      // Pick initial academy: prefer primary, else first active.
+      final primaryId = me.primaryAcademyId;
+      final picked = () {
+        if (primaryId != null) {
+          for (final m in actives) {
+            if (m.academyId == primaryId) return m;
+          }
+        }
+        return actives.first;
+      }();
+
+      // Pre-populate cache for all memberships.
+      final cache = <String, AcademyInfo>{};
+      for (final m in actives) {
+        final info = await _loadAcademyInfoFromTatami(m.academyId, m);
+        if (info != null) cache[m.academyId] = info;
+      }
+
+      state = SelectedAcademyState(academyInfoCache: cache, isLoading: false);
+      _ref.read(selectedAcademyIdProvider.notifier).state = picked.academyId;
+      FirebaseService.setAcademyId(picked.academyId);
+    } catch (_) {
+      // Network failure — fall back to legacy Firestore path.
+      await _initializeFromFirestore();
     }
   }
 
-  /// Select a different academy. Only mutates [selectedAcademyIdProvider] +
-  /// the local cache; downstream providers (currentUser/currentStudent/etc)
-  /// rebuild automatically because they watch the id provider with `.select`.
+  /// Legacy fallback: reads Firestore `userAcademyMapping` collection.
+  /// Only reached when Tatami is unreachable at boot time.
+  Future<void> _initializeFromFirestore() async {
+    final mapping = await _ref.read(userAcademyMappingProvider.future);
+    if (mapping == null || mapping.academyIds.isEmpty) return;
+
+    final primaryId = mapping.primaryAcademyId ?? mapping.academyIds.first;
+
+    Map<String, AcademyInfo> newCache = Map.from(state.academyInfoCache);
+    if (!newCache.containsKey(primaryId)) {
+      final info = await _loadAcademyInfoFromFirestore(primaryId, mapping);
+      if (info != null) newCache[primaryId] = info;
+    }
+
+    state = SelectedAcademyState(academyInfoCache: newCache, isLoading: false);
+    _ref.read(selectedAcademyIdProvider.notifier).state = primaryId;
+    FirebaseService.setAcademyId(primaryId);
+  }
+
+  /// Select a different academy.
   Future<void> selectAcademy(String academyId) async {
     final currentId = _ref.read(selectedAcademyIdProvider);
     if (currentId == academyId) return;
@@ -85,53 +129,69 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
     state = state.copyWith(isLoading: true);
 
     try {
-      final mapping = await _ref.read(userAcademyMappingProvider.future);
-      if (mapping == null || !mapping.academyIds.contains(academyId)) {
-        throw Exception('Academia nao encontrada ou sem acesso');
+      Map<String, AcademyInfo> newCache = Map.from(state.academyInfoCache);
+      if (!newCache.containsKey(academyId)) {
+        final info = await _loadAcademyInfoFromTatamiById(academyId);
+        if (info != null) newCache[academyId] = info;
       }
 
-      await _selectAcademyInternal(academyId, mapping);
+      state =
+          SelectedAcademyState(academyInfoCache: newCache, isLoading: false);
+      _ref.read(selectedAcademyIdProvider.notifier).state = academyId;
+      FirebaseService.setAcademyId(academyId);
     } catch (e) {
       state = state.copyWith(isLoading: false);
       rethrow;
     }
   }
 
-  Future<void> _selectAcademyInternal(
+  /// Load academy info from a Tatami membership + GET /v1/academies/{id}.
+  Future<AcademyInfo?> _loadAcademyInfoFromTatami(
     String academyId,
-    UserAcademyMapping mapping,
+    ApiMembership membership,
   ) async {
-    // Load academy info if not cached
-    Map<String, AcademyInfo> newCache = Map.from(state.academyInfoCache);
-    if (!newCache.containsKey(academyId)) {
-      final info = await _loadAcademyInfo(academyId, mapping);
-      if (info != null) {
-        newCache[academyId] = info;
-      }
+    try {
+      final client = _ref.read(tatamiClientProvider);
+      final json =
+          await client.get<Map<String, dynamic>>('/v1/academies/$academyId');
+      final academy = ApiAcademy.fromJson(json);
+
+      return AcademyInfo(
+        id: academy.id,
+        name: academy.name,
+        logoUrl: null, // Tatami doesn't expose logo_url yet
+        studentId: membership.studentId,
+        role: _mapApiRole(membership.role),
+      );
+    } catch (_) {
+      return null;
     }
-
-    // Flip the cache + loading flag first so the cache lookup below
-    // (used by `currentAcademyInfoProvider`) is consistent when listeners
-    // rebuild.
-    state = SelectedAcademyState(academyInfoCache: newCache, isLoading: false);
-
-    // Single authoritative source-of-truth update: triggers the rebuild
-    // cascade for currentUserProvider, currentStudentProvider, etc.
-    _ref.read(selectedAcademyIdProvider.notifier).state = academyId;
-
-    // Keep FirebaseService in sync for legacy services/screens that still
-    // read FirebaseService.academyId directly (phased out progressively).
-    FirebaseService.setAcademyId(academyId);
   }
 
-  Future<AcademyInfo?> _loadAcademyInfo(
+  /// Load academy info by id only (for selectAcademy, when we don't have
+  /// the membership handy — re-fetch /v1/me to get the role).
+  Future<AcademyInfo?> _loadAcademyInfoFromTatamiById(
+    String academyId,
+  ) async {
+    try {
+      final repo = _ref.read(identityRepoProvider);
+      final me = await repo.getMe();
+      final membership = me.memberships.firstWhere(
+        (m) => m.academyId == academyId,
+        orElse: () => me.memberships.first,
+      );
+      return _loadAcademyInfoFromTatami(academyId, membership);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Firestore fallback for _loadAcademyInfo.
+  Future<AcademyInfo?> _loadAcademyInfoFromFirestore(
     String academyId,
     UserAcademyMapping mapping,
   ) async {
     try {
-      // TODO(tatami): substituir por identityRepoProvider.getMe() ou um
-      //   endpoint GET /v1/academies/{id} quando tatami expor o entity de academia
-      //   com name/logoUrl. Por ora lê direto do Firestore (academy doc).
       final academyDoc = await FirebaseService.firestore
           .collection('academies')
           .doc(academyId)
@@ -145,39 +205,48 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
       return AcademyInfo(
         id: academyId,
         name: data['name'] ?? 'Academia',
-        logoUrl: data['logoUrl'],
+        logoUrl: data['logoUrl'] as String?,
         studentId: details?.studentId,
         role: details?.role ?? UserRole.student,
       );
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
 
-  /// Get current student ID for the selected academy
+  static UserRole _mapApiRole(ApiRole role) {
+    switch (role) {
+      case ApiRole.admin:
+        return UserRole.admin;
+      case ApiRole.instructor:
+        return UserRole.instructor;
+      case ApiRole.monitor:
+        return UserRole.monitor;
+      case ApiRole.guardian:
+        return UserRole.guardian;
+      case ApiRole.student:
+        return UserRole.student;
+    }
+  }
+
   String? getCurrentStudentId() {
     final academyId = _ref.read(selectedAcademyIdProvider);
     if (academyId == null) return null;
     return state.academyInfoCache[academyId]?.studentId;
   }
 
-  /// Get academy details for the selected academy
   AcademyInfo? getCurrentAcademyInfo() {
     final academyId = _ref.read(selectedAcademyIdProvider);
     if (academyId == null) return null;
     return state.academyInfoCache[academyId];
   }
 
-  /// Get academy info by ID (from cache or load)
   Future<AcademyInfo?> getAcademyInfo(String academyId) async {
     if (state.academyInfoCache.containsKey(academyId)) {
       return state.academyInfoCache[academyId];
     }
 
-    final mapping = await _ref.read(userAcademyMappingProvider.future);
-    if (mapping == null) return null;
-
-    final info = await _loadAcademyInfo(academyId, mapping);
+    final info = await _loadAcademyInfoFromTatamiById(academyId);
     if (info != null) {
       state = state.copyWith(
         academyInfoCache: {...state.academyInfoCache, academyId: info},
@@ -186,20 +255,21 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
     return info;
   }
 
-  /// Refresh academy info cache
   Future<void> refreshAcademyCache() async {
-    final mapping = await _ref.read(userAcademyMappingProvider.future);
-    if (mapping == null) return;
+    try {
+      final repo = _ref.read(identityRepoProvider);
+      final me = await repo.getMe();
 
-    Map<String, AcademyInfo> newCache = {};
-    for (final academyId in mapping.academyIds) {
-      final info = await _loadAcademyInfo(academyId, mapping);
-      if (info != null) {
-        newCache[academyId] = info;
+      Map<String, AcademyInfo> newCache = {};
+      for (final m in me.activeMemberships) {
+        final info = await _loadAcademyInfoFromTatami(m.academyId, m);
+        if (info != null) newCache[m.academyId] = info;
       }
-    }
 
-    state = state.copyWith(academyInfoCache: newCache);
+      state = state.copyWith(academyInfoCache: newCache);
+    } catch (_) {
+      // Silently fail — cache stays stale until next successful refresh.
+    }
   }
 }
 
@@ -210,11 +280,9 @@ final selectedAcademyProvider =
     });
 
 /// Provider for current academy info — reads cache by current id.
-/// Cheap rebuild: only fires when id or cache entry for that id change.
 final currentAcademyInfoProvider = Provider<AcademyInfo?>((ref) {
   final id = ref.watch(selectedAcademyIdProvider);
   if (id == null) return null;
-  // Watch only the cache map identity (changes on cache writes).
   final cache = ref.watch(
     selectedAcademyProvider.select((s) => s.academyInfoCache),
   );
@@ -223,40 +291,25 @@ final currentAcademyInfoProvider = Provider<AcademyInfo?>((ref) {
 
 /// Provider to check if user has multiple academies
 final hasMultipleAcademiesProvider = Provider<bool>((ref) {
-  final mapping = ref.watch(userAcademyMappingProvider).valueOrNull;
-  return mapping?.hasMultipleAcademies ?? false;
+  final cache = ref.watch(
+    selectedAcademyProvider.select((s) => s.academyInfoCache),
+  );
+  return cache.length > 1;
 });
 
 /// Provider for list of user's academies with info
 final userAcademiesInfoProvider = FutureProvider<List<AcademyInfo>>((
   ref,
 ) async {
-  final mapping = await ref.watch(userAcademyMappingProvider.future);
-  if (mapping == null || mapping.academyIds.isEmpty) return [];
-
   final notifier = ref.read(selectedAcademyProvider.notifier);
-  final List<AcademyInfo> academies = [];
-
-  for (final academyId in mapping.academyIds) {
-    final info = await notifier.getAcademyInfo(academyId);
-    if (info != null) {
-      academies.add(info);
-    }
-  }
-
-  return academies;
+  await notifier.refreshAcademyCache();
+  final cache = ref.read(selectedAcademyProvider).academyInfoCache;
+  return cache.values.toList();
 });
 
 /// Academy data fetched on demand for the currently selected academy.
-///
-/// Exposes the academy document data (name/logo/etc) keyed by the selected
-/// id. Listeners only re-fetch when the id actually changes (no cascade from
-/// unrelated state in [selectedAcademyProvider]).
 final currentAcademyDataProvider = FutureProvider<AcademyInfo?>((ref) async {
   final id = ref.watch(selectedAcademyIdProvider);
   if (id == null) return null;
-
-  // Reuse the cache + loader on the notifier so we don't re-fetch the same
-  // academy document twice.
   return ref.read(selectedAcademyProvider.notifier).getAcademyInfo(id);
 });
