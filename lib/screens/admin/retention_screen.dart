@@ -51,7 +51,7 @@ class _AdminRetentionScreenState
     setState(() => _isLoading = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final now = DateTime.now();
       final thirtyDaysAgo = now.subtract(const Duration(days: 30));
 

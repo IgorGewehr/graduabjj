@@ -124,7 +124,7 @@ class _ProductFormSheetState extends ConsumerState<ProductFormSheet> {
 
       setState(() => _isUploadingImage = true);
 
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final file = File(croppedFile.path);
 
       // Upload via Tatami signed-URL (fallback Firebase Storage removido).

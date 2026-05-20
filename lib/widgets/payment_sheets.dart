@@ -102,7 +102,7 @@ class _PixPaymentSheetState extends ConsumerState<PixPaymentSheet>
   }
 
   void _setupPaymentListener() {
-    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+    final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
     String collection;
     String docId;
@@ -830,7 +830,7 @@ class _CardPaymentSheetState extends ConsumerState<CardPaymentSheet> {
       _errorMessage = null;
     });
 
-    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+    final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
     try {
       // Determina o financialId: orderId tem precedência, senão usa financialId.

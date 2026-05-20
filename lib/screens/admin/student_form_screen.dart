@@ -142,7 +142,7 @@ class _AdminStudentFormScreenState
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final apiPlans = await ref
           .read(tatami_repos.planRepoProvider)
           .list(academyId);
@@ -426,7 +426,7 @@ class _AdminStudentFormScreenState
     setState(() => _isSaving = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final primarySport = _primarySport ?? _grades.keys.first;
       final primaryGrade = _grades[primarySport]!;
       final sportData = <String, dynamic>{};

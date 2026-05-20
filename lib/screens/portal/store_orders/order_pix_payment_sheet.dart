@@ -55,7 +55,7 @@ class _OrderPixPaymentSheetState extends ConsumerState<OrderPixPaymentSheet> {
   /// Listen to order status changes via Tatami polling (2s interval).
   /// Listener Firestore real-time removido na Fase 1.
   void _setupOrderListener() {
-    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+    final academyId = ref.read(safeAcademyIdProvider) ?? '';
     _orderPollTimer = Timer.periodic(
       const Duration(seconds: 2),
       (timer) async {

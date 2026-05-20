@@ -89,7 +89,7 @@ class _OrderCardPaymentSheetState extends ConsumerState<OrderCardPaymentSheet> {
       _errorMessage = null;
     });
 
-    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+    final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
     try {
       await ref.read(tatami_repos.financialRepoProvider).payWithCard(

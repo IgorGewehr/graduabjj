@@ -75,7 +75,7 @@ class _MonitorStudentDetailScreenState
     setState(() => _isLoading = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
       Future<Student?> studentFuture() async {
         try {
@@ -154,7 +154,7 @@ class _MonitorStudentDetailScreenState
       //   backend expor GET /v1/users/{uid}/global-history (cross-academy).
       final history = await crossAcademyService.getStudentGlobalHistory(
         _student!.linkedUserId!,
-        currentAcademyId: ref.read(selectedAcademyIdProvider) ?? '',
+        currentAcademyId: ref.read(safeAcademyIdProvider) ?? '',
       );
       setState(() {
         _globalHistory = history;
@@ -222,7 +222,7 @@ class _MonitorStudentDetailScreenState
                           StudentGlobalTab(
                             isLoadingGlobal: _isLoadingGlobal,
                             globalHistory: _globalHistory,
-                            currentAcademyId: ref.read(selectedAcademyIdProvider) ?? '',
+                            currentAcademyId: ref.read(safeAcademyIdProvider) ?? '',
                           ),
                       ],
                     ),

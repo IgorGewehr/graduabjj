@@ -73,7 +73,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
       // Invalidate to force a fresh fetch on pull-to-refresh.
       ref.invalidate(

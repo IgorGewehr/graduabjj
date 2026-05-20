@@ -245,7 +245,7 @@ class StudentFinancialTab extends StatelessWidget {
               TextButton.icon(
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
-                  final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+                  final academyId = ref.read(safeAcademyIdProvider) ?? '';
                   try {
                     await ref
                         .read(planRepoProvider)
@@ -291,7 +291,7 @@ class StudentFinancialTab extends StatelessWidget {
               TextButton.icon(
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
-                  final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+                  final academyId = ref.read(safeAcademyIdProvider) ?? '';
                   try {
                     await ref
                         .read(planRepoProvider)
@@ -333,7 +333,7 @@ class StudentFinancialTab extends StatelessWidget {
               final dueDay = int.tryParse(dueDayController.text);
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;
               Navigator.of(dialogContext).pop();
-              final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+              final academyId = ref.read(safeAcademyIdProvider) ?? '';
               try {
                 await ref.read(planRepoProvider).setStudentCustomValue(
                   academyId,

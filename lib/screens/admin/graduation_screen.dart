@@ -39,7 +39,7 @@ class _AdminGraduationScreenState
     setState(() => _isLoading = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final beltRepo = ref.read(tatami_repos.beltProgressionRepoProvider);
 
       final results = await Future.wait([

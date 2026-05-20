@@ -79,7 +79,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
     setState(() => _isLoading = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       ref.invalidate(tatami.tatamiStudentByIdLegacyProvider(
         tatami.studentRef(academyId, widget.studentId!),
       ));
@@ -126,7 +126,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
     setState(() => _isSaving = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final repo = ref.read(tatami_repos.studentRepoProvider);
 
       // Guardian (for kids)

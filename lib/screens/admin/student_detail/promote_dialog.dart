@@ -90,7 +90,7 @@ Future<void> showPromoteDialog({
             FilledButton(
               onPressed: () async {
                 try {
-                  final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+                  final academyId = ref.read(safeAcademyIdProvider) ?? '';
                   final beltRepo =
                       ref.read(tatami_repos.beltProgressionRepoProvider);
 

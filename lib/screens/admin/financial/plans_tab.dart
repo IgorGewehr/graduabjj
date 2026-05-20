@@ -232,7 +232,7 @@ class PlansTab extends ConsumerWidget {
                             return;
                           }
                           try {
-                            final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+                            final academyId = ref.read(safeAcademyIdProvider) ?? '';
                             final planRepo = ref.read(planRepoProvider);
                             await planRepo.create(
                               academyId,
@@ -372,7 +372,7 @@ class PlansTab extends ConsumerWidget {
                       child: ElevatedButton(
                         onPressed: () async {
                           try {
-                            final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+                            final academyId = ref.read(safeAcademyIdProvider) ?? '';
                             final planRepo = ref.read(planRepoProvider);
                             await planRepo.update(
                               academyId,
@@ -437,7 +437,7 @@ class PlansTab extends ConsumerWidget {
           TextButton(
             onPressed: () async {
               try {
-                final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+                final academyId = ref.read(safeAcademyIdProvider) ?? '';
                 final planRepo = ref.read(planRepoProvider);
                 await planRepo.delete(academyId, plan.id);
                 if (context.mounted) {
@@ -476,7 +476,7 @@ class PlansTab extends ConsumerWidget {
           onRefresh();
         },
         planRepo: ref.read(planRepoProvider),
-        academyId: ref.read(selectedAcademyIdProvider) ?? '',
+        academyId: ref.read(safeAcademyIdProvider) ?? '',
       ),
     );
   }

@@ -176,7 +176,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   }
 
   Future<void> _loadWalletData() async {
-    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+    final academyId = ref.read(safeAcademyIdProvider) ?? '';
     if (academyId.isEmpty) return;
 
     try {
@@ -248,7 +248,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   }
 
   void _showWithdrawalSheet() {
-    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+    final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
     // If TOTP is enabled, require validation before showing withdrawal sheet
     if (_isTotpEnabled) {

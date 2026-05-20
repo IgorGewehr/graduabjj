@@ -236,7 +236,7 @@ class FinancialReportData {
 final financialReportDataProvider =
     FutureProvider<FinancialReportData>((ref) async {
   final repo = ref.watch(financialRepoProvider);
-  final academyId = ref.watch(selectedAcademyIdProvider) ?? '';
+  final academyId = ref.watch(safeAcademyIdProvider) ?? '';
   final now = DateTime.now();
 
   // Last 6 months in chronological order (oldest first)
@@ -280,7 +280,7 @@ final monthlyReportProvider = FutureProvider<MonthlyReportData>((ref) async {
 
   // On-demand fetch for months outside the cached window
   final repo = ref.watch(financialRepoProvider);
-  final academyId = ref.watch(selectedAcademyIdProvider) ?? '';
+  final academyId = ref.watch(safeAcademyIdProvider) ?? '';
   final apiReport = await repo.getMonthlyReport(academyId, month: month);
   return _buildMonthlyReportData(apiReport, month);
 });
@@ -308,7 +308,7 @@ final revenueByPlanProvider =
   await ref.watch(financialReportDataProvider.future);
 
   final repo = ref.watch(financialRepoProvider);
-  final academyId = ref.watch(selectedAcademyIdProvider) ?? '';
+  final academyId = ref.watch(safeAcademyIdProvider) ?? '';
   final month = ref.watch(selectedReportMonthProvider);
 
   final parts = month.split('-');

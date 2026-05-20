@@ -79,7 +79,7 @@ class _QuickAddStudentSheetState extends ConsumerState<QuickAddStudentSheet> {
 
     try {
       final currentUser = ref.read(currentUserProvider).valueOrNull;
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final repo = ref.read(studentRepoProvider);
 
       final orderedSports = [

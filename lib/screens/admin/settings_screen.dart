@@ -127,7 +127,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       //   Atualmente SettingsRepo.getAll() retorna key/value genérico, sem
       //   adaptar para AcademySettings. Manter Firestore enquanto endpoint
       //   não existir.
-      final service = SettingsService(ref.read(selectedAcademyIdProvider) ?? '');
+      final service = SettingsService(ref.read(safeAcademyIdProvider) ?? '');
       final settings = await service.getAcademySettings();
 
       if (settings != null) {
@@ -179,7 +179,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
   Future<void> _loadLinkedStudents() async {
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final repo = ref.read(tatami_repos.studentRepoProvider);
       // Busca apenas alunos ativos com conta vinculada via filtro Tatami.
       final page = await repo.list(
@@ -208,7 +208,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   Future<void> _addMonitor(String studentId) async {
     setState(() => _isLoadingMonitors = true);
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final updatedIds = [..._monitorIds, studentId];
       // Tatami: PUT /v1/academies/{id}/settings/monitor_ids
       await ref.read(tatami_repos.settingsRepoProvider).set(
@@ -229,7 +229,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   Future<void> _removeMonitor(String studentId) async {
     setState(() => _isLoadingMonitors = true);
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final updatedIds = _monitorIds.where((id) => id != studentId).toList();
       // Tatami: PUT /v1/academies/{id}/settings/monitor_ids
       await ref.read(tatami_repos.settingsRepoProvider).set(
@@ -254,7 +254,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       // TODO(tatami): migrar writes para settingsRepoProvider.set(key, value)
       //   ou PATCH /v1/academies/{id} quando o backend expor esse endpoint.
       //   Atualmente SettingsService escreve direto no Firestore academy doc.
-      final service = SettingsService(ref.read(selectedAcademyIdProvider) ?? '');
+      final service = SettingsService(ref.read(safeAcademyIdProvider) ?? '');
 
       await service.updateBasicInfo(
         name: _nameController.text,
@@ -349,7 +349,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       final token = await user.getIdToken();
 
       final url = Uri.parse(
-        '${AppConstants.apiBaseUrl}/payments/onboard/documents?academyId=${ref.read(selectedAcademyIdProvider) ?? ''}',
+        '${AppConstants.apiBaseUrl}/payments/onboard/documents?academyId=${ref.read(safeAcademyIdProvider) ?? ''}',
       );
       final response = await http.get(
         url,
@@ -420,7 +420,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
       setState(() => _isSaving = true);
 
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final file = File(croppedFile.path);
 
       final repo = ref.read(tatami_repos.uploadsRepoProvider);

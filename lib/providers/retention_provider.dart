@@ -35,7 +35,7 @@ final retentionServiceProvider = Provider<RetentionService>((ref) {
 /// a partir da lista de risk scores — esse cálculo de agregação é local e
 /// não requer dados extras.
 final retentionDataProvider = FutureProvider<RetentionData>((ref) async {
-  final academyId = ref.watch(selectedAcademyIdProvider) ?? '';
+  final academyId = ref.watch(safeAcademyIdProvider) ?? '';
 
   // Busca todos os risk scores do backend (materialized view server-side).
   final repo = ref.read(retentionRepoProvider);

@@ -426,7 +426,7 @@ class _PaymentsTabState extends ConsumerState<PaymentsTab> {
                           : () async {
                               setDialogState(() => isSaving = true);
                               try {
-                                final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+                                final academyId = ref.read(safeAcademyIdProvider) ?? '';
                                 final apiMethod = _toApiMethod(selectedMethod);
                                 await ref
                                     .read(financialRepoProvider)

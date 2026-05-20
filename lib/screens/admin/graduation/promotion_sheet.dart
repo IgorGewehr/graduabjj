@@ -383,7 +383,7 @@ Future<void> promoteStudent({
   required VoidCallback onPromoted,
 }) async {
   try {
-    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+    final academyId = ref.read(safeAcademyIdProvider) ?? '';
     final repo = ref.read(tatami_repos.studentRepoProvider);
     await repo.createBeltProgression(
       academyId,

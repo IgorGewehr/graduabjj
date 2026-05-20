@@ -51,7 +51,7 @@ class _PixPaymentBottomSheetState
   }
 
   void _setupPaymentListener() {
-    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+    final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
     _paymentPollTimer = Timer.periodic(
       const Duration(seconds: 2),
@@ -141,7 +141,7 @@ class _PixPaymentBottomSheetState
   }
 
   Future<void> _generatePixPayment() async {
-    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+    final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
     try {
       final payIntent =

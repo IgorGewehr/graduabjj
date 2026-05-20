@@ -42,7 +42,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
   }
 
   Future<void> _refreshPlans() async {
-    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+    final academyId = ref.read(safeAcademyIdProvider) ?? '';
     ref.invalidate(tatami.tatamiPlansLegacyProvider(academyId));
     final plans =
         await ref.read(tatami.tatamiPlansLegacyProvider(academyId).future);
@@ -686,7 +686,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: () async {
-                  final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+                  final academyId = ref.read(safeAcademyIdProvider) ?? '';
                   try {
                     await ref.read(planRepoProvider).setStudentCustomValue(
                       academyId,
@@ -728,7 +728,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: () async {
-                  final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+                  final academyId = ref.read(safeAcademyIdProvider) ?? '';
                   try {
                     await ref.read(planRepoProvider).setStudentCustomValue(
                       academyId,
@@ -766,7 +766,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               if (value == null || value <= 0) return;
               final dueDay = int.tryParse(dueDayController.text);
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;
-              final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+              final academyId = ref.read(safeAcademyIdProvider) ?? '';
               try {
                 await ref.read(planRepoProvider).setStudentCustomValue(
                   academyId,

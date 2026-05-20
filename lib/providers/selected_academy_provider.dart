@@ -97,28 +97,14 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
       _ref.read(selectedAcademyIdProvider.notifier).state = picked.academyId;
       FirebaseService.setAcademyId(picked.academyId);
     } catch (_) {
-      // Network failure — fall back to legacy Firestore path.
-      await _initializeFromFirestore();
+      // Network failure — do NOT fall back to Firestore. The Firestore
+      // userAcademyMapping returns Firestore doc IDs (e.g. "team-igor-0676132")
+      // which are incompatible with Tatami's Postgres UUIDs. Using them would
+      // cause every subsequent API call to 404.
+      //
+      // Instead, let currentUserProvider handle initialization when it resolves
+      // — it always sets selectedAcademyIdProvider as a side effect.
     }
-  }
-
-  /// Legacy fallback: reads Firestore `userAcademyMapping` collection.
-  /// Only reached when Tatami is unreachable at boot time.
-  Future<void> _initializeFromFirestore() async {
-    final mapping = await _ref.read(userAcademyMappingProvider.future);
-    if (mapping == null || mapping.academyIds.isEmpty) return;
-
-    final primaryId = mapping.primaryAcademyId ?? mapping.academyIds.first;
-
-    Map<String, AcademyInfo> newCache = Map.from(state.academyInfoCache);
-    if (!newCache.containsKey(primaryId)) {
-      final info = await _loadAcademyInfoFromFirestore(primaryId, mapping);
-      if (info != null) newCache[primaryId] = info;
-    }
-
-    state = SelectedAcademyState(academyInfoCache: newCache, isLoading: false);
-    _ref.read(selectedAcademyIdProvider.notifier).state = primaryId;
-    FirebaseService.setAcademyId(primaryId);
   }
 
   /// Select a different academy.
@@ -284,6 +270,21 @@ final selectedAcademyProvider =
     StateNotifierProvider<SelectedAcademyNotifier, SelectedAcademyState>((ref) {
       return SelectedAcademyNotifier(ref);
     });
+
+/// Safe accessor: returns the selected academy id or the current user's
+/// academy id. Never returns empty string. Screens should use this instead
+/// of `ref.read(safeAcademyIdProvider) ?? ''`.
+///
+/// Usage in initState/callbacks:
+///   `final academyId = ref.read(safeAcademyIdProvider);`
+///   `if (academyId == null) return; // user not loaded yet`
+final safeAcademyIdProvider = Provider<String?>((ref) {
+  final selected = ref.watch(selectedAcademyIdProvider);
+  if (selected != null && selected.isNotEmpty) return selected;
+  // Fallback: read from currentUser (already resolved by the time screens mount)
+  final user = ref.watch(currentUserProvider).valueOrNull;
+  return user?.academyId;
+});
 
 /// Provider for current academy info — reads cache by current id.
 final currentAcademyInfoProvider = Provider<AcademyInfo?>((ref) {

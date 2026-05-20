@@ -77,7 +77,7 @@ class _AdminStudentDetailScreenState
     setState(() => _isLoading = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
       Future<Student?> studentFuture() async {
         try {
@@ -243,7 +243,7 @@ class _AdminStudentDetailScreenState
   void _toggleStatus() async {
     try {
       final currentUser = ref.read(currentUserProvider).valueOrNull;
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final newStatus = _student!.status == StudentStatus.active
           ? StudentStatus.inactive
           : StudentStatus.active;
@@ -288,7 +288,7 @@ class _AdminStudentDetailScreenState
               try {
                 final currentUser =
                     ref.read(currentUserProvider).valueOrNull;
-                final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+                final academyId = ref.read(safeAcademyIdProvider) ?? '';
                 await ref
                     .read(tatami_repos.studentRepoProvider)
                     .delete(academyId, _student!.id);

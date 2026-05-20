@@ -21,7 +21,7 @@ import 'selected_academy_provider.dart';
 ///   - PUT /v1/academies/{id}/settings/billing_reminders →
 ///     migrar getNotificationSettings/saveNotificationSettings para settingsRepoProvider
 final billingReminderServiceProvider = Provider<BillingReminderService>((ref) {
-  final academyId = ref.watch(selectedAcademyIdProvider) ?? '';
+  final academyId = ref.watch(safeAcademyIdProvider) ?? '';
   return BillingReminderService(academyId);
 });
 
@@ -55,7 +55,7 @@ final contactLogProvider = FutureProvider.family<List<BillingContactLog>, String
   return service.getContactLog(financialId);
 
   // Future migration (após adaptar callers):
-  // final academyId = ref.watch(selectedAcademyIdProvider) ?? '';
+  // final academyId = ref.watch(safeAcademyIdProvider) ?? '';
   // final page = await ref.read(financialRepoProvider)
   //     .listBillingContactsForFinancial(academyId, financialId);
   // return page.items.map(...).toList();

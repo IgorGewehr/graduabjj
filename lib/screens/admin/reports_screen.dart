@@ -123,7 +123,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     setState(() => _isRetentionLoading = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final now = DateTime.now();
       final thirtyDaysAgo = now.subtract(const Duration(days: 30));
 

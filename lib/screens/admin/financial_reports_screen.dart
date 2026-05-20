@@ -55,7 +55,7 @@ class _AdminFinancialReportsScreenState
     setState(() => _isLoading = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final repo = ref.read(financialRepoProvider);
       final now = DateTime.now();
 
@@ -225,7 +225,7 @@ class _AdminFinancialReportsScreenState
     setState(() => _isExporting = true);
 
     try {
-      final service = FinancialReportService(ref.read(selectedAcademyIdProvider) ?? '');
+      final service = FinancialReportService(ref.read(safeAcademyIdProvider) ?? '');
       final csvString = service.exportCSV(_historicalData);
 
       // Copy CSV to clipboard

@@ -60,7 +60,7 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       final q = tatami.StudentsQuery(academyId: academyId);
       ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
       final students =

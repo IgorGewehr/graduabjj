@@ -66,7 +66,7 @@ class _AdminBillingRemindersScreenState
       length: BillingStage.values.length,
       vsync: this,
     );
-    _billingService = BillingReminderService(ref.read(selectedAcademyIdProvider) ?? '');
+    _billingService = BillingReminderService(ref.read(safeAcademyIdProvider) ?? '');
     _loadData();
   }
 
@@ -79,7 +79,7 @@ class _AdminBillingRemindersScreenState
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
       _billingService = BillingReminderService(academyId);
 
       // Fan-out: contacts + stats + settings in parallel, then build stages.

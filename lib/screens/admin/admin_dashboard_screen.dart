@@ -48,7 +48,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
+      final academyId = ref.read(safeAcademyIdProvider) ?? '';
 
       // Student stats — Tatami direto (fallback Firestore removido na Fase 1).
       Future<Map<String, dynamic>> statsFuture() async {
