@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../api/dto/store_dto.dart';
 import '../../../api/repositories.dart';
+import '../../../api/tatami_exception.dart';
 import '../../../core/theme.dart';
 import '../../../models/user.dart';
 import '../../../providers/auth_provider.dart';
@@ -281,31 +282,52 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
                   ),
                 ),
               ),
-              error: (error, _) => SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        LucideIcons.alertCircle,
-                        size: 48,
-                        color: AppTheme.error,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Erro ao carregar produtos',
-                        style: AppTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: () => ref.invalidate(productsProvider),
-                        child: const Text('Tentar novamente'),
-                      ),
-                    ],
+              error: (error, _) {
+                final isStoreDisabled = error is TatamiException &&
+                    error.isForbidden &&
+                    (error.detail?.contains('store') == true ||
+                        error.detail?.contains('not enabled') == true);
+                return SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          isStoreDisabled
+                              ? LucideIcons.shoppingBag
+                              : LucideIcons.alertCircle,
+                          size: 48,
+                          color: isStoreDisabled
+                              ? AppTheme.textSecondary
+                              : AppTheme.error,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          isStoreDisabled
+                              ? 'Loja não habilitada'
+                              : 'Erro ao carregar produtos',
+                          style: AppTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        if (isStoreDisabled)
+                          Text(
+                            'A loja não está ativada para esta academia.',
+                            style: AppTheme.bodyMedium.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                            textAlign: TextAlign.center,
+                          )
+                        else
+                          TextButton(
+                            onPressed: () => ref.invalidate(productsProvider),
+                            child: const Text('Tentar novamente'),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
 
             // Bottom padding
