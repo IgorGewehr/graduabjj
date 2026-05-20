@@ -6,6 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../api/repositories.dart';
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
+import '../../../providers/selected_academy_provider.dart';
 import '../../../services/services.dart';
 
 /// Financial tab content for student detail screen.
@@ -244,7 +245,7 @@ class StudentFinancialTab extends StatelessWidget {
               TextButton.icon(
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
-                  final academyId = FirebaseService.academyId;
+                  final academyId = ref.read(selectedAcademyIdProvider) ?? '';
                   try {
                     await ref
                         .read(planRepoProvider)
@@ -290,7 +291,7 @@ class StudentFinancialTab extends StatelessWidget {
               TextButton.icon(
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
-                  final academyId = FirebaseService.academyId;
+                  final academyId = ref.read(selectedAcademyIdProvider) ?? '';
                   try {
                     await ref
                         .read(planRepoProvider)
@@ -332,7 +333,7 @@ class StudentFinancialTab extends StatelessWidget {
               final dueDay = int.tryParse(dueDayController.text);
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;
               Navigator.of(dialogContext).pop();
-              final academyId = FirebaseService.academyId;
+              final academyId = ref.read(selectedAcademyIdProvider) ?? '';
               try {
                 await ref.read(planRepoProvider).setStudentCustomValue(
                   academyId,

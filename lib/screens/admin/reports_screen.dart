@@ -12,6 +12,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/financial_report_provider.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 
 import 'reports/attendance_tab.dart';
@@ -122,7 +123,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     setState(() => _isRetentionLoading = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       final now = DateTime.now();
       final thirtyDaysAgo = now.subtract(const Duration(days: 30));
 

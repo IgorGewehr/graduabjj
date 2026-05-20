@@ -10,8 +10,8 @@ import '../../../api/repositories.dart' as tatami_repos;
 import '../../../api/dto/store_dto.dart' as api_store;
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
+import '../../../providers/selected_academy_provider.dart';
 import '../../../services/abacate_pay_service.dart';
-import '../../../services/firebase_service.dart';
 
 /// PIX Payment Bottom Sheet with real-time payment listener
 class OrderPixPaymentSheet extends ConsumerStatefulWidget {
@@ -55,7 +55,7 @@ class _OrderPixPaymentSheetState extends ConsumerState<OrderPixPaymentSheet> {
   /// Listen to order status changes via Tatami polling (2s interval).
   /// Listener Firestore real-time removido na Fase 1.
   void _setupOrderListener() {
-    final academyId = FirebaseService.academyId;
+    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
     _orderPollTimer = Timer.periodic(
       const Duration(seconds: 2),
       (timer) async {

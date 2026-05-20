@@ -6,6 +6,7 @@ import '../../../api/repositories.dart' as tatami_repos;
 import '../../../core/feedback_utils.dart';
 import '../../../core/sports.dart';
 import '../../../models/student.dart';
+import '../../../providers/selected_academy_provider.dart';
 import '../../../services/services.dart';
 
 /// Shows the "Graduar Aluno" dialog.
@@ -89,7 +90,7 @@ Future<void> showPromoteDialog({
             FilledButton(
               onPressed: () async {
                 try {
-                  final academyId = FirebaseService.academyId;
+                  final academyId = ref.read(selectedAcademyIdProvider) ?? '';
                   final beltRepo =
                       ref.read(tatami_repos.beltProgressionRepoProvider);
 

@@ -10,6 +10,7 @@ import '../../../api/dto/upload_dto.dart' as api_upload;
 import '../../../api/repositories.dart' as tatami_repos;
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
+import '../../../providers/selected_academy_provider.dart';
 import '../../../services/services.dart';
 import '../../../services/store_service.dart';
 import '../../../widgets/cached_image.dart';
@@ -123,7 +124,7 @@ class _ProductFormSheetState extends ConsumerState<ProductFormSheet> {
 
       setState(() => _isUploadingImage = true);
 
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       final file = File(croppedFile.path);
 
       // Upload via Tatami signed-URL (fallback Firebase Storage removido).

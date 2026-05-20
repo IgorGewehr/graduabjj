@@ -11,6 +11,7 @@ import '../../../core/sports.dart';
 import '../../../core/theme.dart';
 import '../../../models/student.dart';
 import '../../../providers/auth_provider.dart' show currentUserProvider;
+import '../../../providers/selected_academy_provider.dart';
 import '../../../services/services.dart';
 
 /// Cadastro rápido de aluno. Pede apenas Nome + Modalidades (+ categoria
@@ -78,7 +79,7 @@ class _QuickAddStudentSheetState extends ConsumerState<QuickAddStudentSheet> {
 
     try {
       final currentUser = ref.read(currentUserProvider).valueOrNull;
-      final academyId = currentUser?.academyId ?? FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       final repo = ref.read(studentRepoProvider);
 
       final orderedSports = [

@@ -7,6 +7,7 @@ import '../../../api/dto/financial_dto.dart' as api_fin;
 import '../../../api/repositories.dart';
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
+import '../../../providers/selected_academy_provider.dart';
 import '../../../services/services.dart';
 import 'financial_widgets.dart';
 
@@ -425,7 +426,7 @@ class _PaymentsTabState extends ConsumerState<PaymentsTab> {
                           : () async {
                               setDialogState(() => isSaving = true);
                               try {
-                                final academyId = FirebaseService.academyId;
+                                final academyId = ref.read(selectedAcademyIdProvider) ?? '';
                                 final apiMethod = _toApiMethod(selectedMethod);
                                 await ref
                                     .read(financialRepoProvider)

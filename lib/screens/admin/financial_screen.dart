@@ -11,6 +11,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/common/academy_page_header.dart';
 import 'financial/financial_reports_tab.dart';
@@ -63,7 +64,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     setState(() => _isLoading = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
 
       Future<List<Payment>> paymentsFuture() async {
         final first =
@@ -165,7 +166,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   Future<void> _sendReminder(Payment payment) async {
     try {
       final currentUser = ref.read(currentUserProvider).valueOrNull;
-      final academyId = currentUser?.academyId ?? FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       final apiStudent = await ref
           .read(studentRepoProvider)
           .getById(academyId, payment.studentId);
@@ -215,7 +216,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
   Future<void> _cancelPayment(Payment payment) async {
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       await ref.read(financialRepoProvider).updateStatus(
             academyId,
             payment.id,
@@ -234,7 +235,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
   Future<void> _reactivatePayment(Payment payment) async {
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       // Determina o status baseado na data de vencimento (igual à lógica legacy)
       final today = DateTime.now();
       final todayStart = DateTime(today.year, today.month, today.day);
@@ -276,7 +277,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
           // O filtro `planId` era exclusivo do path Firestore; no Tatami o BE
           // garante idempotência por (student, plan, month) server-side.
           try {
-            final academyId = FirebaseService.academyId;
+            final academyId = ref.read(selectedAcademyIdProvider) ?? '';
             final result = await ref.read(financialRepoProvider).generateMonthly(
                   academyId,
                   _currentMonthKey,

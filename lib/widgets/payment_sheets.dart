@@ -10,13 +10,13 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../api/dto/financial_dto.dart' as api_fin;
 import '../api/repositories.dart' as tatami_repos;
 import '../core/theme.dart';
-import '../services/firebase_service.dart';
+import '../providers/selected_academy_provider.dart';
 import '../services/abacate_pay_service.dart'; // PaymentLink type
 
 // ============================================
 // Modern PIX Payment Bottom Sheet
 // ============================================
-class PixPaymentSheet extends StatefulWidget {
+class PixPaymentSheet extends ConsumerStatefulWidget {
   final PaymentLink paymentLink;
   final double amount;
   final String? orderId;
@@ -37,10 +37,10 @@ class PixPaymentSheet extends StatefulWidget {
   });
 
   @override
-  State<PixPaymentSheet> createState() => _PixPaymentSheetState();
+  ConsumerState<PixPaymentSheet> createState() => _PixPaymentSheetState();
 }
 
-class _PixPaymentSheetState extends State<PixPaymentSheet>
+class _PixPaymentSheetState extends ConsumerState<PixPaymentSheet>
     with SingleTickerProviderStateMixin {
   bool _paymentConfirmed = false;
   bool _copied = false;
@@ -102,7 +102,7 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
   }
 
   void _setupPaymentListener() {
-    final academyId = FirebaseService.academyId;
+    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
 
     String collection;
     String docId;
@@ -830,7 +830,7 @@ class _CardPaymentSheetState extends ConsumerState<CardPaymentSheet> {
       _errorMessage = null;
     });
 
-    final academyId = FirebaseService.academyId;
+    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
 
     try {
       // Determina o financialId: orderId tem precedência, senão usa financialId.

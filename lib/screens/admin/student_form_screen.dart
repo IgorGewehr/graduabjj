@@ -10,6 +10,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/form/form_widgets.dart';
 import 'student_form/academy_tab.dart';
@@ -141,7 +142,7 @@ class _AdminStudentFormScreenState
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       final apiPlans = await ref
           .read(tatami_repos.planRepoProvider)
           .list(academyId);
@@ -425,7 +426,7 @@ class _AdminStudentFormScreenState
     setState(() => _isSaving = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       final primarySport = _primarySport ?? _grades.keys.first;
       final primaryGrade = _grades[primarySport]!;
       final sportData = <String, dynamic>{};

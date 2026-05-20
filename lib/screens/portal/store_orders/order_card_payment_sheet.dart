@@ -7,7 +7,7 @@ import '../../../api/repositories.dart' as tatami_repos;
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
 // abacate_pay_service.dart removido — CardData não é mais enviado ao backend.
-import '../../../services/firebase_service.dart';
+import '../../../providers/selected_academy_provider.dart';
 
 /// Card Payment Bottom Sheet
 class OrderCardPaymentSheet extends ConsumerStatefulWidget {
@@ -89,7 +89,7 @@ class _OrderCardPaymentSheetState extends ConsumerState<OrderCardPaymentSheet> {
       _errorMessage = null;
     });
 
-    final academyId = FirebaseService.academyId;
+    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
 
     try {
       await ref.read(tatami_repos.financialRepoProvider).payWithCard(

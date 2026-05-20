@@ -10,6 +10,7 @@ import '../../api/dto/student_dto.dart' as api_student;
 import '../../core/theme.dart';
 import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 
 /// Admin Dashboard Screen - Matching webapp design
@@ -47,7 +48,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
 
       // Student stats — Tatami direto (fallback Firestore removido na Fase 1).
       Future<Map<String, dynamic>> statsFuture() async {

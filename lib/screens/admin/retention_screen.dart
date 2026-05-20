@@ -7,6 +7,7 @@ import '../../api/dto/attendance_dto.dart' as api_att;
 import '../../api/dto/financial_dto.dart' as api_fin;
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../services/retention_service.dart';
 
@@ -50,7 +51,7 @@ class _AdminRetentionScreenState
     setState(() => _isLoading = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       final now = DateTime.now();
       final thirtyDaysAgo = now.subtract(const Duration(days: 30));
 

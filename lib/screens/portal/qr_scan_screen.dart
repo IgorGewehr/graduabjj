@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -13,11 +15,6 @@ import '../../providers/auth_provider.dart';
 import '../../providers/student_provider.dart';
 import '../../services/qr_attendance_service.dart' show QrAttendanceException, QrAttendanceResult;
 
-/// QR Scan Screen (Student Portal)
-///
-/// Reads the Tatami-signed QR token shown by the professor (`<b64>.<sig>`) and
-/// immediately calls `/v1/.../attendance/self-checkin` para marcar presença.
-/// BE valida assinatura, TTL (60s), turma e roster.
 class QrScanScreen extends ConsumerStatefulWidget {
   const QrScanScreen({super.key});
 
@@ -32,8 +29,8 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
   );
 
   bool _isProcessing = false;
-  String? _statusMessage;
-  bool _statusIsError = false;
+  String? _errorMessage;
+  bool _showErrorOverlay = false;
   QrAttendanceResult? _success;
 
   @override
@@ -53,8 +50,8 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
 
     setState(() {
       _isProcessing = true;
-      _statusMessage = null;
-      _statusIsError = false;
+      _errorMessage = null;
+      _showErrorOverlay = false;
     });
 
     try {
@@ -69,9 +66,6 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
         );
       }
 
-      // Tatami token format `<b64>.<sig>` — único path agora.
-      // Para apps muito antigos que ainda lerem QR payload JSON legacy
-      // (`{v,a,c,t}`), o BE rejeita o body e o caller vê a mensagem genérica.
       QrAttendanceResult? result;
       final classId = _extractClassIdFromTatamiToken(raw);
       if (classId == null) {
@@ -96,38 +90,44 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
 
       await _controller.stop();
       if (!mounted) return;
+
+      HapticFeedback.heavyImpact();
+
       setState(() {
         _success = result;
         _isProcessing = false;
       });
+
+      Future.delayed(2500.ms, () {
+        if (!mounted) return;
+        Navigator.of(context).pop();
+      });
     } on QrAttendanceException catch (e) {
       if (!mounted) return;
+      HapticFeedback.vibrate();
       setState(() {
-        _statusMessage = e.message;
-        _statusIsError = true;
+        _errorMessage = e.message;
+        _showErrorOverlay = true;
         _isProcessing = false;
       });
-      _scheduleStatusReset();
+      _scheduleErrorDismiss();
     } catch (e) {
       if (!mounted) return;
+      HapticFeedback.vibrate();
       setState(() {
-        _statusMessage = 'Falha inesperada. Tente de novo.';
-        _statusIsError = true;
+        _errorMessage = 'Falha inesperada. Tente de novo.';
+        _showErrorOverlay = true;
         _isProcessing = false;
       });
-      _scheduleStatusReset();
+      _scheduleErrorDismiss();
     }
   }
 
-  /// Decodifica o primeiro segmento (`<b64url(payload)>.<sig>`) e extrai
-  /// `c` (classId). Retorna null se o formato não bater — caller cai
-  /// no caminho legacy. Não valida assinatura (BE faz isso).
   String? _extractClassIdFromTatamiToken(String token) {
     try {
       final dot = token.indexOf('.');
       if (dot <= 0) return null;
       final payloadB64 = token.substring(0, dot);
-      // base64url permite padding ausente — normalize.
       final padded = payloadB64.padRight(
         (payloadB64.length + 3) ~/ 4 * 4,
         '=',
@@ -143,21 +143,28 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
     }
   }
 
-  void _scheduleStatusReset() {
+  void _scheduleErrorDismiss() {
     Future.delayed(const Duration(seconds: 3), () {
       if (!mounted || _success != null) return;
       setState(() {
-        _statusMessage = null;
-        _statusIsError = false;
+        _showErrorOverlay = false;
+        _errorMessage = null;
       });
+    });
+  }
+
+  void _dismissError() {
+    setState(() {
+      _showErrorOverlay = false;
+      _errorMessage = null;
     });
   }
 
   void _retry() {
     setState(() {
       _success = null;
-      _statusMessage = null;
-      _statusIsError = false;
+      _errorMessage = null;
+      _showErrorOverlay = false;
     });
     _controller.start();
   }
@@ -186,107 +193,79 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
           ),
         ],
       ),
-      body: success != null
-          ? _SuccessView(result: success, onScanAnother: _retry)
-          : Stack(
-              children: [
-                MobileScanner(
-                  controller: _controller,
-                  onDetect: _handleDetection,
-                ),
-                _ReticleOverlay(),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: SafeArea(
-                    minimum: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_statusMessage != null)
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _statusIsError
-                                  ? AppTheme.error
-                                  : AppTheme.success,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _statusIsError
-                                      ? LucideIcons.alertTriangle
-                                      : LucideIcons.checkCircle,
-                                  color: Colors.white,
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 8),
-                                Flexible(
-                                  child: Text(
-                                    _statusMessage!,
-                                    style: AppTheme.labelMedium.copyWith(
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.55),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (_isProcessing) ...[
-                                const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation(
-                                      Colors.white,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                              ] else
-                                const Icon(
-                                  LucideIcons.qrCode,
-                                  color: Colors.white,
-                                  size: 16,
-                                ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _isProcessing
-                                    ? 'Validando...'
-                                    : 'Aponte para o QR exibido pelo professor',
-                                style: AppTheme.labelMedium.copyWith(
-                                  color: Colors.white,
+      body: Stack(
+        children: [
+          if (success == null) ...[
+            MobileScanner(
+              controller: _controller,
+              onDetect: _handleDetection,
+            ),
+            _ReticleOverlay(),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SafeArea(
+                minimum: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_isProcessing) ...[
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation(
+                                  Colors.white,
                                 ),
                               ),
-                            ],
+                            ),
+                            const SizedBox(width: 10),
+                          ] else
+                            const Icon(
+                              LucideIcons.qrCode,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _isProcessing
+                                ? 'Validando...'
+                                : 'Aponte para o QR exibido pelo professor',
+                            style: AppTheme.labelMedium.copyWith(
+                              color: Colors.white,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
+          ],
+          if (success != null)
+            _SuccessOverlay(result: success, onScanAnother: _retry),
+          if (_showErrorOverlay && _errorMessage != null)
+            _ErrorOverlay(
+              message: _errorMessage!,
+              onRetry: _dismissError,
+            ),
+        ],
+      ),
     );
   }
 }
@@ -296,12 +275,47 @@ class _ReticleOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     return IgnorePointer(
       child: Center(
-        child: Container(
+        child: SizedBox(
           width: 240,
           height: 240,
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 2),
-            borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            clipBehavior: Clip.hardEdge,
+            children: [
+              Container(
+                width: 240,
+                height: 240,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.8),
+                    width: 2,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              Positioned(
+                left: 2,
+                right: 2,
+                child: Container(
+                  height: 2,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.transparent,
+                        AppTheme.success.withValues(alpha: 0.9),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                )
+                    .animate(onPlay: (c) => c.repeat(reverse: true))
+                    .moveY(
+                      begin: 0,
+                      end: 236,
+                      duration: 1500.ms,
+                      curve: Curves.easeInOut,
+                    ),
+              ),
+            ],
           ),
         ),
       ),
@@ -309,17 +323,17 @@ class _ReticleOverlay extends StatelessWidget {
   }
 }
 
-class _SuccessView extends StatelessWidget {
+class _SuccessOverlay extends StatelessWidget {
   final QrAttendanceResult result;
   final VoidCallback onScanAnother;
 
-  const _SuccessView({required this.result, required this.onScanAnother});
+  const _SuccessOverlay({required this.result, required this.onScanAnother});
 
   @override
   Widget build(BuildContext context) {
+    final className = result.className.isEmpty ? null : result.className;
     return Container(
-      color: AppTheme.background,
-      padding: const EdgeInsets.all(24),
+      color: Colors.black.withValues(alpha: 0.85),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -327,48 +341,143 @@ class _SuccessView extends StatelessWidget {
             Container(
               width: 96,
               height: 96,
-              decoration: BoxDecoration(
-                color: AppTheme.successLight,
+              decoration: const BoxDecoration(
+                color: AppTheme.success,
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                LucideIcons.checkCircle,
-                size: 48,
-                color: AppTheme.success,
+              child: const Icon(
+                LucideIcons.check,
+                size: 52,
+                color: Colors.white,
+              )
+                  .animate()
+                  .fadeIn(delay: 200.ms, duration: 200.ms),
+            )
+                .animate()
+                .scale(
+                  begin: const Offset(0, 0),
+                  end: const Offset(1, 1),
+                  duration: 600.ms,
+                  curve: Curves.elasticOut,
+                ),
+            const SizedBox(height: 24),
+            const Text(
+              'Check-in confirmado!',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+                fontFamily: AppTheme.fontFamily,
               ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'Presenca registrada!',
-              style: AppTheme.headlineLarge,
               textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              result.className,
-              style: AppTheme.titleMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 4),
+            )
+                .animate()
+                .fadeIn(delay: 300.ms, duration: 300.ms)
+                .slideY(begin: 0.2, end: 0, delay: 300.ms, duration: 300.ms),
+            if (className != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Turma: $className',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.75),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w400,
+                  fontFamily: AppTheme.fontFamily,
+                ),
+                textAlign: TextAlign.center,
+              )
+                  .animate()
+                  .fadeIn(delay: 400.ms, duration: 300.ms),
+            ],
+            const SizedBox(height: 6),
             Text(
               DateFormat('HH:mm').format(result.markedAt),
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.55),
+                fontSize: 13,
+                fontFamily: AppTheme.fontFamily,
               ),
-            ),
-            const SizedBox(height: 32),
-            FilledButton.icon(
-              icon: const Icon(LucideIcons.qrCode, size: 16),
-              label: const Text('Escanear outra turma'),
-              onPressed: onScanAnother,
-            ),
-            const SizedBox(height: 12),
+            )
+                .animate()
+                .fadeIn(delay: 450.ms, duration: 300.ms),
+            const SizedBox(height: 36),
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Voltar'),
-            ),
+              onPressed: onScanAnother,
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white.withValues(alpha: 0.7),
+              ),
+              child: const Text('Escanear outra turma'),
+            )
+                .animate()
+                .fadeIn(delay: 600.ms, duration: 300.ms),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorOverlay extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+
+  const _ErrorOverlay({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black.withValues(alpha: 0.85),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 96,
+              height: 96,
+              decoration: const BoxDecoration(
+                color: AppTheme.error,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                LucideIcons.x,
+                size: 52,
+                color: Colors.white,
+              )
+                  .animate()
+                  .fadeIn(delay: 150.ms, duration: 200.ms),
+            )
+                .animate()
+                .scale(
+                  begin: const Offset(0, 0),
+                  end: const Offset(1, 1),
+                  duration: 500.ms,
+                  curve: Curves.elasticOut,
+                ),
+            const SizedBox(height: 24),
+            Text(
+              message,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                fontFamily: AppTheme.fontFamily,
+              ),
+              textAlign: TextAlign.center,
+            )
+                .animate()
+                .fadeIn(delay: 250.ms, duration: 300.ms)
+                .slideY(begin: 0.2, end: 0, delay: 250.ms, duration: 300.ms),
+            const SizedBox(height: 32),
+            FilledButton(
+              onPressed: onRetry,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: AppTheme.error,
+              ),
+              child: const Text('Tentar novamente'),
+            )
+                .animate()
+                .fadeIn(delay: 400.ms, duration: 300.ms),
           ],
         ),
       ),

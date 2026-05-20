@@ -11,7 +11,7 @@ import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
-import '../../services/services.dart';
+import '../../providers/selected_academy_provider.dart';
 
 /// Monitor Student Form Screen - Create or edit student (no financial fields)
 class MonitorStudentFormScreen extends ConsumerStatefulWidget {
@@ -79,7 +79,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
     setState(() => _isLoading = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       ref.invalidate(tatami.tatamiStudentByIdLegacyProvider(
         tatami.studentRef(academyId, widget.studentId!),
       ));
@@ -126,7 +126,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
     setState(() => _isSaving = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       final repo = ref.read(tatami_repos.studentRepoProvider);
 
       // Guardian (for kids)

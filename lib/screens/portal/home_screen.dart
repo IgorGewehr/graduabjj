@@ -7,6 +7,8 @@ import '../../providers/providers.dart';
 import '../../widgets/skeletons/skeletons.dart';
 import 'home/dynamic_cards_section.dart';
 import 'home/home_academy_indicator.dart';
+import 'home/pedidos_card.dart';
+import 'home/quick_actions_grid.dart';
 import 'home/stats_carousel.dart';
 import 'home/welcome_header.dart';
 
@@ -83,6 +85,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             // Academy indicator for multi-academy users
             const HomeAcademyIndicator(),
 
+            const SizedBox(height: 16),
+
+            // Meus Pedidos — acesso rapido logo apos header
+            const PedidosCard(),
+
             const SizedBox(height: 24),
 
             // Stats Carousel
@@ -125,6 +132,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
               error: (_, __) => const SizedBox.shrink(),
             ),
+
+            const SizedBox(height: 24),
+
+            // Quick Actions Grid — features fora do bottom nav
+            const QuickActionsGrid(),
 
             const SizedBox(height: 80),
           ],

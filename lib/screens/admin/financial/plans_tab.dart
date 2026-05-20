@@ -8,6 +8,7 @@ import '../../../api/repositories.dart';
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
 import '../../../models/student.dart';
+import '../../../providers/selected_academy_provider.dart';
 import '../../../services/services.dart';
 import 'financial_widgets.dart';
 
@@ -231,7 +232,7 @@ class PlansTab extends ConsumerWidget {
                             return;
                           }
                           try {
-                            final academyId = FirebaseService.academyId;
+                            final academyId = ref.read(selectedAcademyIdProvider) ?? '';
                             final planRepo = ref.read(planRepoProvider);
                             await planRepo.create(
                               academyId,
@@ -371,7 +372,7 @@ class PlansTab extends ConsumerWidget {
                       child: ElevatedButton(
                         onPressed: () async {
                           try {
-                            final academyId = FirebaseService.academyId;
+                            final academyId = ref.read(selectedAcademyIdProvider) ?? '';
                             final planRepo = ref.read(planRepoProvider);
                             await planRepo.update(
                               academyId,
@@ -436,7 +437,7 @@ class PlansTab extends ConsumerWidget {
           TextButton(
             onPressed: () async {
               try {
-                final academyId = FirebaseService.academyId;
+                final academyId = ref.read(selectedAcademyIdProvider) ?? '';
                 final planRepo = ref.read(planRepoProvider);
                 await planRepo.delete(academyId, plan.id);
                 if (context.mounted) {
@@ -475,7 +476,7 @@ class PlansTab extends ConsumerWidget {
           onRefresh();
         },
         planRepo: ref.read(planRepoProvider),
-        academyId: FirebaseService.academyId,
+        academyId: ref.read(selectedAcademyIdProvider) ?? '',
       ),
     );
   }

@@ -9,6 +9,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/plan_service.dart' show Plan, PlanService;
 import '../../services/firebase_service.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/belt_badge.dart';
 
@@ -41,7 +42,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
   }
 
   Future<void> _refreshPlans() async {
-    final academyId = FirebaseService.academyId;
+    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
     ref.invalidate(tatami.tatamiPlansLegacyProvider(academyId));
     final plans =
         await ref.read(tatami.tatamiPlansLegacyProvider(academyId).future);
@@ -685,7 +686,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: () async {
-                  final academyId = FirebaseService.academyId;
+                  final academyId = ref.read(selectedAcademyIdProvider) ?? '';
                   try {
                     await ref.read(planRepoProvider).setStudentCustomValue(
                       academyId,
@@ -727,7 +728,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: () async {
-                  final academyId = FirebaseService.academyId;
+                  final academyId = ref.read(selectedAcademyIdProvider) ?? '';
                   try {
                     await ref.read(planRepoProvider).setStudentCustomValue(
                       academyId,
@@ -765,7 +766,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
               if (value == null || value <= 0) return;
               final dueDay = int.tryParse(dueDayController.text);
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;
-              final academyId = FirebaseService.academyId;
+              final academyId = ref.read(selectedAcademyIdProvider) ?? '';
               try {
                 await ref.read(planRepoProvider).setStudentCustomValue(
                   academyId,

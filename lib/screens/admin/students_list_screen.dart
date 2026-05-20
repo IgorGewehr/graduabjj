@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -9,6 +11,7 @@ import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/common/academy_page_header.dart';
 import 'students_list/quick_add_student_sheet.dart';
@@ -37,7 +40,19 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   bool? _accountFilter; // null=all, true=linked, false=unlinked
   String _sortBy = 'name';
 
-  // Auto-graduation snapshot (only loaded when feature is on)
+  // Quick belt chips for BJJ
+  static const _bjjBeltChips = [
+    ('white', 'Branca'),
+    ('blue', 'Azul'),
+    ('purple', 'Roxa'),
+    ('brown', 'Marrom'),
+    ('black', 'Preta'),
+  ];
+
+  // Batch selection
+  bool _selectionMode = false;
+  final Set<String> _selectedIds = {};
+
   Map<String, EligibilitySnapshotEntry> _eligibilityByStudent = {};
 
   final _searchController = TextEditingController();
@@ -58,7 +73,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
 
       // Invalidate to force a fresh fetch on pull-to-refresh.
       ref.invalidate(
@@ -237,6 +252,32 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     });
   }
 
+  void _enterSelectionMode(String studentId) {
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _selectionMode = true;
+      _selectedIds.add(studentId);
+    });
+  }
+
+  void _toggleSelection(String studentId) {
+    setState(() {
+      if (_selectedIds.contains(studentId)) {
+        _selectedIds.remove(studentId);
+        if (_selectedIds.isEmpty) _selectionMode = false;
+      } else {
+        _selectedIds.add(studentId);
+      }
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -261,10 +302,10 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
               ),
             ),
 
-            // Search and filters
             SliverToBoxAdapter(child: _buildSearchAndFilters()),
 
-            // Active filter chips
+            SliverToBoxAdapter(child: _buildQuickFilterChips()),
+
             if (_hasActiveFilters())
               SliverToBoxAdapter(child: _buildActiveFilterChips()),
 
@@ -282,12 +323,137 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showQuickAddSheet,
-        backgroundColor: AppTheme.textPrimary,
-        child: const Icon(LucideIcons.userPlus, color: Colors.white),
+      floatingActionButton: _selectionMode
+          ? null
+          : FloatingActionButton(
+              onPressed: _showQuickAddSheet,
+              backgroundColor: AppTheme.textPrimary,
+              child: const Icon(LucideIcons.userPlus, color: Colors.white),
+            ),
+      bottomNavigationBar: _selectionMode ? _buildBatchActionBar() : null,
+    );
+  }
+
+  Widget _buildQuickFilterChips() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+      child: Row(
+        children: [
+          _QuickChip(
+            label: 'Ativo',
+            isSelected: _statusFilter == StudentStatus.active,
+            color: AppTheme.success,
+            onTap: () => setState(() {
+              _statusFilter = _statusFilter == StudentStatus.active
+                  ? null
+                  : StudentStatus.active;
+              _applyFilters();
+            }),
+          ),
+          const SizedBox(width: 8),
+          _QuickChip(
+            label: 'Inativo',
+            isSelected: _statusFilter == StudentStatus.inactive,
+            color: AppTheme.textSecondary,
+            onTap: () => setState(() {
+              _statusFilter = _statusFilter == StudentStatus.inactive
+                  ? null
+                  : StudentStatus.inactive;
+              _applyFilters();
+            }),
+          ),
+          const SizedBox(width: 8),
+          _QuickChip(
+            label: 'Suspenso',
+            isSelected: _statusFilter == StudentStatus.suspended,
+            color: AppTheme.error,
+            onTap: () => setState(() {
+              _statusFilter = _statusFilter == StudentStatus.suspended
+                  ? null
+                  : StudentStatus.suspended;
+              _applyFilters();
+            }),
+          ),
+          const SizedBox(width: 16),
+          Container(width: 1, height: 20, color: AppTheme.divider),
+          const SizedBox(width: 16),
+          for (final (beltId, beltLabel) in _bjjBeltChips) ...[
+            _QuickChip(
+              label: beltLabel,
+              isSelected: _beltFilter == beltId,
+              color: getGradeColor(SportId.bjj, beltId),
+              onTap: () => setState(() {
+                _beltFilter = _beltFilter == beltId ? null : beltId;
+                _applyFilters();
+              }),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ],
       ),
     );
+  }
+
+  Widget _buildBatchActionBar() {
+    final count = _selectedIds.length;
+    return SafeArea(
+      child: Container(
+        height: 72,
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          border: Border(top: BorderSide(color: AppTheme.divider)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 12,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              Text(
+                '$count selecionado${count != 1 ? 's' : ''}',
+                style: AppTheme.bodyMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: count > 0 ? () {} : null,
+                icon: const Icon(LucideIcons.download, size: 16),
+                label: const Text('Exportar'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 4),
+              TextButton.icon(
+                onPressed: count > 0 ? () {} : null,
+                icon: const Icon(LucideIcons.messageSquare, size: 16),
+                label: const Text('Mensagem'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.info,
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                onPressed: _exitSelectionMode,
+                icon: const Icon(LucideIcons.x, size: 20),
+                color: AppTheme.textSecondary,
+                tooltip: 'Cancelar',
+              ),
+            ],
+          ),
+        ),
+      ),
+    )
+        .animate()
+        .slideY(begin: 1.0, end: 0.0, duration: 220.ms, curve: Curves.easeOut);
   }
 
   Widget _buildSearchAndFilters() {
@@ -381,68 +547,40 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   Widget _buildActiveFilterChips() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
       child: Row(
         children: [
-          if (_statusFilter != null)
-            StudentFilterChip(
-              label: _statusFilter!.label,
-              onRemove: () {
-                setState(() {
-                  _statusFilter = null;
-                  _applyFilters();
-                });
-              },
-            ),
           if (_categoryFilter != null)
             StudentFilterChip(
               label: _categoryFilter!.label,
-              onRemove: () {
-                setState(() {
-                  _categoryFilter = null;
-                  _applyFilters();
-                });
-              },
+              onRemove: () => setState(() {
+                _categoryFilter = null;
+                _applyFilters();
+              }),
             ),
           if (_sportFilter != null)
             StudentFilterChip(
               label: sports[_sportFilter]!.label,
-              onRemove: () {
-                setState(() {
-                  _sportFilter = null;
-                  // Belt selection only makes sense within a sport — reset it.
-                  _beltFilter = null;
-                  _applyFilters();
-                });
-              },
-            ),
-          if (_beltFilter != null)
-            StudentFilterChip(
-              label:
-                  'Faixa ${getGradeLabel(_sportFilter ?? SportId.bjj, _beltFilter!)}',
-              onRemove: () {
-                setState(() {
-                  _beltFilter = null;
-                  _applyFilters();
-                });
-              },
+              onRemove: () => setState(() {
+                _sportFilter = null;
+                _beltFilter = null;
+                _applyFilters();
+              }),
             ),
           if (_accountFilter != null)
             StudentFilterChip(
               label: _accountFilter! ? 'Com conta' : 'Sem conta',
-              onRemove: () {
-                setState(() {
-                  _accountFilter = null;
-                  _applyFilters();
-                });
-              },
+              onRemove: () => setState(() {
+                _accountFilter = null;
+                _applyFilters();
+              }),
             ),
           GestureDetector(
             onTap: _clearFilters,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Text(
-                'Limpar',
+                'Limpar tudo',
                 style: AppTheme.bodySmall.copyWith(
                   color: AppTheme.error,
                   fontWeight: FontWeight.w500,
@@ -461,10 +599,19 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       sliver: SliverList(
         delegate: SliverChildBuilderDelegate((context, index) {
           final student = _filteredStudents[index];
+          final selected = _selectedIds.contains(student.id);
           return StudentCard(
             student: student,
             eligibility: _eligibilityByStudent[student.id],
-            onTap: () => context.go('/admin/alunos/${student.id}'),
+            selectionMode: _selectionMode,
+            isSelected: selected,
+            animationIndex: index,
+            onTap: _selectionMode
+                ? () => _toggleSelection(student.id)
+                : () => context.go('/admin/alunos/${student.id}'),
+            onLongPress: _selectionMode
+                ? null
+                : () => _enterSelectionMode(student.id),
           );
         }, childCount: _filteredStudents.length),
       ),
@@ -577,6 +724,46 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _QuickChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _QuickChip({
+    required this.label,
+    required this.isSelected,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: isSelected ? color.withValues(alpha: 0.12) : AppTheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? color : AppTheme.divider,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: AppTheme.bodySmall.copyWith(
+            color: isSelected ? color : AppTheme.textSecondary,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
       ),
     );
   }

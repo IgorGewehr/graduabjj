@@ -7,6 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../api/dto/financial_dto.dart' as api_fin;
 import '../../api/repositories.dart';
 import '../../core/theme.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../services/financial_report_service.dart';
 
@@ -54,7 +55,7 @@ class _AdminFinancialReportsScreenState
     setState(() => _isLoading = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       final repo = ref.read(financialRepoProvider);
       final now = DateTime.now();
 
@@ -224,7 +225,7 @@ class _AdminFinancialReportsScreenState
     setState(() => _isExporting = true);
 
     try {
-      final service = FinancialReportService(FirebaseService.academyId);
+      final service = FinancialReportService(ref.read(selectedAcademyIdProvider) ?? '');
       final csvString = service.exportCSV(_historicalData);
 
       // Copy CSV to clipboard

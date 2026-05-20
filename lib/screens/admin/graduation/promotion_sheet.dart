@@ -7,6 +7,7 @@ import '../../../api/repositories.dart' as tatami_repos;
 import '../../../core/feedback_utils.dart';
 import '../../../core/sports.dart';
 import '../../../core/theme.dart';
+import '../../../providers/selected_academy_provider.dart';
 import '../../../services/services.dart';
 
 /// Exibe o bottom sheet de promoção individual de um aluno.
@@ -382,7 +383,7 @@ Future<void> promoteStudent({
   required VoidCallback onPromoted,
 }) async {
   try {
-    final academyId = FirebaseService.academyId;
+    final academyId = ref.read(selectedAcademyIdProvider) ?? '';
     final repo = ref.read(tatami_repos.studentRepoProvider);
     await repo.createBeltProgression(
       academyId,

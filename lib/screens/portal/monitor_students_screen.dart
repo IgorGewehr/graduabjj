@@ -9,7 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../api/domain_providers.dart' as tatami;
 import '../../core/theme.dart';
 import '../../models/student.dart';
-import '../../services/services.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/belt_badge.dart';
 import '../../widgets/skeletons/skeletons.dart';
@@ -60,7 +60,7 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       final q = tatami.StudentsQuery(academyId: academyId);
       ref.invalidate(tatami.tatamiStudentsLegacyProvider(q));
       final students =

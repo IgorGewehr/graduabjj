@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../api/dto/student_dto.dart' as api_student;
 import '../../api/repositories.dart' as tatami_repos;
 import '../../core/theme.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import 'graduation/graduation_cards.dart';
 import 'graduation/promotion_sheet.dart';
@@ -38,7 +39,7 @@ class _AdminGraduationScreenState
     setState(() => _isLoading = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      final academyId = ref.read(selectedAcademyIdProvider) ?? '';
       final beltRepo = ref.read(tatami_repos.beltProgressionRepoProvider);
 
       final results = await Future.wait([
