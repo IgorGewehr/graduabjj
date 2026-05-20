@@ -229,6 +229,12 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
     }
   }
 
+  /// Clear all cached state. Called on logout so the next login starts fresh.
+  void clear() {
+    state = const SelectedAcademyState();
+    _ref.read(selectedAcademyIdProvider.notifier).state = null;
+  }
+
   String? getCurrentStudentId() {
     final academyId = _ref.read(selectedAcademyIdProvider);
     if (academyId == null) return null;

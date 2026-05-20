@@ -86,6 +86,10 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   );
 
   if (firebaseUser == null) {
+    // Logout: clear all academy state so the next login starts fresh.
+    // This prevents stale data from the previous account bleeding into
+    // the next login session.
+    ref.read(selectedAcademyProvider.notifier).clear();
     return null;
   }
 
@@ -98,11 +102,10 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
       repo: ref.read(identityRepoProvider),
       selectedAcademyId: selectedAcademyId,
     );
-    // Ensure selectedAcademyIdProvider is populated before screens read it.
-    // The SelectedAcademyNotifier._initialize() is async and may not have
-    // completed yet — this guarantees the id is available on the first frame.
-    if (app.academyId != null &&
-        ref.read(selectedAcademyIdProvider) == null) {
+    // Always set the academyId — handles both first login (null → id) and
+    // account switch (old id → new id). Screens that ref.read this provider
+    // in initState/callbacks get the correct value immediately.
+    if (app.academyId != null) {
       ref.read(selectedAcademyIdProvider.notifier).state = app.academyId;
     }
     return app;
