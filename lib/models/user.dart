@@ -511,7 +511,11 @@ class AppUser {
       photoUrl: r.user.photoUrl,
       role: _mapApiRoleToLegacy(picked.role),
       phone: r.user.phone,
-      accountType: r.user.accountType == ApiAccountType.linked
+      // If user has active memberships, they're linked — regardless of the
+      // account_type field. Covers migration edge case where account_type
+      // wasn't updated in Postgres after Firestore import.
+      accountType: (r.activeMemberships.isNotEmpty ||
+              r.user.accountType == ApiAccountType.linked)
           ? AccountType.linked
           : AccountType.free,
       jiujitsuStartDate: r.user.jiujitsuStartDate,

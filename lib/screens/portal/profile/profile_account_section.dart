@@ -62,6 +62,16 @@ class ProfileAccountSection extends ConsumerWidget {
                 onTap: () => _openUrl(AppConstants.privacyPolicyUrl),
               ),
               const Divider(height: 1),
+              // Logout
+              _AccountTile(
+                icon: LucideIcons.logOut,
+                title: 'Sair da conta',
+                onTap: () async {
+                  final authService = ref.read(authServiceProvider);
+                  await authService.signOut();
+                },
+              ),
+              const Divider(height: 1),
               // Delete account
               _AccountTile(
                 icon: LucideIcons.trash2,
