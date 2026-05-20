@@ -78,6 +78,10 @@ class _AdminStudentDetailScreenState
 
     try {
       final academyId = ref.read(safeAcademyIdProvider) ?? '';
+      if (academyId.isEmpty) {
+        setState(() => _isLoading = false);
+        return;
+      }
 
       Future<Student?> studentFuture() async {
         try {

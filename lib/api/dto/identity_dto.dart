@@ -103,6 +103,8 @@ class ApiMembership {
     this.studentId,
     this.joinedAt,
     this.extraPermissions = const [],
+    this.displayName,
+    this.email,
   });
 
   final String uid;
@@ -112,6 +114,13 @@ class ApiMembership {
   final String? studentId;
   final DateTime? joinedAt;
   final List<String> extraPermissions;
+
+  /// Display name resolved from the global user. Not always present in the
+  /// membership JSON — populated client-side after a getUserByUid lookup.
+  final String? displayName;
+
+  /// Email resolved from the global user.
+  final String? email;
 
   factory ApiMembership.fromJson(Map<String, dynamic> j) => ApiMembership(
         uid: j['uid'] as String,
@@ -124,9 +133,25 @@ class ApiMembership {
                 ?.whereType<String>()
                 .toList() ??
             const [],
+        displayName: j['display_name'] as String?,
+        email: j['email'] as String?,
       );
 
   bool get isActive => status == ApiMembershipStatus.active;
+
+  /// Returns a copy with the resolved user info populated.
+  ApiMembership withUserInfo({String? displayName, String? email}) =>
+      ApiMembership(
+        uid: uid,
+        academyId: academyId,
+        role: role,
+        status: status,
+        studentId: studentId,
+        joinedAt: joinedAt,
+        extraPermissions: extraPermissions,
+        displayName: displayName ?? this.displayName,
+        email: email ?? this.email,
+      );
 }
 
 class CurrentUserResponse {

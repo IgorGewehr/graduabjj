@@ -1,12 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../api/dto/financial_dto.dart';
+import '../../../api/financial_repo.dart';
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
 import '../../../services/billing_reminder_service.dart';
-import '../../../services/firebase_service.dart';
+
+/// Maps the legacy [ContactType] enum to the Tatami [ApiBillingContactMethod].
+ApiBillingContactMethod _mapContactType(ContactType type) {
+  switch (type) {
+    case ContactType.whatsapp:
+      return ApiBillingContactMethod.whatsapp;
+    case ContactType.phone:
+      return ApiBillingContactMethod.phone;
+    case ContactType.email:
+      return ApiBillingContactMethod.email;
+    case ContactType.inPerson:
+      return ApiBillingContactMethod.in_person;
+    case ContactType.other:
+      return ApiBillingContactMethod.whatsapp; // fallback
+  }
+}
 
 /// Shows the manual contact log dialog.
+///
+/// Uses Tatami `POST /v1/academies/{id}/billing-contacts` (or the
+/// per-financial variant when [financialId] is a valid Tatami UUID).
 void showBillingContactDialog({
   required BuildContext context,
   required String financialId,
@@ -14,7 +34,10 @@ void showBillingContactDialog({
   required String studentName,
   required BillingStage stage,
   required int daysOverdue,
-  required BillingReminderService billingService,
+  required String academyId,
+  required FinancialRemoteRepo financialRepo,
+  // Keep billingService in signature for backward compat but unused now.
+  BillingReminderService? billingService,
 }) {
   ContactType selectedType = ContactType.whatsapp;
   final notesController = TextEditingController();
@@ -117,17 +140,17 @@ void showBillingContactDialog({
               ElevatedButton(
                 onPressed: () async {
                   try {
-                    await billingService.logContactAttempt(
-                      financialId: financialId,
+                    final req = LogBillingContactRequest(
                       studentId: studentId,
-                      studentName: studentName,
-                      type: selectedType,
-                      notes: notesController.text,
-                      stage: stage.value,
-                      daysOverdue: daysOverdue,
-                      contactedBy: FirebaseService.currentUserId ?? '',
-                      contactedByName: 'Admin',
+                      method: _mapContactType(selectedType),
+                      result: ApiBillingContactResult.other,
+                      contactDate: DateTime.now(),
+                      notes: notesController.text.isNotEmpty
+                          ? notesController.text
+                          : null,
                     );
+
+                    await financialRepo.logBillingContact(academyId, req);
 
                     if (dialogContext.mounted) {
                       Navigator.pop(dialogContext);

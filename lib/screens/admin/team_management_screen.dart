@@ -65,8 +65,28 @@ class _TeamManagementScreenState extends ConsumerState<TeamManagementScreen> {
           .read(tatami_repos.identityRepoProvider)
           .listMemberships(academyId, limit: 100);
       if (!mounted) return;
+
+      // Resolve display_name and email for each member via getUserByUid.
+      // Fire all lookups in parallel to minimize latency.
+      final repo = ref.read(tatami_repos.identityRepoProvider);
+      final resolved = await Future.wait(
+        page.items.map((m) async {
+          // If the backend already returned display_name, skip the lookup.
+          if (m.displayName != null && m.displayName!.isNotEmpty) return m;
+          try {
+            final user = await repo.getUserByUid(m.uid);
+            return m.withUserInfo(
+              displayName: user.displayName,
+              email: user.email,
+            );
+          } catch (_) {
+            return m;
+          }
+        }),
+      );
+      if (!mounted) return;
       setState(() {
-        _memberships = page.items;
+        _memberships = resolved;
         _loading = false;
       });
     } catch (e) {
@@ -235,20 +255,20 @@ class _TeamManagementScreenState extends ConsumerState<TeamManagementScreen> {
     // X-Confirm-Remove (já mandado pelo repo).
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         title: const Text('Remover membro'),
         content: Text(
-          'Tem certeza que quer remover ${m.uid} da academia? Esta ação '
+          'Tem certeza que quer remover ${m.displayName?.isNotEmpty == true ? m.displayName! : m.uid} da academia? Esta ação '
           'cancela TODAS as permissões deste usuário.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogCtx, false),
             child: const Text('Cancelar'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogCtx, true),
             child: const Text('Remover'),
           ),
         ],
@@ -367,15 +387,23 @@ class _MembershipRowState extends State<_MembershipRow> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      // Não temos display_name aqui (response é só a
-                      // membership); mostramos o uid abreviado. Quando o
-                      // BE incluir `display_name` denormalizado, trocamos.
-                      widget.membership.uid,
+                      widget.membership.displayName?.isNotEmpty == true
+                          ? widget.membership.displayName!
+                          : widget.membership.uid,
                       style: AppTheme.bodyMedium.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (widget.membership.email != null &&
+                        widget.membership.email!.isNotEmpty)
+                      Text(
+                        widget.membership.email!,
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     Row(
                       children: [
                         Container(
@@ -520,7 +548,9 @@ class _EditMembershipDialogState extends State<_EditMembershipDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Permissões de ${widget.membership.uid}'),
+      title: Text(
+        'Permissões de ${widget.membership.displayName?.isNotEmpty == true ? widget.membership.displayName! : widget.membership.uid}',
+      ),
       content: SizedBox(
         width: 420,
         child: SingleChildScrollView(

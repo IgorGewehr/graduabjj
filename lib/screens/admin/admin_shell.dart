@@ -439,7 +439,7 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       path: '/admin/financeiro',
     ),
     _AdminNavItem(
-      label: 'Operações',
+      label: 'Chamada',
       icon: LucideIcons.clipboardCheck,
       path: '/admin/chamada',
     ),
@@ -476,11 +476,6 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       label: 'Cobrança',
       icon: LucideIcons.receipt,
       path: '/admin/cobranca',
-    ),
-    _AdminNavItem(
-      label: 'Retenção',
-      icon: LucideIcons.userCheck,
-      path: '/admin/retencao',
     ),
     _AdminNavItem(
       label: 'Relatórios',
@@ -561,8 +556,6 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
           return user?.hasPermission(TatamiPermissions.studentsRead) ?? false;
         case '/admin/cobranca':
           return user?.hasPermission(TatamiPermissions.financialWrite) ?? false;
-        case '/admin/retencao':
-          return user?.hasPermission(TatamiPermissions.studentsRead) ?? false;
         case '/admin/relatorios':
           return user?.hasPermission(TatamiPermissions.financialRead) ?? false;
         case '/admin/equipe':

@@ -65,10 +65,16 @@ final userAcademyMappingProvider = FutureProvider<UserAcademyMapping?>((
   return await globalUserService.getUserAcademyMapping(firebaseUser.uid);
 });
 
-/// Whether the current user is a free user (not linked to any academy)
+/// Whether the current user is a free user (not linked to any academy).
+///
+/// Reads from [currentUserProvider] (Tatami) instead of the legacy
+/// [globalUserProvider] (Firestore) so the flag reflects the real backend
+/// state. Fixes the issue where a user linked via Tatami still shows as
+/// "free" because Firestore wasn't updated.
 final isFreeUserProvider = Provider<bool>((ref) {
-  final globalUser = ref.watch(globalUserProvider).valueOrNull;
-  return globalUser?.accountType == AccountType.free;
+  final user = ref.watch(currentUserProvider).valueOrNull;
+  if (user == null) return true;
+  return user.accountType == AccountType.free;
 });
 
 /// Current user provider with robust fallback logic.
@@ -123,9 +129,14 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
       rethrow;
     }
   } catch (e) {
-    // Non-Dio exceptions (e.g. SocketException wrapped outside Dio,
-    // FormatException on an unexpected response) — fall through to the
-    // Firestore path which covers the "new user not yet in Tatami" edge case.
+    // Non-Dio exceptions (e.g. SocketException wrapped outside Dio).
+    // Only fall through to Firestore on genuine connectivity issues.
+    // FormatException / TypeError indicate a real bug in the response
+    // parsing and should not silently degrade to Firestore (which may
+    // return the wrong role, causing bug #13 — all accounts as student).
+    if (e is FormatException || e is TypeError) {
+      rethrow;
+    }
     // Caminho Firestore mantido aqui temporariamente porque cobre o
     // edge-case "usuário recém-criado sem global_user no Tatami". Esse
     // fluxo deve ser eliminado na Fase 3 (BE precisa auto-provisionar

@@ -8,6 +8,7 @@ import '../../api/dto/financial_dto.dart' as api_fin;
 import '../../api/dto/student_dto.dart' show StudentFilter;
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../api/repositories.dart';
 import '../../providers/api_provider.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/billing_reminder_service.dart';
@@ -68,7 +69,7 @@ class _AdminBillingRemindersScreenState
       length: BillingStage.values.length,
       vsync: this,
     );
-    _billingService = BillingReminderService(ref.read(safeAcademyIdProvider) ?? '');
+    _billingService = BillingReminderService(ref.read(safeAcademyIdProvider) ?? '', settingsRepo: ref.read(settingsRepoProvider));
     _loadData();
   }
 
@@ -82,7 +83,7 @@ class _AdminBillingRemindersScreenState
     setState(() => _isLoading = true);
     try {
       final academyId = ref.read(safeAcademyIdProvider) ?? '';
-      _billingService = BillingReminderService(academyId);
+      _billingService = BillingReminderService(academyId, settingsRepo: ref.read(settingsRepoProvider));
 
       // Load all data from Tatami — no Firestore reads.
       // 1. Students (for contact info) via Tatami
@@ -457,7 +458,8 @@ class _AdminBillingRemindersScreenState
                                 studentName: studentName,
                                 stage: stage,
                                 daysOverdue: daysOverdue,
-                                billingService: _billingService,
+                                academyId: ref.read(safeAcademyIdProvider) ?? '',
+                                financialRepo: ref.read(financialRepoProvider),
                               ),
                             );
                           }).toList(),

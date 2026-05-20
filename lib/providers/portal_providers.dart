@@ -212,16 +212,74 @@ final settingsServiceProvider = Provider<SettingsService?>((ref) {
   return SettingsService(currentUser!.academyId!);
 });
 
-/// Academy settings provider
-// TODO(tatami): migrar para settingsRepoProvider.getAll() quando tatami
-//   expor GET /v1/academies/{id}/settings com campos tipados (name, logoUrl,
-//   pixKey, etc.) mapeáveis para AcademySettings.fromApi. Blocker: o endpoint
-//   atual devolve chave/valor genérico sem cobertura de todos os campos de
-//   AcademySettings (branding, integrations, store, etc.).
+/// Academy settings provider — reads from Tatami REST API.
+///
+/// Converts the generic key/value map from
+/// `GET /v1/academies/{id}/settings` into a typed [AcademySettings].
+/// Falls back to Firestore on network error so the app stays usable
+/// offline / during backend downtime.
 final academySettingsProvider = FutureProvider<AcademySettings?>((ref) async {
-  final service = ref.watch(settingsServiceProvider);
-  if (service == null) return null;
-  return service.getAcademySettings();
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+  if (currentUser?.academyId == null) return null;
+  final academyId = currentUser!.academyId!;
+
+  try {
+    final settingsMap =
+        await ref.read(settingsRepoProvider).getAll(academyId);
+
+    T? _val<T>(String key) {
+      final s = settingsMap[key];
+      if (s == null) return null;
+      final v = s.value;
+      if (v is T) return v;
+      return null;
+    }
+
+    return AcademySettings(
+      name: _val<String>('name') ?? 'Minha Academia',
+      slug: _val<String>('slug'),
+      cnpj: _val<String>('cnpj'),
+      email: _val<String>('email'),
+      phone: _val<String>('phone'),
+      address: _val<String>('address'),
+      city: _val<String>('city'),
+      state: _val<String>('state'),
+      zipCode: _val<String>('zip_code'),
+      responsibleBirthDate: _val<String>('responsible_birth_date'),
+      logoUrl: _val<String>('logo_url'),
+      portalSlogan: _val<String>('portal_slogan'),
+      pixKey: _val<String>('pix_key'),
+      pixKeyType: _val<String>('pix_key_type') != null
+          ? PixKeyType.values.firstWhere(
+              (e) => e.value == _val<String>('pix_key_type'),
+              orElse: () => PixKeyType.cpf,
+            )
+          : null,
+      abacatePayEnabled: _val<bool>('abacate_pay_enabled') ?? false,
+      asaasEnabled: _val<bool>('asaas_enabled') ?? false,
+      autoGraduationEnabled: _val<bool>('auto_graduation_enabled') ?? false,
+      autoGraduationAttendances:
+          _val<num>('auto_graduation_attendances')?.toInt(),
+      useClassWeights: _val<bool>('use_class_weights') ?? false,
+      storeEnabled: _val<bool>('store_enabled') ?? false,
+      storePublished: _val<bool>('store_published') ?? false,
+      storeCreditCardEnabled:
+          _val<bool>('store_credit_card_enabled') ?? false,
+      storeWelcomeMessage: _val<String>('store_welcome_message'),
+      storeMinOrderAmount:
+          _val<num>('store_min_order_amount')?.toDouble(),
+      studentCheckinEnabled:
+          _val<bool>('student_checkin_enabled') ?? false,
+      monitorIds: (_val<List>('monitor_ids') ?? [])
+          .map((e) => e.toString())
+          .toList(),
+    );
+  } catch (_) {
+    // Fallback to Firestore on network error
+    final service = ref.read(settingsServiceProvider);
+    if (service == null) return null;
+    return service.getAcademySettings();
+  }
 });
 
 /// Academy name provider

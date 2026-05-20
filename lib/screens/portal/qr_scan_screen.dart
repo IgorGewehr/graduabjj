@@ -15,6 +15,11 @@ import '../../providers/auth_provider.dart';
 import '../../providers/student_provider.dart';
 import '../../services/qr_attendance_service.dart' show QrAttendanceException, QrAttendanceResult;
 
+/// TODO(backend): Bug #7 - "nao tem turma no dia" ao fazer check-in por QR.
+/// O backend valida schedule vs dia-da-semana e pode estar usando timezone
+/// diferente da academia. Verificar timezone handling em
+/// internal/attendance/application/service.go (SelfCheckin). Se o
+/// backend rejeita, a mensagem de erro aparece aqui como QrAttendanceException.
 class QrScanScreen extends ConsumerStatefulWidget {
   const QrScanScreen({super.key});
 

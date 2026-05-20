@@ -55,6 +55,7 @@ class _AdminCompetitionsScreenState
     setState(() => _isLoading = true);
 
     try {
+      ref.invalidate(tatami.tatamiCompetitionsProvider(academyId));
       ref.invalidate(tatami.tatamiCompetitionsLegacyProvider(academyId));
       final all = await ref
           .read(tatami.tatamiCompetitionsLegacyProvider(academyId).future);
