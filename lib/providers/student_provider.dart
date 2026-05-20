@@ -4,9 +4,11 @@ import '../api/achievement_repo.dart' show ApiAchievementType;
 import '../api/domain_providers.dart' as tatami;
 import '../api/dto/attendance_dto.dart' as api_att;
 import '../api/dto/financial_dto.dart' as api_fin;
+import '../api/dto/student_dto.dart' show ApiStudent;
 import '../api/repositories.dart';
 import '../models/student.dart';
 import '../services/services.dart';
+import 'api_provider.dart';
 import 'auth_provider.dart';
 
 /// Current student provider - fetches the student linked to the logged-in user.
@@ -19,7 +21,36 @@ final currentStudentProvider = FutureProvider<Student?>((ref) async {
 
   if (currentUser == null) return null;
 
-  // If user has a studentId, fetch the student via Tatami
+  // Use GET /v1/me/student which works for ALL roles (no instructor check).
+  // The student-detail endpoint GET /v1/academies/{id}/students/{id} requires
+  // instructor role, so students calling it get 403 → null → "not linked".
+  try {
+    final meStudents = await ref.read(tatamiClientProvider)
+        .get<Map<String, dynamic>>('/v1/me/student');
+    final studentsList = (meStudents['students'] as List?) ?? [];
+    if (studentsList.isNotEmpty) {
+      final first = studentsList.first as Map<String, dynamic>;
+      // If user is in a specific academy, prefer the student from that academy
+      final academyId = currentUser.academyId;
+      Map<String, dynamic>? picked;
+      if (academyId != null) {
+        for (final s in studentsList) {
+          if (s is Map<String, dynamic> && s['academy_id'] == academyId) {
+            picked = s;
+            break;
+          }
+        }
+      }
+      picked ??= first;
+      final apiStudent = ApiStudent.fromJson(picked);
+      return Student.fromApi(apiStudent);
+    }
+  } catch (_) {
+    // Fall through to legacy paths below
+  }
+
+  // Fallback: if /v1/me/student fails, try the admin endpoint (works for
+  // admin/instructor roles) or Firestore.
   if (currentUser.studentId != null && currentUser.academyId != null) {
     try {
       return await ref.read(
@@ -29,22 +60,6 @@ final currentStudentProvider = FutureProvider<Student?>((ref) async {
       );
     } catch (_) {
       return null;
-    }
-  }
-
-  // Fallback: busca por linked_user_uid via StudentRemoteRepo.
-  // Endpoint: GET /v1/academies/{academyId}/students?linked_user_uid={userId}
-  if (currentUser.academyId != null) {
-    try {
-      return await ref
-          .read(studentRepoProvider)
-          .getByLinkedUserId(currentUser.academyId!, currentUser.id)
-          .then((apiStudent) =>
-              apiStudent != null ? Student.fromApi(apiStudent) : null);
-    } catch (_) {
-      // Fallback para Firestore se o endpoint falhar.
-      final service = StudentService(currentUser.academyId!);
-      return await service.getByLinkedUserId(currentUser.id);
     }
   }
 
