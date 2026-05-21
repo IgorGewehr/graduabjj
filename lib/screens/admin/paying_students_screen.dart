@@ -691,7 +691,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
                       academyId,
                       plan.id,
                       student.id,
-                      customValue: plan.monthlyValue,
+                      customValue: plan.monthlyValue.toStringAsFixed(2),
                     );
                   } catch (e) {
                     if (!mounted || !dialogContext.mounted) return;
@@ -775,7 +775,7 @@ class _PayingStudentsScreenState extends ConsumerState<PayingStudentsScreen> {
                   academyId,
                   plan.id,
                   student.id,
-                  customValue: value != plan.monthlyValue ? value : null,
+                  customValue: value != plan.monthlyValue ? value.toStringAsFixed(2) : null,
                   customDueDay:
                       dueDay != plan.defaultDueDay ? dueDay : null,
                 );

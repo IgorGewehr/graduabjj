@@ -253,7 +253,7 @@ class StudentFinancialTab extends StatelessWidget {
                           academyId,
                           plan.id,
                           studentId,
-                          customValue: plan.monthlyValue, // volta ao padrão
+                          customValue: plan.monthlyValue.toStringAsFixed(2), // volta ao padrão
                         );
                   } catch (e) {
                     if (parentContext.mounted) {
@@ -341,7 +341,7 @@ class StudentFinancialTab extends StatelessWidget {
                   academyId,
                   plan.id,
                   studentId,
-                  customValue: value != plan.monthlyValue ? value : null,
+                  customValue: value != plan.monthlyValue ? value.toStringAsFixed(2) : null,
                   customDueDay: dueDay != plan.defaultDueDay ? dueDay : null,
                 );
               } catch (e) {
