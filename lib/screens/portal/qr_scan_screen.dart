@@ -54,8 +54,8 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
     });
 
     try {
-      final user = ref.read(currentUserProvider).valueOrNull;
-      final student = ref.read(currentStudentProvider).valueOrNull;
+      final user = await ref.read(currentUserProvider.future);
+      final student = await ref.read(currentStudentProvider.future);
       final academyId = user?.academyId;
       final studentId = student?.id ?? user?.studentId;
 

@@ -56,7 +56,7 @@ class _MonitorAttendanceScreenState
     setState(() => _isLoading = true);
 
     try {
-      final currentUser = ref.read(currentUserProvider).valueOrNull;
+      final currentUser = await ref.read(currentUserProvider.future);
       if (currentUser?.academyId == null) {
         setState(() => _isLoading = false);
         return;

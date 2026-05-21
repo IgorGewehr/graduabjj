@@ -46,7 +46,7 @@ class _AdminQrSessionScreenState extends ConsumerState<AdminQrSessionScreen> {
   Future<void> _load() async {
     setState(() => _isLoading = true);
     try {
-      final user = ref.read(currentUserProvider).valueOrNull;
+      final user = await ref.read(currentUserProvider.future);
       if (user?.academyId == null) {
         setState(() {
           _classes = [];

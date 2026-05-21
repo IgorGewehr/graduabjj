@@ -189,7 +189,7 @@ class QrAttendanceService {
       throw const QrAttendanceException('Turma nao encontrada');
     }
 
-    if (!cls.studentIds.contains(studentId)) {
+    if (cls.studentIds.isNotEmpty && !cls.studentIds.contains(studentId)) {
       throw const QrAttendanceException(
         'Voce nao esta matriculado nesta turma',
       );
