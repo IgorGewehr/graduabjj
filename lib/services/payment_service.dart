@@ -140,6 +140,24 @@ class Payment {
     required this.createdAt,
   });
 
+  Payment withStudentName(String name) => Payment(
+        id: id,
+        studentId: studentId,
+        studentName: name,
+        value: value,
+        dueDate: dueDate,
+        paidAt: paidAt,
+        status: status,
+        method: method,
+        description: description,
+        referenceMonth: referenceMonth,
+        externalId: externalId,
+        pixCode: pixCode,
+        pixQrCode: pixQrCode,
+        planId: planId,
+        createdAt: createdAt,
+      );
+
   /// Sprint 4 wiring — adapter `ApiFinancial` (Tatami) → `Payment` (legacy).
   ///
   /// O backend usa `Financial` como tabela canônica; o FE legacy chama de

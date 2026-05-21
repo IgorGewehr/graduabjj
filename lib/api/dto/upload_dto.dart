@@ -112,7 +112,7 @@ class SignUploadResponse {
         uploadUrl: j['upload_url'] as String,
         uploadPath: j['upload_path'] as String,
         expiresAt: DateTime.parse(j['expires_at'] as String),
-        maxBytes: (j['max_bytes'] as num).toInt(),
+        maxBytes: (j['max_bytes'] as num?)?.toInt() ?? 0,
       );
 }
 

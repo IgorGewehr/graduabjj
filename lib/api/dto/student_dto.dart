@@ -718,6 +718,7 @@ class UpdateStudentRequest {
     this.emergencyContact,
     this.isProfilePublic,
     this.primarySport,
+    this.sportsList,
   });
 
   final String? fullName;
@@ -746,6 +747,7 @@ class UpdateStudentRequest {
   final String? emergencyContact;
   final bool? isProfilePublic;
   final String? primarySport;
+  final List<String>? sportsList;
 
   Map<String, dynamic> toJson() {
     final m = <String, dynamic>{};
@@ -779,6 +781,7 @@ class UpdateStudentRequest {
     if (emergencyContact != null) m['emergency_contact'] = emergencyContact;
     if (isProfilePublic != null) m['is_profile_public'] = isProfilePublic;
     if (primarySport != null) m['primary_sport'] = primarySport;
+    if (sportsList != null) m['sports_list'] = sportsList;
     return m;
   }
 }

@@ -62,12 +62,11 @@ class UploadsRemoteRepo {
       purpose: purpose,
       filename: filename,
       contentType: contentType,
-      maxBytes: bytes.length,
       academyId: academyId,
     ));
 
     // Size sanity-check antes do PUT pra dar erro melhor que o 413 do GCS.
-    if (bytes.length > signed.maxBytes) {
+    if (signed.maxBytes > 0 && bytes.length > signed.maxBytes) {
       throw UploadSizeLimitException(
         actual: bytes.length,
         limit: signed.maxBytes,

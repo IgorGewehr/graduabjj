@@ -6,6 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../api/domain_providers.dart' as tatami;
 import '../../api/dto/attendance_dto.dart' as api_att;
+import '../../api/dto/student_dto.dart' as api_student;
 import '../../api/repositories.dart';
 import '../../api/tatami_exception.dart';
 import '../../core/feedback_utils.dart';
@@ -337,12 +338,36 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
         setState(() => _presentStudentIds.remove(student.id));
       } else {
         // Tatami: POST /v1/academies/{id}/students/{sid}/attendance
-        await repo.markPresent(academyId, student.id, req);
+        try {
+          await repo.markPresent(academyId, student.id, req);
+        } on DioException catch (e) {
+          final exc = e.error;
+          if (exc is TatamiException &&
+              exc.detail?.contains('sport') == true &&
+              _selectedClass?.sport != null) {
+            // Backend rejeita porque o aluno não tem o esporte da turma
+            // registrado. Corrige automaticamente e re-tenta.
+            final classSport = _selectedClass!.sport!;
+            final current = student.sportsList ?? [];
+            if (!current.contains(classSport)) {
+              await ref.read(studentRepoProvider).update(
+                    academyId,
+                    student.id,
+                    api_student.UpdateStudentRequest(
+                      sportsList: [...current, classSport],
+                    ),
+                  );
+            }
+            await repo.markPresent(academyId, student.id, req);
+          } else {
+            rethrow;
+          }
+        }
         setState(() => _presentStudentIds.add(student.id));
       }
     } catch (e) {
       if (mounted) {
-        String msg = 'Erro ao registrar presenca';
+        String msg = 'Erro ao registrar presença';
         if (e is DioException && e.error is TatamiException) {
           msg = (e.error as TatamiException).forUser(fallback: msg);
         }

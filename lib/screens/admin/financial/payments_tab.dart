@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart' show DioException;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -5,6 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../api/dto/financial_dto.dart' as api_fin;
 import '../../../api/repositories.dart';
+import '../../../api/tatami_exception.dart';
 import '../../../core/feedback_utils.dart';
 import '../../../core/theme.dart';
 import '../../../providers/selected_academy_provider.dart';
@@ -448,7 +450,19 @@ class _PaymentsTabState extends ConsumerState<PaymentsTab> {
                               } catch (e) {
                                 setDialogState(() => isSaving = false);
                                 if (context.mounted) {
-                                  context.showError('Erro: $e');
+                                  final isAlreadyPaid = e is DioException &&
+                                      e.error is TatamiException &&
+                                      (e.error as TatamiException)
+                                              .detail
+                                              ?.contains('already paid') ==
+                                          true;
+                                  if (isAlreadyPaid) {
+                                    Navigator.pop(context);
+                                    context.showSuccess('Pagamento confirmado!');
+                                    await widget.onMarkPaid(payment);
+                                  } else {
+                                    context.showError('Erro: $e');
+                                  }
                                 }
                               }
                             },

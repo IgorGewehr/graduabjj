@@ -136,9 +136,15 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
       ]);
 
       setState(() {
-        _allPayments = results[0] as List<Payment>;
+        final loadedStudents = results[2] as List<Student>;
+        final nameMap = {for (final s in loadedStudents) s.id: s.fullName};
+        _allPayments = (results[0] as List<Payment>).map((p) {
+          if (p.studentName.isNotEmpty) return p;
+          final name = nameMap[p.studentId];
+          return name != null ? p.withStudentName(name) : p;
+        }).toList();
         _plans = results[1] as List<Plan>;
-        _students = results[2] as List<Student>;
+        _students = loadedStudents;
         _monthlySummary = results[3] as Map<String, dynamic>;
         _isLoading = false;
       });
