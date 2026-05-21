@@ -119,6 +119,7 @@ class Payment {
   final String? pixCode;
   final String? pixQrCode;
   final String? planId;
+  final String type; // 'monthly_tuition' | 'avulsa'
   final DateTime createdAt;
 
   Payment({
@@ -136,6 +137,7 @@ class Payment {
     this.pixCode,
     this.pixQrCode,
     this.planId,
+    this.type = 'monthly_tuition',
     required this.createdAt,
   });
 
@@ -164,6 +166,7 @@ class Payment {
       pixCode: data['pixCode'],
       pixQrCode: data['pixQrCode'],
       planId: data['planId'],
+      type: data['type'] ?? 'monthly_tuition',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }

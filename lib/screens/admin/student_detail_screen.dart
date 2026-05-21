@@ -818,8 +818,24 @@ class _AdminStudentDetailScreenState
   }
 
   Widget _buildFinancialTab() {
+    final mensalidades = _payments.where((p) => p.type != 'avulsa').toList();
+    final avulsas = _payments.where((p) => p.type == 'avulsa').toList();
+
     if (_payments.isEmpty && _storeOrders.isEmpty && _studentPlans.isEmpty) {
-      return const Center(child: Text('Nenhum pagamento registrado'));
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Nenhum pagamento registrado'),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              icon: const Icon(LucideIcons.plus, size: 16),
+              label: const Text('Cobrança Avulsa'),
+              onPressed: _showAvulsaPaymentDialog,
+            ),
+          ],
+        ),
+      );
     }
 
     return ListView(
@@ -963,8 +979,52 @@ class _AdminStudentDetailScreenState
           }),
           const SizedBox(height: 16),
         ],
+        // Avulsa charges header with add button
+        Row(
+          children: [
+            Text(
+              'COBRANÇAS AVULSAS',
+              style: AppTheme.labelSmall.copyWith(
+                color: AppTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: _showAvulsaPaymentDialog,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(LucideIcons.plus, size: 14, color: AppTheme.primary),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Adicionar',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (avulsas.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Text(
+              'Nenhuma cobrança avulsa',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+          )
+        else ...[
+          ...avulsas.map((payment) => _PaymentCard(payment: payment)),
+          const SizedBox(height: 16),
+        ],
         // Tuition payments
-        if (_payments.isNotEmpty) ...[
+        if (mensalidades.isNotEmpty) ...[
           Text(
             'MENSALIDADES',
             style: AppTheme.labelSmall.copyWith(
@@ -974,11 +1034,11 @@ class _AdminStudentDetailScreenState
             ),
           ),
           const SizedBox(height: 8),
-          ..._payments.map((payment) => _PaymentCard(payment: payment)),
+          ...mensalidades.map((payment) => _PaymentCard(payment: payment)),
         ],
         // Store orders
         if (_storeOrders.isNotEmpty) ...[
-          if (_payments.isNotEmpty) const SizedBox(height: 16),
+          if (mensalidades.isNotEmpty) const SizedBox(height: 16),
           Text(
             'PEDIDOS DA LOJA',
             style: AppTheme.labelSmall.copyWith(
@@ -991,6 +1051,132 @@ class _AdminStudentDetailScreenState
           ..._storeOrders.map((order) => _StoreOrderCard(order: order)),
         ],
       ],
+    );
+  }
+
+  void _showAvulsaPaymentDialog() {
+    final valueController = TextEditingController();
+    final descController = TextEditingController(text: 'Cobrança Avulsa');
+    DateTime selectedDate = DateTime.now().add(const Duration(days: 5));
+    final parentContext = context;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Nova Cobrança Avulsa'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: descController,
+                      decoration: const InputDecoration(
+                        labelText: 'Descrição',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: valueController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Valor',
+                        prefixText: 'R\$ ',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Vencimento',
+                      style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: selectedDate,
+                          firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                          lastDate: DateTime.now().add(const Duration(days: 730)),
+                        );
+                        if (picked != null) {
+                          setDialogState(() => selectedDate = picked);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: AppTheme.divider),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.calendar, size: 16, color: AppTheme.textSecondary),
+                            const SizedBox(width: 8),
+                            Text(
+                              DateFormat('dd/MM/yyyy').format(selectedDate),
+                              style: AppTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final value = double.tryParse(
+                      valueController.text.replaceAll(',', '.'),
+                    );
+                    if (value == null || value <= 0) return;
+                    final desc = descController.text.trim().isEmpty
+                        ? 'Cobrança Avulsa'
+                        : descController.text.trim();
+                    Navigator.of(dialogContext).pop();
+
+                    final currentUser = ref.read(currentUserProvider).valueOrNull;
+                    final academyId = FirebaseService.academyId;
+                    try {
+                      final paymentService = PaymentService(academyId);
+                      await paymentService.create(
+                        studentId: widget.studentId,
+                        studentName: _student?.fullName ?? '',
+                        value: value,
+                        dueDate: selectedDate,
+                        description: desc,
+                        type: 'avulsa',
+                        planId: null,
+                        sendNotification: false,
+                        createdBy: currentUser?.id,
+                      );
+                    } catch (e) {
+                      if (parentContext.mounted) {
+                        parentContext.showError('Erro ao criar cobrança');
+                      }
+                      return;
+                    }
+                    if (parentContext.mounted) {
+                      parentContext.showSuccess('Cobrança avulsa criada');
+                    }
+                    _loadData();
+                  },
+                  child: const Text('Criar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
