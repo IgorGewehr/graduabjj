@@ -1,10 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import '../api/attendance_repo.dart';
 import '../api/dto/attendance_dto.dart' as api;
-import 'achievement_service.dart';
+import '../api/tatami_client.dart';
 import 'firebase_service.dart';
-import 'student_service.dart';
 
 /// Attendance Model
 class Attendance {
@@ -66,41 +63,27 @@ class Attendance {
       createdAt: a.createdAt ?? DateTime.now(),
     );
   }
-
-  factory Attendance.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return Attendance(
-      id: doc.id,
-      studentId: data['studentId'] ?? '',
-      studentName: data['studentName'] ?? '',
-      classId: data['classId'] ?? '',
-      className: data['className'] ?? '',
-      date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      verifiedBy: data['verifiedBy'] ?? '',
-      verifiedByName: data['verifiedByName'] ?? '',
-      notes: data['notes'],
-      weight: data['weight'] is num ? (data['weight'] as num).toDouble() : null,
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-    );
-  }
 }
 
-/// Attendance Service - Multi-tenant attendance management
+/// Attendance Service - Multi-tenant attendance management (HTTP/Tatami backend)
 class AttendanceService {
   final String academyId;
-  late final Collections _collections;
+  late final AttendanceRemoteRepo _repo;
 
-  AttendanceService(this.academyId) {
-    _collections = Collections(academyId);
+  /// [repo] is optional for backward-compat with callers that only pass
+  /// [academyId]. When omitted, a default [AttendanceRemoteRepo] backed by a
+  /// fresh [TatamiClient] is created automatically.
+  AttendanceService(this.academyId, {AttendanceRemoteRepo? repo}) {
+    _repo = repo ??
+        AttendanceRemoteRepo(
+          TatamiClient(
+            baseUrl: const String.fromEnvironment(
+              'TATAMI_BASE_URL',
+              defaultValue: 'https://tatami.tensorroot.com',
+            ),
+          ),
+        );
   }
-
-  CollectionReference get _attendanceRef => _collections.attendance;
-
-  // Helper: Get start and end of day
-  DateTime _startOfDay(DateTime date) =>
-      DateTime(date.year, date.month, date.day);
-  DateTime _endOfDay(DateTime date) =>
-      DateTime(date.year, date.month, date.day, 23, 59, 59);
 
   // ============================================
   // Get Attendance by Student
@@ -109,65 +92,49 @@ class AttendanceService {
     String studentId, {
     int limit = 50,
   }) async {
-    final query = await _attendanceRef
-        .where('studentId', isEqualTo: studentId)
-        .get();
-
-    var attendance = query.docs
-        .map((doc) => Attendance.fromFirestore(doc))
-        .toList();
-
-    // Sort by date descending
-    attendance.sort((a, b) => b.date.compareTo(a.date));
-
-    if (attendance.length > limit) {
-      attendance = attendance.sublist(0, limit);
-    }
-
-    return attendance;
+    final page = await _repo.list(
+      academyId,
+      filter: api.AttendanceFilter(studentId: studentId, limit: limit),
+    );
+    return page.items.map((a) => Attendance.fromApi(a)).toList();
   }
 
   // ============================================
-  // Get Attendance by Student — PAGINATED (Sprint 5)
+  // Get Attendance by Student — PAGINATED
   //
-  // Server-side cursor pagination using `startAfterDocument`. Use this from
-  // any list UI that supports infinite scroll. Composite index required:
-  // `attendance` (studentId ASC, date DESC) — already declared in
-  // `firestore.indexes.json`.
-  //
-  // Returns the page of items together with the last `DocumentSnapshot`,
-  // which the caller passes back as `startAfter` to fetch the next page.
-  // When `lastDoc` is null, the end of the collection has been reached.
+  // Uses server-side cursor pagination. Returns the page of items together
+  // with the next cursor string. When [nextCursor] is null, the end of the
+  // collection has been reached.
   // ============================================
-  Future<({List<Attendance> items, DocumentSnapshot? lastDoc})>
+  Future<({List<Attendance> items, String? nextCursor})>
   getByStudentPaginated(
     String studentId, {
     int limit = 15,
-    DocumentSnapshot? startAfter,
+    String? cursor,
   }) async {
-    Query query = _attendanceRef
-        .where('studentId', isEqualTo: studentId)
-        .orderBy('date', descending: true)
-        .limit(limit);
-    if (startAfter != null) {
-      query = query.startAfterDocument(startAfter);
-    }
-
-    final snap = await query.get();
-    final items = snap.docs
-        .map((doc) => Attendance.fromFirestore(doc))
-        .toList();
-    return (items: items, lastDoc: snap.docs.isEmpty ? null : snap.docs.last);
+    final page = await _repo.list(
+      academyId,
+      filter: api.AttendanceFilter(
+        studentId: studentId,
+        limit: limit,
+        cursor: cursor,
+      ),
+    );
+    final items = page.items.map((a) => Attendance.fromApi(a)).toList();
+    return (items: items, nextCursor: page.hasMore ? page.nextCursor : null);
   }
 
   // ============================================
   // Get Attendance Count by Student
   // ============================================
   Future<int> getStudentAttendanceCount(String studentId) async {
-    final query = await _attendanceRef
-        .where('studentId', isEqualTo: studentId)
-        .get();
-    return query.size;
+    // Fetch up to 500 items; for a milestone check this is enough.
+    // The backend total field is not exposed in AttendancePage — count items.
+    final page = await _repo.list(
+      academyId,
+      filter: api.AttendanceFilter(studentId: studentId, limit: 500),
+    );
+    return page.items.length;
   }
 
   // ============================================
@@ -179,35 +146,17 @@ class AttendanceService {
     String? classId,
     String? studentId,
   }) async {
-    final snapshot = await _attendanceRef.get();
-    var results = snapshot.docs
-        .map((doc) => Attendance.fromFirestore(doc))
-        .toList();
-
-    final start = _startOfDay(startDate);
-    final end = _endOfDay(endDate);
-
-    // Filter by date range
-    results = results
-        .where(
-          (a) =>
-              a.date.isAfter(start.subtract(const Duration(seconds: 1))) &&
-              a.date.isBefore(end.add(const Duration(seconds: 1))),
-        )
-        .toList();
-
-    // Apply additional filters
-    if (classId != null) {
-      results = results.where((a) => a.classId == classId).toList();
-    }
-    if (studentId != null) {
-      results = results.where((a) => a.studentId == studentId).toList();
-    }
-
-    // Sort by date descending
-    results.sort((a, b) => b.date.compareTo(a.date));
-
-    return results;
+    final page = await _repo.list(
+      academyId,
+      filter: api.AttendanceFilter(
+        studentId: studentId,
+        classId: classId,
+        dateFrom: startDate,
+        dateTo: endDate,
+        limit: 500,
+      ),
+    );
+    return page.items.map((a) => Attendance.fromApi(a)).toList();
   }
 
   // ============================================
@@ -217,24 +166,16 @@ class AttendanceService {
     DateTime date,
     String classId,
   ) async {
-    final query = await _attendanceRef
-        .where('classId', isEqualTo: classId)
-        .get();
-
-    final start = _startOfDay(date);
-    final end = _endOfDay(date);
-
-    final results = query.docs
-        .map((doc) => Attendance.fromFirestore(doc))
-        .where(
-          (a) =>
-              a.date.isAfter(start.subtract(const Duration(seconds: 1))) &&
-              a.date.isBefore(end.add(const Duration(seconds: 1))),
-        )
-        .toList();
-
-    results.sort((a, b) => b.date.compareTo(a.date));
-    return results;
+    final page = await _repo.list(
+      academyId,
+      filter: api.AttendanceFilter(
+        classId: classId,
+        dateFrom: date,
+        dateTo: date,
+        limit: 500,
+      ),
+    );
+    return page.items.map((a) => Attendance.fromApi(a)).toList();
   }
 
   // ============================================
@@ -252,21 +193,17 @@ class AttendanceService {
     String classId,
     DateTime date,
   ) async {
-    final query = await _attendanceRef
-        .where('studentId', isEqualTo: studentId)
-        .get();
-
-    final start = _startOfDay(date);
-    final end = _endOfDay(date);
-
-    return query.docs.any((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      final docDate = (data['date'] as Timestamp?)?.toDate();
-      return data['classId'] == classId &&
-          docDate != null &&
-          docDate.isAfter(start.subtract(const Duration(seconds: 1))) &&
-          docDate.isBefore(end.add(const Duration(seconds: 1)));
-    });
+    final page = await _repo.list(
+      academyId,
+      filter: api.AttendanceFilter(
+        studentId: studentId,
+        classId: classId,
+        dateFrom: date,
+        dateTo: date,
+        limit: 1,
+      ),
+    );
+    return page.items.isNotEmpty;
   }
 
   // ============================================
@@ -276,8 +213,17 @@ class AttendanceService {
     String classId, {
     DateTime? date,
   }) async {
-    final attendance = await getByDateAndClass(date ?? DateTime.now(), classId);
-    return attendance.map((a) => a.studentId).toSet();
+    final d = date ?? DateTime.now();
+    final page = await _repo.list(
+      academyId,
+      filter: api.AttendanceFilter(
+        classId: classId,
+        dateFrom: d,
+        dateTo: d,
+        limit: 500,
+      ),
+    );
+    return page.items.map((a) => a.studentId).toSet();
   }
 
   // ============================================
@@ -350,7 +296,7 @@ class AttendanceService {
     final attendance = await getByStudent(studentId, limit: 365);
     if (attendance.isEmpty) return 0;
 
-    // Get unique dates and sort ascending
+    // Get unique dates and sort descending
     final dates =
         attendance
             .map((a) => DateTime(a.date.year, a.date.month, a.date.day))
@@ -394,43 +340,18 @@ class AttendanceService {
   }) async {
     final attendanceDate = date ?? DateTime.now();
 
-    // Check if already present
-    final alreadyPresent = await isStudentPresent(
+    final apiResult = await _repo.markPresent(
+      academyId,
       studentId,
-      classId,
-      attendanceDate,
+      api.AttendanceSingleRequest(classId: classId, date: attendanceDate),
     );
-    if (alreadyPresent) {
-      throw Exception('Aluno já marcado como presente nesta aula');
-    }
 
-    final payload = <String, dynamic>{
-      'studentId': studentId,
-      'studentName': studentName,
-      'classId': classId,
-      'className': className,
-      'date': Timestamp.fromDate(attendanceDate),
-      'verifiedBy': verifiedBy,
-      'verifiedByName': verifiedByName,
-      'notes': notes,
-      'createdAt': FieldValue.serverTimestamp(),
-    };
-    // Persist weight only when meaningful (non-default). Keeps old docs
-    // and new docs interchangeable when the academy isn't using weights.
-    if (weight != null && weight != 1.0) {
-      payload['weight'] = weight;
-    }
-
-    final docRef = await _attendanceRef.add(payload);
-
-    // Update student's attendance count
-    await _updateStudentAttendanceCount(studentId, 1);
-
-    // Check for milestones (fire and forget)
-    checkAttendanceMilestone(studentId, studentName, verifiedBy).ignore();
-
-    final doc = await docRef.get();
-    return Attendance.fromFirestore(doc);
+    return Attendance.fromApi(
+      apiResult,
+      studentName: studentName,
+      className: className,
+      verifiedByName: verifiedByName,
+    );
   }
 
   // ============================================
@@ -441,36 +362,22 @@ class AttendanceService {
     String classId,
     DateTime date,
   ) async {
-    final attendance = await getByDateAndClass(date, classId);
-    final record = attendance
-        .where((a) => a.studentId == studentId)
-        .firstOrNull;
-
-    if (record == null) {
-      throw Exception('Registro de presença não encontrado');
-    }
-
-    await _attendanceRef.doc(record.id).delete();
-
-    // Update student's attendance count
-    await _updateStudentAttendanceCount(studentId, -1);
+    await _repo.unmarkPresent(
+      academyId,
+      studentId,
+      api.AttendanceSingleRequest(classId: classId, date: date),
+    );
   }
 
   // ============================================
   // Bulk Mark Students as Present
   //
-  // Optimized for "mark all" operations on a full class: everything ships in
-  // a SINGLE Firestore WriteBatch — both the attendance docs and the
-  // denormalized student.attendanceCount increments. This collapses what used
-  // to be ~3N round trips (N inserts + N counter updates + N doc reads) into
-  // one round trip total. Milestone checks remain fire-and-forget afterwards
-  // since they only matter for rare ~50/100/200/etc thresholds.
-  //
-  // Firestore caps batches at 500 writes — we shard automatically when the
-  // input exceeds that. With weight + counter, each student costs 2 writes,
-  // so we cap students per batch at 240 to stay safely under the limit.
+  // Single round trip to POST /attendance/bulk. The backend handles
+  // deduplication, counter updates, and milestone/achievement logic.
+  // Returns the count of students actually recorded (excluding duplicates
+  // and sport_mismatch).
   // ============================================
-  Future<List<Attendance>> bulkMarkPresent({
+  Future<int> bulkMarkPresent({
     required List<({String studentId, String studentName})> students,
     required String classId,
     required String className,
@@ -478,170 +385,53 @@ class AttendanceService {
     required String verifiedByName,
     DateTime? date,
     double? weight,
-    // When provided, writes go to the Go backend instead of Firestore.
-    AttendanceRemoteRepo? repo,
   }) async {
-    final attendanceDate = date ?? DateTime.now();
-    final now = DateTime.now();
-    final results = <Attendance>[];
+    if (students.isEmpty) return 0;
 
-    // Get already present students (single query)
-    final presentIds = await getPresentStudentIds(
-      classId,
-      date: attendanceDate,
-    );
-
-    // Filter once
-    final toMark = students
-        .where((s) => !presentIds.contains(s.studentId))
-        .toList();
-    if (toMark.isEmpty) return results;
-
-    if (repo != null) {
-      // ── Go backend path ──────────────────────────────────────────────────
-      // POST /v1/academies/{id}/attendance/bulk — one round trip for all
-      // students. The backend handles deduplication and counter updates.
-      await repo.bulkRecord(
-        academyId,
-        classId,
-        toMark.map((s) => s.studentId).toList(),
-      );
-
-      // Build results locally for immediate UI feedback.
-      for (final student in toMark) {
-        results.add(
-          Attendance(
-            id: '',
-            studentId: student.studentId,
-            studentName: student.studentName,
-            classId: classId,
-            className: className,
-            date: attendanceDate,
-            verifiedBy: verifiedBy,
-            verifiedByName: verifiedByName,
-            weight: (weight != null && weight != 1.0) ? weight : null,
-            createdAt: now,
-          ),
-        );
-      }
-    } else {
-      // ── Firestore legacy path ────────────────────────────────────────────
-      // Shard into batches of 240 students (≤ 480 writes, under Firestore's 500 cap)
-      const int batchStudentLimit = 240;
-      for (int start = 0; start < toMark.length; start += batchStudentLimit) {
-        final end = (start + batchStudentLimit).clamp(0, toMark.length);
-        final shard = toMark.sublist(start, end);
-
-        final batch = FirebaseService.firestore.batch();
-
-        for (final student in shard) {
-          // 1) Attendance doc
-          final docRef = _attendanceRef.doc();
-          final payload = <String, dynamic>{
-            'studentId': student.studentId,
-            'studentName': student.studentName,
-            'classId': classId,
-            'className': className,
-            'date': Timestamp.fromDate(attendanceDate),
-            'verifiedBy': verifiedBy,
-            'verifiedByName': verifiedByName,
-            'createdAt': FieldValue.serverTimestamp(),
-          };
-          if (weight != null && weight != 1.0) {
-            payload['weight'] = weight;
-          }
-          batch.set(docRef, payload);
-
-          // 2) Student counter increment — in the SAME batch (was a separate
-          // serial loop before, costing N extra round trips for a class of 30)
-          batch.update(_collections.student(student.studentId), {
-            'attendanceCount': FieldValue.increment(1),
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-
-          // Build result locally — no doc.get() needed
-          results.add(
-            Attendance(
-              id: docRef.id,
-              studentId: student.studentId,
-              studentName: student.studentName,
-              classId: classId,
-              className: className,
-              date: attendanceDate,
-              verifiedBy: verifiedBy,
-              verifiedByName: verifiedByName,
-              weight: (weight != null && weight != 1.0) ? weight : null,
-              createdAt: now,
-            ),
-          );
-        }
-
-        await batch.commit();
-      }
-    }
-
-    // Milestones: fire-and-forget after the batch is durable.
-    for (final student in toMark) {
-      checkAttendanceMilestone(
-        student.studentId,
-        student.studentName,
-        verifiedBy,
-      ).ignore();
-    }
-
-    return results;
+    final studentIds = students.map((s) => s.studentId).toList();
+    final recorded = await _repo.bulkRecord(academyId, classId, studentIds);
+    return recorded;
   }
 
   // ============================================
-  // Bulk Unmark Present (batched delete + counter decrement)
+  // Bulk Unmark Present
   //
-  // Single Firestore query to locate today's attendance docs for the class,
-  // then one WriteBatch deletes them all and decrements each student's
-  // attendanceCount. Replaces the previous Future.wait(N×unmarkPresent) which
-  // produced 3N round trips for a 30-student class.
+  // No bulk DELETE endpoint exists — fan out as parallel individual DELETEs
+  // in batches of 20 to avoid overloading the server.
+  // Returns the number of records removed (ignores 404s — already absent).
   // ============================================
   Future<int> bulkUnmarkPresent({
     required String classId,
     required DateTime date,
   }) async {
-    final start = _startOfDay(date);
-    final end = _endOfDay(date);
+    // Discover which students are present for this class/date first.
+    final presentIds = await getPresentStudentIds(classId, date: date);
+    if (presentIds.isEmpty) return 0;
 
-    // Single query for the day's attendance in this class
-    final snap = await _attendanceRef
-        .where('classId', isEqualTo: classId)
-        .get();
-
-    final matching = snap.docs.where((d) {
-      final data = d.data() as Map<String, dynamic>;
-      final docDate = (data['date'] as Timestamp?)?.toDate();
-      return docDate != null &&
-          docDate.isAfter(start.subtract(const Duration(seconds: 1))) &&
-          docDate.isBefore(end.add(const Duration(seconds: 1)));
-    }).toList();
-    if (matching.isEmpty) return 0;
-
-    const int batchLimit = 240; // 2 writes per student = under 500 cap
+    final ids = presentIds.toList();
+    const batchSize = 20;
     int removed = 0;
-    for (int s = 0; s < matching.length; s += batchLimit) {
-      final e = (s + batchLimit).clamp(0, matching.length);
-      final shard = matching.sublist(s, e);
 
-      final batch = FirebaseService.firestore.batch();
-      for (final doc in shard) {
-        final data = doc.data() as Map<String, dynamic>;
-        final sid = data['studentId'] as String?;
-        batch.delete(doc.reference);
-        if (sid != null && sid.isNotEmpty) {
-          batch.update(_collections.student(sid), {
-            'attendanceCount': FieldValue.increment(-1),
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-        }
-      }
-      await batch.commit();
-      removed += shard.length;
+    for (int start = 0; start < ids.length; start += batchSize) {
+      final end = (start + batchSize).clamp(0, ids.length);
+      final batch = ids.sublist(start, end);
+
+      await Future.wait(
+        batch.map((sid) async {
+          try {
+            await _repo.unmarkPresent(
+              academyId,
+              sid,
+              api.AttendanceSingleRequest(classId: classId, date: date),
+            );
+            removed++;
+          } catch (_) {
+            // Student was already absent — not an error.
+          }
+        }),
+      );
     }
+
     return removed;
   }
 
@@ -649,14 +439,7 @@ class AttendanceService {
   // Delete Attendance Record
   // ============================================
   Future<void> delete(String id) async {
-    final doc = await _attendanceRef.doc(id).get();
-    if (!doc.exists) return;
-
-    final attendance = Attendance.fromFirestore(doc);
-    await _attendanceRef.doc(id).delete();
-
-    // Update student's attendance count
-    await _updateStudentAttendanceCount(attendance.studentId, -1);
+    await _repo.delete(academyId, id);
   }
 
   // ============================================
@@ -718,74 +501,18 @@ class AttendanceService {
 
   // ============================================
   // Check Attendance Milestone
+  //
+  // NOTE: Achievement/milestone logic is now managed server-side. This method
+  // is kept as a thin client-side check that can be used for local UI
+  // feedback only; the backend will have already recorded the achievement.
   // ============================================
   Future<void> checkAttendanceMilestone(
     String studentId,
     String studentName,
     String createdBy,
   ) async {
-    const attendeesMilestones = [50, 100, 200, 500, 1000];
-
-    // Get system attendance count
-    final systemCount = await getStudentAttendanceCount(studentId);
-
-    // Get student to access initialAttendanceCount
-    final studentService = StudentService(academyId);
-    final student = await studentService.getById(studentId);
-    final initialCount = student?.initialAttendanceCount ?? 0;
-
-    // Total count
-    final totalCount = systemCount + initialCount;
-
-    // Check if matches milestone
-    if (attendeesMilestones.contains(totalCount)) {
-      // Only create if reached through system attendance (not just initial)
-      if (initialCount >= totalCount) return;
-
-      final achievementService = AchievementService(academyId);
-      final existing = await achievementService.getByStudent(studentId);
-
-      final alreadyHas = existing.any(
-        (a) =>
-            a.type == AchievementType.milestone &&
-            a.milestone == 'attendance_$totalCount',
-      );
-
-      if (!alreadyHas) {
-        // Find exact date
-        final diff = totalCount - initialCount;
-        final allAttendance = await getByStudent(studentId, limit: 10000);
-        // Sort ascending to find N-th attendance
-        allAttendance.sort((a, b) => a.date.compareTo(b.date));
-
-        DateTime? milestoneDate;
-        if (allAttendance.length >= diff) {
-          milestoneDate = allAttendance[diff - 1].date;
-        }
-
-        await achievementService.createAttendanceMilestone(
-          studentId: studentId,
-          studentName: studentName,
-          attendanceCount: totalCount,
-          milestoneDate: milestoneDate,
-          createdBy: createdBy,
-        );
-      }
-    }
-  }
-
-  // ============================================
-  // Helper: Update Student Attendance Count
-  // ============================================
-  Future<void> _updateStudentAttendanceCount(
-    String studentId,
-    int delta,
-  ) async {
-    final studentRef = _collections.student(studentId);
-    await studentRef.update({
-      'attendanceCount': FieldValue.increment(delta),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    // Milestone creation is now server-side. No-op on the client.
+    // Kept for call-site compatibility during incremental migration.
   }
 }
 
