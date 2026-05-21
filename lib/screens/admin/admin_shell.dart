@@ -437,6 +437,11 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       path: '/admin',
     ),
     _AdminNavItem(
+      label: 'Chamada',
+      icon: LucideIcons.clipboardCheck,
+      path: '/admin/chamada',
+    ),
+    _AdminNavItem(
       label: 'Alunos',
       icon: LucideIcons.users,
       path: '/admin/alunos',
@@ -447,13 +452,8 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       path: '/admin/financeiro',
     ),
     _AdminNavItem(
-      label: 'Chamada',
-      icon: LucideIcons.clipboardCheck,
-      path: '/admin/chamada',
-    ),
-    _AdminNavItem(
       label: 'Mais',
-      icon: LucideIcons.grid,
+      icon: LucideIcons.layoutGrid,
       path: '',
     ),
   ];
@@ -610,17 +610,40 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
   Widget build(BuildContext context) {
     final selectedIndex = _getSelectedIndex();
 
-    return NavigationBar(
-      selectedIndex: selectedIndex,
-      onDestinationSelected: _onItemTapped,
-      destinations: _bottomNavItems
-          .map(
-            (item) => NavigationDestination(
-              icon: Icon(item.icon),
-              label: item.label,
-            ),
-          )
-          .toList(),
+    return NavigationBarTheme(
+      data: NavigationBarThemeData(
+        backgroundColor: AppTheme.surface,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        indicatorColor: AppTheme.primary.withValues(alpha: 0.12),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return TextStyle(
+            fontSize: 11,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            color: selected ? AppTheme.primary : AppTheme.textSecondary,
+          );
+        }),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return IconThemeData(
+            color: selected ? AppTheme.primary : AppTheme.textSecondary,
+            size: 22,
+          );
+        }),
+      ),
+      child: NavigationBar(
+        selectedIndex: selectedIndex,
+        onDestinationSelected: _onItemTapped,
+        destinations: _bottomNavItems
+            .map(
+              (item) => NavigationDestination(
+                icon: Icon(item.icon),
+                label: item.label,
+              ),
+            )
+            .toList(),
+      ),
     );
   }
 }

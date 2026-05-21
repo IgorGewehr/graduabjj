@@ -20,12 +20,12 @@ class PortalShell extends ConsumerStatefulWidget {
 class _PortalShellState extends ConsumerState<PortalShell> {
   static const List<_NavItem> _bottomNavItems = [
     _NavItem(
-      label: 'Inicio',
+      label: 'Início',
       icon: LucideIcons.layoutDashboard,
       path: '/portal',
     ),
     _NavItem(
-      label: 'Presencas',
+      label: 'Presenças',
       icon: LucideIcons.clipboardCheck,
       path: '/portal/presencas',
     ),
@@ -180,16 +180,26 @@ class _BottomNavItem extends StatelessWidget {
       child: GestureDetector(
         onTap: onTap,
         behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                item.icon,
-                size: 20,
-                color: isSelected ? AppTheme.textPrimary : AppTheme.textSecondary,
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? AppTheme.primary.withValues(alpha: 0.12)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  item.icon,
+                  size: 20,
+                  color: isSelected ? AppTheme.primary : AppTheme.textSecondary,
+                ),
               ),
               const SizedBox(height: 2),
               Text(
@@ -197,20 +207,10 @@ class _BottomNavItem extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isSelected ? AppTheme.textPrimary : AppTheme.textSecondary,
+                  color: isSelected ? AppTheme.primary : AppTheme.textSecondary,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-              ),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.only(top: 2),
-                width: 4,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: isSelected ? AppTheme.textPrimary : Colors.transparent,
-                  shape: BoxShape.circle,
-                ),
               ),
             ],
           ),
