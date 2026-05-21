@@ -10,7 +10,7 @@ class ApiNews {
     required this.title,
     required this.body,
     this.imageUrl,
-    this.publishedAt,
+    this.isPinned = false,
     this.createdByUid,
     this.createdAt,
     this.updatedAt,
@@ -21,7 +21,7 @@ class ApiNews {
   final String title;
   final String body;
   final String? imageUrl;
-  final DateTime? publishedAt;
+  final bool isPinned;
   final String? createdByUid;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -32,7 +32,7 @@ class ApiNews {
         title: j['title'] as String,
         body: j['body'] as String? ?? j['content'] as String? ?? '',
         imageUrl: j['image_url'] as String?,
-        publishedAt: _parseDate(j['published_at']),
+        isPinned: j['is_pinned'] as bool? ?? false,
         createdByUid: j['created_by_uid'] as String?,
         createdAt: _parseDate(j['created_at']),
         updatedAt: _parseDate(j['updated_at']),
@@ -65,20 +65,18 @@ class CreateNewsRequest {
     required this.title,
     required this.body,
     this.imageUrl,
-    this.publishedAt,
+    this.isPinned,
   });
 
   final String title;
   final String body;
   final String? imageUrl;
-  final DateTime? publishedAt;
+  final bool? isPinned;
 
   Map<String, dynamic> toJson() {
     final m = <String, dynamic>{'title': title, 'body': body};
     if (imageUrl != null) m['image_url'] = imageUrl;
-    if (publishedAt != null) {
-      m['published_at'] = publishedAt!.toUtc().toIso8601String();
-    }
+    if (isPinned != null) m['is_pinned'] = isPinned;
     return m;
   }
 }
@@ -88,22 +86,20 @@ class UpdateNewsRequest {
     this.title,
     this.body,
     this.imageUrl,
-    this.publishedAt,
+    this.isPinned,
   });
 
   final String? title;
   final String? body;
   final String? imageUrl;
-  final DateTime? publishedAt;
+  final bool? isPinned;
 
   Map<String, dynamic> toJson() {
     final m = <String, dynamic>{};
     if (title != null) m['title'] = title;
     if (body != null) m['body'] = body;
     if (imageUrl != null) m['image_url'] = imageUrl;
-    if (publishedAt != null) {
-      m['published_at'] = publishedAt!.toUtc().toIso8601String();
-    }
+    if (isPinned != null) m['is_pinned'] = isPinned;
     return m;
   }
 }

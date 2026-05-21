@@ -349,7 +349,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
         context.showError(msg);
       }
     } finally {
-      setState(() => _isSaving = false);
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -405,7 +405,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
     } catch (e) {
       if (mounted) context.showError('Erro: $e');
     } finally {
-      setState(() => _isSaving = false);
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -438,7 +438,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       }
       final removed = _presentStudentIds.length;
 
-      setState(() => _presentStudentIds.clear());
+      if (mounted) setState(() => _presentStudentIds.clear());
 
       if (mounted) context.showInfo('$removed presencas removidas!');
     } catch (e) {

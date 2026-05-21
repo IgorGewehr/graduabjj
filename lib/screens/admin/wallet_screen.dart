@@ -275,9 +275,8 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
             final walletRepo = ref.read(tatami_repos.walletRepoProvider);
             await walletRepo.requestWithdrawal(
               academyId,
-              amountInCents: amount,
+              amountBRL: amount,
               pixKey: pixKey,
-              pixKeyType: pixKeyType,
             );
 
             if (!mounted || !context.mounted) return;
@@ -1042,14 +1041,13 @@ class _WithdrawalBottomSheetState extends State<_WithdrawalBottomSheet> {
 
     final amountText = _amountController.text.replaceAll(RegExp(r'[^\d,]'), '');
     final amount = double.tryParse(amountText.replaceAll(',', '.')) ?? 0;
-    final amountInCents = (amount * 100).round().toDouble();
 
-    if (amountInCents < 100) {
+    if (amount < 1.0) {
       setState(() => _errorMessage = 'Valor minimo: R\$ 1,00');
       return;
     }
 
-    if (amountInCents > widget.maxAmount) {
+    if (amount > widget.maxAmount) {
       setState(() => _errorMessage = 'Saldo insuficiente');
       return;
     }
@@ -1060,7 +1058,7 @@ class _WithdrawalBottomSheetState extends State<_WithdrawalBottomSheet> {
     });
 
     try {
-      await widget.onWithdraw(amountInCents, _pixKeyController.text, _pixKeyType);
+      await widget.onWithdraw(amount, _pixKeyController.text, _pixKeyType);
     } catch (e) {
       setState(() => _errorMessage = 'Erro ao solicitar saque');
     } finally {

@@ -62,9 +62,8 @@ class AttendanceRemoteRepo {
     return ApiAttendance.fromJson(json);
   }
 
-  /// `DELETE /v1/academies/{id}/students/{sid}/attendance` — desmarca presença
-  /// individual. Passa class_id + date como query params (o backend aceita
-  /// body OU query — usamos query para compatibilidade máxima com Dio).
+  /// `DELETE /v1/academies/{id}/students/{sid}/attendance` — desmarca presença.
+  /// O backend exige JSON body (não query params) para o DELETE.
   /// Admin/instructor only.
   Future<void> unmarkPresent(
     String academyId,
@@ -73,7 +72,7 @@ class AttendanceRemoteRepo {
   ) async {
     await _api.delete(
       '/v1/academies/$academyId/students/$studentId/attendance',
-      queryParameters: req.toJson(),
+      data: req.toJson(),
     );
   }
 

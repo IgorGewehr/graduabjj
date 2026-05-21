@@ -307,15 +307,27 @@ class ApiWallet {
     required this.academyId,
     required this.balance,
     required this.lastUpdatedAt,
+    this.availableBalance = '0.00',
+    this.pendingBalance = '0.00',
+    this.totalReceived = '0.00',
+    this.totalWithdrawn = '0.00',
   });
 
   final String academyId;
   final String balance;
+  final String availableBalance;
+  final String pendingBalance;
+  final String totalReceived;
+  final String totalWithdrawn;
   final DateTime lastUpdatedAt;
 
   factory ApiWallet.fromJson(Map<String, dynamic> j) => ApiWallet(
         academyId: j['academy_id'] as String,
         balance: j['balance'] as String,
+        availableBalance: j['available_balance'] as String? ?? '0.00',
+        pendingBalance: j['pending_balance'] as String? ?? '0.00',
+        totalReceived: j['total_received'] as String? ?? '0.00',
+        totalWithdrawn: j['total_withdrawn'] as String? ?? '0.00',
         lastUpdatedAt: _parseDate(j['last_updated_at']) ?? DateTime.now(),
       );
 }
@@ -330,6 +342,7 @@ class ApiWalletTransaction {
     this.financialId,
     this.externalId,
     this.description,
+    this.status,
   });
 
   final String id;
@@ -339,6 +352,7 @@ class ApiWalletTransaction {
   final ApiWalletTxnKind kind;
   final String amount;
   final String? description;
+  final String? status; // "settled" | "pending" | "failed"
   final DateTime createdAt;
 
   factory ApiWalletTransaction.fromJson(Map<String, dynamic> j) =>
@@ -350,6 +364,7 @@ class ApiWalletTransaction {
         kind: ApiWalletTxnKindX.fromWire(j['kind'] as String?),
         amount: j['amount'] as String,
         description: j['description'] as String?,
+        status: j['status'] as String?,
         createdAt: _parseDate(j['created_at']) ?? DateTime.now(),
       );
 }

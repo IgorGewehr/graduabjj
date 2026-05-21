@@ -129,7 +129,7 @@ class PlanRemoteRepo {
     String academyId,
     String planId,
     String studentId, {
-    double? customValue,
+    String? customValue, // decimal string ex: "99.90" — backend rejects numbers
     int? customDueDay,
   }) async {
     final body = <String, dynamic>{};

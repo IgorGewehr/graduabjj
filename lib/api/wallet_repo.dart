@@ -1,4 +1,5 @@
 import 'dto/financial_dto.dart';
+import 'idempotency.dart';
 import 'tatami_client.dart';
 
 /// Repositório remoto para wallet da academia.
@@ -42,21 +43,23 @@ class WalletRemoteRepo {
   }
 
   /// Solicita saque da wallet da academia.
-  /// [amountInCents] é o valor em centavos.
-  /// Retorna o id da transação gerada pelo backend.
+  /// [amountBRL] é o valor em reais (ex: 150.00).
+  /// Backend exige Idempotency-Key (enviado via postIdempotent) e
+  /// campo `destination_pix_key` (não `pix_key`). Amount deve ser string decimal.
   Future<Map<String, dynamic>> requestWithdrawal(
     String academyId, {
-    required double amountInCents,
+    required double amountBRL,
     required String pixKey,
-    required String pixKeyType,
+    IdempotencyKey? idempotencyKey,
   }) async {
-    final json = await _api.post<Map<String, dynamic>>(
+    final key = idempotencyKey ?? IdempotencyKey.generate();
+    final json = await _api.postIdempotent<Map<String, dynamic>>(
       '/v1/academies/$academyId/wallet/withdrawals',
       data: {
-        'amount': amountInCents.round(),
-        'pix_key': pixKey,
-        'pix_key_type': pixKeyType,
+        'amount': amountBRL.toStringAsFixed(2),
+        'destination_pix_key': pixKey,
       },
+      key: key,
     );
     return json;
   }

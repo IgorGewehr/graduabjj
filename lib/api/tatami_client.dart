@@ -114,10 +114,12 @@ class TatamiClient {
   Future<void> delete(
     String path, {
     Map<String, dynamic>? queryParameters,
+    dynamic data,
     Options? options,
   }) async {
     await _dio.delete<dynamic>(
       path,
+      data: data,
       queryParameters: queryParameters,
       options: options,
     );
