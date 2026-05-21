@@ -1,9 +1,13 @@
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import '../core/constants.dart';
+
+const _tatamiBaseUrl = String.fromEnvironment(
+  'TATAMI_BASE_URL',
+  defaultValue: 'https://tatami.tensorroot.com',
+);
 
 /// Payment Link Response
 class PaymentLink {
@@ -111,16 +115,28 @@ class AbacatePayService {
 
   AbacatePayService(this.academyId);
 
-  /// Check if AbacatePay is enabled for the academy
+  /// Check if AbacatePay is enabled for the academy.
+  ///
+  /// Reads `abacatepay_enabled` from `GET /v1/academies/{id}` (Tatami).
+  /// Falls back to `false` on any error so the UI degrades gracefully.
   Future<bool> isEnabled() async {
     try {
-      final academyDoc = await FirebaseFirestore.instance
-          .collection('academies')
-          .doc(academyId)
-          .get();
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return false;
+      final token = await user.getIdToken();
+      if (token == null) return false;
 
-      if (!academyDoc.exists) return false;
-      return academyDoc.data()?['abacatePayEnabled'] == true;
+      final url = Uri.parse('$_tatamiBaseUrl/v1/academies/$academyId');
+      final response = await http.get(
+        url,
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+      if (response.statusCode != 200) return false;
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      return body['abacatepay_enabled'] as bool? ?? false;
     } catch (_) {
       return false;
     }

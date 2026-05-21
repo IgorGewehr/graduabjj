@@ -177,34 +177,6 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
     }
   }
 
-  /// Firestore fallback for _loadAcademyInfo.
-  Future<AcademyInfo?> _loadAcademyInfoFromFirestore(
-    String academyId,
-    UserAcademyMapping mapping,
-  ) async {
-    try {
-      final academyDoc = await FirebaseService.firestore
-          .collection('academies')
-          .doc(academyId)
-          .get();
-
-      if (!academyDoc.exists) return null;
-
-      final data = academyDoc.data()!;
-      final details = mapping.academyDetails?[academyId];
-
-      return AcademyInfo(
-        id: academyId,
-        name: data['name'] ?? 'Academia',
-        logoUrl: data['logoUrl'] as String?,
-        studentId: details?.studentId,
-        role: details?.role ?? UserRole.student,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
   static UserRole _mapApiRole(ApiRole role) {
     switch (role) {
       case ApiRole.admin:

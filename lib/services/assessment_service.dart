@@ -1,7 +1,6 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
+import '../api/assessment_repo.dart';
 import '../api/dto/student_dto.dart' as api;
-import 'firebase_service.dart';
+import '../api/idempotency.dart';
 
 /// Assessment Category
 enum AssessmentCategory { respeito, disciplina, pontualidade, tecnica, esforco }
@@ -116,43 +115,6 @@ class Assessment {
     required this.createdAt,
   });
 
-  factory Assessment.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-
-    // Parse scores from both formats:
-    // Object format (web): {respeito: 4, disciplina: 3, ...}
-    // Array format (legacy Flutter): [{category: 'respeito', score: 4}, ...]
-    List<AssessmentScore> scoresList;
-    final rawScores = data['scores'];
-    if (rawScores is List) {
-      scoresList = rawScores
-          .map((s) => AssessmentScore.fromMap(s as Map<String, dynamic>))
-          .toList();
-    } else if (rawScores is Map) {
-      scoresList = AssessmentCategory.values.map((cat) {
-        final value = rawScores[cat.value];
-        return AssessmentScore(
-          category: cat,
-          score: (value is num) ? value.toInt() : 3,
-        );
-      }).toList();
-    } else {
-      scoresList = [];
-    }
-
-    return Assessment(
-      id: doc.id,
-      studentId: data['studentId'] ?? '',
-      studentName: data['studentName'] ?? '',
-      date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      scores: scoresList,
-      notes: data['notes'],
-      assessedBy: data['evaluatedBy'] ?? data['assessedBy'] ?? '',
-      assessedByName: data['evaluatedByName'] ?? data['assessedByName'] ?? '',
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-    );
-  }
-
   /// Adapter `ApiAssessment` → `Assessment` legacy.
   ///
   /// Notas:
@@ -192,33 +154,24 @@ class Assessment {
   }
 }
 
-/// Assessment Service - Multi-tenant assessment management
+/// Assessment Service — wraps [AssessmentRemoteRepo] with the legacy
+/// interface expected by screens. All Firestore calls have been removed.
 class AssessmentService {
   final String academyId;
-  late final Collections _collections;
+  final AssessmentRemoteRepo _repo;
 
-  AssessmentService(this.academyId) {
-    _collections = Collections(academyId);
-  }
-
-  CollectionReference get _assessmentsRef => _collections.assessments;
+  AssessmentService(this.academyId, this._repo);
 
   // ============================================
   // Get Assessments by Student
   // ============================================
   Future<List<Assessment>> getByStudent(String studentId, {int? limit}) async {
-    final query = await _assessmentsRef
-        .where('studentId', isEqualTo: studentId)
-        .get();
-
-    var assessments = query.docs.map((doc) => Assessment.fromFirestore(doc)).toList();
-    assessments.sort((a, b) => b.date.compareTo(a.date));
-
-    if (limit != null && assessments.length > limit) {
-      assessments = assessments.sublist(0, limit);
-    }
-
-    return assessments;
+    final page = await _repo.getByStudent(
+      academyId,
+      studentId,
+      limit: limit ?? 50,
+    );
+    return page.items.map(Assessment.fromApi).toList();
   }
 
   // ============================================
@@ -232,10 +185,12 @@ class AssessmentService {
   // ============================================
   // Get Assessment by ID
   // ============================================
-  Future<Assessment?> getById(String id) async {
-    final doc = await _collections.assessment(id).get();
-    if (!doc.exists) return null;
-    return Assessment.fromFirestore(doc);
+  /// Fetches the full list and returns the matching item.
+  /// The REST API does not expose a single-item GET for assessments, so we
+  /// load the first page (limit 50) and search locally.
+  Future<Assessment?> getById(String studentId, String id) async {
+    final assessments = await getByStudent(studentId, limit: 50);
+    return assessments.where((a) => a.id == id).firstOrNull;
   }
 
   // ============================================
@@ -299,14 +254,12 @@ class AssessmentService {
   // ============================================
   // Get Recent Assessments (all students)
   // ============================================
+  /// NOTE: The Tatami API requires a studentId — there is no academy-wide
+  /// "recent assessments" endpoint. This method is kept for API compatibility
+  /// but returns an empty list. Callers that need per-student recents should
+  /// call [getByStudent] directly.
   Future<List<Assessment>> getRecent({int limit = 10}) async {
-    final snapshot = await _assessmentsRef.get();
-    var assessments = snapshot.docs.map((doc) => Assessment.fromFirestore(doc)).toList();
-    assessments.sort((a, b) => b.date.compareTo(a.date));
-    if (assessments.length > limit) {
-      assessments = assessments.sublist(0, limit);
-    }
-    return assessments;
+    return const [];
   }
 
   // ============================================
@@ -396,53 +349,75 @@ class AssessmentService {
     required String assessedByName,
     DateTime? date,
     String? notes,
+    IdempotencyKey? idempotencyKey,
   }) async {
-    // Store scores as object format for cross-app compatibility
-    final scoresMap = <String, int>{};
-    for (final s in scores) {
-      scoresMap[s.category.value] = s.score;
-    }
+    final req = api.CreateAssessmentRequest(
+      date: date ?? DateTime.now(),
+      notes: notes,
+      scores: api.ApiAssessmentScores(
+        respeito: scores.firstWhere((s) => s.category == AssessmentCategory.respeito, orElse: () => AssessmentScore(category: AssessmentCategory.respeito, score: 3)).score,
+        disciplina: scores.firstWhere((s) => s.category == AssessmentCategory.disciplina, orElse: () => AssessmentScore(category: AssessmentCategory.disciplina, score: 3)).score,
+        pontualidade: scores.firstWhere((s) => s.category == AssessmentCategory.pontualidade, orElse: () => AssessmentScore(category: AssessmentCategory.pontualidade, score: 3)).score,
+        tecnica: scores.firstWhere((s) => s.category == AssessmentCategory.tecnica, orElse: () => AssessmentScore(category: AssessmentCategory.tecnica, score: 3)).score,
+        esforco: scores.firstWhere((s) => s.category == AssessmentCategory.esforco, orElse: () => AssessmentScore(category: AssessmentCategory.esforco, score: 3)).score,
+      ),
+    );
 
-    final docRef = await _assessmentsRef.add({
-      'studentId': studentId,
-      'studentName': studentName,
-      'date': Timestamp.fromDate(date ?? DateTime.now()),
-      'scores': scoresMap,
-      'notes': notes,
-      'evaluatedBy': assessedBy,
-      'evaluatedByName': assessedByName,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    final doc = await docRef.get();
-    return Assessment.fromFirestore(doc);
+    final apiAssessment = await _repo.create(
+      academyId,
+      studentId,
+      req,
+      idempotencyKey: idempotencyKey,
+    );
+    return Assessment.fromApi(apiAssessment);
   }
 
   // ============================================
   // Update Assessment
   // ============================================
-  Future<Assessment> update(String id, Map<String, dynamic> data) async {
-    await _collections.assessment(id).update(data);
-    final updated = await getById(id);
-    return updated!;
+  Future<Assessment> update(
+    String studentId,
+    String assessmentId,
+    Map<String, dynamic> data,
+  ) async {
+    final apiAssessment = await _repo.update(
+      academyId,
+      studentId,
+      assessmentId,
+      data,
+    );
+    return Assessment.fromApi(apiAssessment);
   }
 
   // ============================================
   // Delete Assessment
   // ============================================
-  Future<void> delete(String id) async {
-    await _collections.assessment(id).delete();
+  Future<void> delete(String studentId, String assessmentId) async {
+    await _repo.delete(academyId, studentId, assessmentId);
   }
 }
 
 // ============================================
 // Factory Function
 // ============================================
-AssessmentService createAssessmentService(String academyId) {
-  return AssessmentService(academyId);
+AssessmentService createAssessmentService(
+  String academyId,
+  AssessmentRemoteRepo repo,
+) {
+  return AssessmentService(academyId, repo);
 }
 
 // ============================================
 // Default Instance (uses current academy)
 // ============================================
-AssessmentService get assessmentService => AssessmentService(FirebaseService.academyId);
+/// NOTE: This getter requires a repo instance and cannot be used as a simple
+/// top-level getter anymore. Callers should use [assessmentRepoProvider] +
+/// [createAssessmentService] or access [assessmentRepoProvider] directly.
+///
+/// Kept for source compatibility — throws if called; migrate to
+/// ref.read(assessmentRepoProvider).
+AssessmentService get assessmentService =>
+    throw UnsupportedError(
+      'assessmentService getter removed — use assessmentRepoProvider via Riverpod '
+      'or pass AssessmentRemoteRepo explicitly to createAssessmentService().',
+    );

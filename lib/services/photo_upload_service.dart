@@ -1,11 +1,16 @@
 import 'dart:io';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../api/dto/student_dto.dart';
+import '../api/student_repo.dart';
 
 /// Service for uploading and managing student profile photos
 class PhotoUploadService {
+  PhotoUploadService({required StudentRemoteRepo studentRepo})
+      : _studentRepo = studentRepo;
+
   final FirebaseStorage _storage = FirebaseStorage.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final StudentRemoteRepo _studentRepo;
 
   /// Upload a student profile photo
   ///
@@ -53,11 +58,11 @@ class PhotoUploadService {
       // Get download URL
       final downloadURL = await snapshot.ref.getDownloadURL();
 
-      // Update Firestore
-      await _updateStudentPhotoUrl(
-        academyId: academyId,
-        studentId: studentId,
-        photoUrl: downloadURL,
+      // Update student record via Tatami REST API
+      await _studentRepo.update(
+        academyId,
+        studentId,
+        UpdateStudentRequest(photoUrl: downloadURL),
       );
 
       return downloadURL;
@@ -97,11 +102,11 @@ class PhotoUploadService {
         }
       }
 
-      // Update Firestore
-      await _updateStudentPhotoUrl(
-        academyId: academyId,
-        studentId: studentId,
-        photoUrl: '',
+      // Clear photoUrl via Tatami REST API
+      await _studentRepo.update(
+        academyId,
+        studentId,
+        const UpdateStudentRequest(photoUrl: ''),
       );
     } on FirebaseException catch (e) {
       if (e.code == 'unauthorized') {
@@ -112,23 +117,5 @@ class PhotoUploadService {
       if (e is Exception) rethrow;
       throw Exception('Erro ao remover foto: $e');
     }
-  }
-
-  /// Update student photoUrl in Firestore
-  Future<void> _updateStudentPhotoUrl({
-    required String academyId,
-    required String studentId,
-    required String photoUrl,
-  }) async {
-    final docRef = _firestore
-        .collection('academies')
-        .doc(academyId)
-        .collection('students')
-        .doc(studentId);
-
-    await docRef.update({
-      'photoUrl': photoUrl,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
   }
 }

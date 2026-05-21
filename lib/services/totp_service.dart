@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import '../core/constants.dart';
@@ -57,20 +56,26 @@ class TotpService {
         'Content-Type': 'application/json',
       };
 
-  /// Check if TOTP is enabled for the current user (reads Firestore directly)
+  /// Check if TOTP is enabled for the current user.
+  ///
+  /// Reads from `GET /auth/totp/status` (Next.js API). Falls back to
+  /// `false` on any error so the caller degrades gracefully.
   Future<bool> isTotpEnabled() async {
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return false;
+      final token = await _getToken();
+      if (token == null) return false;
 
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
-      if (!doc.exists) return false;
-      return doc.data()?['totpEnabled'] == true;
-    } catch (e) {
+      final url = Uri.parse('${AppConstants.apiBaseUrl}/auth/totp/status');
+      final response = await http.get(url, headers: _headers(token));
+      if (response.statusCode != 200) return false;
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      // Response shape: { "success": true, "data": { "enabled": true } }
+      final data = body['data'];
+      if (data is Map<String, dynamic>) {
+        return data['enabled'] as bool? ?? false;
+      }
+      return false;
+    } catch (_) {
       return false;
     }
   }
