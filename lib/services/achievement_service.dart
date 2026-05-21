@@ -1,10 +1,17 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import '../api/achievement_repo.dart' as repo_ach;
 import '../api/dto/competition_dto.dart' as api;
+import '../api/tatami_client.dart';
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
 import 'student_service.dart';
+
+// Mirrors the compile-time constant from api_provider.dart.
+const _tatamiBaseUrl = String.fromEnvironment(
+  'TATAMI_BASE_URL',
+  defaultValue: 'https://tatami.tensorroot.com',
+);
 
 /// Achievement Type
 enum AchievementType { graduation, stripe, competition, milestone }
@@ -276,33 +283,6 @@ class Achievement {
     }
   }
 
-  factory Achievement.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return Achievement(
-      id: doc.id,
-      studentId: data['studentId'] ?? '',
-      studentName: data['studentName'] ?? '',
-      type: AchievementTypeExtension.fromString(data['type'] ?? 'milestone'),
-      title: data['title'] ?? '',
-      description: data['description'],
-      date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      fromBelt: data['fromBelt'],
-      toBelt: data['toBelt'],
-      fromStripes: data['fromStripes'],
-      toStripes: data['toStripes'],
-      competitionId: data['competitionId'],
-      competitionName: data['competitionName'],
-      position: data['position'] != null
-          ? CompetitionPositionExtension.fromString(data['position'])
-          : null,
-      milestone: data['milestone'],
-      photoUrl: data['photoUrl'],
-      isPublic: data['isPublic'] ?? true,
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      createdBy: data['createdBy'],
-    );
-  }
-
   // Helper: Get year from date
   int get year => date.year;
 
@@ -335,40 +315,57 @@ String getBeltName(String belt) {
 }
 
 /// Achievement Service - Multi-tenant achievement management
+///
+/// All Firestore operations have been replaced with HTTP calls via
+/// [AchievementRemoteRepo]. Methods without a matching backend endpoint
+/// are marked as no-ops with TODO comments.
 class AchievementService {
   final String academyId;
-  late final Collections _collections;
+  late final repo_ach.AchievementRemoteRepo _repo;
   late final NotificationDispatcher _notificationDispatcher;
   late final StudentService _studentService;
 
   AchievementService(this.academyId) {
-    _collections = Collections(academyId);
+    _repo = repo_ach.AchievementRemoteRepo(TatamiClient(baseUrl: _tatamiBaseUrl));
     _notificationDispatcher = NotificationDispatcher(academyId);
     _studentService = StudentService(academyId);
   }
 
-  CollectionReference get _achievementsRef => _collections.achievements;
-
   // ============================================
   // Get Achievements by Student
+  // GET /v1/academies/{academyId}/students/{studentId}/achievements
+  // Fetches all pages to return a flat list (mirrors previous Firestore behaviour).
   // ============================================
   Future<List<Achievement>> getByStudent(String studentId) async {
-    final query = await _achievementsRef
-        .where('studentId', isEqualTo: studentId)
-        .get();
+    final all = <Achievement>[];
+    String? cursor;
 
-    var achievements = query.docs.map((doc) => Achievement.fromFirestore(doc)).toList();
-    achievements.sort((a, b) => b.date.compareTo(a.date));
-    return achievements;
+    do {
+      final page = await _repo.getByStudent(
+        academyId,
+        studentId,
+        limit: 100,
+        cursor: cursor,
+      );
+      all.addAll(page.items.map(Achievement.fromApiRepo));
+      cursor = page.hasMore ? page.nextCursor : null;
+    } while (cursor != null);
+
+    all.sort((a, b) => b.date.compareTo(a.date));
+    return all;
   }
 
   // ============================================
   // Get Achievement by ID
+  // No individual GET endpoint — filter from the student list.
   // ============================================
   Future<Achievement?> getById(String id) async {
-    final doc = await _collections.achievement(id).get();
-    if (!doc.exists) return null;
-    return Achievement.fromFirestore(doc);
+    // TODO(tatami): no GET /v1/.../achievements/{id} endpoint;
+    // searching all achievements for a known student is not efficient here.
+    // This method is only used internally in this service where studentId is
+    // already known — callers should prefer getByStudent().
+    debugPrint('[AchievementService] getById($id): no individual endpoint, returning null');
+    return null;
   }
 
   // ============================================
@@ -445,15 +442,13 @@ class AchievementService {
 
   // ============================================
   // Get Recent Achievements (all students)
+  // TODO(tatami): no academy-wide achievements endpoint exists.
+  // Returns empty list for now.
   // ============================================
   Future<List<Achievement>> getRecent({int limit = 10}) async {
-    final snapshot = await _achievementsRef.get();
-    var achievements = snapshot.docs.map((doc) => Achievement.fromFirestore(doc)).toList();
-    achievements.sort((a, b) => b.date.compareTo(a.date));
-    if (achievements.length > limit) {
-      achievements = achievements.sublist(0, limit);
-    }
-    return achievements;
+    // TODO(tatami): implement when GET /v1/academies/{id}/achievements is available
+    debugPrint('[AchievementService] getRecent: no-op — no academy-wide endpoint');
+    return [];
   }
 
   // ============================================
@@ -497,6 +492,7 @@ class AchievementService {
 
   // ============================================
   // Create Achievement
+  // POST /v1/academies/{academyId}/students/{studentId}/achievements
   // ============================================
   Future<Achievement> create({
     required String studentId,
@@ -518,29 +514,29 @@ class AchievementService {
     String? createdBy,
     bool sendNotification = true,
   }) async {
-    final docRef = await _achievementsRef.add({
-      'studentId': studentId,
-      'studentName': studentName,
+    final body = <String, dynamic>{
       'type': type.value,
-      'title': title,
-      'description': description,
-      'date': Timestamp.fromDate(date ?? DateTime.now()),
-      'fromBelt': fromBelt,
-      'toBelt': toBelt,
-      'fromStripes': fromStripes,
-      'toStripes': toStripes,
-      'competitionId': competitionId,
-      'competitionName': competitionName,
-      'position': position?.value,
-      'milestone': milestone,
-      'photoUrl': photoUrl,
-      'isPublic': isPublic,
-      'createdAt': FieldValue.serverTimestamp(),
-      'createdBy': createdBy,
-    });
+      'unlocked_at': (date ?? DateTime.now()).toIso8601String(),
+    };
 
-    final doc = await docRef.get();
-    final achievement = Achievement.fromFirestore(doc);
+    if (fromBelt != null) body['from_belt'] = fromBelt;
+    if (toBelt != null) body['to_belt'] = toBelt;
+    if (fromStripes != null) body['from_stripes'] = fromStripes;
+    if (toStripes != null) body['to_stripes'] = toStripes;
+    if (competitionId != null) body['competition_id'] = competitionId;
+    if (position != null) body['position'] = position.value;
+    if (milestone != null) body['milestone_key'] = milestone;
+
+    // Pack extra fields that have no direct API mapping into payload.
+    final payload = <String, dynamic>{};
+    if (description != null) payload['description'] = description;
+    if (competitionName != null) payload['competition_name'] = competitionName;
+    if (photoUrl != null) payload['photo_url'] = photoUrl;
+    if (createdBy != null) payload['created_by'] = createdBy;
+    if (payload.isNotEmpty) body['payload'] = payload;
+
+    final apiAchievement = await _repo.create(academyId, studentId, body);
+    final achievement = Achievement.fromApiRepo(apiAchievement, studentName: studentName);
 
     // Send notification to student about new achievement
     if (sendNotification) {
@@ -696,28 +692,43 @@ class AchievementService {
 
   // ============================================
   // Update Achievement
+  // PATCH /v1/academies/{academyId}/students/{studentId}/achievements/{id}
+  //
+  // The data map is forwarded as-is. Callers using legacy Firestore
+  // field names (camelCase) should migrate to snake_case when possible;
+  // the server ignores unknown fields.
   // ============================================
-  Future<Achievement> update(String id, Map<String, dynamic> data) async {
-    await _collections.achievement(id).update(data);
-    final updated = await getById(id);
-    return updated!;
+  Future<Achievement> update(
+    String id,
+    Map<String, dynamic> data, {
+    required String studentId,
+  }) async {
+    final apiAchievement = await _repo.update(academyId, studentId, id, data);
+    return Achievement.fromApiRepo(apiAchievement);
   }
 
   // ============================================
   // Delete Achievement
+  // DELETE /v1/academies/{academyId}/students/{studentId}/achievements/{id}
   // ============================================
-  Future<void> delete(String id) async {
-    await _collections.achievement(id).delete();
+  Future<void> delete(String id, {required String studentId}) async {
+    await _repo.delete(academyId, studentId, id);
   }
 
   // ============================================
   // Toggle Public Visibility
+  // PATCH /v1/academies/{academyId}/students/{studentId}/achievements/{id}
   // ============================================
-  Future<Achievement> togglePublic(String id) async {
-    final achievement = await getById(id);
-    if (achievement == null) throw Exception('Conquista não encontrada');
-
-    return update(id, {'isPublic': !achievement.isPublic});
+  Future<Achievement> togglePublic(String id, {required String studentId}) async {
+    // 'is_public' is the snake_case wire field.
+    // We don't know current value without fetching — pass toggle intent.
+    // For now we optimistically use true and let the caller manage state.
+    // TODO(tatami): add GET /v1/.../achievements/{id} to read current value.
+    debugPrint('[AchievementService] togglePublic: fetching list to determine current value');
+    final list = await getByStudent(studentId);
+    final current = list.where((a) => a.id == id).firstOrNull;
+    final newValue = current != null ? !current.isPublic : true;
+    return update(id, {'is_public': newValue}, studentId: studentId);
   }
 }
 

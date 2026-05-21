@@ -1,7 +1,16 @@
 import 'package:intl/intl.dart';
 
+import '../api/notification_repo.dart';
+import '../api/tatami_client.dart';
 import 'notification_service.dart';
 import 'firebase_service.dart';
+
+// Mirrors the compile-time constant from api_provider.dart so that
+// NotificationDispatcher can build its own TatamiClient without Riverpod.
+const _tatamiBaseUrl = String.fromEnvironment(
+  'TATAMI_BASE_URL',
+  defaultValue: 'https://tatami.tensorroot.com',
+);
 
 /// Notification Dispatcher
 /// Handles creating notifications and optionally sending push notifications
@@ -9,8 +18,10 @@ class NotificationDispatcher {
   final String academyId;
   late final NotificationService _notificationService;
 
-  NotificationDispatcher(this.academyId) {
-    _notificationService = NotificationService(academyId);
+  NotificationDispatcher(this.academyId, {NotificationRemoteRepo? repo}) {
+    final resolvedRepo =
+        repo ?? NotificationRemoteRepo(TatamiClient(baseUrl: _tatamiBaseUrl));
+    _notificationService = NotificationService(academyId, resolvedRepo);
   }
 
   /// Format currency for Brazilian Real

@@ -1,14 +1,15 @@
-import 'dart:math';
-
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import '../api/dto/academy_dto.dart' show ApiLinkCode;
+import '../api/link_code_repo.dart';
+import '../api/tatami_client.dart';
 import 'firebase_service.dart';
 
-// Code configuration
-const int _codeLength = 6;
-const int _codeExpirationHours = 24;
-const String _codeChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Excludes 0, O, I, 1
+// Mirrors the compile-time constant from api_provider.dart.
+const _tatamiBaseUrl = String.fromEnvironment(
+  'TATAMI_BASE_URL',
+  defaultValue: 'https://tatami.tensorroot.com',
+);
 
 /// Link Code Model
 class LinkCode {
@@ -56,35 +57,6 @@ class LinkCode {
     );
   }
 
-  factory LinkCode.fromFirestore(DocumentSnapshot doc, {String? academyId}) {
-    final data = doc.data() as Map<String, dynamic>;
-
-    // Extract academyId from document path if not provided
-    // Path format: academies/{academyId}/linkCodes/{docId}
-    String resolvedAcademyId = academyId ?? '';
-    if (resolvedAcademyId.isEmpty && doc.reference.path.contains('academies/')) {
-      final pathSegments = doc.reference.path.split('/');
-      if (pathSegments.length >= 2 && pathSegments[0] == 'academies') {
-        resolvedAcademyId = pathSegments[1];
-      }
-    }
-
-    return LinkCode(
-      id: doc.id,
-      code: data['code'] ?? '',
-      studentId: data['studentId'] ?? '',
-      studentName: data['studentName'] ?? '',
-      academyId: resolvedAcademyId,
-      createdBy: data['createdBy'] ?? '',
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      expiresAt: (data['expiresAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      usedAt: data['usedAt'] != null
-          ? (data['usedAt'] as Timestamp).toDate()
-          : null,
-      usedBy: data['usedBy'],
-    );
-  }
-
   // Computed properties
   bool get isUsed => usedAt != null;
   bool get isExpired => DateTime.now().isAfter(expiresAt);
@@ -105,26 +77,39 @@ class LinkCodeValidation {
 }
 
 /// Link Code Service - Multi-tenant account linking
+///
+/// All Firestore operations have been replaced with HTTP calls via
+/// [LinkCodeRemoteRepo]. Methods that have no matching backend endpoint
+/// are marked as no-ops with TODO comments.
 class LinkCodeService {
   final String academyId;
-  late final Collections _collections;
+  final LinkCodeRemoteRepo _repo;
 
-  LinkCodeService(this.academyId) {
-    _collections = Collections(academyId);
-  }
-
-  CollectionReference get _linkCodesRef => _collections.linkCodes;
+  LinkCodeService(this.academyId, this._repo);
 
   // ============================================
   // Get Code by Code String
+  // Returns null if not found or backend error.
+  // Uses the preview endpoint GET /v1/link-codes/{code}.
+  // Note: preview returns academy info, not full LinkCode — we synthesize
+  // a minimal LinkCode from the preview.
   // ============================================
   Future<LinkCode?> getByCode(String code) async {
-    final query = await _linkCodesRef
-        .where('code', isEqualTo: code.toUpperCase())
-        .get();
-
-    if (query.docs.isEmpty) return null;
-    return LinkCode.fromFirestore(query.docs.first);
+    try {
+      final preview = await _repo.getPreview(code.toUpperCase());
+      return LinkCode(
+        id: '',
+        code: code.toUpperCase(),
+        studentId: preview.studentId ?? '',
+        studentName: preview.studentName ?? '',
+        academyId: preview.academyId,
+        createdBy: '',
+        createdAt: DateTime.now(),
+        expiresAt: preview.expiresAt,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   // ============================================
@@ -162,195 +147,112 @@ class LinkCodeService {
 
   // ============================================
   // Get Active Code for Student
+  // TODO(tatami): sem endpoint GET /v1/academies/{id}/link-codes com filtro
+  // por student_id. Retorna null enquanto não houver.
   // ============================================
   Future<LinkCode?> getActiveForStudent(String studentId) async {
-    final query = await _linkCodesRef
-        .where('studentId', isEqualTo: studentId)
-        .get();
-
-    final codes = query.docs
-        .map((doc) => LinkCode.fromFirestore(doc))
-        .toList();
-
-    // Sort by createdAt desc
-    codes.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-    // Find first valid code
-    for (final code in codes) {
-      if (code.isValid) {
-        return code;
-      }
-    }
-
+    // TODO(tatami): implement when GET /v1/academies/{id}/link-codes?student_id= is available
+    debugPrint('[LinkCodeService] getActiveForStudent: no-op — endpoint not available yet');
     return null;
   }
 
   // ============================================
   // Get All Codes for Student
+  // TODO(tatami): sem endpoint de listagem por student_id.
   // ============================================
   Future<List<LinkCode>> getForStudent(String studentId) async {
-    final query = await _linkCodesRef
-        .where('studentId', isEqualTo: studentId)
-        .get();
-
-    final codes = query.docs
-        .map((doc) => LinkCode.fromFirestore(doc))
-        .toList();
-
-    codes.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return codes;
+    // TODO(tatami): implement when GET /v1/academies/{id}/link-codes?student_id= is available
+    debugPrint('[LinkCodeService] getForStudent: no-op — endpoint not available yet');
+    return [];
   }
 
   // ============================================
   // Get Code by ID
+  // TODO(tatami): sem endpoint GET /v1/academies/{id}/link-codes/{id}.
   // ============================================
   Future<LinkCode?> getById(String id) async {
-    final doc = await _collections.linkCode(id).get();
-    if (!doc.exists) return null;
-    return LinkCode.fromFirestore(doc);
+    // TODO(tatami): implement when GET /v1/academies/{id}/link-codes/{id} is available
+    debugPrint('[LinkCodeService] getById: no-op — endpoint not available yet');
+    return null;
   }
 
   // ============================================
   // Get Pending Codes (active, unused, not expired)
+  // TODO(tatami): sem endpoint de listagem geral.
   // ============================================
   Future<List<LinkCode>> getPending() async {
-    final snapshot = await _linkCodesRef.get();
-    final codes = snapshot.docs
-        .map((doc) => LinkCode.fromFirestore(doc))
-        .where((c) => c.isValid)
-        .toList();
-
-    codes.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return codes;
+    // TODO(tatami): implement when GET /v1/academies/{id}/link-codes is available
+    debugPrint('[LinkCodeService] getPending: no-op — endpoint not available yet');
+    return [];
   }
 
   // ============================================
   // Get Recently Used Codes
+  // TODO(tatami): sem endpoint de listagem geral.
   // ============================================
   Future<List<LinkCode>> getRecentlyUsed({int limit = 10}) async {
-    final snapshot = await _linkCodesRef.get();
-    var codes = snapshot.docs
-        .map((doc) => LinkCode.fromFirestore(doc))
-        .where((c) => c.isUsed)
-        .toList();
-
-    codes.sort((a, b) => (b.usedAt ?? b.createdAt).compareTo(a.usedAt ?? a.createdAt));
-
-    if (codes.length > limit) {
-      codes = codes.sublist(0, limit);
-    }
-
-    return codes;
-  }
-
-  // ============================================
-  // WRITE OPERATIONS
-  // ============================================
-
-  // Helper: Generate random code
-  String _generateCode() {
-    final random = Random.secure();
-    return List.generate(
-      _codeLength,
-      (index) => _codeChars[random.nextInt(_codeChars.length)],
-    ).join();
+    // TODO(tatami): implement when GET /v1/academies/{id}/link-codes is available
+    debugPrint('[LinkCodeService] getRecentlyUsed: no-op — endpoint not available yet');
+    return [];
   }
 
   // ============================================
   // Generate Code
+  // POST /v1/academies/{academyId}/link-codes
   // ============================================
   Future<LinkCode> generate({
     required String studentId,
     required String studentName,
     required String createdBy,
+    int? ttlSeconds,
   }) async {
-    // Invalidate existing codes for this student
-    await invalidate(studentId);
-
-    // Generate unique code
-    String code;
-    LinkCode? existing;
-    do {
-      code = _generateCode();
-      existing = await getByCode(code);
-    } while (existing != null);
-
-    final now = DateTime.now();
-    final expiresAt = now.add(const Duration(hours: _codeExpirationHours));
-
-    final docRef = await _linkCodesRef.add({
-      'code': code,
-      'studentId': studentId,
-      'studentName': studentName,
-      'createdBy': createdBy,
-      'createdAt': FieldValue.serverTimestamp(),
-      'expiresAt': Timestamp.fromDate(expiresAt),
-      'usedAt': null,
-      'usedBy': null,
-    });
-
-    final doc = await docRef.get();
-    return LinkCode.fromFirestore(doc);
+    final src = await _repo.createForStudent(
+      academyId,
+      studentId: studentId,
+      ttlSeconds: ttlSeconds,
+    );
+    return LinkCode.fromApi(src, studentName: studentName);
   }
 
   // ============================================
   // Mark Code as Used
+  // No-op: the backend handles this atomically in POST /link-codes/{code}/redeem.
+  // Manual marking is not needed and has no matching endpoint.
   // ============================================
   Future<LinkCode> markAsUsed(String code, String userId) async {
-    final linkCode = await getByCode(code);
-    if (linkCode == null) {
-      throw Exception('Código não encontrado');
-    }
-
-    await _linkCodesRef.doc(linkCode.id).update({
-      'usedAt': FieldValue.serverTimestamp(),
-      'usedBy': userId,
-    });
-
-    // Link the student to the user
-    await _collections.student(linkCode.studentId).update({
-      'linkedUserId': userId,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    final doc = await _linkCodesRef.doc(linkCode.id).get();
-    return LinkCode.fromFirestore(doc);
+    // No-op: redeem is handled server-side.
+    debugPrint('[LinkCodeService] markAsUsed: no-op — server handles on redeem');
+    final existing = await getByCode(code);
+    if (existing == null) throw Exception('Código não encontrado');
+    return existing;
   }
 
   // ============================================
   // Delete Code
+  // No-op: no DELETE endpoint for link codes.
+  // TODO(tatami): implement when DELETE /v1/academies/{id}/link-codes/{id} is available.
   // ============================================
   Future<void> delete(String id) async {
-    await _linkCodesRef.doc(id).delete();
+    // TODO(tatami): implement when DELETE /v1/academies/{id}/link-codes/{id} is available
+    debugPrint('[LinkCodeService] delete($id): no-op — endpoint not available yet');
   }
 
   // ============================================
   // Cleanup Expired Codes
+  // No-op: backend manages TTL expiration automatically.
   // ============================================
   Future<int> cleanupExpired() async {
-    final snapshot = await _linkCodesRef.get();
-    final expiredCodes = snapshot.docs
-        .map((doc) => LinkCode.fromFirestore(doc))
-        .where((c) => c.isExpired && !c.isUsed)
-        .toList();
-
-    for (final code in expiredCodes) {
-      await delete(code.id);
-    }
-
-    return expiredCodes.length;
+    // Backend manages TTL — no client-side cleanup needed.
+    return 0;
   }
 
   // ============================================
   // Invalidate All Codes for Student
+  // No-op: delete is a no-op; invalidation is server-managed.
   // ============================================
   Future<void> invalidate(String studentId) async {
-    final codes = await getForStudent(studentId);
-    for (final code in codes) {
-      if (!code.isUsed) {
-        await delete(code.id);
-      }
-    }
+    // No-op: backend manages code lifecycle.
+    debugPrint('[LinkCodeService] invalidate: no-op — server manages code lifecycle');
   }
 }
 
@@ -358,59 +260,65 @@ class LinkCodeService {
 // Factory Function
 // ============================================
 LinkCodeService createLinkCodeService(String academyId) {
-  return LinkCodeService(academyId);
+  return LinkCodeService(
+    academyId,
+    LinkCodeRemoteRepo(TatamiClient(baseUrl: _tatamiBaseUrl)),
+  );
 }
 
 // ============================================
 // Default Instance (uses current academy)
 // ============================================
-LinkCodeService get linkCodeService => LinkCodeService(FirebaseService.academyId);
+LinkCodeService get linkCodeService => LinkCodeService(
+      FirebaseService.academyId,
+      LinkCodeRemoteRepo(TatamiClient(baseUrl: _tatamiBaseUrl)),
+    );
 
 // ============================================
 // GLOBAL VALIDATION (Multi-tenant)
-// Used during registration when user doesn't have an academy yet
+// Used during registration when user doesn't have an academy yet.
+//
+// Migrated from Firestore collectionGroup to GET /v1/link-codes/{code}
+// which returns academy_id directly in the preview response.
 // ============================================
 
-/// Validate code across ALL academies using collectionGroup
-/// Returns the LinkCode with academyId extracted from the document path
+/// Validate code across ALL academies using the Tatami REST API.
+///
+/// GET /v1/link-codes/{code} returns academy_id in the preview — no
+/// Firestore collectionGroup needed. This endpoint is unauthenticated
+/// (preview only) so it works during registration before the user has
+/// an academy context.
 Future<LinkCodeValidation> validateCodeGlobally(String code) async {
-  final firestore = FirebaseFirestore.instance;
+  final repo = LinkCodeRemoteRepo(TatamiClient(baseUrl: _tatamiBaseUrl));
 
   try {
-    // Search across ALL academies' linkCodes subcollections
-    // MUST filter by usedAt == null to match Firestore security rules constraint
-    final query = await firestore
-        .collectionGroup('linkCodes')
-        .where('code', isEqualTo: code.toUpperCase())
-        .where('usedAt', isNull: true)
-        .limit(1)
-        .get();
+    final preview = await repo.getPreview(code.toUpperCase());
 
-    if (query.docs.isEmpty) {
-      return LinkCodeValidation(
-        valid: false,
-        error: 'Código não encontrado ou já utilizado. Solicite um novo código.',
-      );
-    }
-
-    final doc = query.docs.first;
-    final linkCode = LinkCode.fromFirestore(doc);
-
-    // Validate academyId was extracted
-    if (linkCode.academyId.isEmpty) {
+    if (preview.academyId.isEmpty) {
       return LinkCodeValidation(
         valid: false,
         error: 'Erro ao identificar academia do código',
       );
     }
 
-    // Check if expired
-    if (linkCode.isExpired) {
+    final expiresAt = preview.expiresAt;
+    if (DateTime.now().isAfter(expiresAt)) {
       return LinkCodeValidation(
         valid: false,
         error: 'Este código expirou',
       );
     }
+
+    final linkCode = LinkCode(
+      id: '',
+      code: code.toUpperCase(),
+      studentId: preview.studentId ?? '',
+      studentName: preview.studentName ?? '',
+      academyId: preview.academyId,
+      createdBy: '',
+      createdAt: DateTime.now(),
+      expiresAt: expiresAt,
+    );
 
     return LinkCodeValidation(
       valid: true,

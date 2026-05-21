@@ -101,9 +101,6 @@ class AchievementsPage {
 /// estão em `internal/competition/interfaces/`), mas são consultadas
 /// pela rota de estudante:
 ///   `GET /v1/academies/{academyId}/students/{studentId}/achievements`
-///
-/// Somente leitura — conquistas são criadas server-side como efeito
-/// colateral de graduações, resultados de competição e marcos de presença.
 class AchievementRemoteRepo {
   AchievementRemoteRepo(this._api);
 
@@ -126,6 +123,48 @@ class AchievementRemoteRepo {
       queryParameters: params,
     );
     return AchievementsPage.fromJson(json);
+  }
+
+  /// `POST /v1/academies/{academyId}/students/{studentId}/achievements`
+  ///
+  /// Cria uma conquista manualmente para o aluno (ex.: competição, marco).
+  Future<ApiAchievement> create(
+    String academyId,
+    String studentId,
+    Map<String, dynamic> body,
+  ) async {
+    final json = await _api.post<Map<String, dynamic>>(
+      '/v1/academies/$academyId/students/$studentId/achievements',
+      data: body,
+    );
+    return ApiAchievement.fromJson(json);
+  }
+
+  /// `PATCH /v1/academies/{academyId}/students/{studentId}/achievements/{achievementId}`
+  ///
+  /// Atualiza campos de uma conquista existente.
+  Future<ApiAchievement> update(
+    String academyId,
+    String studentId,
+    String achievementId,
+    Map<String, dynamic> body,
+  ) async {
+    final json = await _api.patch<Map<String, dynamic>>(
+      '/v1/academies/$academyId/students/$studentId/achievements/$achievementId',
+      data: body,
+    );
+    return ApiAchievement.fromJson(json);
+  }
+
+  /// `DELETE /v1/academies/{academyId}/students/{studentId}/achievements/{achievementId}`
+  Future<void> delete(
+    String academyId,
+    String studentId,
+    String achievementId,
+  ) async {
+    await _api.delete(
+      '/v1/academies/$academyId/students/$studentId/achievements/$achievementId',
+    );
   }
 }
 

@@ -1,9 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import '../api/dto/notification_dto.dart' as api;
-import 'firebase_service.dart';
+import '../api/notification_repo.dart';
 
-/// Notification Type - matches types stored in Firestore by webhook/Cloud Functions
+/// Notification Type - matches types stored by webhook/Cloud Functions
 enum NotificationType {
   system,
   paymentReceived,
@@ -212,148 +210,94 @@ class AppNotification {
     }
   }
 
-  factory AppNotification.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return AppNotification(
-      id: doc.id,
-      userId: data['userId'] ?? '',
-      type: NotificationTypeExtension.fromString(data['type'] ?? 'system'),
-      priority: NotificationPriorityExtension.fromString(data['priority'] ?? 'normal'),
-      title: data['title'] ?? '',
-      message: data['message'] ?? '',
-      imageUrl: data['imageUrl'],
-      actionUrl: data['actionUrl'],
-      actionLabel: data['actionLabel'],
-      studentId: data['studentId'],
-      financialId: data['financialId'],
-      competitionId: data['competitionId'],
-      read: data['read'] ?? false,
-      readAt: data['readAt'] != null
-          ? (data['readAt'] as Timestamp).toDate()
-          : null,
-      channels: data['channels'] != null
-          ? List<String>.from(data['channels'])
-          : ['in_app'],
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      expiresAt: data['expiresAt'] != null
-          ? (data['expiresAt'] as Timestamp).toDate()
-          : null,
-    );
-  }
-
   // Computed properties
   bool get isExpired =>
       expiresAt != null && DateTime.now().isAfter(expiresAt!);
   bool get isUnread => !read && !isExpired;
 }
 
-/// Notification Service - Multi-tenant notification management
+/// Notification Service - wraps NotificationRemoteRepo for legacy callers.
+///
+/// All Firestore operations have been replaced with HTTP calls via
+/// [NotificationRemoteRepo]. The [academyId] is forwarded as a filter
+/// on endpoints that support it.
 class NotificationService {
   final String academyId;
-  late final Collections _collections;
+  final NotificationRemoteRepo _repo;
 
-  NotificationService(this.academyId) {
-    _collections = Collections(academyId);
-  }
-
-  CollectionReference get _notificationsRef => _collections.notifications;
+  NotificationService(this.academyId, this._repo);
 
   // ============================================
   // Get User Notifications (One-time fetch)
   // ============================================
   Future<List<AppNotification>> getByUser(String userId, {int limit = 50}) async {
-    final query = await _notificationsRef
-        .where('userId', isEqualTo: userId)
-        .orderBy('createdAt', descending: true)
-        .limit(limit)
-        .get();
-
-    return query.docs
-        .map((doc) => AppNotification.fromFirestore(doc))
+    final page = await _repo.list(
+      filter: api.NotificationsFilter(
+        academyId: academyId,
+        limit: limit,
+      ),
+    );
+    return page.items
+        .map(AppNotification.fromApi)
         .where((n) => !n.isExpired)
         .toList();
   }
 
   // ============================================
   // Stream User Notifications (Real-time updates)
+  //
+  // Tatami expõe SSE via NotificationRemoteRepo.streamNotifications().
+  // Aqui convertemos o stream SSE (List<ApiNotification>) em
+  // Stream<List<AppNotification>> para consumo legado.
   // ============================================
   Stream<List<AppNotification>> streamByUser(String userId, {int limit = 50}) {
-    return _notificationsRef
-        .where('userId', isEqualTo: userId)
-        .orderBy('createdAt', descending: true)
-        .limit(limit)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => AppNotification.fromFirestore(doc))
-          .where((n) => !n.isExpired)
-          .toList();
-    });
+    return _repo.streamNotifications().map(
+          (batch) => batch
+              .map(AppNotification.fromApi)
+              .where((n) => !n.isExpired)
+              .toList(),
+        );
   }
 
   // ============================================
   // Get Unread Count (One-time fetch)
   // ============================================
   Future<int> getUnreadCount(String userId) async {
-    final query = await _notificationsRef
-        .where('userId', isEqualTo: userId)
-        .where('read', isEqualTo: false)
-        .get();
-
-    return query.docs
-        .map((doc) => AppNotification.fromFirestore(doc))
-        .where((n) => !n.isExpired)
-        .length;
+    return _repo.getUnreadCount(academyId: academyId);
   }
 
   // ============================================
-  // Stream Unread Count (Real-time updates)
+  // Stream Unread Count (Real-time updates via polling)
+  //
+  // O Tatami não expõe um stream de contagem dedicado. Fazemos polling
+  // a cada 30s como substituto leve; SSE poderia ser usada em sprint
+  // posterior para reduzir latência.
   // ============================================
   Stream<int> streamUnreadCount(String userId) {
-    return _notificationsRef
-        .where('userId', isEqualTo: userId)
-        .where('read', isEqualTo: false)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => AppNotification.fromFirestore(doc))
-          .where((n) => !n.isExpired)
-          .length;
-    });
+    return Stream.periodic(const Duration(seconds: 30)).asyncMap(
+      (_) => _repo.getUnreadCount(academyId: academyId),
+    );
   }
 
   // ============================================
   // Mark as Read
   // ============================================
   Future<void> markAsRead(String notificationId) async {
-    await _notificationsRef.doc(notificationId).update({
-      'read': true,
-      'readAt': FieldValue.serverTimestamp(),
-    });
+    await _repo.markRead(notificationId, read: true);
   }
 
   // ============================================
   // Mark All as Read
   // ============================================
   Future<void> markAllAsRead(String userId) async {
-    final query = await _notificationsRef
-        .where('userId', isEqualTo: userId)
-        .where('read', isEqualTo: false)
-        .get();
-
-    for (final doc in query.docs) {
-      await doc.reference.update({
-        'read': true,
-        'readAt': FieldValue.serverTimestamp(),
-      });
-    }
+    await _repo.markAllRead(academyId: academyId);
   }
 
   // ============================================
   // Delete Notification
   // ============================================
   Future<void> delete(String notificationId) async {
-    await _notificationsRef.doc(notificationId).delete();
+    await _repo.delete(notificationId);
   }
 
   // ============================================
@@ -365,6 +309,13 @@ class NotificationService {
 
   // ============================================
   // Create Notification
+  //
+  // Notificações individuais são criadas pelo backend como efeito colateral
+  // de eventos de domínio. Para criar de forma programática (ex.: admin),
+  // use NotificationRemoteRepo.broadcast() com um filtro de recipient_uid.
+  //
+  // Esta implementação faz broadcast para um único usuário via
+  // POST /v1/academies/{id}/notifications/broadcast.
   // ============================================
   Future<AppNotification> create({
     required String userId,
@@ -379,47 +330,96 @@ class NotificationService {
     String? competitionId,
     int? expiresInDays,
   }) async {
-    final expiresAt = expiresInDays != null
-        ? DateTime.now().add(Duration(days: expiresInDays))
-        : null;
+    // Map legacy type to nearest Tatami type.
+    final apiType = _legacyTypeToApi(type);
 
-    final data = <String, dynamic>{
-      'academyId': academyId,
-      'userId': userId,
-      'type': type.value,
-      'priority': priority.value,
-      'title': title,
-      'message': message,
-      'read': false,
-      'channels': ['in_app'],
-      'sentVia': ['in_app'],
-      'createdAt': FieldValue.serverTimestamp(),
-    };
+    final meta = <String, dynamic>{};
+    if (studentId != null) meta['student_id'] = studentId;
+    if (financialId != null) meta['financial_id'] = financialId;
+    if (competitionId != null) meta['competition_id'] = competitionId;
 
-    // Only add optional fields if they have values
-    if (actionUrl != null) data['actionUrl'] = actionUrl;
-    if (actionLabel != null) data['actionLabel'] = actionLabel;
-    if (studentId != null) data['studentId'] = studentId;
-    if (financialId != null) data['financialId'] = financialId;
-    if (competitionId != null) data['competitionId'] = competitionId;
-    if (expiresAt != null) data['expiresAt'] = Timestamp.fromDate(expiresAt);
+    final req = api.BroadcastRequest(
+      type: apiType,
+      title: title,
+      body: message,
+      actionUrl: actionUrl,
+      metadata: meta.isEmpty ? null : meta,
+      recipients: api.BroadcastRecipientsFilter(includeUids: [userId]),
+    );
 
-    final docRef = await _notificationsRef.add(data);
-    final doc = await docRef.get();
+    await _repo.broadcast(academyId, req);
 
-    return AppNotification.fromFirestore(doc);
+    // The broadcast endpoint returns a BroadcastResponse (id + count), not
+    // the created notification itself. We synthesize a local AppNotification
+    // so that callers that use the return value keep working.
+    return AppNotification(
+      id: '',
+      userId: userId,
+      type: type,
+      priority: priority,
+      title: title,
+      message: message,
+      actionUrl: actionUrl,
+      actionLabel: actionLabel,
+      studentId: studentId,
+      financialId: financialId,
+      competitionId: competitionId,
+      read: false,
+      channels: const ['in_app'],
+      createdAt: DateTime.now(),
+      expiresAt: expiresInDays != null
+          ? DateTime.now().add(Duration(days: expiresInDays))
+          : null,
+    );
+  }
+
+  static api.ApiNotificationType _legacyTypeToApi(NotificationType t) {
+    switch (t) {
+      case NotificationType.paymentPending:
+      case NotificationType.paymentDueSoon:
+        return api.ApiNotificationType.payment_due;
+      case NotificationType.paymentReceived:
+        return api.ApiNotificationType.payment_paid;
+      case NotificationType.paymentOverdue:
+        return api.ApiNotificationType.payment_overdue;
+      case NotificationType.graduationEligible:
+      case NotificationType.graduationNear:
+        return api.ApiNotificationType.graduation_eligible;
+      case NotificationType.studentMilestone:
+        return api.ApiNotificationType.graduation_promoted;
+      case NotificationType.competitionReminder:
+        return api.ApiNotificationType.competition_announcement;
+      case NotificationType.orderPaid:
+        return api.ApiNotificationType.store_order_update;
+      case NotificationType.newStudentLinked:
+      case NotificationType.withdrawalCompleted:
+      case NotificationType.withdrawalFailed:
+      case NotificationType.system:
+        return api.ApiNotificationType.generic;
+    }
   }
 }
 
 // ============================================
 // Factory Function
 // ============================================
-NotificationService createNotificationService(String academyId) {
-  return NotificationService(academyId);
+NotificationService createNotificationService(
+  String academyId,
+  NotificationRemoteRepo repo,
+) {
+  return NotificationService(academyId, repo);
 }
 
 // ============================================
 // Default Instance (uses current academy)
+//
+// NOTE: requires a NotificationRemoteRepo — callers that previously used
+// `notificationService` as a top-level getter should instead obtain
+// NotificationService via a Riverpod provider or pass the repo explicitly.
+// This factory is kept for legacy call-sites during incremental migration.
 // ============================================
-NotificationService get notificationService =>
-    NotificationService(FirebaseService.academyId);
+NotificationService buildNotificationService(
+  String academyId,
+  NotificationRemoteRepo repo,
+) =>
+    NotificationService(academyId, repo);
