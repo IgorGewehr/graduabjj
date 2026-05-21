@@ -1,7 +1,5 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import '../api/dto/plan_dto.dart' as api;
-import 'firebase_service.dart';
+import '../api/plan_repo.dart';
 
 /// Plan Model
 class Plan {
@@ -71,7 +69,7 @@ class Plan {
     );
   }
 
-  /// Sprint 3 wiring — constrói a partir do DTO Tatami.
+  /// Constrói a partir do DTO Tatami.
   ///
   /// Conversões:
   /// - `monthlyValue`: decimal-string → double. Mensagem do BE garante
@@ -99,60 +97,27 @@ class Plan {
     );
   }
 
-  factory Plan.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return Plan(
-      id: doc.id,
-      name: data['name'] ?? '',
-      description: data['description'],
-      monthlyValue: (data['monthlyValue'] ?? 0).toDouble(),
-      defaultDueDay: data['defaultDueDay'] ?? 10,
-      classesPerWeek: data['classesPerWeek'],
-      studentIds: data['studentIds'] != null
-          ? List<String>.from(data['studentIds'])
-          : [],
-      isActive: data['isActive'] ?? true,
-      customValues: data['customValues'] != null
-          ? Map<String, double>.from(
-              (data['customValues'] as Map).map(
-                (key, value) => MapEntry(key.toString(), (value as num).toDouble()),
-              ),
-            )
-          : {},
-      customDueDays: data['customDueDays'] != null
-          ? Map<String, int>.from(
-              (data['customDueDays'] as Map).map(
-                (key, value) => MapEntry(key.toString(), (value as num).toInt()),
-              ),
-            )
-          : {},
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-    );
-  }
-
   // Computed properties
   int get studentCount => studentIds.length;
   String get formattedValue => 'R\$ ${monthlyValue.toStringAsFixed(2)}';
 }
 
-/// Plan Service - Multi-tenant plan management
+/// Plan Service - Multi-tenant plan management via Tatami HTTP API.
+///
+/// Todos os métodos delegam para [PlanRemoteRepo]; não há mais acesso
+/// direto ao Firestore neste serviço.
 class PlanService {
   final String academyId;
-  late final Collections _collections;
+  final PlanRemoteRepo _repo;
 
-  PlanService(this.academyId) {
-    _collections = Collections(academyId);
-  }
-
-  CollectionReference get _plansRef => _collections.plans;
+  PlanService(this.academyId, {required PlanRemoteRepo repo}) : _repo = repo;
 
   // ============================================
   // List All Plans
   // ============================================
   Future<List<Plan>> list() async {
-    final snapshot = await _plansRef.get();
-    var plans = snapshot.docs.map((doc) => Plan.fromFirestore(doc)).toList();
+    final dtos = await _repo.list(academyId);
+    var plans = dtos.map(Plan.fromApi).toList();
     plans.sort((a, b) => a.monthlyValue.compareTo(b.monthlyValue));
     return plans;
   }
@@ -169,9 +134,12 @@ class PlanService {
   // Get Plan by ID
   // ============================================
   Future<Plan?> getById(String id) async {
-    final doc = await _collections.plan(id).get();
-    if (!doc.exists) return null;
-    return Plan.fromFirestore(doc);
+    try {
+      final dto = await _repo.getById(academyId, id);
+      return Plan.fromApi(dto);
+    } catch (_) {
+      return null;
+    }
   }
 
   // ============================================
@@ -218,66 +186,63 @@ class PlanService {
     int defaultDueDay = 10,
     int? classesPerWeek,
   }) async {
-    final docRef = await _plansRef.add({
-      'name': name,
-      'description': description,
-      'monthlyValue': monthlyValue,
-      'defaultDueDay': defaultDueDay,
-      'classesPerWeek': classesPerWeek,
-      'studentIds': [],
-      'isActive': true,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    final doc = await docRef.get();
-    return Plan.fromFirestore(doc);
+    final dto = await _repo.create(
+      academyId,
+      api.CreatePlanRequest(
+        name: name,
+        description: description,
+        monthlyValue: monthlyValue.toStringAsFixed(2),
+        defaultDueDay: defaultDueDay,
+        classesPerWeek: classesPerWeek,
+        isActive: true,
+      ),
+    );
+    return Plan.fromApi(dto);
   }
 
   // ============================================
   // Update Plan
   // ============================================
   Future<Plan> update(String id, Map<String, dynamic> data) async {
-    data['updatedAt'] = FieldValue.serverTimestamp();
-    await _collections.plan(id).update(data);
-
-    final updated = await getById(id);
-    return updated!;
+    // Translate legacy Map keys to UpdatePlanRequest fields.
+    final dto = await _repo.update(
+      academyId,
+      id,
+      api.UpdatePlanRequest(
+        name: data['name'] as String?,
+        description: data['description'] as String?,
+        monthlyValue: data['monthlyValue'] != null
+            ? (data['monthlyValue'] as num).toDouble().toStringAsFixed(2)
+            : null,
+        defaultDueDay: data['defaultDueDay'] as int?,
+        classesPerWeek: data['classesPerWeek'] as int?,
+        isActive: data['isActive'] as bool?,
+      ),
+    );
+    return Plan.fromApi(dto);
   }
 
   // ============================================
   // Delete Plan
   // ============================================
   Future<void> delete(String id) async {
-    await _collections.plan(id).delete();
+    await _repo.delete(academyId, id);
   }
 
   // ============================================
   // Add Student to Plan
   // ============================================
   Future<Plan> addStudent(String planId, String studentId) async {
-    await _collections.plan(planId).update({
-      'studentIds': FieldValue.arrayUnion([studentId]),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    final updated = await getById(planId);
-    return updated!;
+    await _repo.assignStudent(academyId, planId, studentId);
+    return (await getById(planId))!;
   }
 
   // ============================================
   // Remove Student from Plan
   // ============================================
   Future<Plan> removeStudent(String planId, String studentId) async {
-    await _collections.plan(planId).update({
-      'studentIds': FieldValue.arrayRemove([studentId]),
-      'customValues.$studentId': FieldValue.delete(),
-      'customDueDays.$studentId': FieldValue.delete(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    final updated = await getById(planId);
-    return updated!;
+    await _repo.unassignStudent(academyId, planId, studentId);
+    return (await getById(planId))!;
   }
 
   // ============================================
@@ -297,33 +262,39 @@ class PlanService {
   // ============================================
   // Set Custom Value for Student
   // ============================================
-  Future<Plan> setCustomValue(String planId, String studentId, double value) async {
-    await _plansRef.doc(planId).update({
-      'customValues.$studentId': value,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+  Future<Plan> setCustomValue(
+      String planId, String studentId, double value) async {
+    await _repo.setStudentCustomValue(
+      academyId,
+      planId,
+      studentId,
+      customValue: value.toStringAsFixed(2),
+    );
     return (await getById(planId))!;
   }
 
   // ============================================
   // Remove Custom Value (restore plan default)
+  //
+  // Envia custom_value: null explicitamente — o backend interpreta
+  // campos null como "remover override".
   // ============================================
   Future<Plan> removeCustomValue(String planId, String studentId) async {
-    await _plansRef.doc(planId).update({
-      'customValues.$studentId': FieldValue.delete(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await _repo.clearStudentCustomValues(academyId, planId, studentId);
     return (await getById(planId))!;
   }
 
   // ============================================
   // Set Custom Due Day for Student
   // ============================================
-  Future<Plan> setCustomDueDay(String planId, String studentId, int day) async {
-    await _plansRef.doc(planId).update({
-      'customDueDays.$studentId': day,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+  Future<Plan> setCustomDueDay(
+      String planId, String studentId, int day) async {
+    await _repo.setStudentCustomValue(
+      academyId,
+      planId,
+      studentId,
+      customDueDay: day,
+    );
     return (await getById(planId))!;
   }
 
@@ -331,10 +302,7 @@ class PlanService {
   // Remove Custom Due Day (restore plan default)
   // ============================================
   Future<Plan> removeCustomDueDay(String planId, String studentId) async {
-    await _plansRef.doc(planId).update({
-      'customDueDays.$studentId': FieldValue.delete(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await _repo.clearStudentCustomValues(academyId, planId, studentId);
     return (await getById(planId))!;
   }
 }
@@ -342,11 +310,6 @@ class PlanService {
 // ============================================
 // Factory Function
 // ============================================
-PlanService createPlanService(String academyId) {
-  return PlanService(academyId);
+PlanService createPlanService(String academyId, {required PlanRemoteRepo repo}) {
+  return PlanService(academyId, repo: repo);
 }
-
-// ============================================
-// Default Instance (uses current academy)
-// ============================================
-PlanService get planService => PlanService(FirebaseService.academyId);

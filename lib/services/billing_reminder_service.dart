@@ -1,9 +1,12 @@
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
+import '../api/dto/financial_dto.dart' as api;
+import '../api/dto/student_dto.dart' as api_student;
+import '../api/financial_repo.dart';
 import '../api/settings_repo.dart';
+import '../api/student_repo.dart';
 import 'firebase_service.dart';
 
 /// Contact type for billing reminders
@@ -97,9 +100,33 @@ extension BillingStageExtension on BillingStage {
         return 'D+30';
     }
   }
+
+  /// Converte o label do backend ("D+0", "D+3", etc.) para o enum.
+  static BillingStage? fromWireLabel(String label) {
+    switch (label) {
+      case 'D+0':
+        return BillingStage.d0;
+      case 'D+1':
+        return BillingStage.d1;
+      case 'D+3':
+        return BillingStage.d3;
+      case 'D+7':
+        return BillingStage.d7;
+      case 'D+15':
+        return BillingStage.d15;
+      case 'D+30':
+        return BillingStage.d30;
+      default:
+        return null;
+    }
+  }
 }
 
 /// Billing Contact Log Model
+///
+/// Mapeado a partir de [api.ApiBillingContact]. Campos sem equivalente
+/// direto na API (stage, daysOverdue, contactedByName) são aproximados
+/// ou deixados com defaults para compatibilidade do widget tree.
 class BillingContactLog {
   final String id;
   final String financialId;
@@ -129,22 +156,24 @@ class BillingContactLog {
     required this.createdAt,
   });
 
-  factory BillingContactLog.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  factory BillingContactLog.fromApi(
+    api.ApiBillingContact c, {
+    String? financialId,
+    String? academyId,
+  }) {
     return BillingContactLog(
-      id: doc.id,
-      financialId: data['financialId'] ?? '',
-      studentId: data['studentId'] ?? '',
-      studentName: data['studentName'] ?? '',
-      type: ContactTypeExtension.fromString(data['type'] ?? 'other'),
-      notes: data['notes'] ?? '',
-      stage: data['stage'] ?? '',
-      daysOverdue: data['daysOverdue'] ?? 0,
-      contactedBy: data['contactedBy'] ?? '',
-      contactedByName: data['contactedByName'] ?? '',
-      academyId: data['academyId'] ?? '',
-      createdAt:
-          (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      id: c.id,
+      financialId: financialId ?? '',
+      studentId: c.studentId,
+      studentName: c.studentNameSnapshot,
+      type: ContactTypeExtension.fromString(c.method.name),
+      notes: c.notes ?? '',
+      stage: '', // campo sem equivalente direto na API
+      daysOverdue: 0, // campo sem equivalente direto na API
+      contactedBy: c.createdByUid,
+      contactedByName: '', // campo sem equivalente direto na API
+      academyId: academyId ?? c.academyId,
+      createdAt: c.createdAt ?? DateTime.now(),
     );
   }
 }
@@ -179,22 +208,36 @@ class CollectionStats {
   });
 }
 
-/// Billing Reminder Service - Multi-tenant billing reminder management
+/// Billing Reminder Service - Multi-tenant billing reminder management via
+/// Tatami HTTP API.
+///
+/// Mudanças vs. versão Firestore:
+/// - `getOverdueWithStages`: usa GET /billing/stages (via FinancialRemoteRepo).
+/// - `logContactAttempt`: usa POST /financials/{id}/billing-contacts.
+/// - `getContactLog`: usa GET /financials/{id}/billing-contacts.
+/// - `getStudentContacts`: usa GET /students (via StudentRemoteRepo).
+/// - `getCollectionStats`: derivado de GET /billing/stages; campos sem
+///   equivalente (recoveryRate, averageDaysOverdue) retornam 0.
+/// - `getNotificationSettings` / `saveNotificationSettings`: mantidos via
+///   SettingsRemoteRepo (sem mudança).
 class BillingReminderService {
   final String academyId;
-  late final Collections _collections;
 
-  /// Optional Tatami settings repo for reading/writing billing reminder
-  /// settings via the Go backend instead of Firestore.
+  /// Repositório de financials — cobre billing/stages e billing-contacts.
+  final FinancialRemoteRepo? financialRepo;
+
+  /// Repositório de alunos — cobre getStudentContacts.
+  final StudentRemoteRepo? studentRepo;
+
+  /// Repositório de settings — billing_reminders settings.
   final SettingsRemoteRepo? settingsRepo;
 
-  BillingReminderService(this.academyId, {this.settingsRepo}) {
-    _collections = Collections(academyId);
-  }
-
-  CollectionReference get _financialsRef => _collections.payments;
-  CollectionReference get _billingContactLogRef =>
-      _collections.billingContactLog;
+  BillingReminderService(
+    this.academyId, {
+    this.financialRepo,
+    this.studentRepo,
+    this.settingsRepo,
+  });
 
   // ============================================
   // Helper: Calculate days overdue from a due date
@@ -207,25 +250,15 @@ class BillingReminderService {
   }
 
   // ============================================
-  // Helper: Classify billing stage from days overdue
-  // ============================================
-  BillingStage? _classifyStage(int daysOverdue) {
-    if (daysOverdue >= 30) return BillingStage.d30;
-    if (daysOverdue >= 15) return BillingStage.d15;
-    if (daysOverdue >= 7) return BillingStage.d7;
-    if (daysOverdue >= 3) return BillingStage.d3;
-    if (daysOverdue >= 1) return BillingStage.d1;
-    if (daysOverdue == 0) return BillingStage.d0;
-    return null;
-  }
-
-  // ============================================
   // Get Overdue Financials Grouped by Stage
+  //
+  // GET /v1/academies/{id}/billing/stages
+  //
+  // O backend retorna JSON com chaves "D+0", "D+1", etc. Cada item da
+  // lista deve ter pelo menos: id, student_id, amount, due_date, status.
   // ============================================
   Future<Map<BillingStage, List<Map<String, dynamic>>>>
       getOverdueWithStages() async {
-    final snapshot = await _financialsRef.get();
-
     final result = <BillingStage, List<Map<String, dynamic>>>{
       BillingStage.d0: [],
       BillingStage.d1: [],
@@ -235,55 +268,73 @@ class BillingReminderService {
       BillingStage.d30: [],
     };
 
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final status = data['status'] as String? ?? '';
+    if (financialRepo == null || academyId.isEmpty) return result;
 
-      // Only consider overdue or pending
-      if (status != 'overdue' && status != 'pending') continue;
+    try {
+      final raw = await financialRepo!.getBillingStages(academyId);
 
-      final dueDateRaw = data['dueDate'];
-      if (dueDateRaw == null) continue;
+      for (final entry in raw.entries) {
+        final stage = BillingStageExtension.fromWireLabel(entry.key);
+        if (stage == null) continue;
 
-      final dueDate = dueDateRaw is Timestamp
-          ? dueDateRaw.toDate()
-          : DateTime.now();
+        final items = (entry.value as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .toList() ??
+            [];
 
-      final daysOverdue = _calculateDaysOverdue(dueDate);
-      if (daysOverdue < 1) continue;
+        for (final item in items) {
+          final dueDate = _parseDate(item['due_date']);
+          final daysOverdue =
+              dueDate != null ? _calculateDaysOverdue(dueDate) : 0;
+          final amount = _parseAmount(item['amount']);
 
-      final stage = _classifyStage(daysOverdue);
-      if (stage == null) continue;
+          result[stage]!.add({
+            'id': item['id'] ?? '',
+            'studentId': item['student_id'] ?? '',
+            'studentName': item['student_name'] ?? '',
+            'amount': amount,
+            'dueDate': dueDate ?? DateTime.now(),
+            'status': item['status'] ?? '',
+            'referenceMonth': item['reference_month'],
+            'planId': item['plan_id'],
+            'description': item['description'],
+            'daysOverdue': daysOverdue,
+            'stage': stage.value,
+          });
+        }
 
-      result[stage]!.add({
-        'id': doc.id,
-        'studentId': data['studentId'] ?? '',
-        'studentName': data['studentName'] ?? '',
-        'amount': (data['amount'] ?? data['value'] ?? 0).toDouble(),
-        'dueDate': dueDate,
-        'status': status,
-        'referenceMonth': data['referenceMonth'],
-        'planId': data['planId'],
-        'description': data['description'],
-        'daysOverdue': daysOverdue,
-        'stage': stage.value,
-      });
-    }
-
-    // Sort each stage by daysOverdue desc (most overdue first)
-    for (final stage in BillingStage.values) {
-      result[stage]!.sort((a, b) {
-        final daysA = a['daysOverdue'] as int;
-        final daysB = b['daysOverdue'] as int;
-        return daysB.compareTo(daysA);
-      });
+        // Sort by daysOverdue desc (most overdue first)
+        result[stage]!.sort((a, b) {
+          final daysA = a['daysOverdue'] as int;
+          final daysB = b['daysOverdue'] as int;
+          return daysB.compareTo(daysA);
+        });
+      }
+    } catch (_) {
+      // On error, return empty map so UI renders without crashing.
     }
 
     return result;
   }
 
+  DateTime? _parseDate(dynamic v) {
+    if (v == null) return null;
+    if (v is DateTime) return v;
+    if (v is String) return DateTime.tryParse(v);
+    return null;
+  }
+
+  double _parseAmount(dynamic v) {
+    if (v == null) return 0.0;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
+  }
+
   // ============================================
   // Log Contact Attempt
+  //
+  // POST /v1/academies/{id}/financials/{financialId}/billing-contacts
   // ============================================
   Future<BillingContactLog> logContactAttempt({
     required String financialId,
@@ -296,145 +347,168 @@ class BillingReminderService {
     required String contactedBy,
     required String contactedByName,
   }) async {
-    final now = DateTime.now();
+    if (financialRepo == null || academyId.isEmpty) {
+      // Fallback: retorna log local sem persistir
+      return BillingContactLog(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        financialId: financialId,
+        studentId: studentId,
+        studentName: studentName,
+        type: type,
+        notes: notes,
+        stage: stage,
+        daysOverdue: daysOverdue,
+        contactedBy: contactedBy,
+        contactedByName: contactedByName,
+        academyId: academyId,
+        createdAt: DateTime.now(),
+      );
+    }
 
-    final docData = {
-      'financialId': financialId,
-      'studentId': studentId,
-      'studentName': studentName,
-      'type': type.value,
-      'notes': notes,
-      'stage': stage,
-      'daysOverdue': daysOverdue,
-      'contactedBy': contactedBy,
-      'contactedByName': contactedByName,
-      'academyId': academyId,
-      'createdAt': Timestamp.fromDate(now),
-    };
-
-    final docRef = await _billingContactLogRef.add(docData);
-
-    return BillingContactLog(
-      id: docRef.id,
-      financialId: financialId,
+    final contactMethod = _toApiBillingMethod(type);
+    final req = api.LogBillingContactRequest(
       studentId: studentId,
-      studentName: studentName,
-      type: type,
-      notes: notes,
-      stage: stage,
-      daysOverdue: daysOverdue,
-      contactedBy: contactedBy,
-      contactedByName: contactedByName,
-      academyId: academyId,
-      createdAt: now,
+      method: contactMethod,
+      result: api.ApiBillingContactResult.other,
+      contactDate: DateTime.now(),
+      notes: notes.isNotEmpty ? notes : null,
     );
+
+    final contact = await financialRepo!
+        .logBillingContactForFinancial(academyId, financialId, req);
+
+    return BillingContactLog.fromApi(
+      contact,
+      financialId: financialId,
+      academyId: academyId,
+    );
+  }
+
+  api.ApiBillingContactMethod _toApiBillingMethod(ContactType type) {
+    switch (type) {
+      case ContactType.whatsapp:
+        return api.ApiBillingContactMethod.whatsapp;
+      case ContactType.email:
+        return api.ApiBillingContactMethod.email;
+      case ContactType.phone:
+        return api.ApiBillingContactMethod.phone;
+      case ContactType.inPerson:
+        return api.ApiBillingContactMethod.in_person;
+      case ContactType.other:
+        return api.ApiBillingContactMethod.whatsapp; // fallback
+    }
   }
 
   // ============================================
   // Get Contact Log for a Financial Record
+  //
+  // GET /v1/academies/{id}/financials/{financialId}/billing-contacts
   // ============================================
   Future<List<BillingContactLog>> getContactLog(String financialId) async {
-    final snapshot = await _billingContactLogRef
-        .where('financialId', isEqualTo: financialId)
-        .orderBy('createdAt', descending: true)
-        .get();
+    if (financialRepo == null || academyId.isEmpty) return [];
 
-    return snapshot.docs
-        .map((doc) => BillingContactLog.fromFirestore(doc))
-        .toList();
+    try {
+      final page = await financialRepo!
+          .listBillingContactsForFinancial(academyId, financialId);
+      return page.items
+          .map((c) => BillingContactLog.fromApi(
+                c,
+                financialId: financialId,
+                academyId: academyId,
+              ))
+          .toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   // ============================================
   // Get Collection Stats
+  //
+  // Derivado de GET /billing/stages. Campos sem equivalente na API
+  // (recoveryRate, averageDaysOverdue) retornam 0.
+  //
+  // TODO(tatami): migrar para endpoint dedicado de stats quando exposto.
   // ============================================
   Future<CollectionStats> getCollectionStats() async {
-    final snapshot = await _financialsRef.get();
+    final stages = await getOverdueWithStages();
 
     int totalOverdue = 0;
     double totalOverdueAmount = 0;
-    int totalDaysOverdue = 0;
     final uniqueStudents = <String>{};
 
-    // Mutable counters for byStage
-    final stageCounts = <BillingStage, int>{};
-    final stageAmounts = <BillingStage, double>{};
-    for (final stage in BillingStage.values) {
-      stageCounts[stage] = 0;
-      stageAmounts[stage] = 0;
-    }
+    final emptyStage = CollectionStageData(count: 0, amount: 0);
+    final finalByStage = <BillingStage, CollectionStageData>{
+      for (final s in BillingStage.values) s: emptyStage,
+    };
 
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final status = data['status'] as String? ?? '';
+    for (final entry in stages.entries) {
+      final stage = entry.key;
+      final items = entry.value;
 
-      if (status != 'overdue' && status != 'pending') continue;
+      // D+0 não é "overdue" stricto sensu — inclua somente D+1+
+      if (stage == BillingStage.d0) continue;
 
-      final dueDateRaw = data['dueDate'];
-      if (dueDateRaw == null) continue;
+      int stageCount = 0;
+      double stageAmount = 0;
 
-      final dueDate = dueDateRaw is Timestamp
-          ? dueDateRaw.toDate()
-          : DateTime.now();
+      for (final item in items) {
+        final amount = (item['amount'] as num?)?.toDouble() ?? 0.0;
+        final studentId = item['studentId'] as String? ?? '';
+        totalOverdue++;
+        totalOverdueAmount += amount;
+        uniqueStudents.add(studentId);
+        stageCount++;
+        stageAmount += amount;
+      }
 
-      final daysOverdue = _calculateDaysOverdue(dueDate);
-      if (daysOverdue < 1) continue;
-
-      final stage = _classifyStage(daysOverdue);
-      if (stage == null) continue;
-
-      final amount = (data['amount'] ?? data['value'] ?? 0).toDouble();
-      final studentId = data['studentId'] as String? ?? '';
-
-      totalOverdue++;
-      totalOverdueAmount += amount;
-      totalDaysOverdue += daysOverdue;
-      uniqueStudents.add(studentId);
-
-      stageCounts[stage] = (stageCounts[stage] ?? 0) + 1;
-      stageAmounts[stage] = (stageAmounts[stage] ?? 0) + amount;
-    }
-
-    // Build final byStage map
-    final finalByStage = <BillingStage, CollectionStageData>{};
-    for (final stage in BillingStage.values) {
-      finalByStage[stage] = CollectionStageData(
-        count: stageCounts[stage] ?? 0,
-        amount: stageAmounts[stage] ?? 0,
-      );
+      finalByStage[stage] =
+          CollectionStageData(count: stageCount, amount: stageAmount);
     }
 
     return CollectionStats(
       totalOverdue: totalOverdue,
       totalOverdueAmount: totalOverdueAmount,
       totalStudentsOverdue: uniqueStudents.length,
-      recoveryRate: 0, // Placeholder - needs historical data
-      averageDaysOverdue:
-          totalOverdue > 0 ? (totalDaysOverdue / totalOverdue).round() : 0,
+      recoveryRate: 0, // sem endpoint dedicado
+      averageDaysOverdue: 0, // sem endpoint dedicado
       byStage: finalByStage,
     );
   }
 
   // ============================================
   // Get Student Contacts Map (for notifications)
+  //
+  // GET /v1/academies/{id}/students (lista completa com limit alto)
   // ============================================
   Future<Map<String, StudentContact>> getStudentContacts() async {
-    final snapshot = await _collections.students.get();
+    if (studentRepo == null || academyId.isEmpty) return {};
+
     final contacts = <String, StudentContact>{};
 
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final guardian = data['guardian'] as Map<String, dynamic>?;
-
-      contacts[doc.id] = StudentContact(
-        studentId: doc.id,
-        studentName: data['fullName'] as String? ?? '',
-        phone: data['phone'] as String?,
-        email: data['email'] as String?,
-        guardianPhone: guardian?['phone'] as String?,
-        guardianEmail: guardian?['email'] as String?,
-        category: data['category'] as String? ?? 'adult',
-        photoUrl: data['photoUrl'] as String?,
+    try {
+      // Busca até 500 alunos em uma chamada; para academias maiores
+      // seria necessário paginação — suficiente para o uso atual.
+      const filter = api_student.StudentFilter(
+        status: api_student.ApiStudentStatus.active,
+        limit: 500,
       );
+      final page = await studentRepo!.list(academyId, filter: filter);
+
+      for (final s in page.items) {
+        contacts[s.id] = StudentContact(
+          studentId: s.id,
+          studentName: s.fullName,
+          phone: s.phone,
+          email: s.email,
+          guardianPhone: s.guardian?.phone,
+          guardianEmail: s.guardian?.email,
+          category: s.category.name, // 'adult' | 'kids'
+          photoUrl: s.photoUrl,
+        );
+      }
+    } catch (_) {
+      // On error, return partial/empty map so callers can degrade gracefully.
     }
 
     return contacts;
@@ -475,7 +549,6 @@ class BillingReminderService {
         ),
       );
     } catch (e) {
-      // On error, return defaults so the UI renders without crashing.
       return BillingNotificationSettings(
         whatsappEnabled: false,
         emailEnabled: false,
@@ -488,7 +561,8 @@ class BillingReminderService {
   // ============================================
   /// Persists billing reminder settings via Tatami
   /// `PUT /v1/academies/{id}/settings/billing_reminders`.
-  Future<void> saveNotificationSettings(BillingNotificationSettings settings) async {
+  Future<void> saveNotificationSettings(
+      BillingNotificationSettings settings) async {
     if (settingsRepo == null || academyId.isEmpty) {
       throw Exception(
         'Settings repo not available. Cannot save notification settings.',
@@ -562,10 +636,10 @@ class BillingMessageTemplates {
   }
 
   Map<String, dynamic> toMap() => {
-    'whatsapp': whatsapp,
-    'emailSubject': emailSubject,
-    'emailBody': emailBody,
-  };
+        'whatsapp': whatsapp,
+        'emailSubject': emailSubject,
+        'emailBody': emailBody,
+      };
 }
 
 class BillingNotificationSettings {
@@ -605,8 +679,6 @@ class BillingNotificationService {
       _emailApiKeyRaw.isNotEmpty ? _emailApiKeyRaw : _legacyApiKey;
   static const String _bulkApiUrlEnv =
       String.fromEnvironment('NOTIFICATION_BULK_API_URL', defaultValue: '');
-  // Marcusjj proxies stamp every notification payload with this appId so the
-  // notification server can route per-app. Match it for parity.
   static const String _appId = 'gestao-raiz';
 
   bool get hasWhatsAppApi => _whatsappApiUrl.isNotEmpty;
@@ -630,7 +702,6 @@ class BillingNotificationService {
   final _dateFormat = DateFormat('dd/MM/yyyy');
 
   // Default templates with placeholders: {nome}, {valor}, {vencimento}, {dias}, {academia}.
-  // Mirrors marcusjj/src/services/billingNotificationService.ts DEFAULT_*_TEMPLATES.
   static const defaultWhatsAppTemplates = {
     'D+0': 'Oi {nome}! Passando rapidinho para lembrar que hoje, dia {vencimento}, vence sua mensalidade de {valor} com a {academia}. Contamos com voce! Qualquer duvida, estamos a disposicao.',
     'D+1': 'Ola {nome}! Aqui e a {academia}. Identificamos que sua mensalidade de {valor} venceu em {vencimento}. Caso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem. Caso contrario, solicitamos a regularizacao. Obrigado!',
@@ -664,7 +735,8 @@ class BillingNotificationService {
     this.customTemplates,
   });
 
-  String _applyTemplate(String template, String studentName, String amountStr, String dateStr, int daysOverdue) {
+  String _applyTemplate(String template, String studentName, String amountStr,
+      String dateStr, int daysOverdue) {
     return template
         .replaceAll('{nome}', studentName)
         .replaceAll('{valor}', amountStr)
@@ -687,11 +759,12 @@ class BillingNotificationService {
     final dateStr = _dateFormat.format(dueDate);
     final stageKey = stage.value;
 
-    final template = customTemplates?.whatsapp[stageKey]
-        ?? defaultWhatsAppTemplates[stageKey]
-        ?? defaultWhatsAppTemplates['D+1']!;
+    final template = customTemplates?.whatsapp[stageKey] ??
+        defaultWhatsAppTemplates[stageKey] ??
+        defaultWhatsAppTemplates['D+1']!;
 
-    return _applyTemplate(template, studentName, amountStr, dateStr, daysOverdue);
+    return _applyTemplate(
+        template, studentName, amountStr, dateStr, daysOverdue);
   }
 
   // ============================================
@@ -708,17 +781,19 @@ class BillingNotificationService {
     final dateStr = _dateFormat.format(dueDate);
     final stageKey = stage.value;
 
-    final subjectTemplate = customTemplates?.emailSubject[stageKey]
-        ?? defaultEmailSubjectTemplates[stageKey]
-        ?? defaultEmailSubjectTemplates['D+1']!;
+    final subjectTemplate = customTemplates?.emailSubject[stageKey] ??
+        defaultEmailSubjectTemplates[stageKey] ??
+        defaultEmailSubjectTemplates['D+1']!;
 
-    final bodyTemplate = customTemplates?.emailBody[stageKey]
-        ?? defaultEmailBodyTemplates[stageKey]
-        ?? defaultEmailBodyTemplates['D+1']!;
+    final bodyTemplate = customTemplates?.emailBody[stageKey] ??
+        defaultEmailBodyTemplates[stageKey] ??
+        defaultEmailBodyTemplates['D+1']!;
 
     return (
-      subject: _applyTemplate(subjectTemplate, studentName, amountStr, dateStr, daysOverdue),
-      message: _applyTemplate(bodyTemplate, studentName, amountStr, dateStr, daysOverdue),
+      subject: _applyTemplate(
+          subjectTemplate, studentName, amountStr, dateStr, daysOverdue),
+      message: _applyTemplate(
+          bodyTemplate, studentName, amountStr, dateStr, daysOverdue),
     );
   }
 
@@ -753,33 +828,36 @@ class BillingNotificationService {
       );
     }
     try {
-      final response = await http.post(
-        Uri.parse(_whatsappApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          if (_whatsappApiKey.isNotEmpty) 'x-api-key': _whatsappApiKey,
-        },
-        body: jsonEncode({
-          'phone': _normalizePhone(phone),
-          'studentName': studentName,
-          'studentId': studentId,
-          'financialId': financialId,
-          'academyId': academyId,
-          'academyName': academyName,
-          'amount': amount,
-          'amountFormatted': _currencyFormat.format(amount),
-          'dueDate': DateFormat('yyyy-MM-dd').format(dueDate),
-          'dueDateFormatted': _dateFormat.format(dueDate),
-          'daysOverdue': daysOverdue,
-          'stage': stage.value,
-          'message': message,
-          'type': 'billing_reminder',
-          'appId': _appId,
-        }),
-      ).timeout(const Duration(seconds: 30));
+      final response = await http
+          .post(
+            Uri.parse(_whatsappApiUrl),
+            headers: {
+              'Content-Type': 'application/json',
+              if (_whatsappApiKey.isNotEmpty) 'x-api-key': _whatsappApiKey,
+            },
+            body: jsonEncode({
+              'phone': _normalizePhone(phone),
+              'studentName': studentName,
+              'studentId': studentId,
+              'financialId': financialId,
+              'academyId': academyId,
+              'academyName': academyName,
+              'amount': amount,
+              'amountFormatted': _currencyFormat.format(amount),
+              'dueDate': DateFormat('yyyy-MM-dd').format(dueDate),
+              'dueDateFormatted': _dateFormat.format(dueDate),
+              'daysOverdue': daysOverdue,
+              'stage': stage.value,
+              'message': message,
+              'type': 'billing_reminder',
+              'appId': _appId,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        return NotificationResult(success: true, studentName: studentName, studentId: studentId);
+        return NotificationResult(
+            success: true, studentName: studentName, studentId: studentId);
       } else {
         return NotificationResult(
           success: false,
@@ -801,7 +879,9 @@ class BillingNotificationService {
         success: false,
         studentName: studentName,
         studentId: studentId,
-        error: isTimeout ? 'Timeout: API demorou mais de 30 segundos' : e.toString(),
+        error: isTimeout
+            ? 'Timeout: API demorou mais de 30 segundos'
+            : e.toString(),
       );
     }
   }
@@ -830,34 +910,37 @@ class BillingNotificationService {
       );
     }
     try {
-      final response = await http.post(
-        Uri.parse(_emailApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          if (_emailApiKey.isNotEmpty) 'x-api-key': _emailApiKey,
-        },
-        body: jsonEncode({
-          'email': email,
-          'studentName': studentName,
-          'studentId': studentId,
-          'financialId': financialId,
-          'academyId': academyId,
-          'academyName': academyName,
-          'amount': amount,
-          'amountFormatted': _currencyFormat.format(amount),
-          'dueDate': DateFormat('yyyy-MM-dd').format(dueDate),
-          'dueDateFormatted': _dateFormat.format(dueDate),
-          'daysOverdue': daysOverdue,
-          'stage': stage.value,
-          'subject': subject,
-          'message': message,
-          'type': 'billing_reminder',
-          'appId': _appId,
-        }),
-      ).timeout(const Duration(seconds: 30));
+      final response = await http
+          .post(
+            Uri.parse(_emailApiUrl),
+            headers: {
+              'Content-Type': 'application/json',
+              if (_emailApiKey.isNotEmpty) 'x-api-key': _emailApiKey,
+            },
+            body: jsonEncode({
+              'email': email,
+              'studentName': studentName,
+              'studentId': studentId,
+              'financialId': financialId,
+              'academyId': academyId,
+              'academyName': academyName,
+              'amount': amount,
+              'amountFormatted': _currencyFormat.format(amount),
+              'dueDate': DateFormat('yyyy-MM-dd').format(dueDate),
+              'dueDateFormatted': _dateFormat.format(dueDate),
+              'daysOverdue': daysOverdue,
+              'stage': stage.value,
+              'subject': subject,
+              'message': message,
+              'type': 'billing_reminder',
+              'appId': _appId,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        return NotificationResult(success: true, studentName: studentName, studentId: studentId);
+        return NotificationResult(
+            success: true, studentName: studentName, studentId: studentId);
       } else {
         return NotificationResult(
           success: false,
@@ -879,7 +962,9 @@ class BillingNotificationService {
         success: false,
         studentName: studentName,
         studentId: studentId,
-        error: isTimeout ? 'Timeout: API demorou mais de 30 segundos' : e.toString(),
+        error: isTimeout
+            ? 'Timeout: API demorou mais de 30 segundos'
+            : e.toString(),
       );
     }
   }
@@ -1016,14 +1101,15 @@ class BillingNotificationService {
       results: results,
     );
   }
+
   // ============================================
   // Generate Generic Stage Message (template preview with placeholders)
   // ============================================
   String generateGenericStageMessage(BillingStage stage) {
     final stageKey = stage.value;
-    final template = customTemplates?.whatsapp[stageKey]
-        ?? defaultWhatsAppTemplates[stageKey]
-        ?? defaultWhatsAppTemplates['D+1']!;
+    final template = customTemplates?.whatsapp[stageKey] ??
+        defaultWhatsAppTemplates[stageKey] ??
+        defaultWhatsAppTemplates['D+1']!;
     return template.replaceAll('{academia}', academyName);
   }
 
@@ -1039,7 +1125,8 @@ class BillingNotificationService {
   ) {
     final amountStr = _currencyFormat.format(amount);
     final dateStr = _dateFormat.format(dueDate);
-    return _applyTemplate(template, studentName, amountStr, dateStr, daysOverdue);
+    return _applyTemplate(
+        template, studentName, amountStr, dateStr, daysOverdue);
   }
 
   // ============================================
@@ -1047,9 +1134,9 @@ class BillingNotificationService {
   // ============================================
   String generateGenericEmailSubject(BillingStage stage) {
     final stageKey = stage.value;
-    final template = customTemplates?.emailSubject[stageKey]
-        ?? defaultEmailSubjectTemplates[stageKey]
-        ?? defaultEmailSubjectTemplates['D+1']!;
+    final template = customTemplates?.emailSubject[stageKey] ??
+        defaultEmailSubjectTemplates[stageKey] ??
+        defaultEmailSubjectTemplates['D+1']!;
     return template.replaceAll('{academia}', academyName);
   }
 
@@ -1082,12 +1169,17 @@ class BillingNotificationService {
         emailsSet.add(email);
       }
 
-      if ((phone == null || phone.isEmpty) && (email == null || email.isEmpty)) {
+      if ((phone == null || phone.isEmpty) &&
+          (email == null || email.isEmpty)) {
         skipped++;
       }
     }
 
-    return (phones: phonesSet.toList(), emails: emailsSet.toList(), skipped: skipped);
+    return (
+      phones: phonesSet.toList(),
+      emails: emailsSet.toList(),
+      skipped: skipped
+    );
   }
 
   // ============================================
@@ -1116,17 +1208,18 @@ class BillingNotificationService {
         body['scheduledTime'] = scheduledTime;
       }
 
-      // Bulk hits both channels; the notification server accepts either key.
-      // Prefer WhatsApp key (most builds use the same value anyway).
-      final bulkKey = _whatsappApiKey.isNotEmpty ? _whatsappApiKey : _emailApiKey;
-      final response = await http.post(
-        Uri.parse(_bulkApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          if (bulkKey.isNotEmpty) 'x-api-key': bulkKey,
-        },
-        body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 120));
+      final bulkKey =
+          _whatsappApiKey.isNotEmpty ? _whatsappApiKey : _emailApiKey;
+      final response = await http
+          .post(
+            Uri.parse(_bulkApiUrl),
+            headers: {
+              'Content-Type': 'application/json',
+              if (bulkKey.isNotEmpty) 'x-api-key': bulkKey,
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 120));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -1169,7 +1262,8 @@ class BulkFailure {
   final String recipient;
   final String error;
 
-  BulkFailure({required this.type, required this.recipient, required this.error});
+  BulkFailure(
+      {required this.type, required this.recipient, required this.error});
 
   factory BulkFailure.fromJson(Map<String, dynamic> json) {
     return BulkFailure(
@@ -1202,8 +1296,9 @@ class BulkServerResult {
   factory BulkServerResult.fromJson(Map<String, dynamic> json) {
     final summary = json['summary'] as Map<String, dynamic>? ?? {};
     final failuresList = (json['failures'] as List<dynamic>?)
-        ?.map((f) => BulkFailure.fromJson(f as Map<String, dynamic>))
-        .toList() ?? [];
+            ?.map((f) => BulkFailure.fromJson(f as Map<String, dynamic>))
+            .toList() ??
+        [];
 
     return BulkServerResult(
       success: json['success'] as bool? ?? false,

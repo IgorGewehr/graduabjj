@@ -235,4 +235,18 @@ class FinancialRemoteRepo {
     );
     return ApiBillingContact.fromJson(json);
   }
+
+  /// Retorna cobranças em atraso agrupadas por estágio (D+0 → D+30).
+  ///
+  /// `GET /v1/academies/{id}/billing/stages`
+  ///
+  /// A resposta é um Map<String, List<dynamic>> cujas chaves são os labels
+  /// dos estágios ("D+0", "D+1", etc.). O método devolve o JSON bruto para
+  /// que `BillingReminderService` possa adaptar ao modelo legado
+  /// (`Map<BillingStage, List<Map<String,dynamic>>>`).
+  Future<Map<String, dynamic>> getBillingStages(String academyId) async {
+    return await _api.get<Map<String, dynamic>>(
+      '/v1/academies/$academyId/billing/stages',
+    );
+  }
 }

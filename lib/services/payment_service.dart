@@ -1,9 +1,6 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import '../api/dto/financial_dto.dart' as api;
-import 'firebase_service.dart';
+import '../api/financial_repo.dart';
 import 'notification_dispatcher.dart';
-import 'plan_service.dart';
 import 'student_service.dart';
 
 /// Payment Status
@@ -158,18 +155,15 @@ class Payment {
         createdAt: createdAt,
       );
 
-  /// Sprint 4 wiring — adapter `ApiFinancial` (Tatami) → `Payment` (legacy).
+  /// Adapter `ApiFinancial` (Tatami) → `Payment` (legacy).
   ///
-  /// O backend usa `Financial` como tabela canônica; o FE legacy chama de
-  /// `Payment`. Mapeamento:
-  /// - `studentName` não vem na resposta (precisa do student por separado;
-  ///   passe via parâmetro quando souber).
+  /// - `studentName` não vem na resposta; passe via parâmetro quando souber.
   /// - `value`: decimal-string → double (0.0 fallback).
   /// - `referenceMonth`: passa direto (formato YYYY-MM).
   /// - `externalId`: prioriza asaas_payment_id → abacatepay_transaction_id.
-  /// - `planId` não existe na API Financial (Plan tem N alunos, não o
-  ///   reverso); permanece null. Quando o caller souber, passa via param.
-  factory Payment.fromApi(api.ApiFinancial f, {String? studentName, String? planId}) {
+  /// - `planId` não existe na API Financial; permanece null.
+  factory Payment.fromApi(api.ApiFinancial f,
+      {String? studentName, String? planId}) {
     return Payment(
       id: f.id,
       studentId: f.studentId,
@@ -216,35 +210,6 @@ class Payment {
     }
   }
 
-  factory Payment.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return Payment(
-      id: doc.id,
-      studentId: data['studentId'] ?? '',
-      studentName: data['studentName'] ?? '',
-      // Support both 'amount' (webapp) and 'value' (legacy) field names
-      value: (data['amount'] ?? data['value'] ?? 0).toDouble(),
-      dueDate: (data['dueDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      // Support both 'paymentDate' (webapp) and 'paidAt' (legacy) field names
-      paidAt: data['paymentDate'] != null
-          ? (data['paymentDate'] as Timestamp).toDate()
-          : data['paidAt'] != null
-              ? (data['paidAt'] as Timestamp).toDate()
-              : null,
-      status: PaymentStatusExtension.fromString(data['status'] ?? 'pending'),
-      method: data['method'] != null
-          ? PaymentMethodExtension.fromString(data['method'])
-          : null,
-      description: data['description'],
-      referenceMonth: data['referenceMonth'],
-      externalId: data['externalId'],
-      pixCode: data['pixCode'],
-      pixQrCode: data['pixQrCode'],
-      planId: data['planId'],
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-    );
-  }
-
   // Computed properties
   bool get isPaid => status == PaymentStatus.paid;
   bool get isOverdue =>
@@ -258,114 +223,145 @@ class Payment {
   }
 }
 
-/// Payment Service - Multi-tenant payment management
+/// Helper: converte `PaymentMethod` legacy → `ApiPaymentMethod`.
+api.ApiPaymentMethod _toApiMethod(PaymentMethod m) {
+  switch (m) {
+    case PaymentMethod.pix:
+      return api.ApiPaymentMethod.pix;
+    case PaymentMethod.creditCard:
+      return api.ApiPaymentMethod.credit_card;
+    case PaymentMethod.debitCard:
+      // debit_card não existe no enum da API — mapeamos para `other`
+      return api.ApiPaymentMethod.other;
+    case PaymentMethod.cash:
+      return api.ApiPaymentMethod.cash;
+    case PaymentMethod.bankTransfer:
+      return api.ApiPaymentMethod.bank_transfer;
+  }
+}
+
+/// Helper: converte string de tipo (legacy) → `ApiBillingType`.
+api.ApiBillingType _toApiType(String type) {
+  switch (type) {
+    case 'monthly_tuition':
+      return api.ApiBillingType.monthly_tuition;
+    case 'uniform':
+      return api.ApiBillingType.uniform;
+    case 'seminar':
+      return api.ApiBillingType.seminar;
+    case 'graduation':
+      return api.ApiBillingType.graduation;
+    case 'competition':
+      return api.ApiBillingType.competition;
+    default:
+      return api.ApiBillingType.other;
+  }
+}
+
+/// Payment Service - Multi-tenant payment management via Tatami HTTP API.
+///
+/// Todos os métodos delegam para [FinancialRemoteRepo]; não há mais acesso
+/// direto ao Firestore neste serviço.
+///
+/// Mudanças de assinatura vs. versão Firestore:
+/// - `streamByStudent` / `streamStatsByStudent`: convertidos para `Future`
+///   (HTTP não suporta streams nativos). Callers já migraram para
+///   `tatamiPaymentsLegacyProvider` / `studentPaymentStatsProvider` em
+///   `student_provider.dart` — estes métodos existem apenas para
+///   compatibilidade residual.
+/// - `generateMonthlyTuitions`: delega para `POST /financials/generate-monthly`
+///   no backend; retorna lista vazia (o backend é a fonte de verdade).
+/// - `markOverduePayments`: no-op — o backend gerencia transições automáticas.
 class PaymentService {
   final String academyId;
-  late final Collections _collections;
+  final FinancialRemoteRepo _repo;
   late final NotificationDispatcher _notificationDispatcher;
   late final StudentService _studentService;
 
-  PaymentService(this.academyId) {
-    _collections = Collections(academyId);
+  PaymentService(this.academyId, {required FinancialRemoteRepo repo})
+      : _repo = repo {
     _notificationDispatcher = NotificationDispatcher(academyId);
     _studentService = StudentService(academyId);
   }
-
-  CollectionReference get _paymentsRef => _collections.payments;
 
   // ============================================
   // Get Payments by Student (One-time fetch)
   // ============================================
   Future<List<Payment>> getByStudent(String studentId, {int? limit}) async {
-    final query = await _paymentsRef
-        .where('studentId', isEqualTo: studentId)
-        .get();
-
-    var payments = query.docs.map((doc) => Payment.fromFirestore(doc)).toList();
+    final page = await _repo.list(
+      academyId,
+      filter: api.FinancialFilter(
+        studentId: studentId,
+        limit: limit ?? 200,
+      ),
+    );
+    var payments = page.items.map(Payment.fromApi).toList();
     payments.sort((a, b) => b.dueDate.compareTo(a.dueDate));
-
-    if (limit != null && payments.length > limit) {
-      payments = payments.sublist(0, limit);
-    }
-
     return payments;
   }
 
   // ============================================
-  // Stream Payments by Student (Real-time updates)
+  // Stream Payments by Student (legacy compat — HTTP polling stub)
+  //
+  // HTTP não suporta streams nativos. Este stub emite os dados como
+  // Future e fecha o stream logo em seguida. Callers em
+  // student_provider.dart já foram migrados para
+  // tatamiPaymentsLegacyProvider — este método existe apenas para
+  // retrocompatibilidade de eventuais callers não migrados.
   // ============================================
   Stream<List<Payment>> streamByStudent(String studentId) {
-    return _paymentsRef
-        .where('studentId', isEqualTo: studentId)
-        .snapshots()
-        .map((snapshot) {
-      var payments = snapshot.docs.map((doc) => Payment.fromFirestore(doc)).toList();
-      payments.sort((a, b) => b.dueDate.compareTo(a.dueDate));
-      return payments;
-    });
+    return Stream.fromFuture(getByStudent(studentId));
   }
 
   // ============================================
-  // Stream Payment Stats by Student (Real-time)
+  // Stream Payment Stats by Student (legacy compat — HTTP polling stub)
   // ============================================
   Stream<Map<String, dynamic>> streamStatsByStudent(String studentId) {
-    return streamByStudent(studentId).map((payments) {
-      int pendingCount = 0;
-      int overdueCount = 0;
-      int paidCount = 0;
-      double pendingTotal = 0;
-      double overdueTotal = 0;
-      double paidTotal = 0;
-
-      for (final p in payments) {
-        switch (p.status) {
-          case PaymentStatus.pending:
-            if (p.isOverdue) {
-              overdueCount++;
-              overdueTotal += p.value;
-            } else {
-              pendingCount++;
-              pendingTotal += p.value;
-            }
-            break;
-          case PaymentStatus.paid:
-            paidCount++;
-            paidTotal += p.value;
-            break;
-          case PaymentStatus.overdue:
-            overdueCount++;
-            overdueTotal += p.value;
-            break;
-          case PaymentStatus.cancelled:
-            // Ignore cancelled
-            break;
-        }
-      }
-
-      return {
-        'pending': {'count': pendingCount, 'total': pendingTotal},
-        'overdue': {'count': overdueCount, 'total': overdueTotal},
-        'paid': {'count': paidCount, 'total': paidTotal},
-      };
-    });
+    return Stream.fromFuture(getStatsByStudent(studentId));
   }
 
   // ============================================
   // Get Pending Payments by Student
   // ============================================
   Future<List<Payment>> getPendingByStudent(String studentId) async {
-    final payments = await getByStudent(studentId);
-    return payments
-        .where((p) => p.status == PaymentStatus.pending || p.status == PaymentStatus.overdue)
-        .toList();
+    final page = await _repo.list(
+      academyId,
+      filter: api.FinancialFilter(
+        studentId: studentId,
+        status: api.ApiFinancialStatus.pending,
+        limit: 200,
+      ),
+    );
+    var payments = page.items.map(Payment.fromApi).toList();
+    // also include overdue
+    final overdueItems = await _repo.list(
+      academyId,
+      filter: api.FinancialFilter(
+        studentId: studentId,
+        status: api.ApiFinancialStatus.overdue,
+        limit: 200,
+      ),
+    );
+    payments.addAll(overdueItems.items.map(Payment.fromApi));
+    payments.sort((a, b) => a.dueDate.compareTo(b.dueDate));
+    return payments;
   }
 
   // ============================================
   // Get Overdue Payments by Student
   // ============================================
   Future<List<Payment>> getOverdueByStudent(String studentId) async {
-    final payments = await getByStudent(studentId);
-    return payments.where((p) => p.isOverdue).toList();
+    final page = await _repo.list(
+      academyId,
+      filter: api.FinancialFilter(
+        studentId: studentId,
+        status: api.ApiFinancialStatus.overdue,
+        limit: 200,
+      ),
+    );
+    final payments = page.items.map(Payment.fromApi).toList();
+    payments.sort((a, b) => a.dueDate.compareTo(b.dueDate));
+    return payments;
   }
 
   // ============================================
@@ -401,7 +397,6 @@ class PaymentService {
           overdueTotal += p.value;
           break;
         case PaymentStatus.cancelled:
-          // Ignore cancelled
           break;
       }
     }
@@ -419,7 +414,6 @@ class PaymentService {
   Future<Payment?> getNextDue(String studentId) async {
     final pending = await getPendingByStudent(studentId);
     if (pending.isEmpty) return null;
-
     pending.sort((a, b) => a.dueDate.compareTo(b.dueDate));
     return pending.first;
   }
@@ -428,23 +422,41 @@ class PaymentService {
   // Get Payment by ID
   // ============================================
   Future<Payment?> getById(String id) async {
-    final doc = await _collections.payment(id).get();
-    if (!doc.exists) return null;
-    return Payment.fromFirestore(doc);
+    try {
+      final dto = await _repo.getById(academyId, id);
+      return Payment.fromApi(dto);
+    } catch (_) {
+      return null;
+    }
   }
 
   // ============================================
   // Get Payments by Reference Month
   // ============================================
-  Future<List<Payment>> getByMonth(String referenceMonth, {String? studentId}) async {
-    Query query = _paymentsRef.where('referenceMonth', isEqualTo: referenceMonth);
+  Future<List<Payment>> getByMonth(String referenceMonth,
+      {String? studentId}) async {
+    // O endpoint /financials usa reference_month como filtro.
+    // FinancialFilter não tem referenceMonth direto — filtramos pelo mês
+    // via due_from / due_to do mês.
+    final parts = referenceMonth.split('-');
+    final year = int.parse(parts[0]);
+    final month = int.parse(parts[1]);
+    final from = DateTime(year, month, 1);
+    final to = DateTime(year, month + 1, 0); // último dia do mês
 
-    if (studentId != null) {
-      query = query.where('studentId', isEqualTo: studentId);
-    }
-
-    final snapshot = await query.get();
-    var payments = snapshot.docs.map((doc) => Payment.fromFirestore(doc)).toList();
+    final page = await _repo.list(
+      academyId,
+      filter: api.FinancialFilter(
+        studentId: studentId,
+        dueFrom: from,
+        dueTo: to,
+        limit: 200,
+      ),
+    );
+    var payments = page.items
+        .map(Payment.fromApi)
+        .where((p) => p.referenceMonth == referenceMonth)
+        .toList();
     payments.sort((a, b) => b.dueDate.compareTo(a.dueDate));
     return payments;
   }
@@ -453,44 +465,14 @@ class PaymentService {
   // Get Payment Summary (all students)
   // ============================================
   Future<Map<String, dynamic>> getSummary() async {
-    final snapshot = await _paymentsRef.get();
-
-    int totalPending = 0;
-    int totalOverdue = 0;
-    int totalPaid = 0;
-    double valuePending = 0;
-    double valueOverdue = 0;
-    double valuePaid = 0;
-
-    for (final doc in snapshot.docs) {
-      final payment = Payment.fromFirestore(doc);
-      switch (payment.status) {
-        case PaymentStatus.pending:
-          if (payment.isOverdue) {
-            totalOverdue++;
-            valueOverdue += payment.value;
-          } else {
-            totalPending++;
-            valuePending += payment.value;
-          }
-          break;
-        case PaymentStatus.paid:
-          totalPaid++;
-          valuePaid += payment.value;
-          break;
-        case PaymentStatus.overdue:
-          totalOverdue++;
-          valueOverdue += payment.value;
-          break;
-        case PaymentStatus.cancelled:
-          break;
-      }
-    }
+    final report = await _repo.getMonthlyReport(academyId);
+    final totalRevenue = double.tryParse(report.totalRevenue) ?? 0.0;
+    final outstanding = double.tryParse(report.outstanding) ?? 0.0;
 
     return {
-      'pending': {'count': totalPending, 'value': valuePending},
-      'overdue': {'count': totalOverdue, 'value': valueOverdue},
-      'paid': {'count': totalPaid, 'value': valuePaid},
+      'pending': {'count': report.pendingCount, 'value': outstanding},
+      'overdue': {'count': report.overdueCount, 'value': 0.0},
+      'paid': {'count': report.paidCount, 'value': totalRevenue},
     };
   }
 
@@ -499,7 +481,7 @@ class PaymentService {
   // ============================================
 
   // ============================================
-  // Create Payment
+  // Create Payment → POST /financials
   // ============================================
   Future<Payment> create({
     required String studentId,
@@ -513,24 +495,19 @@ class PaymentService {
     String type = 'monthly_tuition',
     bool sendNotification = true,
   }) async {
-    final docRef = await _paymentsRef.add({
-      'academyId': academyId,
-      'studentId': studentId,
-      'studentName': studentName,
-      'amount': value,
-      'type': type,
-      'dueDate': Timestamp.fromDate(dueDate),
-      'status': PaymentStatus.pending.value,
-      'description': description ?? 'Mensalidade',
-      'referenceMonth': referenceMonth,
-      'planId': planId,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'createdBy': createdBy,
-    });
+    final dto = await _repo.create(
+      academyId,
+      api.CreateFinancialRequest(
+        studentId: studentId,
+        type: _toApiType(type),
+        amount: value.toStringAsFixed(2),
+        dueDate: dueDate,
+        referenceMonth: referenceMonth,
+        description: description ?? 'Mensalidade',
+      ),
+    );
 
-    final doc = await docRef.get();
-    final payment = Payment.fromFirestore(doc);
+    final payment = Payment.fromApi(dto, studentName: studentName);
 
     // Send notification to student if they have a linked account
     if (sendNotification && type == 'monthly_tuition') {
@@ -554,79 +531,97 @@ class PaymentService {
   }
 
   // ============================================
-  // Update Payment
+  // Update Payment → PATCH /financials/{id}
   // ============================================
   Future<Payment> update(String id, Map<String, dynamic> data) async {
-    data['updatedAt'] = FieldValue.serverTimestamp();
-    await _paymentsRef.doc(id).update(data);
-    final doc = await _paymentsRef.doc(id).get();
-    return Payment.fromFirestore(doc);
+    final dto = await _repo.update(
+      academyId,
+      id,
+      api.UpdateFinancialRequest(
+        amount: data['amount'] != null
+            ? (data['amount'] as num).toDouble().toStringAsFixed(2)
+            : null,
+        dueDate: data['dueDate'] is DateTime
+            ? data['dueDate'] as DateTime
+            : null,
+        description: data['description'] as String?,
+        referenceMonth: data['referenceMonth'] as String?,
+      ),
+    );
+    return Payment.fromApi(dto);
   }
 
   // ============================================
-  // Mark as Paid
+  // Mark as Paid → PATCH /financials/{id}/status
   // ============================================
   Future<Payment> markAsPaid(
     String id, {
     PaymentMethod method = PaymentMethod.pix,
     DateTime? paymentDate,
   }) async {
-    final paidAt = paymentDate ?? DateTime.now();
-    return update(id, {
-      'status': PaymentStatus.paid.value,
-      'method': method.value,
-      'paymentDate': Timestamp.fromDate(paidAt),
-    });
+    final dto = await _repo.updateStatus(
+      academyId,
+      id,
+      api.UpdateFinancialStatusRequest(
+        status: api.ApiFinancialStatus.paid,
+        method: _toApiMethod(method),
+        paymentDate: paymentDate ?? DateTime.now(),
+      ),
+    );
+    return Payment.fromApi(dto);
   }
 
   // ============================================
-  // Cancel Payment
+  // Cancel Payment → PATCH /financials/{id}/status
   // ============================================
   Future<Payment> cancel(String id) async {
-    return update(id, {
-      'status': PaymentStatus.cancelled.value,
-    });
+    final dto = await _repo.updateStatus(
+      academyId,
+      id,
+      const api.UpdateFinancialStatusRequest(
+        status: api.ApiFinancialStatus.cancelled,
+      ),
+    );
+    return Payment.fromApi(dto);
   }
 
   // ============================================
-  // Reactivate Cancelled Payment
+  // Reactivate Cancelled Payment → PATCH /financials/{id}/status
+  //
+  // O backend decide o status correto (pending vs overdue) via regra
+  // de negócio própria. Enviamos sempre `pending` — o backend pode
+  // retornar `overdue` se a due_date já passou.
   // ============================================
   Future<Payment> reactivate(String id) async {
-    final payment = await getById(id);
-    if (payment == null) {
-      throw Exception('Payment not found');
-    }
-
-    // Determine new status based on due date
-    final today = DateTime.now();
-    final todayStart = DateTime(today.year, today.month, today.day);
-    final dueDate = DateTime(payment.dueDate.year, payment.dueDate.month, payment.dueDate.day);
-
-    final newStatus = dueDate.isBefore(todayStart)
-        ? PaymentStatus.overdue
-        : PaymentStatus.pending;
-
-    return update(id, {
-      'status': newStatus.value,
-    });
+    final dto = await _repo.updateStatus(
+      academyId,
+      id,
+      const api.UpdateFinancialStatusRequest(
+        status: api.ApiFinancialStatus.pending,
+      ),
+    );
+    return Payment.fromApi(dto);
   }
 
   // ============================================
-  // Delete Payment
+  // Delete Payment → DELETE /financials/{id}
   // ============================================
   Future<void> delete(String id) async {
-    await _paymentsRef.doc(id).delete();
+    await _repo.delete(academyId, id);
   }
 
   // ============================================
   // Get Pending Payments (all students)
   // ============================================
   Future<List<Payment>> getPending() async {
-    final snapshot = await _paymentsRef.get();
-    var payments = snapshot.docs
-        .map((doc) => Payment.fromFirestore(doc))
-        .where((p) => p.status == PaymentStatus.pending && !p.isOverdue)
-        .toList();
+    final page = await _repo.list(
+      academyId,
+      filter: const api.FinancialFilter(
+        status: api.ApiFinancialStatus.pending,
+        limit: 200,
+      ),
+    );
+    var payments = page.items.map(Payment.fromApi).toList();
     payments.sort((a, b) => a.dueDate.compareTo(b.dueDate));
     return payments;
   }
@@ -635,11 +630,14 @@ class PaymentService {
   // Get Overdue Payments (all students)
   // ============================================
   Future<List<Payment>> getOverdue() async {
-    final snapshot = await _paymentsRef.get();
-    var payments = snapshot.docs
-        .map((doc) => Payment.fromFirestore(doc))
-        .where((p) => p.isOverdue || p.status == PaymentStatus.overdue)
-        .toList();
+    final page = await _repo.list(
+      academyId,
+      filter: const api.FinancialFilter(
+        status: api.ApiFinancialStatus.overdue,
+        limit: 200,
+      ),
+    );
+    var payments = page.items.map(Payment.fromApi).toList();
     payments.sort((a, b) => a.dueDate.compareTo(b.dueDate));
     return payments;
   }
@@ -649,231 +647,85 @@ class PaymentService {
   // ============================================
   Future<List<Payment>> getPaidThisMonth() async {
     final now = DateTime.now();
-    final startOfMonth = DateTime(now.year, now.month, 1);
-    final endOfMonth = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
+    final from = DateTime(now.year, now.month, 1);
+    final to = DateTime(now.year, now.month + 1, 0);
 
-    final snapshot = await _paymentsRef.get();
-    var payments = snapshot.docs
-        .map((doc) => Payment.fromFirestore(doc))
-        .where((p) =>
-            p.status == PaymentStatus.paid &&
-            p.paidAt != null &&
-            p.paidAt!.isAfter(startOfMonth) &&
-            p.paidAt!.isBefore(endOfMonth))
-        .toList();
-    payments.sort((a, b) => b.paidAt!.compareTo(a.paidAt!));
+    final page = await _repo.list(
+      academyId,
+      filter: api.FinancialFilter(
+        status: api.ApiFinancialStatus.paid,
+        dueFrom: from,
+        dueTo: to,
+        limit: 200,
+      ),
+    );
+    var payments = page.items.map(Payment.fromApi).toList();
+    payments.sort((a, b) => b.paidAt != null && a.paidAt != null
+        ? b.paidAt!.compareTo(a.paidAt!)
+        : 0);
     return payments;
   }
 
   // ============================================
   // Generate Monthly Tuitions
+  //
+  // Delega inteiramente ao backend via POST /financials/generate-monthly.
+  // O backend é a fonte de verdade para a geração idempotente de
+  // mensalidades — lógica de enumeração de planos/alunos foi removida
+  // do cliente.
+  //
+  // Retorna lista vazia por compatibilidade de assinatura; use
+  // GenerateMonthlyResponse via FinancialRemoteRepo.generateMonthly
+  // diretamente quando precisar dos contadores.
   // ============================================
-  /// Generates monthly tuitions ONLY for students enrolled in active plans.
-  /// Uses the plan's monthlyValue (not the student's tuitionValue field).
-  /// One tuition is generated per student per plan.
-  /// If [planId] is provided, generates only for students in that specific plan.
   Future<List<Payment>> generateMonthlyTuitions({
-    List<({String id, String name, double value, int dueDay, String? planId})>? students,
+    List<({String id, String name, double value, int dueDay, String? planId})>?
+        students,
     required String referenceMonth,
     String? createdBy,
-    String? planId, // Optional: filter to specific plan
+    String? planId,
   }) async {
-    final results = <Payment>[];
-    final year = int.parse(referenceMonth.split('-')[0]);
-    final month = int.parse(referenceMonth.split('-')[1]);
-
-    // If students not provided, build list from active plans
-    List<({String id, String name, double value, int dueDay, String? planId})> studentList;
-    if (students != null) {
-      studentList = students;
-    } else {
-      // Get only students enrolled in active plans with the correct plan value
-      final planService = PlanService(academyId);
-      List<Plan> plansToProcess;
-
-      if (planId != null) {
-        // Filter to specific plan
-        final plan = await planService.getById(planId);
-        plansToProcess = plan != null && plan.isActive ? [plan] : [];
-      } else {
-        // All active plans
-        plansToProcess = await planService.getActive();
-      }
-
-      // Build a list of (studentId, planId, value, dueDay) entries.
-      // A student can appear multiple times — once per plan.
-      final entries = <({String studentId, String planId, double value, int dueDay})>[];
-
-      for (final plan in plansToProcess) {
-        for (final studentId in plan.studentIds) {
-          entries.add((
-            studentId: studentId,
-            planId: plan.id,
-            value: plan.getStudentValue(studentId),
-            dueDay: plan.getStudentDueDay(studentId),
-          ));
-        }
-      }
-
-      // Fetch student details only for students with plans
-      if (entries.isEmpty) {
-        return results; // No students with active plans
-      }
-
-      final studentIds = entries.map((e) => e.studentId).toSet();
-
-      final activeStudents = await _collections.students
-          .where('status', isEqualTo: 'active')
-          .get();
-
-      final activeStudentMap = <String, Map<String, dynamic>>{};
-      for (final doc in activeStudents.docs) {
-        if (studentIds.contains(doc.id)) {
-          activeStudentMap[doc.id] = doc.data() as Map<String, dynamic>;
-        }
-      }
-
-      studentList = entries
-          .where((e) => activeStudentMap.containsKey(e.studentId))
-          .map((e) {
-        final data = activeStudentMap[e.studentId]!;
-        return (
-          id: e.studentId,
-          name: data['fullName'] as String? ?? '',
-          value: e.value,
-          dueDay: data['tuitionDay'] as int? ?? e.dueDay,
-          planId: e.planId as String?,
-        );
-      }).where((s) => s.value > 0).toList();
-    }
-
-    for (final student in studentList) {
-      // Check if payment already exists for this student+plan+month
-      // IMPORTANT: Filter out cancelled payments - they don't count as "existing"
-      final existing = await getByMonth(referenceMonth, studentId: student.id);
-
-      // Exclude cancelled payments from the check
-      final activeExisting = existing.where((p) => p.status != PaymentStatus.cancelled).toList();
-
-      if (student.planId != null) {
-        // Skip if an ACTIVE payment with this planId already exists
-        if (activeExisting.any((p) => p.planId == student.planId)) continue;
-      } else {
-        // Fallback for legacy entries without planId: skip if any ACTIVE payment exists
-        if (activeExisting.any((p) => p.planId == null)) continue;
-      }
-
-      // Clamp to last day of month (e.g., day 31 in February → Feb 28/29)
-      final lastDayOfMonth = DateTime(year, month + 1, 0).day;
-      final clampedDay = student.dueDay > lastDayOfMonth ? lastDayOfMonth : student.dueDay;
-      final dueDate = DateTime(year, month, clampedDay);
-
-      final payment = await create(
-        studentId: student.id,
-        studentName: student.name,
-        value: student.value,
-        dueDate: dueDate,
-        description: 'Mensalidade',
-        referenceMonth: referenceMonth,
-        createdBy: createdBy,
-        planId: student.planId,
-      );
-
-      results.add(payment);
-    }
-
-    return results;
+    await _repo.generateMonthly(academyId, referenceMonth);
+    return const [];
   }
 
   // ============================================
-  // Mark Overdue Payments (batch job)
+  // Mark Overdue Payments (no-op)
+  //
+  // O backend gerencia transições automáticas de pending → overdue
+  // via cron job. Este método é mantido por compatibilidade de
+  // assinatura; nenhuma chamada HTTP é feita.
   // ============================================
   Future<int> markOverduePayments({bool sendNotifications = true}) async {
-    final snapshot = await _paymentsRef.get();
-    int count = 0;
-
-    for (final doc in snapshot.docs) {
-      final payment = Payment.fromFirestore(doc);
-      if (payment.status == PaymentStatus.pending && payment.isOverdue) {
-        await doc.reference.update({
-          'status': PaymentStatus.overdue.value,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-        count++;
-
-        // Send overdue notification to student
-        if (sendNotifications) {
-          try {
-            final student = await _studentService.getById(payment.studentId);
-            if (student != null && student.linkedUserId != null) {
-              await _notificationDispatcher.notifyOverdueTuition(
-                userId: student.linkedUserId!,
-                studentName: payment.studentName,
-                amount: (payment.value * 100).toInt(),
-                daysOverdue: payment.daysOverdue,
-                financialId: payment.id,
-              );
-            }
-          } catch (e) {
-            // ignore notification errors
-          }
-        }
-      }
-    }
-
-    return count;
+    // TODO(tatami): no-op — backend gerencia transições automáticas.
+    return 0;
   }
 
   // ============================================
   // Get Monthly Summary
   // ============================================
-  Future<Map<String, dynamic>> getMonthlySummary(String referenceMonth) async {
-    final payments = await getByMonth(referenceMonth);
-
-    double totalExpected = 0;
-    double totalPaid = 0;
-    double totalPending = 0;
-    double totalOverdue = 0;
-    int countPaid = 0;
-    int countPending = 0;
-    int countOverdue = 0;
-    int countCancelled = 0;
-
-    for (final p in payments) {
-      // Skip cancelled payments - they don't count for collection rate
-      if (p.status == PaymentStatus.cancelled) {
-        countCancelled++;
-        continue;
-      }
-
-      // Only count active payments (pending, overdue, paid) in expected
-      totalExpected += p.value;
-
-      if (p.status == PaymentStatus.paid) {
-        totalPaid += p.value;
-        countPaid++;
-      } else if (p.isOverdue || p.status == PaymentStatus.overdue) {
-        totalOverdue += p.value;
-        countOverdue++;
-      } else if (p.status == PaymentStatus.pending) {
-        totalPending += p.value;
-        countPending++;
-      }
-    }
+  Future<Map<String, dynamic>> getMonthlySummary(
+      String referenceMonth) async {
+    final report =
+        await _repo.getMonthlyReport(academyId, month: referenceMonth);
+    final totalRevenue = double.tryParse(report.totalRevenue) ?? 0.0;
+    final outstanding = double.tryParse(report.outstanding) ?? 0.0;
+    final totalExpected = totalRevenue + outstanding;
 
     return {
       'referenceMonth': referenceMonth,
       'totalExpected': totalExpected,
-      'paid': {'value': totalPaid, 'count': countPaid},
-      'pending': {'value': totalPending, 'count': countPending},
-      'overdue': {'value': totalOverdue, 'count': countOverdue},
-      'cancelled': countCancelled,
-      'collectionRate': totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0,
+      'paid': {'value': totalRevenue, 'count': report.paidCount},
+      'pending': {'value': outstanding, 'count': report.pendingCount},
+      'overdue': {'value': 0.0, 'count': report.overdueCount},
+      'cancelled': report.cancelledCount,
+      'collectionRate':
+          totalExpected > 0 ? (totalRevenue / totalExpected * 100) : 0,
     };
   }
 
   // ============================================
-  // Get WhatsApp Reminder Link
+  // Get WhatsApp Reminder Link (pure helper — não acessa rede)
   // ============================================
   String getWhatsAppReminderLink({
     required String phone,
@@ -904,11 +756,11 @@ class PaymentService {
 // ============================================
 // Factory Function
 // ============================================
-PaymentService createPaymentService(String academyId) {
-  return PaymentService(academyId);
+PaymentService createPaymentService(String academyId,
+    {required FinancialRemoteRepo repo}) {
+  return PaymentService(academyId, repo: repo);
 }
 
-// ============================================
-// Default Instance (uses current academy)
-// ============================================
-PaymentService get paymentService => PaymentService(FirebaseService.academyId);
+// O getter paymentService foi removido: PaymentService agora requer
+// FinancialRemoteRepo injetado. Use PaymentService(academyId, repo: repo)
+// ou acesse via financialRepoProvider + tatamiPaymentsLegacyProvider.

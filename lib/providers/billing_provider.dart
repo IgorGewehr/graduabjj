@@ -3,6 +3,7 @@ import '../api/repositories.dart';
 import '../services/billing_reminder_service.dart';
 import 'selected_academy_provider.dart';
 
+
 /// Billing reminder service provider.
 ///
 /// Mantido para operações sem equivalente direto no tatami:
@@ -23,6 +24,8 @@ final billingReminderServiceProvider = Provider<BillingReminderService>((ref) {
   final academyId = ref.watch(safeAcademyIdProvider) ?? '';
   return BillingReminderService(
     academyId,
+    financialRepo: ref.watch(financialRepoProvider),
+    studentRepo: ref.watch(studentRepoProvider),
     settingsRepo: ref.watch(settingsRepoProvider),
   );
 });
