@@ -78,7 +78,7 @@ void main() {
   });
 
   group('updateStatus (Marcar como pago)', () {
-    test('PATCH status + method credita wallet via BE', () async {
+    test('PATCH status + method marca como pago sem creditar wallet', () async {
       adapter.onPatch(
         '/v1/academies/aid/financials/f-1/status',
         (s) => s.reply(200, financialJson(status: 'paid')),

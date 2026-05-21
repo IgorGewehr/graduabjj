@@ -9,9 +9,9 @@ import 'tatami_client.dart';
 ///   GET /v1/academies/{id}/wallet/transactions  (paginado por cursor)
 ///
 /// O cliente nunca cria/altera wallet_transactions — o backend faz tudo
-/// dentro da transação que muda o status do financial para `paid` (ou via
-/// webhook do gateway). Vide doc 06 §Fase 4 sobre por que essa fase é a
-/// mais sensível do plano.
+/// somente a partir do webhook confirmado da AbacatePay, já com a taxa do
+/// gateway descontada. Marcar um financeiro como `paid` manualmente não
+/// credita a carteira.
 class WalletRemoteRepo {
   WalletRemoteRepo(this._api);
 

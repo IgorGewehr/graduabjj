@@ -30,26 +30,27 @@ void main() {
   Map<String, dynamic> studentJson({
     String id = 'sid-new',
     String fullName = 'Aluno Novo',
-  }) =>
-      {
-        'id': id,
-        'academy_id': 'aid-1',
-        'full_name': fullName,
-        'current_belt': 'white',
-        'current_stripes': 0,
-        'category': 'adult',
-        'status': 'active',
-        'attendance_count': 0,
-        'is_profile_public': false,
-        'primary_sport': 'bjj',
-        'sports_list': ['bjj'],
-        'created_at': '2026-05-16T10:00:00Z',
-        'updated_at': '2026-05-16T10:00:00Z',
-      };
+  }) => {
+    'id': id,
+    'academy_id': 'aid-1',
+    'full_name': fullName,
+    'current_belt': 'white',
+    'current_stripes': 0,
+    'category': 'adult',
+    'status': 'active',
+    'attendance_count': 0,
+    'is_profile_public': false,
+    'primary_sport': 'bjj',
+    'sports_list': ['bjj'],
+    'created_at': '2026-05-16T10:00:00Z',
+    'updated_at': '2026-05-16T10:00:00Z',
+  };
 
   group('create', () {
     test('POST sends body + Idempotency-Key header, parses response', () async {
-      final key = IdempotencyKey.fromString('11111111-1111-4111-8111-111111111111');
+      final key = IdempotencyKey.fromString(
+        '11111111-1111-4111-8111-111111111111',
+      );
 
       adapter.onPost(
         '/v1/academies/aid-1/students',
@@ -105,7 +106,8 @@ void main() {
           guardian: const ApiGuardian(name: 'Mãe', phone: '+5511'),
         ),
         idempotencyKey: IdempotencyKey.fromString(
-            '22222222-2222-4222-8222-222222222222'),
+          '22222222-2222-4222-8222-222222222222',
+        ),
       );
       expect(s.id, 'sid-new');
     });
@@ -125,10 +127,7 @@ void main() {
       );
 
       try {
-        await repo.create(
-          'aid-1',
-          const CreateStudentRequest(fullName: ''),
-        );
+        await repo.create('aid-1', const CreateStudentRequest(fullName: ''));
         fail('expected 422');
       } on DioException catch (e) {
         final t = e.error as TatamiException;
@@ -142,7 +141,8 @@ void main() {
     test('PATCH sends only present fields', () async {
       adapter.onPatch(
         '/v1/academies/aid-1/students/sid',
-        (server) => server.reply(200, studentJson(id: 'sid', fullName: 'Novo Nome')),
+        (server) =>
+            server.reply(200, studentJson(id: 'sid', fullName: 'Novo Nome')),
         data: {'full_name': 'Novo Nome', 'status': 'inactive'},
       );
 
@@ -157,6 +157,29 @@ void main() {
       expect(s.fullName, 'Novo Nome');
     });
 
+    test(
+      'PATCH sends sports_list for multi-sport attendance recovery',
+      () async {
+        adapter.onPatch(
+          '/v1/academies/aid-1/students/sid',
+          (server) => server.reply(200, {
+            ...studentJson(id: 'sid'),
+            'sports_list': ['bjj', 'judo'],
+          }),
+          data: {
+            'sports_list': ['bjj', 'judo'],
+          },
+        );
+
+        final s = await repo.update(
+          'aid-1',
+          'sid',
+          const UpdateStudentRequest(sportsList: ['bjj', 'judo']),
+        );
+        expect(s.sportsList, ['bjj', 'judo']);
+      },
+    );
+
     test('PATCH empty body when nothing to update', () async {
       adapter.onPatch(
         '/v1/academies/aid-1/students/sid',
@@ -164,11 +187,7 @@ void main() {
         data: <String, dynamic>{},
       );
 
-      final s = await repo.update(
-        'aid-1',
-        'sid',
-        const UpdateStudentRequest(),
-      );
+      final s = await repo.update('aid-1', 'sid', const UpdateStudentRequest());
       expect(s.id, 'sid');
     });
   });
@@ -236,7 +255,8 @@ void main() {
           sport: ApiSport.judo,
         ),
         idempotencyKey: IdempotencyKey.fromString(
-            '33333333-3333-4333-8333-333333333333'),
+          '33333333-3333-4333-8333-333333333333',
+        ),
       );
       expect(bp.id, 'bp-new');
       expect(bp.sport, ApiSport.judo);
@@ -291,7 +311,8 @@ void main() {
           notes: 'Muito bom',
         ),
         idempotencyKey: IdempotencyKey.fromString(
-            '44444444-4444-4444-8444-444444444444'),
+          '44444444-4444-4444-8444-444444444444',
+        ),
       );
       expect(a.id, 'as-new');
       expect(a.scores.average, closeTo(4.6, 1e-9));
