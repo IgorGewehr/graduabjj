@@ -81,6 +81,9 @@ class DeleteAccountHelper {
     try {
       final authService = ref.read(authServiceProvider);
       await authService.deleteAccount();
+      if (context.mounted) {
+        Navigator.pop(context); // dismiss loading
+      }
       // auth state listener redirects to login automatically
     } catch (e) {
       if (context.mounted) {

@@ -454,8 +454,8 @@ class _MonitorAttendanceScreenState
           .toList();
     }
 
-    // Filter by class students if class has specific students
-    if (_selectedClass != null && _selectedClass!.studentIds.isNotEmpty) {
+    // Filter by class students
+    if (_selectedClass != null) {
       filteredStudents = filteredStudents
           .where((s) => _selectedClass!.studentIds.contains(s.id))
           .toList();
@@ -479,7 +479,7 @@ class _MonitorAttendanceScreenState
   }
 
   int get _totalCount {
-    if (_selectedClass != null && _selectedClass!.studentIds.isNotEmpty) {
+    if (_selectedClass != null) {
       return _selectedClass!.studentIds.length;
     }
     return _students.length;

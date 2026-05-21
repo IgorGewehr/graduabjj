@@ -175,6 +175,9 @@ service cloud.firestore {
                     && !request.resource.data.diff(resource.data).affectedKeys()
                         .hasAny(['role', 'academyId']);
 
+      // Users can delete their own document during account deletion
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+
       // FCM Tokens subcollection
       match /fcmTokens/{tokenId} {
         // User can manage their own tokens
@@ -214,8 +217,8 @@ service cloud.firestore {
       allow update: if isAuthenticated()
                     && request.auth.uid == userId;
 
-      // Never allow delete
-      allow delete: if false;
+      // Users can delete their own mapping during account deletion
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
     }
 
     // ============================================
@@ -297,13 +300,22 @@ service cloud.firestore {
                                    'currentBelt', 'currentStripes', 'status',
                                    'beltHistory', 'createdAt', 'createdBy']);
 
-        // Students can update only personal info (including photoUrl and registration linking fields)
+        // Students can update only personal info (including photoUrl and registration linking fields) or soft-delete their own record
         allow update: if isOwnStudent(academyId, studentId)
-                      && request.resource.data.diff(resource.data).affectedKeys()
+                      && (
+                        // Normal update of personal info
+                        request.resource.data.diff(resource.data).affectedKeys()
                           .hasOnly(['photoUrl', 'updatedAt', 'linkedUserId', 'email', 'cpf', 'phone',
                                     'nickname', 'birthDate', 'rg', 'weight',
                                     'address', 'bloodType', 'allergies', 'healthNotes',
-                                    'emergencyContact', 'isProfilePublic']);
+                                    'emergencyContact', 'isProfilePublic'])
+                        ||
+                        // Soft delete during account deletion
+                        (request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['status', 'deletedAt', 'deletedByUser'])
+                         && request.resource.data.status == 'deleted'
+                         && request.resource.data.deletedByUser == true)
+                      );
 
         // Timeline subcollection
         match /timeline/{eventId} {
