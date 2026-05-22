@@ -293,7 +293,7 @@ class AuthService {
       // 2. Get user's academy mappings to delete related data
       final mapping = await globalUserService.getUserAcademyMapping(uid);
 
-      // 3. Delete student records from each academy
+      // 3. Delete student records and academy user docs from each academy
       if (mapping != null) {
         for (final academyId in mapping.academyIds) {
           final academyDetail = mapping.academyDetails?[academyId];
@@ -308,6 +308,11 @@ class AuthService {
                   'deletedByUser': true,
                 });
           }
+          // Remove academy-scoped user document
+          await _firestore
+              .collection('academies/$academyId/users')
+              .doc(uid)
+              .delete();
         }
       }
 
@@ -679,12 +684,11 @@ class AuthService {
         if (attempt < 2) {
           await Future.delayed(Duration(milliseconds: 500));
         } else {
-          // On final attempt failure, log error but continue
-          // User can still login, but profile linking might fail
+          // Account is fully functional (Auth + Firestore docs created).
+          // Only the student.linkedUserId is missing — log and continue so
+          // the user can still sign in. Throwing here would leave a valid
+          // Auth user with no way to re-register (email-already-in-use).
           debugPrint('CRITICAL: Failed to update student after 3 attempts');
-          throw Exception(
-            'Falha ao vincular perfil do aluno. Tente novamente.',
-          );
         }
       }
     }

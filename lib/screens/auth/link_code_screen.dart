@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,7 +7,9 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
 import '../../core/theme.dart';
+import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/global_user_service.dart';
 import '../../services/instructor_link_code_service.dart';
 import '../../services/link_code_service.dart';
 
@@ -202,16 +203,14 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
       if (user == null) throw Exception('No user returned from Firebase Auth');
       await user.updateDisplayName(displayName);
 
-      // Root /users/{uid} doc so subsequent updates by linkUserToAcademy can
-      // bump accountType to "linked" without failing on a missing doc.
-      await FirebaseFirestore.instance.doc('users/${user.uid}').set({
-        'email': email,
-        'displayName': displayName,
-        'accountType': 'free',
-        'isActive': true,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      // Root /users/{uid} doc + empty userAcademyMapping via service,
+      // so linkUserToAcademy can safely update instead of creating from scratch.
+      await globalUserService.createGlobalUser(
+        userId: user.uid,
+        email: email,
+        displayName: displayName,
+        accountType: AccountType.free,
+      );
 
       await redeemInstructorCode(
         code: _validatedInstructorCode!,

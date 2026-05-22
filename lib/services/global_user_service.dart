@@ -80,14 +80,19 @@ class GlobalUserService {
 
     await userRef.set(userData);
 
-    // Also create empty userAcademyMapping
+    // Create empty userAcademyMapping only if it doesn't exist yet.
+    // Using set() unconditionally would overwrite an already-populated mapping
+    // in race conditions where linkUserToAcademy ran before this call completes.
     final mappingRef = RootCollections.userAcademyMappingDoc(userId);
-    await mappingRef.set({
-      'academyIds': <String>[],
-      'primaryAcademyId': null,
-      'academyDetails': <String, dynamic>{},
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    final mappingSnap = await mappingRef.get();
+    if (!mappingSnap.exists) {
+      await mappingRef.set({
+        'academyIds': <String>[],
+        'primaryAcademyId': null,
+        'academyDetails': <String, dynamic>{},
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
 
     return GlobalUser(
       id: userId,
