@@ -2,12 +2,49 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_service.dart';
 
+enum BillingPeriod {
+  monthly,
+  quarterly,
+  semiannual,
+  annual;
+
+  int get months => switch (this) {
+        BillingPeriod.monthly => 1,
+        BillingPeriod.quarterly => 3,
+        BillingPeriod.semiannual => 6,
+        BillingPeriod.annual => 12,
+      };
+
+  String get label => switch (this) {
+        BillingPeriod.monthly => 'Mensal',
+        BillingPeriod.quarterly => 'Trimestral',
+        BillingPeriod.semiannual => 'Semestral',
+        BillingPeriod.annual => 'Anual',
+      };
+
+  String get periodLabel => switch (this) {
+        BillingPeriod.monthly => 'mês',
+        BillingPeriod.quarterly => 'trimestre',
+        BillingPeriod.semiannual => 'semestre',
+        BillingPeriod.annual => 'ano',
+      };
+
+  static BillingPeriod fromString(String? value) => switch (value) {
+        'quarterly' => BillingPeriod.quarterly,
+        'semiannual' => BillingPeriod.semiannual,
+        'annual' => BillingPeriod.annual,
+        _ => BillingPeriod.monthly,
+      };
+}
+
 /// Plan Model
 class Plan {
   final String id;
   final String name;
   final String? description;
   final double monthlyValue;
+  final double? periodValue;
+  final BillingPeriod billingPeriod;
   final int defaultDueDay;
   final int? classesPerWeek;
   final List<String> studentIds;
@@ -22,6 +59,8 @@ class Plan {
     required this.name,
     this.description,
     required this.monthlyValue,
+    this.periodValue,
+    this.billingPeriod = BillingPeriod.monthly,
     this.defaultDueDay = 10,
     this.classesPerWeek,
     this.studentIds = const [],
@@ -32,10 +71,14 @@ class Plan {
     required this.updatedAt,
   });
 
-  /// Returns the value a specific student pays in this plan.
-  /// If the student has a custom value, returns it; otherwise returns monthlyValue.
+  /// The actual amount charged per billing cycle.
+  /// For monthly plans this equals monthlyValue.
+  /// For non-monthly plans this equals periodValue if set, or monthlyValue as fallback.
+  double get effectivePeriodValue => periodValue ?? monthlyValue;
+
+  /// Returns the amount this student is charged per billing cycle.
   double getStudentValue(String studentId) =>
-      customValues[studentId] ?? monthlyValue;
+      customValues[studentId] ?? effectivePeriodValue;
 
   int getStudentDueDay(String studentId) =>
       customDueDays[studentId] ?? defaultDueDay;
@@ -45,6 +88,8 @@ class Plan {
     String? name,
     String? description,
     double? monthlyValue,
+    double? periodValue,
+    BillingPeriod? billingPeriod,
     int? defaultDueDay,
     int? classesPerWeek,
     List<String>? studentIds,
@@ -59,6 +104,8 @@ class Plan {
       name: name ?? this.name,
       description: description ?? this.description,
       monthlyValue: monthlyValue ?? this.monthlyValue,
+      periodValue: periodValue ?? this.periodValue,
+      billingPeriod: billingPeriod ?? this.billingPeriod,
       defaultDueDay: defaultDueDay ?? this.defaultDueDay,
       classesPerWeek: classesPerWeek ?? this.classesPerWeek,
       studentIds: studentIds ?? this.studentIds,
@@ -77,6 +124,8 @@ class Plan {
       name: data['name'] ?? '',
       description: data['description'],
       monthlyValue: (data['monthlyValue'] ?? 0).toDouble(),
+      periodValue: (data['periodValue'] as num?)?.toDouble(),
+      billingPeriod: BillingPeriod.fromString(data['billingPeriod']),
       defaultDueDay: data['defaultDueDay'] ?? 10,
       classesPerWeek: data['classesPerWeek'],
       studentIds: data['studentIds'] != null
@@ -102,9 +151,15 @@ class Plan {
     );
   }
 
-  // Computed properties
   int get studentCount => studentIds.length;
-  String get formattedValue => 'R\$ ${monthlyValue.toStringAsFixed(2)}';
+
+  String get formattedValue {
+    final value = effectivePeriodValue;
+    if (billingPeriod == BillingPeriod.monthly) {
+      return 'R\$ ${value.toStringAsFixed(2)}/mês';
+    }
+    return 'R\$ ${value.toStringAsFixed(2)}/${billingPeriod.periodLabel}';
+  }
 }
 
 /// Plan Service - Multi-tenant plan management
@@ -186,6 +241,8 @@ class PlanService {
     required String name,
     String? description,
     required double monthlyValue,
+    double? periodValue,
+    BillingPeriod billingPeriod = BillingPeriod.monthly,
     int defaultDueDay = 10,
     int? classesPerWeek,
   }) async {
@@ -193,6 +250,8 @@ class PlanService {
       'name': name,
       'description': description,
       'monthlyValue': monthlyValue,
+      if (periodValue != null) 'periodValue': periodValue,
+      'billingPeriod': billingPeriod.name,
       'defaultDueDay': defaultDueDay,
       'classesPerWeek': classesPerWeek,
       'studentIds': [],

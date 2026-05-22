@@ -101,7 +101,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   double get _expectedRevenue {
     double total = 0;
     for (final plan in _plans.where((p) => p.isActive)) {
-      total += plan.studentIds.fold(0.0, (sum, sid) => sum + plan.getStudentValue(sid));
+      final periodRevenue = plan.studentIds
+          .fold(0.0, (sum, sid) => sum + plan.getStudentValue(sid));
+      total += periodRevenue / plan.billingPeriod.months;
     }
     return total;
   }
@@ -853,6 +855,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     final valueController = TextEditingController();
     final dueDayController = TextEditingController(text: '10');
     int? classesPerWeek;
+    BillingPeriod billingPeriod = BillingPeriod.monthly;
 
     showModalBottomSheet(
       context: context,
@@ -893,19 +896,27 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 ),
                 const SizedBox(height: 20),
 
-                // Name
                 _buildFormField('Nome do Plano', nameController, 'Ex: Mensal'),
 
-                // Value
-                _buildFormField(
-                    'Valor Mensal (R\$)', valueController, 'Ex: 150',
-                    keyboardType: TextInputType.number),
+                // Billing period selector
+                _BillingPeriodSelector(
+                  selected: billingPeriod,
+                  onChanged: (p) => setDialogState(() => billingPeriod = p),
+                ),
+                const SizedBox(height: 16),
 
-                // Due Day
+                _buildFormField(
+                  billingPeriod == BillingPeriod.monthly
+                      ? 'Valor (R\$)'
+                      : 'Valor por ${billingPeriod.periodLabel.capitalize()} (R\$)',
+                  valueController,
+                  billingPeriod == BillingPeriod.monthly ? 'Ex: 150' : 'Ex: 400',
+                  keyboardType: TextInputType.number,
+                ),
+
                 _buildFormField('Dia de Vencimento', dueDayController, '1-31',
                     keyboardType: TextInputType.number),
 
-                // Classes per week
                 Text(
                   'Aulas por Semana',
                   style:
@@ -934,7 +945,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 ),
                 const SizedBox(height: 24),
 
-                // Actions
                 Row(
                   children: [
                     Expanded(
@@ -961,10 +971,17 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                           try {
                             final service =
                                 PlanService(FirebaseService.academyId);
+                            final enteredValue =
+                                double.tryParse(valueController.text) ?? 0;
                             await service.create(
                               name: nameController.text,
-                              monthlyValue:
-                                  double.tryParse(valueController.text) ?? 0,
+                              monthlyValue: billingPeriod == BillingPeriod.monthly
+                                  ? enteredValue
+                                  : enteredValue / billingPeriod.months,
+                              periodValue: billingPeriod == BillingPeriod.monthly
+                                  ? null
+                                  : enteredValue,
+                              billingPeriod: billingPeriod,
                               defaultDueDay:
                                   int.tryParse(dueDayController.text) ?? 10,
                               classesPerWeek: classesPerWeek,
@@ -1038,12 +1055,14 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
   void _showEditPlanDialog(Plan plan) {
     final nameController = TextEditingController(text: plan.name);
-    final valueController =
-        TextEditingController(text: plan.monthlyValue.toString());
+    final valueController = TextEditingController(
+      text: plan.effectivePeriodValue.toStringAsFixed(2),
+    );
     final dueDayController =
         TextEditingController(text: plan.defaultDueDay.toString());
     int? classesPerWeek = plan.classesPerWeek;
     bool isActive = plan.isActive;
+    BillingPeriod billingPeriod = plan.billingPeriod;
 
     showModalBottomSheet(
       context: context,
@@ -1085,12 +1104,25 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 const SizedBox(height: 20),
 
                 _buildFormField('Nome do Plano', nameController, ''),
-                _buildFormField('Valor Mensal (R\$)', valueController, '',
-                    keyboardType: TextInputType.number),
+
+                _BillingPeriodSelector(
+                  selected: billingPeriod,
+                  onChanged: (p) => setDialogState(() => billingPeriod = p),
+                ),
+                const SizedBox(height: 16),
+
+                _buildFormField(
+                  billingPeriod == BillingPeriod.monthly
+                      ? 'Valor (R\$)'
+                      : 'Valor por ${billingPeriod.periodLabel.capitalize()} (R\$)',
+                  valueController,
+                  '',
+                  keyboardType: TextInputType.number,
+                ),
+
                 _buildFormField('Dia de Vencimento', dueDayController, '',
                     keyboardType: TextInputType.number),
 
-                // Status toggle
                 Row(
                   children: [
                     Text(
@@ -1134,10 +1166,19 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                           try {
                             final service =
                                 PlanService(FirebaseService.academyId);
+                            final enteredValue =
+                                double.tryParse(valueController.text) ?? 0;
                             await service.update(plan.id, {
                               'name': nameController.text,
+                              'billingPeriod': billingPeriod.name,
                               'monthlyValue':
-                                  double.tryParse(valueController.text) ?? 0,
+                                  billingPeriod == BillingPeriod.monthly
+                                      ? enteredValue
+                                      : enteredValue / billingPeriod.months,
+                              'periodValue':
+                                  billingPeriod == BillingPeriod.monthly
+                                      ? null
+                                      : enteredValue,
                               'defaultDueDay':
                                   int.tryParse(dueDayController.text) ?? 10,
                               'classesPerWeek': classesPerWeek,
@@ -1571,7 +1612,11 @@ class _PlanCard extends StatelessWidget {
             children: [
               _InfoChip(
                 icon: LucideIcons.dollarSign,
-                label: formatCurrency(plan.monthlyValue),
+                label: plan.formattedValue,
+              ),
+              _InfoChip(
+                icon: LucideIcons.calendarClock,
+                label: plan.billingPeriod.label,
               ),
               _InfoChip(
                 icon: LucideIcons.layoutGrid,
@@ -1594,7 +1639,7 @@ class _PlanCard extends StatelessWidget {
 
           // Expected revenue
           Text(
-            'Receita Esperada/Mes',
+            'Receita Esperada/${plan.billingPeriod.periodLabel.capitalize()}',
             style: AppTheme.labelSmall.copyWith(
               color: AppTheme.success,
               fontWeight: FontWeight.w600,
@@ -3058,6 +3103,55 @@ class _QuickInsightCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _BillingPeriodSelector extends StatelessWidget {
+  final BillingPeriod selected;
+  final ValueChanged<BillingPeriod> onChanged;
+
+  const _BillingPeriodSelector({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Periodicidade',
+          style: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: BillingPeriod.values.map((period) {
+            final isSelected = selected == period;
+            return GestureDetector(
+              onTap: () => onChanged(period),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? AppTheme.textPrimary
+                      : AppTheme.surfaceVariant,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  period.label,
+                  style: AppTheme.labelMedium.copyWith(
+                    color: isSelected ? Colors.white : AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 }

@@ -594,41 +594,72 @@ class PaymentService {
   // ============================================
   // Generate Monthly Tuitions
   // ============================================
-  /// Generates monthly tuitions ONLY for students enrolled in active plans.
-  /// Uses the plan's monthlyValue (not the student's tuitionValue field).
-  /// One tuition is generated per student per plan.
+  /// Returns true if a non-monthly plan student is due for a new charge in [referenceMonth].
+  /// Looks at the last active payment for this student+plan and checks if enough time
+  /// has elapsed (>= billingPeriod.months months since last due date).
+  Future<bool> _isDueForPeriod({
+    required String studentId,
+    required String planId,
+    required BillingPeriod billingPeriod,
+    required int refYear,
+    required int refMonth,
+  }) async {
+    final snapshot = await _paymentsRef
+        .where('studentId', isEqualTo: studentId)
+        .where('planId', isEqualTo: planId)
+        .where('type', isEqualTo: 'monthly_tuition')
+        .get();
+
+    final active = snapshot.docs
+        .map((d) => Payment.fromFirestore(d))
+        .where((p) => p.status != PaymentStatus.cancelled)
+        .toList();
+
+    if (active.isEmpty) return true;
+
+    active.sort((a, b) => b.dueDate.compareTo(a.dueDate));
+    final lastDue = active.first.dueDate;
+
+    final nextBilling = DateTime(
+      lastDue.year,
+      lastDue.month + billingPeriod.months,
+      lastDue.day,
+    );
+
+    return nextBilling.year < refYear ||
+        (nextBilling.year == refYear && nextBilling.month <= refMonth);
+  }
+
+  // ============================================
+  /// Generates tuitions for students enrolled in active plans.
+  /// Monthly plans: one charge per month. Non-monthly plans: one charge per period
+  /// (quarterly/semiannual/annual). A student already charged within the period is skipped.
   /// If [planId] is provided, generates only for students in that specific plan.
   Future<List<Payment>> generateMonthlyTuitions({
-    List<({String id, String name, double value, int dueDay, String? planId})>? students,
+    List<({String id, String name, double value, int dueDay, String? planId, BillingPeriod billingPeriod})>? students,
     required String referenceMonth,
     String? createdBy,
-    String? planId, // Optional: filter to specific plan
+    String? planId,
   }) async {
     final results = <Payment>[];
     final year = int.parse(referenceMonth.split('-')[0]);
     final month = int.parse(referenceMonth.split('-')[1]);
 
-    // If students not provided, build list from active plans
-    List<({String id, String name, double value, int dueDay, String? planId})> studentList;
+    List<({String id, String name, double value, int dueDay, String? planId, BillingPeriod billingPeriod})> studentList;
     if (students != null) {
       studentList = students;
     } else {
-      // Get only students enrolled in active plans with the correct plan value
       final planService = PlanService(academyId);
       List<Plan> plansToProcess;
 
       if (planId != null) {
-        // Filter to specific plan
         final plan = await planService.getById(planId);
         plansToProcess = plan != null && plan.isActive ? [plan] : [];
       } else {
-        // All active plans
         plansToProcess = await planService.getActive();
       }
 
-      // Build a list of (studentId, planId, value, dueDay) entries.
-      // A student can appear multiple times — once per plan.
-      final entries = <({String studentId, String planId, double value, int dueDay})>[];
+      final entries = <({String studentId, String planId, double value, int dueDay, BillingPeriod billingPeriod})>[];
 
       for (final plan in plansToProcess) {
         for (final studentId in plan.studentIds) {
@@ -637,14 +668,12 @@ class PaymentService {
             planId: plan.id,
             value: plan.getStudentValue(studentId),
             dueDay: plan.getStudentDueDay(studentId),
+            billingPeriod: plan.billingPeriod,
           ));
         }
       }
 
-      // Fetch student details only for students with plans
-      if (entries.isEmpty) {
-        return results; // No students with active plans
-      }
+      if (entries.isEmpty) return results;
 
       final studentIds = entries.map((e) => e.studentId).toSet();
 
@@ -669,27 +698,37 @@ class PaymentService {
           value: e.value,
           dueDay: data['tuitionDay'] as int? ?? e.dueDay,
           planId: e.planId as String?,
+          billingPeriod: e.billingPeriod,
         );
       }).where((s) => s.value > 0).toList();
     }
 
     for (final student in studentList) {
-      // Check if payment already exists for this student+plan+month
-      // IMPORTANT: Filter out cancelled payments - they don't count as "existing"
-      final existing = await getByMonth(referenceMonth, studentId: student.id);
+      final period = student.billingPeriod;
+      bool shouldGenerate;
 
-      // Exclude cancelled payments from the check
-      final activeExisting = existing.where((p) => p.status != PaymentStatus.cancelled).toList();
-
-      if (student.planId != null) {
-        // Skip if an ACTIVE payment with this planId already exists
-        if (activeExisting.any((p) => p.planId == student.planId)) continue;
+      if (period == BillingPeriod.monthly) {
+        // Existing monthly logic: skip if active payment already exists this month
+        final existing = await getByMonth(referenceMonth, studentId: student.id);
+        final activeExisting = existing.where((p) => p.status != PaymentStatus.cancelled).toList();
+        if (student.planId != null) {
+          shouldGenerate = !activeExisting.any((p) => p.planId == student.planId);
+        } else {
+          shouldGenerate = !activeExisting.any((p) => p.planId == null);
+        }
       } else {
-        // Fallback for legacy entries without planId: skip if any ACTIVE payment exists
-        if (activeExisting.any((p) => p.planId == null)) continue;
+        // Non-monthly: skip if student was already charged within the billing period
+        shouldGenerate = await _isDueForPeriod(
+          studentId: student.id,
+          planId: student.planId!,
+          billingPeriod: period,
+          refYear: year,
+          refMonth: month,
+        );
       }
 
-      // Clamp to last day of month (e.g., day 31 in February → Feb 28/29)
+      if (!shouldGenerate) continue;
+
       final lastDayOfMonth = DateTime(year, month + 1, 0).day;
       final clampedDay = student.dueDay > lastDayOfMonth ? lastDayOfMonth : student.dueDay;
       final dueDate = DateTime(year, month, clampedDay);
@@ -699,7 +738,7 @@ class PaymentService {
         studentName: student.name,
         value: student.value,
         dueDate: dueDate,
-        description: 'Mensalidade',
+        description: period == BillingPeriod.monthly ? 'Mensalidade' : period.label,
         referenceMonth: referenceMonth,
         createdBy: createdBy,
         planId: student.planId,
