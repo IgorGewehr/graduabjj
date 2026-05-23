@@ -110,6 +110,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               error: (_, __) => const SizedBox.shrink(),
             ),
 
+            // Graduation progress (only when academy opted-in + visibility on)
+            student.when(
+              data: (s) {
+                if (s == null) return const SizedBox.shrink();
+                return _GraduationProgressCard(student: s);
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+
             const SizedBox(height: 24),
 
             // Dynamic Cards Section
@@ -1112,3 +1122,123 @@ class _AcademyIndicator extends ConsumerWidget {
     );
   }
 }
+
+/// Card showing the student's progress towards the next graduation.
+/// Visible only when the academy enabled `autoGraduationEnabled` AND
+/// `graduationProgressVisibleToStudents`. Threshold falls back to 70
+/// matching the historical default if the academy hasn't set one.
+class _GraduationProgressCard extends ConsumerWidget {
+  final dynamic student;
+  const _GraduationProgressCard({required this.student});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settingsAsync = ref.watch(academySettingsProvider);
+    final settings = settingsAsync.valueOrNull;
+    if (settings == null) return const SizedBox.shrink();
+    if (!settings.autoGraduationEnabled) return const SizedBox.shrink();
+    if (!settings.graduationProgressVisibleToStudents) {
+      return const SizedBox.shrink();
+    }
+
+    final attendanceAsync = ref.watch(
+      studentAttendanceCountProvider(student.id as String),
+    );
+    final count = attendanceAsync.valueOrNull ?? 0;
+    final initial = (student.initialAttendanceCount as int?) ?? 0;
+    final threshold = settings.autoGraduationAttendances ?? 70;
+    final total = count + initial;
+    final progress = threshold == 0 ? 1.0 : (total / threshold).clamp(0.0, 1.0);
+    final remaining = (threshold - total).clamp(0, threshold);
+    final eligible = total >= threshold;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: eligible
+                ? [AppTheme.success, AppTheme.success.withValues(alpha: 0.85)]
+                : [
+                    AppTheme.primary.withValues(alpha: 0.12),
+                    AppTheme.surface,
+                  ],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: eligible
+                ? AppTheme.success
+                : AppTheme.primary.withValues(alpha: 0.25),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  eligible ? LucideIcons.trophy : LucideIcons.award,
+                  color: eligible ? Colors.white : AppTheme.primary,
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    eligible
+                        ? 'Você atingiu a meta de graduação!'
+                        : 'Progresso para próxima graduação',
+                    style: AppTheme.titleMedium.copyWith(
+                      color: eligible ? Colors.white : AppTheme.textPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 8,
+                backgroundColor: eligible
+                    ? Colors.white.withValues(alpha: 0.25)
+                    : AppTheme.divider,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  eligible ? Colors.white : AppTheme.primary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Text(
+                  '$total / $threshold aulas',
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: eligible ? Colors.white : AppTheme.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  eligible
+                      ? settings.graduationMode == 'auto'
+                          ? 'Graduação automática'
+                          : 'Aguarde aprovação do mestre'
+                      : 'Faltam $remaining',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: eligible
+                        ? Colors.white.withValues(alpha: 0.9)
+                        : AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

@@ -2,7 +2,7 @@ name: graduabjj
 description: "BJJEasy - Sistema Whitelabel para Academias de Jiu-Jitsu"
 publish_to: 'none'
 
-version: 1.12.0+74
+version: 1.13.0+76
 
 environment:
   sdk: ^3.10.7

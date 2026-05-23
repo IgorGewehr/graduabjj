@@ -63,6 +63,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   // Auto-graduation + class weights
   bool _autoGraduationEnabled = false;
   bool _useClassWeights = false;
+  String _graduationMode = 'manual'; // 'manual' | 'auto'
+  bool _graduationProgressVisibleToStudents = false;
   final _autoGraduationAttendancesController = TextEditingController(
     text: '70',
   );
@@ -143,6 +145,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _studentCheckinEnabled = settings.studentCheckinEnabled;
           _autoGraduationEnabled = settings.autoGraduationEnabled;
           _useClassWeights = settings.useClassWeights;
+          _graduationMode = settings.graduationMode;
+          _graduationProgressVisibleToStudents =
+              settings.graduationProgressVisibleToStudents;
           if (settings.autoGraduationAttendances != null) {
             _autoGraduationAttendancesController.text = settings
                 .autoGraduationAttendances
@@ -295,6 +300,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       await service.updateAutoGraduation(
         _autoGraduationEnabled,
         attendances: attendancesValue,
+        mode: _graduationMode,
+        progressVisibleToStudents: _graduationProgressVisibleToStudents,
       );
       await service.updateUseClassWeights(_useClassWeights);
 
@@ -1316,14 +1323,14 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           // Auto-graduation settings
           _SettingsCard(
-            title: 'Graduacao Automatica',
+            title: 'Graduacao por Presencas',
             icon: LucideIcons.award,
             child: Column(
               children: [
                 _ModernSwitch(
-                  title: 'Habilitar Graduacao Automatica',
+                  title: 'Habilitar Graduacao por Presencas',
                   subtitle:
-                      'Sinaliza alunos elegiveis com base no numero de presencas',
+                      'Libera a aba Graduacao no menu admin e o card de progresso para alunos',
                   value: _autoGraduationEnabled,
                   onChanged: (value) {
                     setState(() => _autoGraduationEnabled = value);
@@ -1339,6 +1346,25 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                     hint: '70',
                     icon: LucideIcons.target,
                     keyboardType: TextInputType.number,
+                  ),
+                  const SizedBox(height: 16),
+                  // Mode selector — auto vs manual approval
+                  _GraduationModeSelector(
+                    value: _graduationMode,
+                    onChanged: (mode) =>
+                        setState(() => _graduationMode = mode),
+                  ),
+                  const SizedBox(height: 16),
+                  _ModernSwitch(
+                    title: 'Aluno ve seu progresso',
+                    subtitle:
+                        'Exibe X/Y aulas e barra de progresso no portal do aluno',
+                    value: _graduationProgressVisibleToStudents,
+                    onChanged: (value) => setState(
+                      () => _graduationProgressVisibleToStudents = value,
+                    ),
+                    icon: LucideIcons.eye,
+                    iconColor: AppTheme.info,
                   ),
                   const SizedBox(height: 12),
                   Container(
@@ -1357,7 +1383,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'Alunos serao destacados na lista quando atingirem o numero configurado. A graduacao em si precisa ser confirmada por um admin.',
+                            _graduationMode == 'auto'
+                                ? 'Modo automatico: ao atingir o numero de presencas, o aluno e promovido automaticamente para o proximo grau.'
+                                : 'Modo manual: alunos elegiveis sao destacados na lista; o mestre confirma cada graduacao na tela Graduacao.',
                             style: AppTheme.labelSmall.copyWith(
                               color: AppTheme.info,
                             ),
@@ -1982,6 +2010,121 @@ class _AccountActionTile extends StatelessWidget {
               LucideIcons.chevronRight,
               color: isDestructive ? accent : AppTheme.textSecondary,
               size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Segmented selector used in the Funcionalidades tab to pick between
+/// 'manual' (mestre confirma cada graduação) and 'auto' (promote on
+/// threshold). Renders as two side-by-side cards with the active one
+/// highlighted in the primary color.
+class _GraduationModeSelector extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _GraduationModeSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Modo de graduacao',
+          style: AppTheme.labelSmall.copyWith(
+            color: AppTheme.textSecondary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _ModeCard(
+                title: 'Manual',
+                subtitle: 'Mestre aprova',
+                icon: LucideIcons.handMetal,
+                selected: value == 'manual',
+                onTap: () => onChanged('manual'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _ModeCard(
+                title: 'Automatico',
+                subtitle: 'Promove ao bater',
+                icon: LucideIcons.zap,
+                selected: value == 'auto',
+                onTap: () => onChanged('auto'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ModeCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ModeCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? AppTheme.primary : AppTheme.textSecondary;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.primary.withValues(alpha: 0.08)
+              : AppTheme.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? AppTheme.primary : AppTheme.divider,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AppTheme.bodyMedium.copyWith(
+                      color: color,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: AppTheme.labelSmall.copyWith(
+                      color: color.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

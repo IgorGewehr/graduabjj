@@ -94,10 +94,21 @@ class AcademySettings {
   final String? asaasKycOnboardingUrl;
 
   // Auto-graduation Settings
+  /// Master toggle for the entire attendance-based graduation feature.
+  /// When false: the Graduation tab disappears from admin nav, the student
+  /// progress widget hides, and auto-promotion never fires (regardless of
+  /// graduationMode). Existing data is preserved when the flag is flipped off.
   final bool autoGraduationEnabled;
   final int? autoGraduationAttendances;
   /// When true, attendance counts use Class.weight instead of 1 per doc.
   final bool useClassWeights;
+  /// 'manual' → mestre confirma promoção a partir da tela de Graduação.
+  /// 'auto'   → ao bater o threshold, markPresent já promove sem intervenção.
+  /// Default 'manual' preserves prior behavior.
+  final String graduationMode;
+  /// Whether students see their own attendance-to-graduation progress on
+  /// the portal home. When false, the count stays admin-only.
+  final bool graduationProgressVisibleToStudents;
 
   // Store Settings
   final bool storeEnabled;
@@ -141,6 +152,8 @@ class AcademySettings {
     this.autoGraduationEnabled = false,
     this.autoGraduationAttendances,
     this.useClassWeights = false,
+    this.graduationMode = 'manual',
+    this.graduationProgressVisibleToStudents = false,
     this.storeEnabled = false,
     this.storePublished = false,
     this.storeCreditCardEnabled = false,
@@ -182,6 +195,9 @@ class AcademySettings {
       autoGraduationEnabled: data['autoGraduationEnabled'] ?? false,
       autoGraduationAttendances: data['autoGraduationAttendances'],
       useClassWeights: data['useClassWeights'] ?? false,
+      graduationMode: (data['graduationMode'] as String?) ?? 'manual',
+      graduationProgressVisibleToStudents:
+          data['graduationProgressVisibleToStudents'] ?? false,
       storeEnabled: data['storeEnabled'] ?? false,
       storePublished: data['storePublished'] ?? false,
       storeCreditCardEnabled: data['storeCreditCardEnabled'] ?? false,
@@ -360,13 +376,24 @@ class SettingsService {
   // ============================================
   // Update Auto-graduation Settings
   // ============================================
-  Future<void> updateAutoGraduation(bool enabled, {int? attendances}) async {
+  Future<void> updateAutoGraduation(
+    bool enabled, {
+    int? attendances,
+    String? mode,
+    bool? progressVisibleToStudents,
+  }) async {
     final data = <String, dynamic>{
       'autoGraduationEnabled': enabled,
       'updatedAt': FieldValue.serverTimestamp(),
     };
     if (attendances != null) {
       data['autoGraduationAttendances'] = attendances;
+    }
+    if (mode != null) {
+      data['graduationMode'] = mode;
+    }
+    if (progressVisibleToStudents != null) {
+      data['graduationProgressVisibleToStudents'] = progressVisibleToStudents;
     }
     await _academyRef.update(data);
   }

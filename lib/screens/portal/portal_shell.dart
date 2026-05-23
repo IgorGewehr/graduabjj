@@ -21,69 +21,132 @@ class PortalShell extends ConsumerStatefulWidget {
 }
 
 class _PortalShellState extends ConsumerState<PortalShell> {
-  // Navigation items for bottom nav (first 4 + "Mais")
-  static const List<_NavItem> _bottomNavItems = [
-    _NavItem(
-      label: 'Inicio',
-      icon: LucideIcons.layoutDashboard,
-      path: '/portal',
-    ),
-    _NavItem(
-      label: 'Perfil',
-      icon: LucideIcons.user,
-      path: '/portal/perfil',
-    ),
-    _NavItem(
-      label: 'Presencas',
-      icon: LucideIcons.clipboardCheck,
-      path: '/portal/presencas',
-    ),
-    _NavItem(
-      label: 'Competicoes',
-      icon: LucideIcons.trophy,
-      path: '/portal/competicoes',
-    ),
-    _NavItem(
-      label: 'Mais',
-      icon: LucideIcons.moreHorizontal,
-      path: '', // Special case for bottom sheet
-    ),
-  ];
+  // Base bottom-nav items shared by every portal role. The 4th slot below
+  // adapts (Chamada for monitors, Horários for students). The last slot is
+  // the categorized "Menu" sheet.
+  static const _NavItem _homeNavItem = _NavItem(
+    label: 'Inicio',
+    icon: LucideIcons.layoutDashboard,
+    path: '/portal',
+  );
+  static const _NavItem _scheduleNavItem = _NavItem(
+    label: 'Horarios',
+    icon: LucideIcons.calendar,
+    path: '/portal/horarios',
+  );
+  static const _NavItem _presencasNavItem = _NavItem(
+    label: 'Presencas',
+    icon: LucideIcons.clipboardCheck,
+    path: '/portal/presencas',
+  );
+  static const _NavItem _chamadaNavItem = _NavItem(
+    label: 'Chamada',
+    icon: LucideIcons.clipboardCheck,
+    path: '/portal/chamada',
+  );
+  static const _NavItem _alunosNavItem = _NavItem(
+    label: 'Alunos',
+    icon: LucideIcons.users,
+    path: '/portal/alunos',
+  );
+  static const _NavItem _profileNavItem = _NavItem(
+    label: 'Perfil',
+    icon: LucideIcons.user,
+    path: '/portal/perfil',
+  );
+  static const _NavItem _menuNavItem = _NavItem(
+    label: 'Menu',
+    icon: LucideIcons.layoutGrid,
+    path: '', // Special case for bottom sheet
+  );
 
-  // Items for "Mais" menu
-  static const List<_NavItem> _moreMenuItems = [
-    _NavItem(
+  /// Builds the bottom nav for the current role. Monitors get Chamada
+  /// and Alunos as primary entries (the two screens they actually use);
+  /// students get Horários in that slot.
+  List<_NavItem> _bottomNavItemsFor({required bool isMonitor}) {
+    if (isMonitor) {
+      return const [
+        _homeNavItem,
+        _chamadaNavItem,
+        _alunosNavItem,
+        _profileNavItem,
+        _menuNavItem,
+      ];
+    }
+    return const [
+      _homeNavItem,
+      _scheduleNavItem,
+      _presencasNavItem,
+      _profileNavItem,
+      _menuNavItem,
+    ];
+  }
+
+  /// Catalog of secondary items reached via the Menu sheet. Each entry
+  /// declares the section it lives in plus its activation gate.
+  static const List<_PortalMenuEntry> _menuCatalog = [
+    // Treinos — academic life
+    _PortalMenuEntry(
       label: 'Horarios',
       icon: LucideIcons.calendar,
       path: '/portal/horarios',
+      section: 'Treinos',
+      hideWhen: _PortalGate.monitor, // monitors already have it elsewhere? no
     ),
-    _NavItem(
+    _PortalMenuEntry(
+      label: 'Presencas',
+      icon: LucideIcons.clipboardCheck,
+      path: '/portal/presencas',
+      section: 'Treinos',
+    ),
+    _PortalMenuEntry(
       label: 'Jornada',
       icon: LucideIcons.history,
       path: '/portal/linha-do-tempo',
+      section: 'Treinos',
     ),
-    _NavItem(
+    // Conquistas
+    _PortalMenuEntry(
+      label: 'Competicoes',
+      icon: LucideIcons.trophy,
+      path: '/portal/competicoes',
+      section: 'Conquistas',
+    ),
+    _PortalMenuEntry(
       label: 'Comportamento',
       icon: LucideIcons.star,
       path: '/portal/comportamento',
+      section: 'Conquistas',
+      requiresKidsCategory: true,
     ),
-    _NavItem(
+    // Conta
+    _PortalMenuEntry(
       label: 'Financeiro',
       icon: LucideIcons.dollarSign,
       path: '/portal/financeiro',
+      section: 'Conta',
+      requiresPlan: true,
     ),
-    _NavItem(
+    _PortalMenuEntry(
       label: 'Loja',
       icon: LucideIcons.store,
       path: '/portal/loja',
+      section: 'Conta',
+      requiresStorePublished: true,
+    ),
+    _PortalMenuEntry(
+      label: 'Academias',
+      icon: LucideIcons.school,
+      path: '/portal/academias',
+      section: 'Conta',
     ),
   ];
 
-  int _getSelectedIndex(String location) {
-    // Check bottom nav items (except "Mais")
-    for (int i = 0; i < _bottomNavItems.length - 1; i++) {
-      final path = _bottomNavItems[i].path;
-      // Exact match for /portal, prefix match for others
+  int _getSelectedIndex(String location, List<_NavItem> items) {
+    final menuIndex = items.length - 1;
+    // Check bottom nav items (except the Menu slot).
+    for (int i = 0; i < items.length - 1; i++) {
+      final path = items[i].path;
       if (path == '/portal') {
         if (location == path) return i;
       } else if (location == path || location.startsWith('$path/')) {
@@ -91,27 +154,21 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       }
     }
 
-    // Check if any "more" item is active
-    for (final item in _moreMenuItems) {
-      if (location == item.path || location.startsWith('${item.path}/')) {
-        return 4; // "Mais" index
+    // Any deeper portal route → highlight Menu
+    for (final entry in _menuCatalog) {
+      if (location == entry.path || location.startsWith('${entry.path}/')) {
+        return menuIndex;
       }
     }
 
-    // Check monitor routes
-    if (location.startsWith('/portal/chamada') || location.startsWith('/portal/alunos')) {
-      return 4; // "Mais" index
-    }
-
-    return 0; // Default to first item
+    return 0;
   }
 
-  void _onItemTapped(int index) {
-    if (index == 4) {
-      // Show "Mais" bottom sheet
+  void _onItemTapped(int index, List<_NavItem> items) {
+    if (index == items.length - 1) {
       _showMoreMenu();
     } else {
-      context.go(_bottomNavItems[index].path);
+      context.go(items[index].path);
     }
   }
 
@@ -121,78 +178,53 @@ class _PortalShellState extends ConsumerState<PortalShell> {
   }
 
   void _showMoreMenu() {
-    // Capture current location BEFORE opening bottom sheet
-    // (bottom sheet context doesn't have GoRouter)
     final currentLocation = GoRouterState.of(context).matchedLocation;
     final navigator = GoRouter.of(context);
 
-    // Get student to check if they're a kid (for showing Comportamento)
     final student = ref.read(currentStudentProvider).valueOrNull;
     final isKids = student?.category == StudentCategory.kids;
 
-    // Get academy settings to check if store is published and monitors
     final settings = ref.read(academySettingsProvider).valueOrNull;
     final isStorePublished = settings?.storePublished ?? false;
 
-    // Check if user is a monitor
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     final studentId = currentUser?.studentId;
-    final linkedStudentIds = currentUser?.linkedStudentIds ?? [];
-    final allStudentIds = studentId != null ? [studentId, ...linkedStudentIds] : linkedStudentIds;
-    final monitorIds = settings?.monitorIds ?? [];
-    final isMonitor = allStudentIds.any((id) => monitorIds.contains(id));
+    final linkedStudentIds = currentUser?.linkedStudentIds ?? const <String>[];
+    final allStudentIds = studentId != null
+        ? [studentId, ...linkedStudentIds]
+        : linkedStudentIds;
+    final monitorIds = settings?.monitorIds ?? const <String>[];
+    final isMonitor = allStudentIds.any(monitorIds.contains);
 
-    // Build filtered items list
-    final List<_NavItem> filteredItems = [];
+    final studentDocId = student?.id;
+    final hasPlan = studentDocId != null &&
+        ref.read(studentPlanProvider(studentDocId)).valueOrNull != null;
 
-    // Add monitor-specific items first if user is a monitor
-    if (isMonitor) {
-      filteredItems.add(const _NavItem(
-        label: 'Chamada',
-        icon: LucideIcons.clipboardCheck,
-        path: '/portal/chamada',
-      ));
-      filteredItems.add(const _NavItem(
-        label: 'Alunos',
-        icon: LucideIcons.users,
-        path: '/portal/alunos',
-      ));
-    }
-
-    // Check if student is enrolled in any plan (via plan.studentIds)
-    final studentId2 = student?.id;
-    final hasPlan = studentId2 != null &&
-        ref.read(studentPlanProvider(studentId2)).valueOrNull != null;
-
-    // Filter and add standard menu items
-    for (final item in _moreMenuItems) {
-      // Comportamento only shows for kids
-      if (item.path == '/portal/comportamento' && !isKids) {
-        continue;
-      }
-      // Loja only shows if store is published
-      if (item.path == '/portal/loja' && !isStorePublished) {
-        continue;
-      }
-      // Financeiro only shows if student has a plan
-      if (item.path == '/portal/financeiro' && !hasPlan) {
-        continue;
-      }
-      filteredItems.add(item);
-    }
+    final entries = _menuCatalog.where((e) {
+      if (e.requiresKidsCategory && !isKids) return false;
+      if (e.requiresStorePublished && !isStorePublished) return false;
+      if (e.requiresPlan && !hasPlan) return false;
+      if (e.hideWhen == _PortalGate.monitor && isMonitor) return false;
+      return true;
+    }).toList();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => MoreMenuSheet(
-        items: filteredItems
-            .map((item) => MoreMenuItem(
-                  label: item.label,
-                  icon: item.icon,
-                  path: item.path,
-                  isActive: currentLocation == item.path,
-                ))
+        headerTitle: 'Menu',
+        headerSubtitle: settings?.name ?? 'Meu Portal',
+        items: entries
+            .map(
+              (e) => MoreMenuItem(
+                label: e.label,
+                icon: e.icon,
+                path: e.path,
+                isActive: currentLocation == e.path,
+                category: e.section,
+              ),
+            )
             .toList(),
         onLogout: () async {
           Navigator.pop(sheetContext);
@@ -210,7 +242,7 @@ class _PortalShellState extends ConsumerState<PortalShell> {
   @override
   Widget build(BuildContext context) {
     // Watch auth state for reactive updates
-    ref.watch(currentUserProvider);
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
 
     // Pre-load student plan so it's available synchronously in _showMoreMenu
     final student = ref.watch(currentStudentProvider).valueOrNull;
@@ -218,9 +250,19 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       ref.watch(studentPlanProvider(student.id));
     }
 
+    // Detect monitor role to pick the right bottom-nav layout.
+    final settings = ref.watch(academySettingsProvider).valueOrNull;
+    final studentIds = <String>[
+      if (currentUser?.studentId != null) currentUser!.studentId!,
+      ...(currentUser?.linkedStudentIds ?? const <String>[]),
+    ];
+    final monitorIds = settings?.monitorIds ?? const <String>[];
+    final isMonitor = studentIds.any(monitorIds.contains);
+    final bottomNavItems = _bottomNavItemsFor(isMonitor: isMonitor);
+
     // Get current location from GoRouter
     final location = GoRouterState.of(context).matchedLocation;
-    final selectedIndex = _getSelectedIndex(location);
+    final selectedIndex = _getSelectedIndex(location, bottomNavItems);
 
     // Check if this is the root route (/portal)
     final isRootRoute = location == '/portal';
@@ -260,11 +302,11 @@ class _PortalShellState extends ConsumerState<PortalShell> {
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
               child: Row(
                 children: List.generate(
-                  _bottomNavItems.length,
+                  bottomNavItems.length,
                   (index) => _BottomNavItem(
-                    item: _bottomNavItems[index],
+                    item: bottomNavItems[index],
                     isSelected: selectedIndex == index,
-                    onTap: () => _onItemTapped(index),
+                    onTap: () => _onItemTapped(index, bottomNavItems),
                   ),
                 ),
               ),
@@ -286,6 +328,33 @@ class _NavItem {
     required this.label,
     required this.icon,
     required this.path,
+  });
+}
+
+/// Optional gate to hide an entry for a specific portal role.
+enum _PortalGate { monitor }
+
+/// One entry in the portal "Menu" sheet catalog. Gates compose: if any one
+/// of the *requires* flags is false, the entry is filtered out at render.
+class _PortalMenuEntry {
+  final String label;
+  final IconData icon;
+  final String path;
+  final String section;
+  final bool requiresKidsCategory;
+  final bool requiresStorePublished;
+  final bool requiresPlan;
+  final _PortalGate? hideWhen;
+
+  const _PortalMenuEntry({
+    required this.label,
+    required this.icon,
+    required this.path,
+    required this.section,
+    this.requiresKidsCategory = false,
+    this.requiresStorePublished = false,
+    this.requiresPlan = false,
+    this.hideWhen,
   });
 }
 

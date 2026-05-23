@@ -132,6 +132,7 @@ class AdminSidebar extends ConsumerWidget {
     final settingsAsync = ref.watch(academySettingsProvider);
     final settings = settingsAsync.valueOrNull;
     final isStoreEnabled = settings?.storeEnabled ?? false;
+    final isGraduationEnabled = settings?.autoGraduationEnabled ?? false;
     final currentUser = ref.watch(currentUserProvider);
     final user = currentUser.valueOrNull;
     // Permission gates. Admins always pass; instructors need the explicit
@@ -233,6 +234,14 @@ class AdminSidebar extends ConsumerWidget {
                   path: '/admin/turmas',
                   currentPath: currentPath,
                 ),
+                if (isGraduationEnabled)
+                  _NavItem(
+                    icon: Icons.military_tech_outlined,
+                    activeIcon: Icons.military_tech,
+                    label: 'Graduação',
+                    path: '/admin/graduacao',
+                    currentPath: currentPath,
+                  ),
                 _NavItem(
                   icon: Icons.emoji_events_outlined,
                   activeIcon: Icons.emoji_events,
@@ -424,9 +433,9 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     icon: LucideIcons.calendar,
     path: '/admin/turmas',
   );
-  static const _AdminNavItem _moreBottomNavItem = _AdminNavItem(
-    label: 'Mais',
-    icon: LucideIcons.moreHorizontal,
+  static const _AdminNavItem _menuBottomNavItem = _AdminNavItem(
+    label: 'Menu',
+    icon: LucideIcons.layoutGrid,
     path: '', // Special case for bottom sheet
   );
 
@@ -437,42 +446,80 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     return <_AdminNavItem>[
       ..._baseBottomNavItems,
       canSeeFinancial ? _financialBottomNavItem : _turmasBottomNavItem,
-      _moreBottomNavItem,
+      _menuBottomNavItem,
     ];
   }
 
-  // Items for "Mais" menu
-  static const List<_AdminNavItem> _moreMenuItems = [
-    _AdminNavItem(
+  /// Catalog of everything that lives behind the "Menu" tile, tagged by
+  /// section and tagged with the permission needed to see it. The shell
+  /// applies the filter at render time so each role only sees what's
+  /// actually theirs.
+  static const List<_AdminMenuEntry> _menuCatalog = [
+    // Gestão — primary academy operations
+    _AdminMenuEntry(
       label: 'Turmas',
       icon: LucideIcons.calendar,
       path: '/admin/turmas',
+      section: 'Gestão',
     ),
-    _AdminNavItem(
-      label: 'Competicoes',
+    _AdminMenuEntry(
+      label: 'Graduação',
+      icon: LucideIcons.award,
+      path: '/admin/graduacao',
+      section: 'Gestão',
+      requiresGraduation: true,
+    ),
+    _AdminMenuEntry(
+      label: 'Campeonatos',
       icon: LucideIcons.trophy,
       path: '/admin/campeonatos',
+      section: 'Gestão',
     ),
-    _AdminNavItem(
-      label: 'Cobranca',
+    // Financeiro
+    _AdminMenuEntry(
+      label: 'Cobrança',
       icon: LucideIcons.receipt,
       path: '/admin/cobranca',
+      section: 'Financeiro',
+      requiresPermission: 'financial:view',
     ),
-    _AdminNavItem(
-      label: 'Relatorios',
-      icon: LucideIcons.barChart3,
-      path: '/admin/relatorios',
-    ),
-    _AdminNavItem(label: 'Loja', icon: LucideIcons.store, path: '/admin/loja'),
-    _AdminNavItem(
+    _AdminMenuEntry(
       label: 'Carteira',
       icon: LucideIcons.wallet,
       path: '/admin/carteira',
+      section: 'Financeiro',
+      requiresPermission: 'financial:view',
+      requiresPayment: true,
     ),
-    _AdminNavItem(
-      label: 'Configuracoes',
+    _AdminMenuEntry(
+      label: 'Relatórios',
+      icon: LucideIcons.barChart3,
+      path: '/admin/relatorios',
+      section: 'Financeiro',
+      requiresPermission: 'reports:view',
+    ),
+    // Conteúdo
+    _AdminMenuEntry(
+      label: 'Loja',
+      icon: LucideIcons.store,
+      path: '/admin/loja',
+      section: 'Conteúdo',
+      requiresStore: true,
+    ),
+    // Conta — admin-only
+    _AdminMenuEntry(
+      label: 'Configurações',
       icon: LucideIcons.settings,
       path: '/admin/configuracoes',
+      section: 'Conta',
+      adminOnly: true,
+    ),
+    _AdminMenuEntry(
+      label: 'Código de equipe',
+      icon: LucideIcons.key,
+      path: '/codigo-equipe',
+      section: 'Conta',
+      adminOnly: true,
     ),
   ];
 
@@ -490,10 +537,10 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       }
     }
 
-    // Check if any "more" item is active
-    for (final item in _moreMenuItems) {
-      if (location == item.path || location.startsWith('${item.path}/')) {
-        return items.length - 1; // "Mais" index
+    // Check if any menu entry is active
+    for (final entry in _menuCatalog) {
+      if (location == entry.path || location.startsWith('${entry.path}/')) {
+        return items.length - 1; // "Menu" index
       }
     }
 
@@ -508,50 +555,52 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     }
   }
 
-  void _showMoreMenu() {
-    final currentLocation = widget.currentPath;
-    final navigator = GoRouter.of(context);
-
+  /// Resolves the menu catalog against the current user/settings and returns
+  /// only the entries this role is allowed to see.
+  List<_AdminMenuEntry> _visibleMenuEntries() {
     final settings = ref.read(academySettingsProvider).valueOrNull;
     final isStoreEnabled = settings?.storeEnabled ?? false;
+    final isGraduationEnabled = settings?.autoGraduationEnabled ?? false;
     final isPaymentEnabled =
         (settings?.abacatePayEnabled ?? false) ||
         (settings?.asaasEnabled ?? false);
     final user = ref.read(currentUserProvider).valueOrNull;
-    final canSeeFinancial = user?.hasPermission('financial:view') == true;
-    final canSeeReports = user?.hasPermission('reports:view') == true;
     final isAdminUser = user?.isAdmin == true;
 
-    // Filter menu items based on academy features + caller permissions.
-    final filteredItems = _moreMenuItems.where((item) {
-      switch (item.path) {
-        case '/admin/loja':
-          return isStoreEnabled;
-        case '/admin/carteira':
-          return isPaymentEnabled && canSeeFinancial;
-        case '/admin/cobranca':
-          return canSeeFinancial;
-        case '/admin/relatorios':
-          return canSeeReports;
-        case '/admin/configuracoes':
-          return isAdminUser;
-        default:
-          return true;
+    return _menuCatalog.where((e) {
+      if (e.adminOnly && !isAdminUser) return false;
+      if (e.requiresStore && !isStoreEnabled) return false;
+      if (e.requiresGraduation && !isGraduationEnabled) return false;
+      if (e.requiresPayment && !isPaymentEnabled) return false;
+      if (e.requiresPermission != null &&
+          user?.hasPermission(e.requiresPermission!) != true) {
+        return false;
       }
+      return true;
     }).toList();
+  }
+
+  void _showMoreMenu() {
+    final currentLocation = widget.currentPath;
+    final navigator = GoRouter.of(context);
+    final entries = _visibleMenuEntries();
+    final settings = ref.read(academySettingsProvider).valueOrNull;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => MoreMenuSheet(
-        items: filteredItems
+        headerTitle: 'Menu',
+        headerSubtitle: settings?.name ?? 'Administração',
+        items: entries
             .map(
-              (item) => MoreMenuItem(
-                label: item.label,
-                icon: item.icon,
-                path: item.path,
-                isActive: currentLocation == item.path,
+              (e) => MoreMenuItem(
+                label: e.label,
+                icon: e.icon,
+                path: e.path,
+                isActive: currentLocation == e.path,
+                category: e.section,
               ),
             )
             .toList(),
@@ -609,6 +658,32 @@ class _AdminNavItem {
     required this.label,
     required this.icon,
     required this.path,
+  });
+}
+
+/// One entry in the admin "Menu" sheet catalog. Each entry declares the
+/// section it belongs to plus the gates required to surface it.
+class _AdminMenuEntry {
+  final String label;
+  final IconData icon;
+  final String path;
+  final String section;
+  final bool adminOnly;
+  final bool requiresStore;
+  final bool requiresGraduation;
+  final bool requiresPayment;
+  final String? requiresPermission;
+
+  const _AdminMenuEntry({
+    required this.label,
+    required this.icon,
+    required this.path,
+    required this.section,
+    this.adminOnly = false,
+    this.requiresStore = false,
+    this.requiresGraduation = false,
+    this.requiresPayment = false,
+    this.requiresPermission,
   });
 }
 

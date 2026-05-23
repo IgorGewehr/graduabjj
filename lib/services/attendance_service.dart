@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/sports.dart';
 import 'achievement_service.dart';
+import 'belt_progression_service.dart';
 import 'firebase_service.dart';
 import 'student_service.dart';
 
@@ -409,8 +411,103 @@ class AttendanceService {
     // Milestone notification is best-effort and outside the transaction.
     checkAttendanceMilestone(studentId, studentName, verifiedBy).ignore();
 
+    // Auto-graduation: when the academy is in graduationMode='auto', check
+    // eligibility and promote on the spot. Fire-and-forget so a failure
+    // here never blocks the attendance write that just succeeded.
+    _maybeAutoPromote(
+      studentId: studentId,
+      studentName: studentName,
+      verifiedBy: verifiedBy,
+      verifiedByName: verifiedByName,
+      sport: sport,
+    ).ignore();
+
     final doc = await attendanceRef.get();
     return Attendance.fromFirestore(doc);
+  }
+
+  /// Promote the student if the academy opted into auto graduation AND
+  /// they just crossed the configured threshold. No-op when the feature
+  /// is off or the mode is 'manual'.
+  Future<void> _maybeAutoPromote({
+    required String studentId,
+    required String studentName,
+    required String verifiedBy,
+    required String verifiedByName,
+    String? sport,
+  }) async {
+    try {
+      final settingsDoc = await _collections.academy.get();
+      if (!settingsDoc.exists) return;
+      final settings = settingsDoc.data() as Map<String, dynamic>;
+      if (settings['autoGraduationEnabled'] != true) return;
+      if (settings['graduationMode'] != 'auto') return;
+
+      final sportId = SportId.fromString(sport ?? 'bjj');
+      final progressionService = BeltProgressionService(academyId);
+      final eligibility =
+          await progressionService.checkEligibilityForStudent(
+        studentId,
+        sportId: sportId,
+      );
+      if (!eligibility.eligible) return;
+
+      // Pick the next belt + stripes for this sport. The progression
+      // service exposes the helper indirectly via Sports; we mirror the
+      // same logic as the manual admin promotion path.
+      final studentSnap = await _collections.student(studentId).get();
+      if (!studentSnap.exists) return;
+      final studentData = studentSnap.data() as Map<String, dynamic>;
+      final next = _nextGradeFor(studentData, sportId);
+      if (next == null) return; // already top grade
+
+      await progressionService.promote(
+        studentId: studentId,
+        studentName: studentName,
+        newBelt: next.belt,
+        newStripes: next.stripes,
+        promotedBy: verifiedBy,
+        promotedByName: '$verifiedByName (auto)',
+        notes: 'Graduação automática por presenças',
+        sportId: sportId,
+      );
+    } catch (_) {
+      // Swallow — auto-promotion is opportunistic, never fail the check-in.
+    }
+  }
+
+  /// Returns the next (belt, stripes) for the given sport using the grade
+  /// list from core/sports.dart. Returns null when the student is already
+  /// at the highest grade for that sport.
+  ({String belt, int stripes})? _nextGradeFor(
+    Map<String, dynamic> studentData,
+    SportId sport,
+  ) {
+    String currentBelt;
+    int currentStripes;
+    if (sport == SportId.bjj &&
+        (studentData['sportData'] == null ||
+            (studentData['sportData'] as Map)['bjj'] == null)) {
+      currentBelt = studentData['currentBelt'] ?? 'white';
+      currentStripes = studentData['currentStripes'] ?? 0;
+    } else {
+      final sd = (studentData['sportData'] as Map?)?[sport.value]
+          as Map<String, dynamic>?;
+      currentBelt = sd?['currentGrade'] ?? 'white';
+      currentStripes = sd?['currentStripes'] ?? 0;
+    }
+
+    final grades = getGradesForSport(sport);
+    final idx = grades.indexWhere((g) => g.id == currentBelt);
+    if (idx < 0) return (belt: currentBelt, stripes: currentStripes + 1);
+
+    // Add a stripe until we reach the per-belt cap (4 in BJJ), then advance.
+    const stripeCap = 4;
+    if (currentStripes < stripeCap) {
+      return (belt: currentBelt, stripes: currentStripes + 1);
+    }
+    if (idx + 1 >= grades.length) return null; // already at top
+    return (belt: grades[idx + 1].id, stripes: 0);
   }
 
   /// Deterministic key per (student, class, day) so concurrent writes collide
