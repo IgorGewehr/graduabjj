@@ -9,6 +9,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/instructor_link_code_service.dart';
 import '../../services/student_service.dart';
+import '../../services/team_service.dart';
 import '../../widgets/cached_image.dart';
 
 /// Team management tab for academy admins.
@@ -26,7 +27,10 @@ class TeamTabContent extends ConsumerStatefulWidget {
 class _TeamTabContentState extends ConsumerState<TeamTabContent> {
   bool _loading = true;
   List<InstructorLinkCode> _codes = const [];
+  AcademyMembers _members =
+      const AcademyMembers(admins: [], instructors: [], students: []);
   InstructorLinkCodeService? _service;
+  String? _academyId;
 
   @override
   void initState() {
@@ -41,18 +45,106 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
       if (user?.academyId == null) {
         setState(() {
           _codes = const [];
+          _members = const AcademyMembers(
+            admins: [],
+            instructors: [],
+            students: [],
+          );
           _loading = false;
         });
         return;
       }
-      _service = InstructorLinkCodeService(user!.academyId!);
-      final list = await _service!.listActive();
+      _academyId = user!.academyId!;
+      _service = InstructorLinkCodeService(_academyId!);
+      // Codes + members loaded in parallel — both routinely take >100ms each
+      // and they're independent.
+      final results = await Future.wait([
+        _service!.listActive(),
+        teamService.listMembers(_academyId!),
+      ]);
       setState(() {
-        _codes = list;
+        _codes = results[0] as List<InstructorLinkCode>;
+        _members = results[1] as AcademyMembers;
         _loading = false;
       });
     } catch (_) {
       setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _demoteMember(AcademyMember m) async {
+    if (_academyId == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rebaixar para aluno?'),
+        content: Text(
+          '${m.displayName} voltará a ser aluno e perderá o acesso administrativo. '
+          'A vinculação à academia é mantida.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.warning),
+            child: const Text('Rebaixar'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await teamService.demoteToStudent(
+        userId: m.userId,
+        academyId: _academyId!,
+      );
+      if (!mounted) return;
+      context.showSuccess('${m.displayName} agora é aluno.');
+      _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      context.showError('Não foi possível rebaixar: $e');
+    }
+  }
+
+  Future<void> _revokeMember(AcademyMember m) async {
+    if (_academyId == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover da academia?'),
+        content: Text(
+          '${m.displayName} será removido da academia e perderá todo o acesso. '
+          'Esta ação não apaga o histórico, apenas o vínculo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await teamService.revokeMember(
+        userId: m.userId,
+        academyId: _academyId!,
+      );
+      if (!mounted) return;
+      context.showSuccess('${m.displayName} foi removido.');
+      _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      context.showError('Não foi possível remover: $e');
     }
   }
 
@@ -149,6 +241,24 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'EQUIPE ATUAL',
+              style: AppTheme.labelSmall.copyWith(
+                color: AppTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _TeamMembersSection(
+              loading: _loading,
+              admins: _members.admins,
+              instructors: _members.instructors,
+              onDemote: _demoteMember,
+              onRevoke: _revokeMember,
+              currentUserId: ref.read(currentUserProvider).valueOrNull?.id,
             ),
             const SizedBox(height: 24),
             Text(
@@ -720,6 +830,204 @@ class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
                 child: const Text('Cancelar'),
               ),
             ],
+    );
+  }
+}
+
+class _TeamMembersSection extends StatelessWidget {
+  final bool loading;
+  final List<AcademyMember> admins;
+  final List<AcademyMember> instructors;
+  final ValueChanged<AcademyMember> onDemote;
+  final ValueChanged<AcademyMember> onRevoke;
+  final String? currentUserId;
+
+  const _TeamMembersSection({
+    required this.loading,
+    required this.admins,
+    required this.instructors,
+    required this.onDemote,
+    required this.onRevoke,
+    required this.currentUserId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (admins.isEmpty && instructors.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          'Ainda não há equipe cadastrada.',
+          textAlign: TextAlign.center,
+          style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final m in admins)
+          _MemberRow(
+            member: m,
+            badgeLabel: 'Admin',
+            badgeColor: AppTheme.primary,
+            // Admins cannot be demoted or revoked from this screen — explicit
+            // safety so the academy doesn't accidentally orphan itself.
+            actions: const [],
+          ),
+        for (final m in instructors)
+          _MemberRow(
+            member: m,
+            badgeLabel: 'Instrutor',
+            badgeColor: AppTheme.info,
+            actions: m.userId == currentUserId
+                ? const []
+                : [
+                    _MemberAction(
+                      icon: LucideIcons.userMinus,
+                      label: 'Rebaixar',
+                      color: AppTheme.warning,
+                      onTap: () => onDemote(m),
+                    ),
+                    _MemberAction(
+                      icon: LucideIcons.userX,
+                      label: 'Remover',
+                      color: AppTheme.error,
+                      onTap: () => onRevoke(m),
+                    ),
+                  ],
+          ),
+      ],
+    );
+  }
+}
+
+class _MemberAction {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _MemberAction({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+}
+
+class _MemberRow extends StatelessWidget {
+  final AcademyMember member;
+  final String badgeLabel;
+  final Color badgeColor;
+  final List<_MemberAction> actions;
+
+  const _MemberRow({
+    required this.member,
+    required this.badgeLabel,
+    required this.badgeColor,
+    required this.actions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final permissionsLabel = member.extraPermissions.isEmpty
+        ? null
+        : member.extraPermissions.length == 1
+            ? '1 permissão extra'
+            : '${member.extraPermissions.length} permissões extras';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        member.displayName.isEmpty
+                            ? member.email
+                            : member.displayName,
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        badgeLabel,
+                        style: AppTheme.labelSmall.copyWith(
+                          color: badgeColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (member.email.isNotEmpty &&
+                    member.email != member.displayName) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    member.email,
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                if (permissionsLabel != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    permissionsLabel,
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          for (final a in actions) ...[
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: a.label,
+              icon: Icon(a.icon, size: 18, color: a.color),
+              onPressed: a.onTap,
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

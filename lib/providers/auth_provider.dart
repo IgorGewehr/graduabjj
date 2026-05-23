@@ -7,6 +7,7 @@ import '../models/user.dart';
 import '../services/firebase_service.dart';
 import '../services/global_user_service.dart';
 import '../services/push_notification_service.dart';
+import '../services/team_service.dart';
 import 'selected_academy_provider.dart';
 
 /// Firebase Auth instance provider
@@ -171,6 +172,7 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
       approvedAt: userData['approvedAt'] != null
           ? (userData['approvedAt'] as Timestamp).toDate()
           : null,
+      extraPermissions: academyDetails?.extraPermissions ?? const [],
     );
   }
 
@@ -376,75 +378,29 @@ class AuthService {
     }
   }
 
-  /// Link student account with code (multi-tenant)
+  /// Link an already-authenticated user to an additional academy via a
+  /// student link code. After the firestore.rules hardening this path runs
+  /// through the joinAcademy Cloud Function — only the server can safely
+  /// update a userAcademyMapping that already exists.
+  ///
+  /// `linkCode` is the 6-char code typed by the user; `academyId` is the
+  /// academy resolved during validation (kept in the signature for callers
+  /// that already have it, but the server resolves authoritatively from
+  /// the code itself).
   Future<void> linkStudentAccount(String linkCode, String academyId) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('Usuario nao autenticado');
 
-    final academyRef = _firestore.collection('academies').doc(academyId);
+    final resolvedAcademyId = await teamService.joinAcademy(linkCode);
 
-    // Find link code document in academy's linkCodes subcollection
-    final codeQuery = await academyRef
-        .collection('linkCodes')
-        .where('code', isEqualTo: linkCode.toUpperCase())
-        .where('usedAt', isNull: true)
-        .limit(1)
-        .get();
+    // Best-effort post-write client side fixups. These are not security
+    // sensitive — Cloud Function already wrote authoritative data.
+    try {
+      await globalUserService.syncHighestBelt(user.uid);
+    } catch (_) {/* non-fatal */}
 
-    if (codeQuery.docs.isEmpty) {
-      throw Exception('Codigo invalido ou ja utilizado');
-    }
-
-    final codeDoc = codeQuery.docs.first;
-    final codeData = codeDoc.data();
-
-    // Check if code is expired
-    final expiresAt = (codeData['expiresAt'] as Timestamp).toDate();
-    if (DateTime.now().isAfter(expiresAt)) {
-      throw Exception('Codigo expirado');
-    }
-
-    final studentId = codeData['studentId'] as String;
-
-    // Link user to academy using globalUserService
-    await globalUserService.linkUserToAcademy(
-      userId: user.uid,
-      academyId: academyId,
-      studentId: studentId,
-      role: UserRole.student,
-    );
-
-    // Update/create academy user document
-    await globalUserService.upsertAcademyUser(
-      academyId: academyId,
-      userId: user.uid,
-      data: {
-        'studentId': studentId,
-        'role': 'student',
-        'email': user.email,
-        'displayName': user.displayName,
-        'approvedAt': DateTime.now(),
-        'status': 'active',
-      },
-    );
-
-    // Update student document in academy's students subcollection
-    await academyRef.collection('students').doc(studentId).update({
-      'linkedUserId': user.uid,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    // Mark code as used
-    await codeDoc.reference.update({
-      'usedAt': FieldValue.serverTimestamp(),
-      'usedBy': user.uid,
-    });
-
-    // Sync highest belt from all linked academies
-    await globalUserService.syncHighestBelt(user.uid);
-
-    // Subscribe to academy push notifications topic
-    await pushNotificationService.subscribeToTopic('academy_$academyId');
+    await pushNotificationService
+        .subscribeToTopic('academy_${resolvedAcademyId.isNotEmpty ? resolvedAcademyId : academyId}');
   }
 
   /// Unlink from academy

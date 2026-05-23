@@ -51,6 +51,9 @@ class Plan {
   final bool isActive;
   final Map<String, double> customValues;
   final Map<String, int> customDueDays;
+  /// Sport id this plan applies to ('bjj', 'muaythai', ...). Null = legacy
+  /// "any modality" plan from before the field existed.
+  final String? sport;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -67,6 +70,7 @@ class Plan {
     this.isActive = true,
     this.customValues = const {},
     this.customDueDays = const {},
+    this.sport,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -96,6 +100,7 @@ class Plan {
     bool? isActive,
     Map<String, double>? customValues,
     Map<String, int>? customDueDays,
+    String? sport,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -112,6 +117,7 @@ class Plan {
       isActive: isActive ?? this.isActive,
       customValues: customValues ?? this.customValues,
       customDueDays: customDueDays ?? this.customDueDays,
+      sport: sport ?? this.sport,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -146,6 +152,7 @@ class Plan {
               ),
             )
           : {},
+      sport: data['sport'] as String?,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );

@@ -253,6 +253,7 @@ class QrAttendanceService {
         verifiedByName: verifiedByName,
         date: scheduleDate,
         weight: cls.effectiveWeight(),
+        sport: cls.sport,
       );
     } catch (e) {
       if (e.toString().contains('marcado como presente')) {

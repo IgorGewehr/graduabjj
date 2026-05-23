@@ -375,14 +375,32 @@ class BeltProgressionService {
     final category = data['category'] ?? 'adult';
 
     // System count: weighted if academy uses it, otherwise raw doc count.
+    // Attendances are filtered by sport so graduation in one modality doesn't
+    // get padded by attendances of another (e.g. Muay Thai aulas don't count
+    // for BJJ graduation). Legacy attendances without `sport` are treated as
+    // BJJ for back-compat.
     int systemCount;
     if (cfg.useClassWeights) {
       systemCount = await getWeightedAttendanceCount(studentId);
     } else {
-      final attendSnap = await _collections.attendance
-          .where('studentId', isEqualTo: studentId)
-          .get();
-      systemCount = attendSnap.size;
+      Query attendQuery = _collections.attendance
+          .where('studentId', isEqualTo: studentId);
+      if (sportId == SportId.bjj) {
+        // Include legacy docs without a sport field: query both 'bjj' and
+        // null variants by counting in two queries.
+        final bjjSnap = await attendQuery
+            .where('sport', isEqualTo: 'bjj')
+            .get();
+        final legacySnap = await attendQuery
+            .where('sport', isNull: true)
+            .get();
+        systemCount = bjjSnap.size + legacySnap.size;
+      } else {
+        final snap = await attendQuery
+            .where('sport', isEqualTo: sportId.value)
+            .get();
+        systemCount = snap.size;
+      }
     }
     final initial = (data['initialAttendanceCount'] ?? 0) as int;
     final totalClasses = systemCount + initial;

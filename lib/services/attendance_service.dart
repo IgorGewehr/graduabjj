@@ -20,6 +20,10 @@ class Attendance {
   /// or 1 means "counts as one normal attendance". Kept immutable so old
   /// graduation math stays stable even if the class weight changes later.
   final double? weight;
+  /// Sport id ('bjj', 'muaythai', ...) captured from the class at write time.
+  /// Null on legacy docs created before multi-sport — callers should treat
+  /// null as 'bjj' for backwards compatibility.
+  final String? sport;
   final DateTime createdAt;
 
   Attendance({
@@ -33,6 +37,7 @@ class Attendance {
     required this.verifiedByName,
     this.notes,
     this.weight,
+    this.sport,
     required this.createdAt,
   });
 
@@ -49,6 +54,7 @@ class Attendance {
       verifiedByName: data['verifiedByName'] ?? '',
       notes: data['notes'],
       weight: data['weight'] is num ? (data['weight'] as num).toDouble() : null,
+      sport: data['sport'] as String?,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
@@ -361,6 +367,7 @@ class AttendanceService {
     DateTime? date,
     String? notes,
     double? weight,
+    String? sport,
   }) async {
     final attendanceDate = date ?? DateTime.now();
     // Deterministic doc id makes the transactional check-and-write idempotent:
@@ -383,6 +390,9 @@ class AttendanceService {
     if (weight != null && weight != 1.0) {
       payload['weight'] = weight;
     }
+    // Persist the class's sport so graduation queries can filter
+    // attendances by sport. Defaults to 'bjj' for legacy callers.
+    payload['sport'] = sport ?? 'bjj';
 
     await FirebaseService.firestore.runTransaction((tx) async {
       final existing = await tx.get(attendanceRef);
@@ -461,6 +471,7 @@ class AttendanceService {
     required String verifiedByName,
     DateTime? date,
     double? weight,
+    String? sport,
   }) async {
     final attendanceDate = date ?? DateTime.now();
     final now = DateTime.now();
@@ -502,6 +513,7 @@ class AttendanceService {
         if (weight != null && weight != 1.0) {
           payload['weight'] = weight;
         }
+        payload['sport'] = sport ?? 'bjj';
         batch.set(docRef, payload);
 
         // 2) Student counter increment — in the SAME batch (was a separate

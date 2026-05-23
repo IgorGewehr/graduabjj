@@ -330,6 +330,11 @@ class AppUser {
   final String? pendingStudentLink;
   final DateTime? approvedAt;
 
+  /// Extra permissions granted on top of the role for the current academy
+  /// (e.g. 'financial:view' for an instructor). Empty for admins (who have
+  /// everything) and for students.
+  final List<String> extraPermissions;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -351,6 +356,7 @@ class AppUser {
     this.instructorId,
     this.pendingStudentLink,
     this.approvedAt,
+    this.extraPermissions = const [],
     required this.createdAt,
     required this.updatedAt,
   });
@@ -396,6 +402,7 @@ class AppUser {
     String? instructorId,
     String? pendingStudentLink,
     DateTime? approvedAt,
+    List<String> extraPermissions = const [],
   }) {
     return AppUser(
       id: globalUser.id,
@@ -415,9 +422,21 @@ class AppUser {
       instructorId: instructorId,
       pendingStudentLink: pendingStudentLink,
       approvedAt: approvedAt,
+      extraPermissions: extraPermissions,
       createdAt: globalUser.createdAt,
       updatedAt: globalUser.updatedAt,
     );
+  }
+
+  /// Returns true when the user can access [permission] for the current
+  /// academy. Admins can do everything; instructors need the permission in
+  /// `extraPermissions`; students always return false.
+  bool hasPermission(String permission) {
+    if (role == UserRole.admin) return true;
+    if (role == UserRole.instructor) {
+      return extraPermissions.contains(permission);
+    }
+    return false;
   }
 
   Map<String, dynamic> toFirestore() {

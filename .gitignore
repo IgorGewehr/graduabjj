@@ -56,3 +56,9 @@ key.properties
 
 # Release bundles (AAB/IPA) stored locally
 /dist/
+
+# Cloud Functions
+functions/node_modules/
+functions/.runtimeconfig.json
+firebase-debug.log
+firebase-debug.*.log

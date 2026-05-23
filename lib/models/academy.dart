@@ -204,6 +204,10 @@ class Academy {
   // Subscription
   final AcademySubscription? subscription;
 
+  /// Sports/modalities offered by this academy (e.g. ['bjj', 'muaythai']).
+  /// Empty list means single-modality (defaults to BJJ for legacy academies).
+  final List<String> sports;
+
   // Metadata
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -240,10 +244,16 @@ class Academy {
     this.storeMinOrderAmount,
     this.studentCheckinEnabled = false,
     this.subscription,
+    this.sports = const [],
     required this.createdAt,
     required this.updatedAt,
     required this.ownerId,
   });
+
+  /// Returns the effective list of sports offered, defaulting to ['bjj']
+  /// for legacy academies that never declared the field.
+  List<String> get effectiveSports =>
+      sports.isNotEmpty ? sports : const ['bjj'];
 
   factory Academy.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -282,6 +292,9 @@ class Academy {
       subscription: data['subscription'] != null
           ? AcademySubscription.fromMap(data['subscription'])
           : null,
+      sports: data['sports'] is List
+          ? List<String>.from((data['sports'] as List).map((e) => e.toString()))
+          : const [],
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       ownerId: data['ownerId'] ?? '',
@@ -319,6 +332,7 @@ class Academy {
       'storeMinOrderAmount': storeMinOrderAmount,
       'studentCheckinEnabled': studentCheckinEnabled,
       'subscription': subscription?.toMap(),
+      if (sports.isNotEmpty) 'sports': sports,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(DateTime.now()),
       'ownerId': ownerId,

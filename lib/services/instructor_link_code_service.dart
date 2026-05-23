@@ -2,9 +2,8 @@ import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../models/user.dart';
 import 'firebase_service.dart';
-import 'global_user_service.dart';
+import 'team_service.dart';
 
 /// Permissions the academy owner is allowed to grant on top of the
 /// instructor role's defaults. Mirrors GRANTABLE_EXTRA_PERMISSIONS on the
@@ -178,9 +177,8 @@ Future<({InstructorLinkCode code, String academyId})?>
 }
 
 /// Promote an existing user (already linked to the academy) to instructor.
-/// Keeps studentId intact so the user still has access to their student
-/// portal data, but switches role and stamps extraPermissions. Idempotent:
-/// calling twice rewrites permissions instead of stacking.
+/// Delegates to the `promoteToInstructor` Cloud Function, which validates
+/// that the caller is the academy admin before mutating the mapping.
 Future<void> promoteUserToInstructor({
   required String userId,
   required String academyId,
@@ -188,27 +186,17 @@ Future<void> promoteUserToInstructor({
   String? email,
   String? displayName,
 }) async {
-  final mappingRef = FirebaseService.firestore.doc('userAcademyMapping/$userId');
-  await mappingRef.set({
-    'academyDetails.$academyId.role': 'instructor',
-    'academyDetails.$academyId.extraPermissions': extraPermissions,
-    'updatedAt': FieldValue.serverTimestamp(),
-  }, SetOptions(merge: true));
-
-  await globalUserService.upsertAcademyUser(
-    academyId: academyId,
+  await teamService.promoteToInstructor(
     userId: userId,
-    data: {
-      'role': 'instructor',
-      if (email != null) 'email': email,
-      if (displayName != null) 'displayName': displayName,
-      'status': 'active',
-    },
+    academyId: academyId,
+    extraPermissions: extraPermissions,
   );
 }
 
-/// Redeem a code: link user to the academy as instructor + persist
-/// extraPermissions + mark the code as used.
+/// Redeem an instructor invite code for the currently-authenticated user.
+/// Delegates to the `redeemInstructorCode` Cloud Function — the function
+/// resolves the academy from the code itself and stamps the stored
+/// extraPermissions atomically with the code-used mark.
 Future<void> redeemInstructorCode({
   required InstructorLinkCode code,
   required String academyId,
@@ -216,32 +204,5 @@ Future<void> redeemInstructorCode({
   required String userEmail,
   required String userDisplayName,
 }) async {
-  // Persist in cross-academy mapping (mirrors globalUserService on web)
-  await globalUserService.linkUserToAcademy(
-    userId: userId,
-    academyId: academyId,
-    role: UserRole.instructor,
-    extraPermissions: code.extraPermissions,
-  );
-
-  // Upsert academy-scoped user doc (legacy reads)
-  await globalUserService.upsertAcademyUser(
-    academyId: academyId,
-    userId: userId,
-    data: {
-      'role': 'instructor',
-      'email': userEmail,
-      'displayName': userDisplayName,
-      'status': 'active',
-    },
-  );
-
-  // Mark code as used (one-shot)
-  await FirebaseService.firestore
-      .doc('academies/$academyId/instructorLinkCodes/${code.id}')
-      .set({
-    'usedAt': FieldValue.serverTimestamp(),
-    'usedBy': userId,
-    'usedByName': userDisplayName,
-  }, SetOptions(merge: true));
+  await teamService.redeemInstructorCode(code.code);
 }

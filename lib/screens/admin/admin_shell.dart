@@ -134,6 +134,11 @@ class AdminSidebar extends ConsumerWidget {
     final isStoreEnabled = settings?.storeEnabled ?? false;
     final currentUser = ref.watch(currentUserProvider);
     final user = currentUser.valueOrNull;
+    // Permission gates. Admins always pass; instructors need the explicit
+    // extraPermissions entry granted at promotion time.
+    final canSeeFinancial = user?.hasPermission('financial:view') == true;
+    final canSeeReports = user?.hasPermission('reports:view') == true;
+    final isAdminUser = user?.isAdmin == true;
 
     return Container(
       width: 250,
@@ -235,27 +240,30 @@ class AdminSidebar extends ConsumerWidget {
                   path: '/admin/campeonatos',
                   currentPath: currentPath,
                 ),
-                _NavItem(
-                  icon: Icons.attach_money_outlined,
-                  activeIcon: Icons.attach_money,
-                  label: 'Financeiro',
-                  path: '/admin/financeiro',
-                  currentPath: currentPath,
-                ),
-                _NavItem(
-                  icon: Icons.receipt_long_outlined,
-                  activeIcon: Icons.receipt_long,
-                  label: 'Cobranca',
-                  path: '/admin/cobranca',
-                  currentPath: currentPath,
-                ),
-                _NavItem(
-                  icon: Icons.bar_chart_outlined,
-                  activeIcon: Icons.bar_chart,
-                  label: 'Relatorios',
-                  path: '/admin/relatorios',
-                  currentPath: currentPath,
-                ),
+                if (canSeeFinancial)
+                  _NavItem(
+                    icon: Icons.attach_money_outlined,
+                    activeIcon: Icons.attach_money,
+                    label: 'Financeiro',
+                    path: '/admin/financeiro',
+                    currentPath: currentPath,
+                  ),
+                if (canSeeFinancial)
+                  _NavItem(
+                    icon: Icons.receipt_long_outlined,
+                    activeIcon: Icons.receipt_long,
+                    label: 'Cobranca',
+                    path: '/admin/cobranca',
+                    currentPath: currentPath,
+                  ),
+                if (canSeeReports)
+                  _NavItem(
+                    icon: Icons.bar_chart_outlined,
+                    activeIcon: Icons.bar_chart,
+                    label: 'Relatorios',
+                    path: '/admin/relatorios',
+                    currentPath: currentPath,
+                  ),
                 if (isStoreEnabled)
                   _NavItem(
                     icon: Icons.store_outlined,
@@ -264,21 +272,25 @@ class AdminSidebar extends ConsumerWidget {
                     path: '/admin/loja',
                     currentPath: currentPath,
                   ),
-                const Divider(),
-                _NavItem(
-                  icon: Icons.settings_outlined,
-                  activeIcon: Icons.settings,
-                  label: 'Configurações',
-                  path: '/admin/configuracoes',
-                  currentPath: currentPath,
-                ),
-                _NavItem(
-                  icon: Icons.key_outlined,
-                  activeIcon: Icons.key,
-                  label: 'Código de equipe',
-                  path: '/codigo-equipe',
-                  currentPath: currentPath,
-                ),
+                // Configurações + código de equipe are admin-only — instructors
+                // never touch academy-wide settings or generate invites.
+                if (isAdminUser) ...[
+                  const Divider(),
+                  _NavItem(
+                    icon: Icons.settings_outlined,
+                    activeIcon: Icons.settings,
+                    label: 'Configurações',
+                    path: '/admin/configuracoes',
+                    currentPath: currentPath,
+                  ),
+                  _NavItem(
+                    icon: Icons.key_outlined,
+                    activeIcon: Icons.key,
+                    label: 'Código de equipe',
+                    path: '/codigo-equipe',
+                    currentPath: currentPath,
+                  ),
+                ],
               ],
             ),
           ),
@@ -381,8 +393,10 @@ class AdminBottomNav extends ConsumerStatefulWidget {
 }
 
 class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
-  // Navigation items for bottom nav (first 4 + "Mais")
-  static const List<_AdminNavItem> _bottomNavItems = [
+  // Navigation items for bottom nav (first 4 + "Mais"). The 4th item is
+  // permission-gated below — instructors without financial:view see Turmas
+  // there instead of Financeiro.
+  static const List<_AdminNavItem> _baseBottomNavItems = [
     _AdminNavItem(
       label: 'Dashboard',
       icon: LucideIcons.layoutDashboard,
@@ -398,17 +412,34 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       icon: LucideIcons.users,
       path: '/admin/alunos',
     ),
-    _AdminNavItem(
-      label: 'Financeiro',
-      icon: LucideIcons.dollarSign,
-      path: '/admin/financeiro',
-    ),
-    _AdminNavItem(
-      label: 'Mais',
-      icon: LucideIcons.moreHorizontal,
-      path: '', // Special case for bottom sheet
-    ),
   ];
+
+  static const _AdminNavItem _financialBottomNavItem = _AdminNavItem(
+    label: 'Financeiro',
+    icon: LucideIcons.dollarSign,
+    path: '/admin/financeiro',
+  );
+  static const _AdminNavItem _turmasBottomNavItem = _AdminNavItem(
+    label: 'Turmas',
+    icon: LucideIcons.calendar,
+    path: '/admin/turmas',
+  );
+  static const _AdminNavItem _moreBottomNavItem = _AdminNavItem(
+    label: 'Mais',
+    icon: LucideIcons.moreHorizontal,
+    path: '', // Special case for bottom sheet
+  );
+
+  /// Returns the current bottom nav list, gated by permissions on the user.
+  List<_AdminNavItem> _bottomNavItemsFor(WidgetRef ref) {
+    final user = ref.read(currentUserProvider).valueOrNull;
+    final canSeeFinancial = user?.hasPermission('financial:view') == true;
+    return <_AdminNavItem>[
+      ..._baseBottomNavItems,
+      canSeeFinancial ? _financialBottomNavItem : _turmasBottomNavItem,
+      _moreBottomNavItem,
+    ];
+  }
 
   // Items for "Mais" menu
   static const List<_AdminNavItem> _moreMenuItems = [
@@ -445,12 +476,12 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     ),
   ];
 
-  int _getSelectedIndex() {
+  int _getSelectedIndex(List<_AdminNavItem> items) {
     final location = widget.currentPath;
 
     // Check bottom nav items (except "Mais")
-    for (int i = 0; i < _bottomNavItems.length - 1; i++) {
-      final path = _bottomNavItems[i].path;
+    for (int i = 0; i < items.length - 1; i++) {
+      final path = items[i].path;
       // Exact match for /admin, prefix match for others
       if (path == '/admin') {
         if (location == path) return i;
@@ -462,18 +493,18 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     // Check if any "more" item is active
     for (final item in _moreMenuItems) {
       if (location == item.path || location.startsWith('${item.path}/')) {
-        return 4; // "Mais" index
+        return items.length - 1; // "Mais" index
       }
     }
 
     return 0;
   }
 
-  void _onItemTapped(int index) {
-    if (index == 4) {
+  void _onItemTapped(int index, List<_AdminNavItem> items) {
+    if (index == items.length - 1) {
       _showMoreMenu();
     } else {
-      context.go(_bottomNavItems[index].path);
+      context.go(items[index].path);
     }
   }
 
@@ -481,24 +512,32 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     final currentLocation = widget.currentPath;
     final navigator = GoRouter.of(context);
 
-    // Get academy settings to check if store/abacatepay is enabled
     final settings = ref.read(academySettingsProvider).valueOrNull;
     final isStoreEnabled = settings?.storeEnabled ?? false;
     final isPaymentEnabled =
         (settings?.abacatePayEnabled ?? false) ||
         (settings?.asaasEnabled ?? false);
+    final user = ref.read(currentUserProvider).valueOrNull;
+    final canSeeFinancial = user?.hasPermission('financial:view') == true;
+    final canSeeReports = user?.hasPermission('reports:view') == true;
+    final isAdminUser = user?.isAdmin == true;
 
-    // Filter menu items based on conditions
+    // Filter menu items based on academy features + caller permissions.
     final filteredItems = _moreMenuItems.where((item) {
-      // Loja only shows if store is enabled
-      if (item.path == '/admin/loja') {
-        return isStoreEnabled;
+      switch (item.path) {
+        case '/admin/loja':
+          return isStoreEnabled;
+        case '/admin/carteira':
+          return isPaymentEnabled && canSeeFinancial;
+        case '/admin/cobranca':
+          return canSeeFinancial;
+        case '/admin/relatorios':
+          return canSeeReports;
+        case '/admin/configuracoes':
+          return isAdminUser;
+        default:
+          return true;
       }
-      // Carteira only shows if a payment provider is enabled
-      if (item.path == '/admin/carteira') {
-        return isPaymentEnabled;
-      }
-      return true;
     }).toList();
 
     showModalBottomSheet(
@@ -531,7 +570,8 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
 
   @override
   Widget build(BuildContext context) {
-    final selectedIndex = _getSelectedIndex();
+    final items = _bottomNavItemsFor(ref);
+    final selectedIndex = _getSelectedIndex(items);
 
     return Container(
       decoration: BoxDecoration(
@@ -545,11 +585,11 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
           child: Row(
             children: List.generate(
-              _bottomNavItems.length,
+              items.length,
               (index) => _AdminBottomNavItem(
-                item: _bottomNavItems[index],
+                item: items[index],
                 isSelected: selectedIndex == index,
-                onTap: () => _onItemTapped(index),
+                onTap: () => _onItemTapped(index, items),
               ),
             ),
           ),
