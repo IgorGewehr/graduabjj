@@ -57,12 +57,18 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
     try {
       final academyId = FirebaseService.academyId;
+      final paymentService = PaymentService(academyId);
+
+      // Reconcile overdue statuses before reading. Without this, dueDate-passed
+      // records remain "pending" in Firestore and downstream queries that filter
+      // by status alone (notifications, reports) miss them.
+      await paymentService.markOverduePayments();
 
       final results = await Future.wait([
-        PaymentService(academyId).getByMonth(_currentMonthKey),
+        paymentService.getByMonth(_currentMonthKey),
         PlanService(academyId).list(),
         StudentService(academyId).getActive(),
-        PaymentService(academyId).getMonthlySummary(_currentMonthKey),
+        paymentService.getMonthlySummary(_currentMonthKey),
       ]);
 
       setState(() {

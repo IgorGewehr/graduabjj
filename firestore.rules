@@ -192,30 +192,44 @@ service cloud.firestore {
       // Users can read their own mapping
       allow read: if isAuthenticated() && request.auth.uid == userId;
 
-      // Users can create their own mapping:
-      // 1. During normal signup (empty mapping with no academies)
-      // 2. During academy creation (mapping with admin role in root)
-      // 3. During student registration via link code (role in academyDetails)
+      // SECURITY: Three create patterns, role elevation requires verifiable ownership.
+      // 1. Empty mapping during normal signup (no academies)
+      // 2. Admin during own-academy creation - verified via academies/{id}.ownerId == self
+      // 3. Student joining via link code - role MUST be 'student' in academyDetails
       allow create: if isAuthenticated()
                     && request.auth.uid == userId
                     && (
-                      // Empty mapping during normal signup
+                      // Pattern 1: Empty mapping
                       (request.resource.data.academyIds.size() == 0)
                       ||
-                      // Admin mapping during academy creation (legacy format with root-level role)
-                      (request.resource.data.role == 'admin'
-                       && request.resource.data.academyIds.size() == 1
-                       && request.resource.data.primaryAcademyId == request.resource.data.academyIds[0])
+                      // Pattern 2: Owner of single academy claiming admin
+                      (request.resource.data.academyIds.size() == 1
+                       && request.resource.data.primaryAcademyId == request.resource.data.academyIds[0]
+                       && exists(/databases/$(database)/documents/academies/$(request.resource.data.academyIds[0]))
+                       && get(/databases/$(database)/documents/academies/$(request.resource.data.academyIds[0])).data.ownerId == request.auth.uid)
                       ||
-                      // Student/any role mapping during registration (role in academyDetails)
-                      (request.resource.data.academyIds.size() >= 1
-                       && request.resource.data.primaryAcademyId in request.resource.data.academyIds
-                       && request.resource.data.keys().hasAll(['academyDetails']))
+                      // Pattern 3: Single-academy student via link code
+                      (request.resource.data.academyIds.size() == 1
+                       && request.resource.data.primaryAcademyId == request.resource.data.academyIds[0]
+                       && request.resource.data.keys().hasAll(['academyDetails'])
+                       && request.resource.data.academyDetails[request.resource.data.academyIds[0]].role == 'student')
                     );
 
-      // Users can update their own mapping to add/remove academies
+      // SECURITY: Role elevation cannot happen via client write. Three update patterns:
+      // A. Update non-role metadata only (primaryAcademyId, updatedAt, sync fields)
+      // B. Shrink academyDetails (leaving an academy)
+      // Adding a new academyDetails entry (joining a 2nd academy) and any role change
+      // must go through a server-side Cloud Function (validates link code / promotion).
       allow update: if isAuthenticated()
-                    && request.auth.uid == userId;
+                    && request.auth.uid == userId
+                    && (
+                      // Path A: no academyDetails change
+                      !request.resource.data.diff(resource.data).affectedKeys().hasAny(['academyDetails'])
+                      ||
+                      // Path B: shrinking - removing an academy entry
+                      (request.resource.data.academyDetails.size() < resource.data.academyDetails.size()
+                       && resource.data.academyDetails.keys().hasAll(request.resource.data.academyDetails.keys()))
+                    );
 
       // Users can delete their own mapping during account deletion
       allow delete: if isAuthenticated() && request.auth.uid == userId;
@@ -355,6 +369,26 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Instructor Link Codes Subcollection
+      // ============================================
+      match /instructorLinkCodes/{codeId} {
+        // Staff can read all codes (managing invites)
+        allow read: if isAcademyStaff(academyId);
+
+        // Anyone authenticated can read UNUSED codes (collectionGroup validation)
+        allow read: if resource.data.usedAt == null;
+
+        // Staff can create/delete codes
+        allow create, delete: if isAcademyStaff(academyId);
+
+        // Allow marking as used during redemption (authenticated users only)
+        allow update: if isAuthenticated()
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['usedAt', 'usedBy', 'usedByName'])
+                      && request.resource.data.usedBy == request.auth.uid;
+      }
+
+      // ============================================
       // Link Codes Subcollection
       // ============================================
       match /linkCodes/{codeId} {
@@ -394,10 +428,17 @@ service cloud.firestore {
                       && request.resource.data.academyId == academyId
                       && isPositiveAmount(request.resource.data.amount);
 
-        // Staff can update financials (except payment confirmation fields)
+        // Staff can update financials, but:
+        //  - Cannot touch payment-gateway audit fields
+        //  - Cannot mutate financial fields of an already-paid record (audit integrity)
         allow update: if isAcademyStaff(academyId)
                       && !request.resource.data.diff(resource.data).affectedKeys()
-                          .hasAny(['paidViaAbacatePay', 'abacatePayTransactionId']);
+                          .hasAny(['paidViaAbacatePay', 'abacatePayTransactionId'])
+                      && !(
+                        resource.data.status == 'paid'
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                            .hasAny(['status', 'amount', 'paymentDate', 'paidAt', 'method'])
+                      );
 
         // Staff can delete unpaid financials only
         allow delete: if isAcademyStaff(academyId)
@@ -643,6 +684,11 @@ service cloud.firestore {
       // Allow reading unused codes for registration flow
       // Once a code is used (usedAt != null), it becomes invisible to prevent enumeration
       allow read: if resource.data.usedAt == null;
+    }
+
+    // Collection group access to instructor codes (auth required, unused only)
+    match /{path=**}/instructorLinkCodes/{codeId} {
+      allow read: if isAuthenticated() && resource.data.usedAt == null;
     }
 
     // ============================================

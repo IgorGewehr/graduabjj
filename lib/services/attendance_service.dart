@@ -148,33 +148,34 @@ class AttendanceService {
     String? classId,
     String? studentId,
   }) async {
-    final snapshot = await _attendanceRef.get();
+    final start = _startOfDay(startDate);
+    final end = _endOfDay(endDate);
+
+    // Server-side filter using composite indexes declared in
+    // firestore.indexes.json: (classId, date DESC) or (studentId, date DESC).
+    // When neither classId nor studentId is given, falls back to a date-only
+    // query (single-field index is auto-created by Firestore).
+    Query query = _attendanceRef;
+    if (classId != null) {
+      query = query.where('classId', isEqualTo: classId);
+    } else if (studentId != null) {
+      query = query.where('studentId', isEqualTo: studentId);
+    }
+    query = query
+        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
+        .where('date', isLessThanOrEqualTo: Timestamp.fromDate(end))
+        .orderBy('date', descending: true);
+
+    final snapshot = await query.get();
     var results = snapshot.docs
         .map((doc) => Attendance.fromFirestore(doc))
         .toList();
 
-    final start = _startOfDay(startDate);
-    final end = _endOfDay(endDate);
-
-    // Filter by date range
-    results = results
-        .where(
-          (a) =>
-              a.date.isAfter(start.subtract(const Duration(seconds: 1))) &&
-              a.date.isBefore(end.add(const Duration(seconds: 1))),
-        )
-        .toList();
-
-    // Apply additional filters
-    if (classId != null) {
-      results = results.where((a) => a.classId == classId).toList();
-    }
-    if (studentId != null) {
+    // Secondary filter only when both classId and studentId were requested,
+    // since Firestore can use a single equality + range per query.
+    if (classId != null && studentId != null) {
       results = results.where((a) => a.studentId == studentId).toList();
     }
-
-    // Sort by date descending
-    results.sort((a, b) => b.date.compareTo(a.date));
 
     return results;
   }
@@ -362,16 +363,11 @@ class AttendanceService {
     double? weight,
   }) async {
     final attendanceDate = date ?? DateTime.now();
-
-    // Check if already present
-    final alreadyPresent = await isStudentPresent(
-      studentId,
-      classId,
-      attendanceDate,
-    );
-    if (alreadyPresent) {
-      throw Exception('Aluno já marcado como presente nesta aula');
-    }
+    // Deterministic doc id makes the transactional check-and-write idempotent:
+    // two concurrent writers race on the same ref, exactly one wins.
+    final docId = _deterministicAttendanceId(studentId, classId, attendanceDate);
+    final attendanceRef = _attendanceRef.doc(docId);
+    final studentRef = _collections.student(studentId);
 
     final payload = <String, dynamic>{
       'studentId': studentId,
@@ -384,22 +380,40 @@ class AttendanceService {
       'notes': notes,
       'createdAt': FieldValue.serverTimestamp(),
     };
-    // Persist weight only when meaningful (non-default). Keeps old docs
-    // and new docs interchangeable when the academy isn't using weights.
     if (weight != null && weight != 1.0) {
       payload['weight'] = weight;
     }
 
-    final docRef = await _attendanceRef.add(payload);
+    await FirebaseService.firestore.runTransaction((tx) async {
+      final existing = await tx.get(attendanceRef);
+      if (existing.exists) {
+        throw Exception('Aluno já marcado como presente nesta aula');
+      }
+      tx.set(attendanceRef, payload);
+      tx.update(studentRef, {
+        'attendanceCount': FieldValue.increment(1),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
 
-    // Update student's attendance count
-    await _updateStudentAttendanceCount(studentId, 1);
-
-    // Check for milestones (fire and forget)
+    // Milestone notification is best-effort and outside the transaction.
     checkAttendanceMilestone(studentId, studentName, verifiedBy).ignore();
 
-    final doc = await docRef.get();
+    final doc = await attendanceRef.get();
     return Attendance.fromFirestore(doc);
+  }
+
+  /// Deterministic key per (student, class, day) so concurrent writes collide
+  /// on the same doc id and exactly one wins inside the transaction.
+  String _deterministicAttendanceId(
+    String studentId,
+    String classId,
+    DateTime date,
+  ) {
+    final y = date.year.toString().padLeft(4, '0');
+    final m = date.month.toString().padLeft(2, '0');
+    final d = date.day.toString().padLeft(2, '0');
+    return '${studentId}_${classId}_$y$m$d';
   }
 
   // ============================================

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../models/student.dart';
 import 'attendance_service.dart';
 import 'checkin_service.dart';
 import 'class_service.dart';
@@ -189,9 +190,24 @@ class QrAttendanceService {
       throw const QrAttendanceException('Turma nao encontrada');
     }
 
-    if (cls.studentIds.isNotEmpty && !cls.studentIds.contains(studentId)) {
+    // Enrollment gate. Open classes (or legacy classes with no roster) accept
+    // anyone in the academy; otherwise the student must appear in studentIds.
+    if (!cls.acceptsCheckinFrom(studentId)) {
       throw const QrAttendanceException(
         'Voce nao esta matriculado nesta turma',
+      );
+    }
+
+    // Student status gate: suspended/inactive/injured students cannot
+    // self-check-in. Fetch happens here (not lazily later) so we fail fast
+    // with a clearer message before any presence write is attempted.
+    final student = await _studentService.getById(studentId);
+    if (student == null) {
+      throw const QrAttendanceException('Aluno nao encontrado');
+    }
+    if (student.status != StudentStatus.active) {
+      throw const QrAttendanceException(
+        'Sua matricula nao esta ativa. Procure a secretaria da academia.',
       );
     }
 
@@ -219,33 +235,33 @@ class QrAttendanceService {
       );
     }
 
-    final already = await _attendanceService.isStudentPresent(
-      studentId,
-      cls.id,
-      scheduleDate,
-    );
-    if (already) {
-      throw const QrAttendanceException(
-        'Voce ja registrou presenca nesta aula',
+    final studentName = (studentNameOverride != null && studentNameOverride.isNotEmpty)
+        ? studentNameOverride
+        : (student.fullName.isNotEmpty ? student.fullName : 'Aluno');
+
+    // Concurrency safety lives inside markPresent (deterministic doc id +
+    // transactional check-and-write). A pre-flight duplicate check here
+    // would only add a redundant read.
+    final Attendance attendance;
+    try {
+      attendance = await _attendanceService.markPresent(
+        studentId: studentId,
+        studentName: studentName,
+        classId: cls.id,
+        className: cls.name,
+        verifiedBy: verifiedBy,
+        verifiedByName: verifiedByName,
+        date: scheduleDate,
+        weight: cls.effectiveWeight(),
       );
+    } catch (e) {
+      if (e.toString().contains('marcado como presente')) {
+        throw const QrAttendanceException(
+          'Voce ja registrou presenca nesta aula',
+        );
+      }
+      rethrow;
     }
-
-    String studentName = studentNameOverride ?? '';
-    if (studentName.isEmpty) {
-      final student = await _studentService.getById(studentId);
-      studentName = student?.fullName ?? 'Aluno';
-    }
-
-    final attendance = await _attendanceService.markPresent(
-      studentId: studentId,
-      studentName: studentName,
-      classId: cls.id,
-      className: cls.name,
-      verifiedBy: verifiedBy,
-      verifiedByName: verifiedByName,
-      date: scheduleDate,
-      weight: cls.effectiveWeight(),
-    );
 
     return QrAttendanceResult(
       classId: cls.id,

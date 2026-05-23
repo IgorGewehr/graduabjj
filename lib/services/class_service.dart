@@ -48,6 +48,12 @@ class BJJClass {
   final String? maxBelt;
   final int? maxStudents;
   final bool isActive;
+  /// Enrollment gate for QR check-in:
+  /// - `true`  → open class, anyone in the academy can check in (studentIds ignored).
+  /// - `false` → strict, must appear in studentIds.
+  /// - `null`  → legacy fallback: open iff studentIds is empty (back-compat for
+  ///             classes created before this field existed).
+  final bool? isOpenClass;
   /// Optional weight applied to attendances marked in this class. Only
   /// effective when the academy has `useClassWeights = true`. Null/1 means
   /// "counts as one normal attendance" — the default for any new class.
@@ -69,10 +75,19 @@ class BJJClass {
     this.maxBelt,
     this.maxStudents,
     this.isActive = true,
+    this.isOpenClass,
     this.weight,
     required this.createdAt,
     required this.updatedAt,
   });
+
+  /// Whether this class accepts QR check-ins from non-enrolled students.
+  /// Captures the legacy fallback so call sites don't repeat the rule.
+  bool acceptsCheckinFrom(String studentId) {
+    if (isOpenClass == true) return true;
+    if (isOpenClass == false) return studentIds.contains(studentId);
+    return studentIds.isEmpty || studentIds.contains(studentId);
+  }
 
   /// Returns the effective sport for this class (backward compat: absent = 'bjj')
   SportId getSport() => SportId.fromString(sport ?? 'bjj');
@@ -104,6 +119,7 @@ class BJJClass {
       maxBelt: data['maxBelt'],
       maxStudents: data['maxStudents'],
       isActive: data['isActive'] ?? true,
+      isOpenClass: data['isOpenClass'] is bool ? data['isOpenClass'] as bool : null,
       weight: data['weight'] is num ? (data['weight'] as num).toDouble() : null,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),

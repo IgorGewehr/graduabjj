@@ -896,7 +896,7 @@ class _AdminStudentDetailScreenState
                   Row(
                     children: [
                       Text(
-                        'Valor padrão: R\$ ${plan.monthlyValue.toStringAsFixed(2)}',
+                        'Valor padrão: ${plan.formattedValue}',
                         style: AppTheme.bodySmall.copyWith(
                           color: AppTheme.textSecondary,
                         ),
@@ -1202,7 +1202,7 @@ class _AdminStudentDetailScreenState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Valor padrão do plano: R\$ ${plan.monthlyValue.toStringAsFixed(2)}',
+              'Valor padrão do plano: ${plan.formattedValue}',
               style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
             ),
             const SizedBox(height: 16),
@@ -1289,8 +1289,9 @@ class _AdminStudentDetailScreenState
               if (dueDay == null || dueDay < 1 || dueDay > 31) return;
               Navigator.of(dialogContext).pop();
               final planService = PlanService(FirebaseService.academyId);
-              // Save value
-              if (value == plan.monthlyValue) {
+              // Save value — compare against the plan's per-period charge so
+              // quarterly/semiannual plans don't leave a ghost customValues entry.
+              if (value == plan.effectivePeriodValue) {
                 await planService.removeCustomValue(plan.id, widget.studentId);
               } else {
                 await planService.setCustomValue(

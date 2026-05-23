@@ -37,6 +37,7 @@ import 'screens/portal/monitor_attendance_screen.dart';
 import 'screens/portal/monitor_students_screen.dart';
 import 'screens/portal/monitor_student_detail_screen.dart';
 import 'screens/portal/monitor_student_form_screen.dart';
+import 'providers/portal_providers.dart';
 import 'screens/splash_screen.dart';
 // Admin screens
 import 'screens/admin/admin_screens.dart';
@@ -645,13 +646,13 @@ final routerProvider = Provider<GoRouter>((ref) {
               child: const AddAcademyScreen(),
             ),
           ),
-          // Monitor routes
+          // Monitor routes (guarded — only academy staff or listed monitors).
           GoRoute(
             path: '/portal/chamada',
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,
               state: state,
-              child: const MonitorAttendanceScreen(),
+              child: const _MonitorGuard(child: MonitorAttendanceScreen()),
             ),
           ),
           GoRoute(
@@ -659,7 +660,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,
               state: state,
-              child: const MonitorStudentsScreen(),
+              child: const _MonitorGuard(child: MonitorStudentsScreen()),
             ),
           ),
           GoRoute(
@@ -667,7 +668,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) => _buildPageWithPushTransition(
               context: context,
               state: state,
-              child: const MonitorStudentFormScreen(),
+              child: const _MonitorGuard(child: MonitorStudentFormScreen()),
             ),
           ),
           GoRoute(
@@ -675,8 +676,10 @@ final routerProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) => _buildPageWithPushTransition(
               context: context,
               state: state,
-              child: MonitorStudentDetailScreen(
-                studentId: state.pathParameters['id']!,
+              child: _MonitorGuard(
+                child: MonitorStudentDetailScreen(
+                  studentId: state.pathParameters['id']!,
+                ),
               ),
             ),
           ),
@@ -685,8 +688,10 @@ final routerProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) => _buildPageWithPushTransition(
               context: context,
               state: state,
-              child: MonitorStudentFormScreen(
-                studentId: state.pathParameters['id'],
+              child: _MonitorGuard(
+                child: MonitorStudentFormScreen(
+                  studentId: state.pathParameters['id'],
+                ),
               ),
             ),
           ),
@@ -916,3 +921,42 @@ final routerProvider = Provider<GoRouter>((ref) {
     ),
   );
 });
+
+/// Restricts monitor portal screens to academy staff or users whose
+/// studentId (or any linked studentId) is in the academy's `monitorIds`.
+/// Redirects offenders to `/portal` after providers settle.
+class _MonitorGuard extends ConsumerWidget {
+  const _MonitorGuard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final userAsync = ref.watch(currentUserProvider);
+    final settingsAsync = ref.watch(academySettingsProvider);
+
+    if (userAsync.isLoading || settingsAsync.isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    final user = userAsync.valueOrNull;
+    final settings = settingsAsync.valueOrNull;
+
+    final isStaff = user?.isAdmin == true || user?.isInstructor == true;
+    final allStudentIds = <String>[
+      if (user?.studentId != null) user!.studentId!,
+      ...(user?.linkedStudentIds ?? const []),
+    ];
+    final monitorIds = settings?.monitorIds ?? const <String>[];
+    final isMonitor = allStudentIds.any(monitorIds.contains);
+
+    if (!isStaff && !isMonitor) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) context.go('/portal');
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    return child;
+  }
+}

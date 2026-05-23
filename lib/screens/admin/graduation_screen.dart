@@ -721,6 +721,19 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
   }) async {
     try {
       final service = BeltProgressionService(FirebaseService.academyId);
+      // Resolve the student's primary sport so the promotion writes the
+      // graduation to the right sportData bucket. Falls back to BJJ for
+      // legacy single-sport students.
+      final studentSnap = await FirebaseService.firestore
+          .collection('academies/${FirebaseService.academyId}/students')
+          .doc(studentId)
+          .get();
+      final studentData = studentSnap.data() ?? const <String, dynamic>{};
+      final primarySport = studentData['primarySport'] as String?;
+      final sportId = primarySport != null
+          ? SportId.fromString(primarySport)
+          : SportId.bjj;
+
       await service.promote(
         studentId: studentId,
         studentName: studentName,
@@ -729,6 +742,7 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
         promotedBy: 'admin',
         promotedByName: 'Administrador',
         notes: notes,
+        sportId: sportId,
       );
 
       if (mounted) {

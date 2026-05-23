@@ -71,10 +71,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     userName: currentUser.valueOrNull?.displayName ?? 'Aluno',
                   );
                 }
+                final primarySport = s.getPrimarySport();
+                final grade = s.getGrade(primarySport);
                 return _WelcomeHeaderWithBelt(
                   userName: s.displayName,
-                  belt: s.currentBelt,
-                  stripes: s.currentStripes,
+                  sportId: primarySport,
+                  belt: grade?.currentGrade ?? 'white',
+                  stripes: grade?.currentStripes ?? 0,
                 );
               },
               loading: () => _WelcomeHeader(
@@ -177,11 +180,13 @@ class _WelcomeHeader extends StatelessWidget {
 /// Welcome header with belt badge inline
 class _WelcomeHeaderWithBelt extends StatelessWidget {
   final String userName;
+  final SportId sportId;
   final String belt;
   final int stripes;
 
   const _WelcomeHeaderWithBelt({
     required this.userName,
+    required this.sportId,
     required this.belt,
     required this.stripes,
   });
@@ -216,7 +221,7 @@ class _WelcomeHeaderWithBelt extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             GradeDisplay(
-              sportId: SportId.bjj,
+              sportId: sportId,
               grade: belt,
               stripes: stripes,
               size: GradeDisplaySize.small,

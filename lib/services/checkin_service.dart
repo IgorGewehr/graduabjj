@@ -18,21 +18,25 @@ bool isInCheckinWindow({
   final startParts = startTime.split(':').map(int.parse).toList();
   final endParts = endTime.split(':').map(int.parse).toList();
 
-  final windowStart = DateTime(
+  // Use Duration arithmetic to avoid silent overflow when raw minutes go
+  // negative or above 60 (e.g. class at 00:15 would otherwise resolve to the
+  // previous day, opening the window incorrectly).
+  final classStart = DateTime(
     date.year,
     date.month,
     date.day,
     startParts[0],
-    startParts[1] - 30,
+    startParts[1],
   );
-
-  final windowEnd = DateTime(
+  final classEnd = DateTime(
     date.year,
     date.month,
     date.day,
     endParts[0],
-    endParts[1] + 60,
+    endParts[1],
   );
+  final windowStart = classStart.subtract(const Duration(minutes: 30));
+  final windowEnd = classEnd.add(const Duration(hours: 1));
 
   return now.isAfter(windowStart) && now.isBefore(windowEnd);
 }
@@ -52,8 +56,8 @@ Map<String, int>? getTimeUntilCheckinOpens({
     date.month,
     date.day,
     startParts[0],
-    startParts[1] - 30,
-  );
+    startParts[1],
+  ).subtract(const Duration(minutes: 30));
 
   if (now.isAfter(windowStart)) return null;
 

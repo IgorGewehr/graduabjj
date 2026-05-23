@@ -240,12 +240,14 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
       container.invalidate(currentUserProvider);
 
       // Poll until currentUserProvider returns valid data with admin role (max 10 seconds)
+      bool ready = false;
       for (int i = 0; i < 20; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         final userAsync = container.read(currentUserProvider);
         if (userAsync.hasValue && userAsync.value != null) {
           final user = userAsync.value!;
           if (user.academyId != null && user.isAdmin) {
+            ready = true;
             break;
           }
           container.invalidate(currentUserProvider);
@@ -255,8 +257,18 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         }
       }
 
-      // Dismiss overlay - the router will naturally redirect to /admin
       container.read(isCreatingAccountProvider.notifier).state = false;
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      if (ready) {
+        // Explicit navigation: don't rely on router redirect timing.
+        context.go('/admin');
+      } else {
+        // Documents created but provider didn't settle in time. Show success
+        // step so the admin can complete sign-in deliberately.
+        _goToStep(2);
+      }
     } catch (e) {
       // Dismiss overlay on error (if it was shown)
       container.read(isCreatingAccountProvider.notifier).state = false;
@@ -828,18 +840,23 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
           const SizedBox(height: 40),
 
-          // Access button
+          // Access button - go straight to /admin if already authenticated.
           SizedBox(
             height: 52,
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () => context.go('/login'),
+              onPressed: () {
+                final userAsync = ref.read(currentUserProvider);
+                final isAdminReady = userAsync.value?.isAdmin == true
+                    && userAsync.value?.academyId != null;
+                context.go(isAdminReady ? '/admin' : '/login');
+              },
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Icon(LucideIcons.logIn, size: 18),
                   const SizedBox(width: 8),
-                  const Text('Fazer Login Agora'),
+                  const Text('Acessar Painel'),
                 ],
               ),
             ),
