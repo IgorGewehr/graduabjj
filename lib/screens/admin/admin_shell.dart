@@ -6,6 +6,8 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
+import '../../providers/subscription_provider.dart';
+import '../paywall_screen.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/more_menu_sheet.dart';
 import '../../widgets/common/back_button_handler.dart';
@@ -22,6 +24,9 @@ class AdminShell extends ConsumerWidget {
     ref.watch(currentUserProvider);
     final settingsAsync = ref.watch(academySettingsProvider);
     final settings = settingsAsync.valueOrNull;
+    final hasAccess = ref.watch(hasSubscriptionAccessProvider);
+
+    if (!hasAccess) return const PaywallScreen();
 
     // Check if this is the root route (/admin)
     final isRootRoute = location == '/admin';

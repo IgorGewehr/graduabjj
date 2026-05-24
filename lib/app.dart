@@ -8,6 +8,8 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'core/theme.dart';
 import 'core/constants.dart';
 import 'providers/auth_provider.dart';
+import 'providers/subscription_provider.dart';
+import 'screens/paywall_screen.dart';
 import 'services/push_notification_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
@@ -956,6 +958,11 @@ class _MonitorGuard extends ConsumerWidget {
       });
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+
+    // Monitor/staff screens are gated by subscription — only regular student
+    // portal remains free regardless of plan.
+    final hasAccess = ref.watch(hasSubscriptionAccessProvider);
+    if (!hasAccess) return const PaywallScreen();
 
     return child;
   }

@@ -118,13 +118,38 @@ class AcademySubscription {
   final SubscriptionStatus status;
   final DateTime? expiresAt;
   final DateTime? trialEndsAt;
+  final DateTime? paidUntil;
+  final bool freeOverride;
 
   AcademySubscription({
     required this.plan,
     required this.status,
     this.expiresAt,
     this.trialEndsAt,
+    this.paidUntil,
+    this.freeOverride = false,
   });
+
+  /// True when the academy has full access (override, paid, or in trial).
+  bool get hasAccess {
+    if (freeOverride) return true;
+    if (plan == SubscriptionPlan.premium || plan == SubscriptionPlan.enterprise) return true;
+    if (paidUntil != null && paidUntil!.isAfter(DateTime.now())) return true;
+    if (trialEndsAt != null && trialEndsAt!.isAfter(DateTime.now())) return true;
+    return false;
+  }
+
+  bool get isTrialing =>
+      !freeOverride &&
+      plan == SubscriptionPlan.free &&
+      (paidUntil == null || paidUntil!.isBefore(DateTime.now())) &&
+      trialEndsAt != null &&
+      trialEndsAt!.isAfter(DateTime.now());
+
+  int get trialDaysLeft {
+    if (trialEndsAt == null) return 0;
+    return trialEndsAt!.difference(DateTime.now()).inDays.clamp(0, 30);
+  }
 
   factory AcademySubscription.fromMap(Map<String, dynamic> map) {
     return AcademySubscription(
@@ -136,6 +161,10 @@ class AcademySubscription {
       trialEndsAt: map['trialEndsAt'] != null
           ? (map['trialEndsAt'] as Timestamp).toDate()
           : null,
+      paidUntil: map['paidUntil'] != null
+          ? (map['paidUntil'] as Timestamp).toDate()
+          : null,
+      freeOverride: map['freeOverride'] as bool? ?? false,
     );
   }
 
@@ -145,6 +174,8 @@ class AcademySubscription {
       'status': status.value,
       'expiresAt': expiresAt != null ? Timestamp.fromDate(expiresAt!) : null,
       'trialEndsAt': trialEndsAt != null ? Timestamp.fromDate(trialEndsAt!) : null,
+      'paidUntil': paidUntil != null ? Timestamp.fromDate(paidUntil!) : null,
+      'freeOverride': freeOverride,
     };
   }
 }

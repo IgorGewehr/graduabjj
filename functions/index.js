@@ -12,9 +12,11 @@
  * `FirebaseFunctions.httpsCallable('name')`.
  */
 
-const {onCall, HttpsError} = require('firebase-functions/v2/https');
+const {onCall, onRequest, HttpsError} = require('firebase-functions/v2/https');
 const {initializeApp} = require('firebase-admin/app');
 const {getFirestore, FieldValue, Timestamp} = require('firebase-admin/firestore');
+const {getAuth} = require('firebase-admin/auth');
+const crypto = require('crypto');
 
 initializeApp();
 
@@ -494,3 +496,120 @@ exports.listAcademyMembers = onCall(async (request) => {
 
   return {admins, instructors, students};
 });
+
+// ============================================================
+// caktoWebhook — recebe eventos de pagamento do Cakto e ativa
+// a subscription da academia correspondente ao e-mail do comprador.
+//
+// Configurar no Firebase:
+//   firebase functions:secrets:set CAKTO_WEBHOOK_SECRET
+//
+// IDs dos produtos Cakto (configurar como secrets ou env vars):
+//   CAKTO_PRODUCT_MENSAL, CAKTO_PRODUCT_TRIMESTRAL, CAKTO_PRODUCT_ANUAL
+// ============================================================
+exports.caktoWebhook = onRequest(
+  {cors: false, secrets: ['CAKTO_WEBHOOK_SECRET']},
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      return res.status(405).send('Method Not Allowed');
+    }
+
+    // ---- Validação de assinatura HMAC-SHA256 ----
+    const secret = process.env.CAKTO_WEBHOOK_SECRET;
+    if (secret) {
+      const signature = req.headers['x-cakto-signature'] || req.headers['x-webhook-signature'];
+      if (!signature) {
+        return res.status(401).json({error: 'Missing signature'});
+      }
+      const body = JSON.stringify(req.body);
+      const expected = crypto.createHmac('sha256', secret).update(body).digest('hex');
+      if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+        return res.status(401).json({error: 'Invalid signature'});
+      }
+    }
+
+    const payload = req.body;
+    // Cakto pode enviar o evento no root ou em payload.event
+    const event = payload.event || payload.type || '';
+
+    // Só processa eventos de pagamento confirmado / assinatura ativa
+    const relevantEvents = [
+      'payment.confirmed',
+      'payment.approved',
+      'subscription.active',
+      'subscription.renewed',
+      'order.paid',
+    ];
+    if (!relevantEvents.includes(event)) {
+      return res.status(200).json({received: true, skipped: event});
+    }
+
+    // ---- Extrair e-mail e produto ----
+    const data = payload.data || payload;
+    const buyerEmail =
+      data.customer?.email ||
+      data.buyer?.email ||
+      data.email ||
+      null;
+    const productId =
+      data.product?.id ||
+      data.offer?.id ||
+      data.offer_id ||
+      data.product_id ||
+      null;
+
+    if (!buyerEmail) {
+      console.warn('[caktoWebhook] Missing buyer email in payload', JSON.stringify(payload));
+      return res.status(200).json({received: true, warning: 'missing_email'});
+    }
+
+    // ---- Mapear e-mail → uid Firebase ----
+    let uid;
+    try {
+      const userRecord = await getAuth().getUserByEmail(buyerEmail);
+      uid = userRecord.uid;
+    } catch (e) {
+      console.warn('[caktoWebhook] Firebase user not found for email:', buyerEmail);
+      return res.status(200).json({received: true, warning: 'user_not_found', email: buyerEmail});
+    }
+
+    // ---- Encontrar academia do owner ----
+    const academySnap = await db
+      .collection('academies')
+      .where('ownerId', '==', uid)
+      .limit(1)
+      .get();
+
+    if (academySnap.empty) {
+      console.warn('[caktoWebhook] Academy not found for uid:', uid);
+      return res.status(200).json({received: true, warning: 'academy_not_found'});
+    }
+
+    const academyId = academySnap.docs[0].id;
+
+    // ---- Calcular paidUntil com base no produto ----
+    const mensalId = process.env.CAKTO_PRODUCT_MENSAL || 'MENSAL_ID';
+    const trimestralId = process.env.CAKTO_PRODUCT_TRIMESTRAL || 'TRIMESTRAL_ID';
+    const anualId = process.env.CAKTO_PRODUCT_ANUAL || 'ANUAL_ID';
+
+    let daysToAdd = 35; // default: mensal + 4 dias de buffer
+    if (productId === trimestralId) daysToAdd = 95;
+    else if (productId === anualId) daysToAdd = 370;
+
+    const paidUntil = new Date();
+    paidUntil.setDate(paidUntil.getDate() + daysToAdd);
+
+    // ---- Atualizar Firestore ----
+    await db.collection('academies').doc(academyId).update({
+      'subscription.plan': 'pro',
+      'subscription.status': 'active',
+      'subscription.paidUntil': Timestamp.fromDate(paidUntil),
+      'subscription.lastPaymentAt': FieldValue.serverTimestamp(),
+      'subscription.externalPaymentId': data.id || data.transaction_id || null,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    console.log('[caktoWebhook] Subscription activated', {academyId, buyerEmail, paidUntil, daysToAdd});
+    return res.status(200).json({success: true, academyId, paidUntil});
+  },
+);

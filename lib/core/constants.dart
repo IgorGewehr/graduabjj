@@ -32,6 +32,15 @@ class AppConstants {
   static const String supportEmail = 'suporte@bjjeasy.com.br';
 
   // ===========================================
+  // Subscription / Cakto Checkout
+  // TODO: substituir pelas URLs reais após criar os produtos no Cakto
+  // ===========================================
+  static const String caktoCheckoutMensal = 'https://pay.cakto.com.br/MENSAL_ID';
+  static const String caktoCheckoutTrimestral = 'https://pay.cakto.com.br/TRIMESTRAL_ID';
+  static const String caktoCheckoutAnual = 'https://pay.cakto.com.br/ANUAL_ID';
+  static const String supportWhatsApp = 'https://wa.me/5500000000000';
+
+  // ===========================================
   // Firebase Collections
   // ===========================================
   static const String academiesCollection = 'academies';
