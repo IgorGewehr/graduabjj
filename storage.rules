@@ -1,46 +1,96 @@
 rules_version = '2';
 
-// Firebase Storage rules.
-//
-// NOTE: This file is NEW. Until now the project shipped no storage.rules, so
-// the bucket used the Firebase console defaults. These rules are intentionally
-// auth-scoped (any authenticated user of the academy) to MATCH that existing
-// behavior and avoid breaking current uploads (profile + competition photos).
-// Role-based tightening (staff-only writes via firestore.get()) is a future
-// hardening step. Review/test before deploying with `firebase deploy --only storage`.
-//
-// The `request.resource == null` guard keeps DELETES working (deletes have no
-// incoming file, so a bare size check would otherwise fail).
-
 service firebase.storage {
   match /b/{bucket}/o {
-    // Authenticated users can read academy files.
-    match /academies/{academyId}/{allPaths=**} {
-      allow read: if request.auth != null;
+
+    // ============================================================
+    // Helpers — mirrors firestore.rules role model via
+    // userAcademyMapping/{uid}.academyDetails.{academyId}.role
+    // ============================================================
+
+    function authed() {
+      return request.auth != null;
     }
 
-    // Student profile photos (<= 10MB on upload).
-    match /academies/{academyId}/students/{studentId}/{file=**} {
-      allow write: if request.auth != null
-                   && (request.resource == null
-                       || request.resource.size < 10 * 1024 * 1024);
+    function academyRole(academyId) {
+      return firestore.get(
+        /databases/(default)/documents/userAcademyMapping/$(request.auth.uid)
+      ).data.academyDetails[academyId].role;
     }
 
-    // Competition photos (<= 15MB on upload).
-    match /academies/{academyId}/competitions/{competitionId}/{file=**} {
-      allow write: if request.auth != null
-                   && (request.resource == null
-                       || request.resource.size < 15 * 1024 * 1024);
+    function isAdmin(academyId) {
+      return authed() && academyRole(academyId) == 'admin';
     }
 
-    // Training content — videos & documents (<= 300MB on upload).
+    function isStaff(academyId) {
+      return authed() && (
+        academyRole(academyId) == 'admin' ||
+        academyRole(academyId) == 'instructor'
+      );
+    }
+
+    // ============================================================
+    // Academy files — public read, role-gated write
+    // ============================================================
+
+    // Logo da academia — só admin altera a identidade visual
+    match /academies/{academyId}/logo.png {
+      allow read: if true;
+      allow write: if isAdmin(academyId);
+      allow delete: if isAdmin(academyId);
+    }
+
+    // Fotos de perfil dos alunos — admin ou instrutor
+    match /academies/{academyId}/students/{studentId}/profile.jpg {
+      allow read: if true;
+      allow write: if isStaff(academyId);
+      allow delete: if isStaff(academyId);
+    }
+
+    // Fotos de campeonatos — admin ou instrutor
+    match /academies/{academyId}/competitions/{competitionId}/photos/{photoId} {
+      allow read: if true;
+      allow write: if isStaff(academyId);
+      allow delete: if isStaff(academyId);
+    }
+
+    // Imagens de eventos e notícias — admin ou instrutor
+    match /academies/{academyId}/events/{file=**} {
+      allow read: if true;
+      allow write: if isStaff(academyId);
+      allow delete: if isStaff(academyId);
+    }
+
+    match /academies/{academyId}/news/{file=**} {
+      allow read: if true;
+      allow write: if isStaff(academyId);
+      allow delete: if isStaff(academyId);
+    }
+
+    // Imagens de produtos da loja — só admin gerencia o catálogo
+    match /academies/{academyId}/products/{filename} {
+      allow read: if true;
+      allow write: if isAdmin(academyId);
+      allow delete: if isAdmin(academyId);
+    }
+
+    // Conteúdo de treino (vídeos e docs) — até 300 MB, staff
     match /academies/{academyId}/content/{file=**} {
-      allow write: if request.auth != null
+      allow read: if true;
+      allow write: if isStaff(academyId)
                    && (request.resource == null
                        || request.resource.size < 300 * 1024 * 1024);
+      allow delete: if isStaff(academyId);
     }
 
-    // Deny everything else.
+    // Fallback: qualquer outro arquivo dentro de academies — admin escreve, leitura pública
+    match /academies/{academyId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin(academyId);
+      allow delete: if isAdmin(academyId);
+    }
+
+    // Nega tudo fora de academies
     match /{allPaths=**} {
       allow read, write: if false;
     }
