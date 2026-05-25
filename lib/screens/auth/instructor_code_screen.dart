@@ -175,7 +175,13 @@ class _InstructorCodeScreenState extends ConsumerState<InstructorCodeScreen> {
         ),
         const SizedBox(height: 8),
         TextButton(
-          onPressed: () => context.pop(),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/');
+            }
+          },
           child: const Text('Voltar'),
         ),
       ],

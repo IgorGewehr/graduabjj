@@ -480,6 +480,12 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       path: '/admin/campeonatos',
       section: 'Gestão',
     ),
+    _AdminMenuEntry(
+      label: 'Musculação',
+      icon: Icons.fitness_center,
+      path: '/admin/musculacao',
+      section: 'Gestão',
+    ),
     // Financeiro
     _AdminMenuEntry(
       label: 'Cobrança',
@@ -504,6 +510,18 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       requiresPermission: 'reports:view',
     ),
     // Conteúdo
+    _AdminMenuEntry(
+      label: 'Treinos',
+      icon: Icons.assignment_outlined,
+      path: '/admin/treinos',
+      section: 'Conteúdo',
+    ),
+    _AdminMenuEntry(
+      label: 'Vídeos',
+      icon: Icons.play_circle_outline,
+      path: '/admin/videos',
+      section: 'Conteúdo',
+    ),
     _AdminMenuEntry(
       label: 'Loja',
       icon: LucideIcons.store,

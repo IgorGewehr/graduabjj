@@ -18,6 +18,12 @@ const {getFirestore, FieldValue, Timestamp} = require('firebase-admin/firestore'
 const {getAuth} = require('firebase-admin/auth');
 const crypto = require('crypto');
 
+// Cloud Functions run in UTC by default. Pin the process timezone to Brazil
+// so selfCheckin's operating-hours check (getHours/getDay) and any date-based
+// math use local wall-clock time. Academies outside this zone would need this
+// revisited (e.g. a per-academy timezone setting).
+process.env.TZ = 'America/Sao_Paulo';
+
 initializeApp();
 
 const db = getFirestore();
@@ -51,6 +57,28 @@ async function isStaff(uid, academyId) {
   const details = data.academyDetails || {};
   const entry = details[academyId];
   return entry && (entry.role === 'admin' || entry.role === 'instructor');
+}
+
+/**
+ * Whether `now` falls inside the academy's configured operating hours.
+ * `raw` is the Firestore map { "<dow>": { open: "HH:mm", close: "HH:mm" } }
+ * where dow is 0=Sun..6=Sat (matches the app's OperatingHours). Empty/absent
+ * config means no time gate (returns true). Mirrors OperatingHours.isOpenAt.
+ */
+function isWithinOperatingHours(raw) {
+  if (!raw || typeof raw !== 'object' || Object.keys(raw).length === 0) {
+    return true;
+  }
+  const now = new Date();
+  const dow = now.getDay(); // JS getDay: 0=Sun..6=Sat
+  const window = raw[String(dow)];
+  if (!window || !window.open || !window.close) return false;
+  const toMin = (s) => {
+    const parts = String(s).split(':');
+    return (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+  };
+  const cur = now.getHours() * 60 + now.getMinutes();
+  return cur >= toMin(window.open) && cur < toMin(window.close);
 }
 
 // ============================================================
@@ -495,6 +523,102 @@ exports.listAcademyMembers = onCall(async (request) => {
   }
 
   return {admins, instructors, students};
+});
+
+// ============================================================
+// selfCheckin — student self check-in for schedule-less modalities (musculação)
+// ============================================================
+//
+// Body: { academyId: string }
+// The student (caller) records their own attendance for musculação. Used by the
+// "button" and "fixed QR" check-in modes, where the client cannot write to the
+// attendance subcollection directly (rules restrict it to staff/monitors).
+//
+// Validates server-side: membership (resolves the caller's studentId from the
+// mapping), the academy's configured mode allows self check-in, operating
+// hours, that the student practices musculação and is active, and one-per-day
+// dedup via a deterministic doc id. Mirrors AttendanceService.markPresent so
+// reports and counts stay consistent.
+exports.selfCheckin = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const academyId = (request.data && request.data.academyId || '').toString().trim();
+  if (!academyId) {
+    throw new HttpsError('invalid-argument', 'academyId é obrigatório.');
+  }
+
+  // 1. Resolve caller's studentId for this academy from the mapping.
+  const mappingSnap = await db.collection('userAcademyMapping').doc(uid).get();
+  const details = (mappingSnap.exists && (mappingSnap.data().academyDetails || {})) || {};
+  const entry = details[academyId];
+  if (!entry || !entry.studentId) {
+    throw new HttpsError('permission-denied', 'Você não pertence a esta academia.');
+  }
+  const studentId = entry.studentId;
+
+  // 2. Academy mode must allow self check-in and respect operating hours.
+  const academyRef = db.collection('academies').doc(academyId);
+  const academySnap = await academyRef.get();
+  const settings = (academySnap.exists && academySnap.data()) || {};
+  const mode = settings.musculacaoCheckinMode || 'manual';
+  if (mode !== 'qr' && mode !== 'button') {
+    throw new HttpsError('failed-precondition',
+        'O check-in pelo aluno não está habilitado nesta academia.');
+  }
+  if (!isWithinOperatingHours(settings.operatingHours)) {
+    throw new HttpsError('failed-precondition',
+        'Fora do horário de funcionamento da academia.');
+  }
+
+  // 3. Student must exist, practice musculação, and be active.
+  const studentRef = academyRef.collection('students').doc(studentId);
+  const studentSnap = await studentRef.get();
+  if (!studentSnap.exists) {
+    throw new HttpsError('not-found', 'Aluno não encontrado.');
+  }
+  const student = studentSnap.data() || {};
+  const sports = Array.isArray(student.sports) ? student.sports : [];
+  if (!sports.includes('musculacao')) {
+    throw new HttpsError('failed-precondition',
+        'Você não está matriculado na musculação.');
+  }
+  if (student.status && student.status !== 'active') {
+    throw new HttpsError('failed-precondition', 'Sua matrícula não está ativa.');
+  }
+
+  // 4. Deterministic id → one check-in per day. Transaction makes it idempotent
+  //    (matches AttendanceService._deterministicAttendanceId).
+  const now = new Date();
+  const y = now.getFullYear().toString().padStart(4, '0');
+  const m = (now.getMonth() + 1).toString().padStart(2, '0');
+  const d = now.getDate().toString().padStart(2, '0');
+  const docId = `${studentId}_musculacao_${y}${m}${d}`;
+  const attendanceRef = academyRef.collection('attendance').doc(docId);
+  const studentName = student.fullName || student.nickname || 'Aluno';
+
+  await db.runTransaction(async (tx) => {
+    const existing = await tx.get(attendanceRef);
+    if (existing.exists) {
+      throw new HttpsError('already-exists', 'Você já registrou presença hoje.');
+    }
+    tx.set(attendanceRef, {
+      studentId,
+      studentName,
+      classId: 'musculacao',
+      className: 'Musculação',
+      date: Timestamp.fromDate(now),
+      verifiedBy: uid,
+      verifiedByName: studentName,
+      sport: 'musculacao',
+      source: mode === 'qr' ? 'self_qr' : 'self_button',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.update(studentRef, {
+      attendanceCount: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  return {success: true, checkedInAt: now.toISOString()};
 });
 
 // ============================================================

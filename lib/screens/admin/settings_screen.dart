@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -37,6 +38,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _isSaving = false;
   int _selectedTabIndex = 0;
 
+  // Unsaved-changes tracking. `_savedSnapshot` is the serialized state at the
+  // last load/save; the screen is "dirty" when the current snapshot differs.
+  String? _savedSnapshot;
+  bool _lastDirty = false;
+
   // Form controllers
   final _nameController = TextEditingController();
   final _sloganController = TextEditingController();
@@ -59,6 +65,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _storePublished = false;
   bool _storeCreditCardEnabled = false;
   bool _studentCheckinEnabled = false;
+
+  // Musculação check-in (schedule-less)
+  String _musculacaoCheckinMode = 'manual'; // 'manual' | 'qr' | 'button'
+  final Map<int, ({String open, String close})> _operatingHours = {};
 
   // Auto-graduation + class weights
   bool _autoGraduationEnabled = false;
@@ -90,7 +100,76 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   @override
   void initState() {
     super.initState();
+    // Text edits should surface the "unsaved changes" bar like toggles do.
+    for (final c in <TextEditingController>[
+      _nameController,
+      _sloganController,
+      _cnpjController,
+      _emailController,
+      _phoneController,
+      _addressController,
+      _cityController,
+      _stateController,
+      _zipCodeController,
+      _birthDateController,
+      _pixKeyController,
+      _storeWelcomeController,
+      _storeMinAmountController,
+      _autoGraduationAttendancesController,
+    ]) {
+      c.addListener(_onFieldChanged);
+    }
     _loadSettings();
+  }
+
+  /// Serialized snapshot of every field saved by [_saveSettings]. Comparing it
+  /// to [_savedSnapshot] tells us whether there are unsaved changes — covering
+  /// all fields without touching each onChanged callback.
+  String _snapshot() {
+    final hours = (_operatingHours.entries.toList()
+          ..sort((a, b) => a.key.compareTo(b.key)))
+        .map((e) => '${e.key}:${e.value.open}-${e.value.close}')
+        .join(',');
+    return [
+      _nameController.text,
+      _sloganController.text,
+      _cnpjController.text,
+      _emailController.text,
+      _phoneController.text,
+      _addressController.text,
+      _cityController.text,
+      _stateController.text,
+      _zipCodeController.text,
+      _birthDateController.text,
+      _pixKeyController.text,
+      _storeWelcomeController.text,
+      _storeMinAmountController.text,
+      _autoGraduationAttendancesController.text,
+      _pixKeyType?.value ?? '',
+      _abacatePayEnabled,
+      _asaasEnabled,
+      _storeEnabled,
+      _storePublished,
+      _storeCreditCardEnabled,
+      _studentCheckinEnabled,
+      _musculacaoCheckinMode,
+      hours,
+      _autoGraduationEnabled,
+      _useClassWeights,
+      _graduationMode,
+      _graduationProgressVisibleToStudents,
+    ].join('|');
+  }
+
+  bool get _isDirty =>
+      _savedSnapshot != null && _snapshot() != _savedSnapshot;
+
+  void _onFieldChanged() {
+    if (_isLoading) return; // ignore programmatic population during load
+    final dirty = _isDirty;
+    if (dirty != _lastDirty && mounted) {
+      setState(() => _lastDirty = dirty);
+    }
   }
 
   @override
@@ -143,6 +222,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _storePublished = settings.storePublished;
           _storeCreditCardEnabled = settings.storeCreditCardEnabled;
           _studentCheckinEnabled = settings.studentCheckinEnabled;
+          _musculacaoCheckinMode = settings.musculacaoCheckinMode;
+          _operatingHours
+            ..clear()
+            ..addAll(settings.operatingHours.byDay);
           _autoGraduationEnabled = settings.autoGraduationEnabled;
           _useClassWeights = settings.useClassWeights;
           _graduationMode = settings.graduationMode;
@@ -165,6 +248,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         _checkKycStatus();
       }
 
+      _savedSnapshot = _snapshot();
+      _lastDirty = false;
       setState(() => _isLoading = false);
     } catch (e) {
       setState(() => _isLoading = false);
@@ -241,69 +326,77 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
     try {
       final service = SettingsService(FirebaseService.academyId);
-
-      // Save basic info
-      await service.updateBasicInfo(
-        name: _nameController.text,
-        cnpj: _cnpjController.text.isEmpty ? null : _cnpjController.text,
-        email: _emailController.text.isEmpty ? null : _emailController.text,
-        phone: _phoneController.text.isEmpty ? null : _phoneController.text,
-        address: _addressController.text.isEmpty
-            ? null
-            : _addressController.text,
-        city: _cityController.text.isEmpty ? null : _cityController.text,
-        state: _stateController.text.isEmpty ? null : _stateController.text,
-        zipCode: _zipCodeController.text.isEmpty
-            ? null
-            : _zipCodeController.text,
-        responsibleBirthDate: _birthDateController.text.isEmpty
-            ? null
-            : _birthDateController.text,
-      );
-
-      // Save PIX info
-      if (_pixKeyController.text.isNotEmpty && _pixKeyType != null) {
-        await service.updatePixInfo(_pixKeyController.text, _pixKeyType!);
-      }
-
-      // Save branding
-      await service.updateBranding(
-        portalSlogan: _sloganController.text.isEmpty
-            ? null
-            : _sloganController.text,
-      );
-
-      // Save store settings
-      await service.updateStoreSettings(
-        enabled: _storeEnabled,
-        published: _storePublished,
-        creditCardEnabled: _storeCreditCardEnabled,
-        welcomeMessage: _storeWelcomeController.text.isEmpty
-            ? null
-            : _storeWelcomeController.text,
-        minOrderAmount: _storeMinAmountController.text.isNotEmpty
-            ? double.tryParse(_storeMinAmountController.text)
-            : null,
-      );
-
-      // Save payment provider settings
-      await service.toggleAbacatePay(_abacatePayEnabled);
-      await service.toggleAsaas(_asaasEnabled);
-
-      // Save student check-in settings
-      await service.toggleStudentCheckin(_studentCheckinEnabled);
-
-      // Save auto-graduation settings
       final attendancesValue = int.tryParse(
         _autoGraduationAttendancesController.text,
       );
-      await service.updateAutoGraduation(
-        _autoGraduationEnabled,
-        attendances: attendancesValue,
-        mode: _graduationMode,
-        progressVisibleToStudents: _graduationProgressVisibleToStudents,
-      );
-      await service.updateUseClassWeights(_useClassWeights);
+
+      // Fire all writes concurrently (they target the same academy doc). This
+      // matters offline: Firestore applies each write to the local cache the
+      // moment it's called, but the returned Future only completes on the
+      // server ack — which never arrives while offline. Awaiting them
+      // sequentially hangs forever on the first one (the infinite spinner).
+      // Future.wait + a timeout keeps the UI responsive; offline the data is
+      // already saved locally and syncs when the connection returns.
+      final futures = <Future<void>>[
+        service.updateBasicInfo(
+          name: _nameController.text,
+          cnpj: _cnpjController.text.isEmpty ? null : _cnpjController.text,
+          email: _emailController.text.isEmpty ? null : _emailController.text,
+          phone: _phoneController.text.isEmpty ? null : _phoneController.text,
+          address:
+              _addressController.text.isEmpty ? null : _addressController.text,
+          city: _cityController.text.isEmpty ? null : _cityController.text,
+          state: _stateController.text.isEmpty ? null : _stateController.text,
+          zipCode:
+              _zipCodeController.text.isEmpty ? null : _zipCodeController.text,
+          responsibleBirthDate: _birthDateController.text.isEmpty
+              ? null
+              : _birthDateController.text,
+        ),
+        // PIX: set when key+type are valid, otherwise clear it. (Before, a
+        // cleared or partial PIX was silently skipped and never persisted.)
+        service.updatePix(
+          pixKey: _pixKeyController.text,
+          pixKeyType: _pixKeyType,
+        ),
+        service.updateBranding(
+          portalSlogan:
+              _sloganController.text.isEmpty ? null : _sloganController.text,
+        ),
+        service.updateStoreSettings(
+          enabled: _storeEnabled,
+          published: _storePublished,
+          creditCardEnabled: _storeCreditCardEnabled,
+          welcomeMessage: _storeWelcomeController.text.isEmpty
+              ? null
+              : _storeWelcomeController.text,
+          minOrderAmount: _storeMinAmountController.text.isNotEmpty
+              ? double.tryParse(_storeMinAmountController.text)
+              : null,
+        ),
+        service.toggleAbacatePay(_abacatePayEnabled),
+        service.toggleAsaas(_asaasEnabled),
+        service.toggleStudentCheckin(_studentCheckinEnabled),
+        service.updateMusculacaoCheckin(
+          mode: _musculacaoCheckinMode,
+          operatingHours: OperatingHours(Map.of(_operatingHours)),
+        ),
+        service.updateAutoGraduation(
+          _autoGraduationEnabled,
+          attendances: attendancesValue,
+          mode: _graduationMode,
+          progressVisibleToStudents: _graduationProgressVisibleToStudents,
+        ),
+        service.updateUseClassWeights(_useClassWeights),
+      ];
+
+      var savedOffline = false;
+      try {
+        await Future.wait(futures).timeout(const Duration(seconds: 12));
+      } on TimeoutException {
+        // Writes are committed locally; only the server ack is pending.
+        savedOffline = true;
+      }
 
       // Invalidate the settings provider to refresh UI across the app
       ref.invalidate(academySettingsProvider);
@@ -311,14 +404,22 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       ref.invalidate(pixInfoProvider);
 
       if (mounted) {
-        context.showSuccess('Configuracoes salvas!');
+        setState(() {
+          _savedSnapshot = _snapshot();
+          _lastDirty = false;
+        });
+        context.showSuccess(
+          savedOffline
+              ? 'Salvo. Sera sincronizado quando houver conexao.'
+              : 'Configuracoes salvas!',
+        );
       }
     } catch (e) {
       if (mounted) {
         context.showError('Erro: $e');
       }
     } finally {
-      setState(() => _isSaving = false);
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -459,36 +560,132 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadSettings,
-              child: CustomScrollView(
-                slivers: [
-                  // Header
-                  SliverToBoxAdapter(child: _buildHeader()),
+    return PopScope(
+      canPop: !_isDirty,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop || !_isDirty) return;
+        final action = await _showUnsavedDialog();
+        if (!mounted || action == null || action == 'cancel') return;
+        if (action == 'save') {
+          await _saveSettings();
+          if (mounted && !_isDirty) Navigator.of(context).maybePop();
+        } else {
+          // Discard: drop changes (we're leaving) and pop.
+          setState(() {
+            _savedSnapshot = _snapshot();
+            _lastDirty = false;
+          });
+          if (mounted) Navigator.of(context).maybePop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                children: [
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: _loadSettings,
+                      child: CustomScrollView(
+                        slivers: [
+                          // Header
+                          SliverToBoxAdapter(child: _buildHeader()),
 
-                  // Tabs
-                  SliverToBoxAdapter(child: _buildTabs()),
+                          // Tabs
+                          SliverToBoxAdapter(child: _buildTabs()),
 
-                  // Content based on tab
-                  SliverToBoxAdapter(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 200),
-                      child: _buildTabContent(),
+                          // Content based on tab
+                          SliverToBoxAdapter(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 200),
+                              child: _buildTabContent(),
+                            ),
+                          ),
+
+                          // Save button
+                          SliverToBoxAdapter(child: _buildSaveButton()),
+
+                          // Bottom padding
+                          const SliverToBoxAdapter(child: SizedBox(height: 100)),
+                        ],
+                      ),
                     ),
                   ),
-
-                  // Save button
-                  SliverToBoxAdapter(child: _buildSaveButton()),
-
-                  // Bottom padding
-                  const SliverToBoxAdapter(child: SizedBox(height: 100)),
+                  // Sticky unsaved-changes bar — always visible while dirty,
+                  // regardless of scroll position or how the user navigates.
+                  if (_isDirty) _buildUnsavedBar(),
                 ],
               ),
-            ),
+      ),
+    );
+  }
+
+  Future<String?> _showUnsavedDialog() {
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Alteracoes nao salvas'),
+        content: const Text(
+          'Voce tem alteracoes que ainda nao foram salvas. O que deseja fazer?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
+            child: const Text('Continuar editando'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'discard'),
+            child: Text('Descartar', style: TextStyle(color: AppTheme.error)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'save'),
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUnsavedBar() {
+    return Material(
+      elevation: 8,
+      color: AppTheme.surface,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Row(
+            children: [
+              Icon(Icons.error_outline, size: 18, color: AppTheme.warning),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Alteracoes nao salvas',
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: _isSaving ? null : _loadSettings,
+                child: const Text('Descartar'),
+              ),
+              const SizedBox(width: 4),
+              FilledButton(
+                onPressed: _isSaving ? null : _saveSettings,
+                child: _isSaving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Salvar'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1445,6 +1642,41 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           const SizedBox(height: 16),
 
+          // Musculação check-in (schedule-less modality)
+          _SettingsCard(
+            title: 'Check-in da Musculacao',
+            icon: Icons.fitness_center,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Como os alunos de musculacao (sem horario de aula) registram presenca.',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _MusculacaoCheckinModeSelector(
+                  value: _musculacaoCheckinMode,
+                  onChanged: (m) => setState(() => _musculacaoCheckinMode = m),
+                ),
+                if (_musculacaoCheckinMode != 'manual') ...[
+                  const SizedBox(height: 16),
+                  _OperatingHoursEditor(
+                    hours: _operatingHours,
+                    onChanged: (next) => setState(() {
+                      _operatingHours
+                        ..clear()
+                        ..addAll(next);
+                    }),
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // Student Check-in Settings
           _SettingsCard(
             title: 'Check-in de Alunos',
@@ -1881,13 +2113,17 @@ class _ModernSwitch extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Text(
-                        title,
-                        style: AppTheme.bodyMedium.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: disabled
-                              ? AppTheme.textSecondary
-                              : AppTheme.textPrimary,
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: disabled
+                                ? AppTheme.textSecondary
+                                : AppTheme.textPrimary,
+                          ),
                         ),
                       ),
                       if (disabled) ...[
@@ -2128,6 +2364,196 @@ class _ModeCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Selector for how musculação students record attendance: staff-driven
+/// ('manual'), fixed QR ('qr') or in-app button ('button').
+class _MusculacaoCheckinModeSelector extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _MusculacaoCheckinModeSelector({
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Modo de check-in',
+          style: AppTheme.labelSmall.copyWith(
+            color: AppTheme.textSecondary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        _ModeCard(
+          title: 'Recepcao (manual)',
+          subtitle: 'A recepcao marca a presenca',
+          icon: Icons.how_to_reg,
+          selected: value == 'manual',
+          onTap: () => onChanged('manual'),
+        ),
+        const SizedBox(height: 8),
+        _ModeCard(
+          title: 'QR fixo',
+          subtitle: 'Aluno escaneia o QR na recepcao',
+          icon: Icons.qr_code_2,
+          selected: value == 'qr',
+          onTap: () => onChanged('qr'),
+        ),
+        const SizedBox(height: 8),
+        _ModeCard(
+          title: 'Botao no app',
+          subtitle: 'Aluno toca "Cheguei" no portal',
+          icon: Icons.touch_app,
+          selected: value == 'button',
+          onTap: () => onChanged('button'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Per-weekday operating-hours editor. Keys are 0=Sun..6=Sat to match
+/// [OperatingHours]; displayed Monday-first. A weekday without an entry is
+/// "closed". Emits a brand-new map on every change so the parent can setState.
+class _OperatingHoursEditor extends StatelessWidget {
+  final Map<int, ({String open, String close})> hours;
+  final ValueChanged<Map<int, ({String open, String close})>> onChanged;
+
+  const _OperatingHoursEditor({required this.hours, required this.onChanged});
+
+  static const _labels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+  static const _order = [1, 2, 3, 4, 5, 6, 0];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Horario de funcionamento',
+          style: AppTheme.labelSmall.copyWith(
+            color: AppTheme.textSecondary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'Libera o check-in apenas dentro do horario. Sem dias configurados = liberado sempre.',
+          style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+        ),
+        const SizedBox(height: 8),
+        ..._order.map((dow) => _row(context, dow)),
+      ],
+    );
+  }
+
+  Widget _row(BuildContext context, int dow) {
+    final window = hours[dow];
+    final isOpen = window != null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 40,
+            child: Text(
+              _labels[dow],
+              style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Switch(
+            value: isOpen,
+            onChanged: (v) {
+              final next = Map<int, ({String open, String close})>.from(hours);
+              if (v) {
+                next[dow] = (open: '06:00', close: '22:00');
+              } else {
+                next.remove(dow);
+              }
+              onChanged(next);
+            },
+          ),
+          const SizedBox(width: 8),
+          if (isOpen)
+            Expanded(
+              child: Row(
+                children: [
+                  _timeChip(context, window.open, (t) {
+                    final next =
+                        Map<int, ({String open, String close})>.from(hours);
+                    next[dow] = (open: t, close: window.close);
+                    onChanged(next);
+                  }),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Text(
+                      'as',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                  _timeChip(context, window.close, (t) {
+                    final next =
+                        Map<int, ({String open, String close})>.from(hours);
+                    next[dow] = (open: window.open, close: t);
+                    onChanged(next);
+                  }),
+                ],
+              ),
+            )
+          else
+            Text(
+              'Fechado',
+              style: AppTheme.labelSmall.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _timeChip(
+    BuildContext context,
+    String hhmm,
+    ValueChanged<String> onPick,
+  ) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () async {
+        final parts = hhmm.split(':');
+        final initial = TimeOfDay(
+          hour: int.tryParse(parts.first) ?? 6,
+          minute: parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0,
+        );
+        final picked = await showTimePicker(
+          context: context,
+          initialTime: initial,
+        );
+        if (picked != null) {
+          final h = picked.hour.toString().padLeft(2, '0');
+          final m = picked.minute.toString().padLeft(2, '0');
+          onPick('$h:$m');
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppTheme.divider),
+        ),
+        child: Text(hhmm, style: AppTheme.bodyMedium),
       ),
     );
   }

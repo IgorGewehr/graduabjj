@@ -105,6 +105,16 @@ service cloud.firestore {
       );
     }
 
+    // Check if the caller's studentId (from the mapping) is in a list of ids.
+    // Used by workout plans assigned to specific students.
+    function isAssignedStudent(academyId, ids) {
+      let mapping = getUserAcademyMapping();
+      return belongsToAcademy(academyId)
+        && mapping.keys().hasAll(['academyDetails'])
+        && mapping.academyDetails.keys().hasAll([academyId])
+        && mapping.academyDetails[academyId].studentId in ids;
+    }
+
     // Check if user is the owner of the academy
     function isAcademyOwner(academyId) {
       let academy = get(/databases/$(database)/documents/academies/$(academyId)).data;
@@ -678,6 +688,58 @@ service cloud.firestore {
       match /settings/{settingId} {
         allow read: if belongsToAcademy(academyId);
         allow write: if isAcademyAdmin(academyId);
+      }
+
+      // ============================================
+      // Workout Plans (structured training — all modalities)
+      // ============================================
+      match /workoutPlans/{planId} {
+        // Staff manage everything.
+        allow read, write: if isAcademyStaff(academyId);
+
+        // Students read academy-wide and sport-library plans, plus personal
+        // plans assigned to them. assignedStudentIds is always present (empty
+        // for non-personal plans) so the `in` check is safe. These branches
+        // mirror the two queries in WorkoutPlanService.getForStudent so a
+        // student's queries only return docs they're allowed to read.
+        allow read: if belongsToAcademy(academyId)
+                    && (
+                      resource.data.audience == 'academy'
+                      || resource.data.audience == 'sport'
+                      || isAssignedStudent(academyId, resource.data.assignedStudentIds)
+                    );
+      }
+
+      // ============================================
+      // Content — training videos & documents (all modalities)
+      // Same targeting model as workoutPlans.
+      // ============================================
+      match /content/{contentId} {
+        // Staff manage everything.
+        allow read, write: if isAcademyStaff(academyId);
+
+        // Students read academy-wide / sport-library content, plus items
+        // personally assigned to them. Mirrors TrainingVideoService queries.
+        allow read: if belongsToAcademy(academyId)
+                    && (
+                      resource.data.audience == 'academy'
+                      || resource.data.audience == 'sport'
+                      || isAssignedStudent(academyId, resource.data.assignedStudentIds)
+                    );
+      }
+
+      // ============================================
+      // Workout Logs (student per-day exercise completion)
+      // ============================================
+      match /workoutLogs/{logId} {
+        // Staff can read for progress; students read their own.
+        allow read: if isAcademyStaff(academyId)
+                    || isOwnStudentRecord(academyId, resource.data.studentId);
+        // A student writes only their own log (studentId field must be theirs).
+        allow create: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, request.resource.data.studentId);
+        allow update: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, resource.data.studentId);
       }
     }
 

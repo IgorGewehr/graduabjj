@@ -13,6 +13,7 @@ const Map<SportId, ({Color bg, Color text})> _sportChipColorMap = {
   SportId.kickboxing: (bg: Color(0x22EA580C), text: Color(0xFFEA580C)),
   SportId.boxing: (bg: Color(0x22171717), text: Color(0xFF374151)),
   SportId.lutalivre: (bg: Color(0x220891B2), text: Color(0xFF0891B2)),
+  SportId.musculacao: (bg: Color(0x22475569), text: Color(0xFF475569)),
 };
 
 // ============================================

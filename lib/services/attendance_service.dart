@@ -510,6 +510,22 @@ class AttendanceService {
     return (belt: grades[idx + 1].id, stripes: 0);
   }
 
+  /// Student ids that already have a [classId] attendance dated today. Used by
+  /// the musculação roster and self check-in UIs to mark "done today". Uses the
+  /// existing (classId ASC, date DESC) composite index.
+  Future<Set<String>> presentTodayForClass(String classId) async {
+    final now = DateTime.now();
+    final snap = await _attendanceRef
+        .where('classId', isEqualTo: classId)
+        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(_startOfDay(now)))
+        .where('date', isLessThanOrEqualTo: Timestamp.fromDate(_endOfDay(now)))
+        .get();
+    return snap.docs
+        .map((d) => (d.data() as Map<String, dynamic>)['studentId'] as String?)
+        .whereType<String>()
+        .toSet();
+  }
+
   /// Deterministic key per (student, class, day) so concurrent writes collide
   /// on the same doc id and exactly one wins inside the transaction.
   String _deterministicAttendanceId(

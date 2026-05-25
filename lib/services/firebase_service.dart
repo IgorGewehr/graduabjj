@@ -55,6 +55,9 @@ class Collections {
   CollectionReference get notifications => academy.collection('notifications');
   CollectionReference get checkins => academy.collection('checkins');
   CollectionReference get billingContactLog => academy.collection('billingContactLog');
+  CollectionReference get workoutPlans => academy.collection('workoutPlans');
+  CollectionReference get content => academy.collection('content');
+  CollectionReference get workoutLogs => academy.collection('workoutLogs');
 
   // Individual document references
   DocumentReference student(String id) => students.doc(id);

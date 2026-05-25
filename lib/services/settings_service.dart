@@ -52,6 +52,62 @@ extension PixKeyTypeExtension on PixKeyType {
   }
 }
 
+/// Operating hours per weekday, used to gate schedule-less (musculação)
+/// self check-in. Weekdays follow the app convention 0=Sunday..6=Saturday
+/// (same as [ClassSchedule.dayOfWeek] and `DateTime.weekday % 7`). A weekday
+/// absent from [byDay] means the academy is closed that day.
+class OperatingHours {
+  /// dayOfWeek (0=Sun..6=Sat) -> open/close times as "HH:mm".
+  final Map<int, ({String open, String close})> byDay;
+
+  const OperatingHours(this.byDay);
+
+  static const OperatingHours empty = OperatingHours({});
+
+  bool get isEmpty => byDay.isEmpty;
+  bool get isNotEmpty => byDay.isNotEmpty;
+
+  /// Whether [now] falls inside the configured window for its weekday.
+  /// When nothing is configured at all, returns true (no time gate) so the
+  /// feature works out of the box; admins opt into stricter hours.
+  bool isOpenAt(DateTime now) {
+    if (byDay.isEmpty) return true;
+    final dow = now.weekday % 7; // Mon=1..Sun=7 -> 0=Sun..6=Sat
+    final window = byDay[dow];
+    if (window == null) return false; // closed that day
+    final open = _at(window.open, now);
+    final close = _at(window.close, now);
+    return !now.isBefore(open) && now.isBefore(close);
+  }
+
+  DateTime _at(String hhmm, DateTime ref) {
+    final parts = hhmm.split(':');
+    final h = int.tryParse(parts.first) ?? 0;
+    final m = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    return DateTime(ref.year, ref.month, ref.day, h, m);
+  }
+
+  factory OperatingHours.fromMap(Map<String, dynamic>? raw) {
+    if (raw == null || raw.isEmpty) return empty;
+    final map = <int, ({String open, String close})>{};
+    raw.forEach((key, value) {
+      final day = int.tryParse(key);
+      if (day == null || value is! Map) return;
+      final open = value['open']?.toString();
+      final close = value['close']?.toString();
+      if (open != null && close != null) {
+        map[day] = (open: open, close: close);
+      }
+    });
+    return OperatingHours(map);
+  }
+
+  Map<String, dynamic> toMap() => {
+        for (final e in byDay.entries)
+          e.key.toString(): {'open': e.value.open, 'close': e.value.close},
+      };
+}
+
 /// Academy Settings Model
 class AcademySettings {
   // Basic Info
@@ -120,6 +176,15 @@ class AcademySettings {
   // Student Check-in Settings
   final bool studentCheckinEnabled;
 
+  // Musculação (schedule-less) check-in.
+  /// 'manual' → staff records presence (works with current rules, no Cloud
+  /// Function); 'qr' → student scans a fixed QR; 'button' → student taps a
+  /// check-in button. 'qr'/'button' route through the selfCheckin function.
+  final String musculacaoCheckinMode;
+
+  /// Open/close hours that gate musculação self check-in. Empty = no time gate.
+  final OperatingHours operatingHours;
+
   // Monitors (students with additional permissions)
   final List<String> monitorIds;
 
@@ -160,6 +225,8 @@ class AcademySettings {
     this.storeWelcomeMessage,
     this.storeMinOrderAmount,
     this.studentCheckinEnabled = false,
+    this.musculacaoCheckinMode = 'manual',
+    this.operatingHours = OperatingHours.empty,
     this.monitorIds = const [],
     this.updatedAt,
   });
@@ -204,6 +271,11 @@ class AcademySettings {
       storeWelcomeMessage: data['storeWelcomeMessage'],
       storeMinOrderAmount: data['storeMinOrderAmount']?.toDouble(),
       studentCheckinEnabled: data['studentCheckinEnabled'] ?? false,
+      musculacaoCheckinMode:
+          (data['musculacaoCheckinMode'] as String?) ?? 'manual',
+      operatingHours: OperatingHours.fromMap(
+        data['operatingHours'] as Map<String, dynamic>?,
+      ),
       monitorIds: List<String>.from(data['monitorIds'] ?? []),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
@@ -223,6 +295,12 @@ class AcademySettings {
 
   /// Whether any payment provider is enabled (AbacatePay or Asaas)
   bool get isPaymentEnabled => abacatePayEnabled || asaasEnabled;
+
+  /// Whether musculação students record their own attendance (vs. staff doing
+  /// it manually). Both 'qr' and 'button' modes go through the selfCheckin
+  /// Cloud Function.
+  bool get musculacaoSelfCheckin =>
+      musculacaoCheckinMode == 'qr' || musculacaoCheckinMode == 'button';
 }
 
 /// Settings Service - Multi-tenant settings management
@@ -420,6 +498,30 @@ class SettingsService {
   }
 
   // ============================================
+  // Update PIX (set or clear)
+  // ============================================
+  /// Sets the PIX key/type when both are provided, or clears them otherwise.
+  /// Unlike [updatePixInfo] (which can only set), this lets the settings form
+  /// remove a PIX key — previously a cleared/partial PIX was silently ignored.
+  Future<void> updatePix({String? pixKey, PixKeyType? pixKeyType}) async {
+    final key = pixKey ?? '';
+    final type = pixKeyType;
+    if (key.isNotEmpty && type != null) {
+      await _academyRef.update({
+        'pixKey': key,
+        'pixKeyType': type.value,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } else {
+      await _academyRef.update({
+        'pixKey': FieldValue.delete(),
+        'pixKeyType': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+  }
+
+  // ============================================
   // Update Store Settings
   // ============================================
   Future<void> updateStoreSettings({
@@ -449,6 +551,23 @@ class SettingsService {
       'studentCheckinEnabled': enabled,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  // ============================================
+  // Update Musculação Check-in (mode + operating hours)
+  // ============================================
+  Future<void> updateMusculacaoCheckin({
+    String? mode,
+    OperatingHours? operatingHours,
+  }) async {
+    final data = <String, dynamic>{
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    if (mode != null) data['musculacaoCheckinMode'] = mode;
+    if (operatingHours != null) {
+      data['operatingHours'] = operatingHours.toMap();
+    }
+    await _academyRef.update(data);
   }
 
   // ============================================

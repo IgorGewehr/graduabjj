@@ -198,6 +198,27 @@ class NotificationDispatcher {
   // BULK NOTIFICATIONS
   // ============================================
 
+  /// Notify a student that new training content (workout plan or video) was
+  /// shared with them. Used when content is assigned to specific students.
+  Future<AppNotification> notifyNewContent({
+    required String userId,
+    required String title,
+    required bool isVideo,
+    String? actionUrl,
+  }) async {
+    return _notificationService.create(
+      userId: userId,
+      type: NotificationType.system,
+      priority: NotificationPriority.normal,
+      title: isVideo ? 'Novo vídeo disponível' : 'Novo treino disponível',
+      message: isVideo
+          ? 'Seu professor compartilhou um vídeo: $title'
+          : 'Seu professor enviou um treino: $title',
+      actionUrl: actionUrl,
+      actionLabel: 'Abrir',
+      expiresInDays: 30,
+    );
+  }
 }
 
 // ============================================

@@ -1,0 +1,48 @@
+rules_version = '2';
+
+// Firebase Storage rules.
+//
+// NOTE: This file is NEW. Until now the project shipped no storage.rules, so
+// the bucket used the Firebase console defaults. These rules are intentionally
+// auth-scoped (any authenticated user of the academy) to MATCH that existing
+// behavior and avoid breaking current uploads (profile + competition photos).
+// Role-based tightening (staff-only writes via firestore.get()) is a future
+// hardening step. Review/test before deploying with `firebase deploy --only storage`.
+//
+// The `request.resource == null` guard keeps DELETES working (deletes have no
+// incoming file, so a bare size check would otherwise fail).
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Authenticated users can read academy files.
+    match /academies/{academyId}/{allPaths=**} {
+      allow read: if request.auth != null;
+    }
+
+    // Student profile photos (<= 10MB on upload).
+    match /academies/{academyId}/students/{studentId}/{file=**} {
+      allow write: if request.auth != null
+                   && (request.resource == null
+                       || request.resource.size < 10 * 1024 * 1024);
+    }
+
+    // Competition photos (<= 15MB on upload).
+    match /academies/{academyId}/competitions/{competitionId}/{file=**} {
+      allow write: if request.auth != null
+                   && (request.resource == null
+                       || request.resource.size < 15 * 1024 * 1024);
+    }
+
+    // Training content — videos & documents (<= 300MB on upload).
+    match /academies/{academyId}/content/{file=**} {
+      allow write: if request.auth != null
+                   && (request.resource == null
+                       || request.resource.size < 300 * 1024 * 1024);
+    }
+
+    // Deny everything else.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -5,6 +5,14 @@ import 'attendance_service.dart';
 import 'class_service.dart';
 import 'firebase_service.dart';
 
+/// Virtual class identity for schedule-less modalities (musculação). Musculação
+/// has no turma/horário, so attendance is recorded against this shared id.
+/// [AttendanceService.markPresent] stores it as a plain string and never looks
+/// the class up, so no real class document is required. The same string is
+/// mirrored in the `selfCheckin` Cloud Function.
+const String kMusculacaoClassId = 'musculacao';
+const String kMusculacaoClassName = 'Musculação';
+
 /// Helper: Check if current time is within check-in window
 /// Window: 30 min before class START until 1 hour after class END
 bool isInCheckinWindow({

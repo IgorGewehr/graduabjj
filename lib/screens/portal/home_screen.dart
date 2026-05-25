@@ -11,6 +11,8 @@ import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/checkin_service.dart';
+import '../../services/musculacao_checkin_service.dart';
+import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/grade_display.dart';
@@ -75,6 +77,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   );
                 }
                 final primarySport = s.getPrimarySport();
+                // Sports without a graduation system (e.g. musculação, boxe)
+                // have no belt/grade — show the plain header instead.
+                if (sports[primarySport]?.gradeSystem == GradeSystem.none) {
+                  return _WelcomeHeader(userName: s.displayName);
+                }
                 final grade = s.getGrade(primarySport);
                 return _WelcomeHeaderWithBelt(
                   userName: s.displayName,
@@ -463,10 +470,30 @@ class _DynamicCardsSection extends ConsumerWidget {
         (s) => s.valueOrNull?.studentCheckinEnabled ?? false,
       ),
     );
+    // Musculação self check-in — shown to students who practice musculação
+    // when the academy picked the 'button' or 'qr' mode.
+    final musculacaoMode = ref.watch(
+      academySettingsProvider.select(
+        (s) => s.valueOrNull?.musculacaoCheckinMode ?? 'manual',
+      ),
+    );
+    final practicesMusculacao = ref
+            .watch(currentStudentProvider)
+            .valueOrNull
+            ?.getSports()
+            .contains(SportId.musculacao) ??
+        false;
+    final showMusculacaoCheckin = practicesMusculacao &&
+        (musculacaoMode == 'button' || musculacaoMode == 'qr');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (showMusculacaoCheckin) ...[
+          _MusculacaoCheckinCard(qrMode: musculacaoMode == 'qr'),
+          const SizedBox(height: 12),
+        ],
+
         // Next Class Card (Featured)
         nextClassAsync.when(
           data: (data) {
@@ -588,6 +615,141 @@ class _DynamicCardsSection extends ConsumerWidget {
         // Upcoming Events
         _EventsSection(onTap: onTap),
       ],
+    );
+  }
+}
+
+/// Self check-in card for musculação students (button mode). Calls the
+/// selfCheckin Cloud Function; the server enforces operating hours, active
+/// status and one-per-day dedup. Local state flips to "done" after success or
+/// when the server reports today's check-in already exists.
+class _MusculacaoCheckinCard extends ConsumerStatefulWidget {
+  /// When true the academy uses the fixed-QR mode: tapping opens the scanner
+  /// instead of calling the function directly.
+  final bool qrMode;
+
+  const _MusculacaoCheckinCard({required this.qrMode});
+
+  @override
+  ConsumerState<_MusculacaoCheckinCard> createState() =>
+      _MusculacaoCheckinCardState();
+}
+
+class _MusculacaoCheckinCardState
+    extends ConsumerState<_MusculacaoCheckinCard> {
+  bool _loading = false;
+  bool _doneToday = false;
+
+  Future<void> _checkin() async {
+    if (widget.qrMode) {
+      final result = await context.push<bool>('/portal/musculacao-checkin');
+      if (result == true && mounted) setState(() => _doneToday = true);
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      await MusculacaoCheckinService().checkIn();
+      if (!mounted) return;
+      setState(() => _doneToday = true);
+      context.showSuccess('Presenca registrada!');
+    } on MusculacaoCheckinException catch (e) {
+      if (!mounted) return;
+      if (e.message.toLowerCase().contains('registrou presen')) {
+        setState(() => _doneToday = true);
+      }
+      context.showError(e.message);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final done = _doneToday;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: done
+              ? [AppTheme.success, AppTheme.success.withValues(alpha: 0.85)]
+              : [AppTheme.primary, AppTheme.primary.withValues(alpha: 0.85)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                done ? Icons.check_circle : Icons.fitness_center,
+                color: Colors.white,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                done ? 'Presenca de hoje registrada' : 'Treino de musculacao',
+                style: AppTheme.titleMedium.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            done
+                ? 'Bom treino! Volte amanha para registrar de novo.'
+                : widget.qrMode
+                    ? 'Escaneie o QR da recepcao para registrar presenca.'
+                    : 'Chegou na academia? Registre sua presenca.',
+            style: AppTheme.bodyMedium.copyWith(
+              color: Colors.white.withValues(alpha: 0.9),
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: (_loading || done) ? null : _checkin,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: done ? AppTheme.success : AppTheme.primary,
+                disabledBackgroundColor: Colors.white.withValues(alpha: 0.7),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              icon: _loading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      done
+                          ? Icons.check
+                          : widget.qrMode
+                              ? Icons.qr_code_scanner
+                              : Icons.location_on,
+                      size: 18,
+                    ),
+              label: Text(
+                done
+                    ? 'Check-in feito'
+                    : widget.qrMode
+                        ? 'Escanear QR'
+                        : 'Cheguei',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1144,6 +1306,11 @@ class _GraduationProgressCard extends ConsumerWidget {
     if (settings == null) return const SizedBox.shrink();
     if (!settings.autoGraduationEnabled) return const SizedBox.shrink();
     if (!settings.graduationProgressVisibleToStudents) {
+      return const SizedBox.shrink();
+    }
+    // Sports without a graduation system (e.g. musculação) never graduate.
+    final primarySport = student.getPrimarySport() as SportId;
+    if (sports[primarySport]?.gradeSystem == GradeSystem.none) {
       return const SizedBox.shrink();
     }
 

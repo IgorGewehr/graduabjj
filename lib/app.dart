@@ -25,6 +25,12 @@ import 'screens/portal/competitions_screen.dart';
 import 'screens/portal/competition_detail_screen.dart';
 import 'screens/portal/schedule_screen.dart';
 import 'screens/portal/qr_scan_screen.dart';
+import 'screens/portal/musculacao_qr_scan_screen.dart';
+import 'screens/admin/musculacao_admin_screen.dart';
+import 'screens/portal/workouts_screen.dart';
+import 'screens/admin/workout_plans_screen.dart';
+import 'screens/portal/videos_screen.dart';
+import 'screens/admin/training_videos_screen.dart';
 import 'screens/portal/timeline_screen.dart';
 import 'screens/portal/financial_screen.dart';
 import 'screens/portal/notifications_screen.dart';
@@ -659,6 +665,24 @@ final routerProvider = Provider<GoRouter>((ref) {
               child: const AddAcademyScreen(),
             ),
           ),
+          // Workout plans (structured training)
+          GoRoute(
+            path: '/portal/treinos',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const WorkoutsScreen(),
+            ),
+          ),
+          // Training videos
+          GoRoute(
+            path: '/portal/videos',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const VideosScreen(),
+            ),
+          ),
           // Monitor routes (guarded — only academy staff or listed monitors).
           GoRoute(
             path: '/portal/chamada',
@@ -718,6 +742,16 @@ final routerProvider = Provider<GoRouter>((ref) {
           context: context,
           state: state,
           child: const QrScanScreen(),
+        ),
+      ),
+
+      // Musculação self check-in scanner (fixed QR mode, fullscreen camera)
+      GoRoute(
+        path: '/portal/musculacao-checkin',
+        pageBuilder: (context, state) => _buildPageWithPushTransition(
+          context: context,
+          state: state,
+          child: const MusculacaoQrScanScreen(),
         ),
       ),
 
@@ -796,6 +830,30 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const AdminQrSessionScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/musculacao',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const MusculacaoAdminScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/treinos',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const WorkoutPlansScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/videos',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const TrainingVideosScreen(),
             ),
           ),
           GoRoute(

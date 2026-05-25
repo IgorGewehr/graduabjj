@@ -105,6 +105,18 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       path: '/portal/linha-do-tempo',
       section: 'Treinos',
     ),
+    _PortalMenuEntry(
+      label: 'Treinos',
+      icon: Icons.fitness_center,
+      path: '/portal/treinos',
+      section: 'Treinos',
+    ),
+    _PortalMenuEntry(
+      label: 'Vídeos',
+      icon: Icons.play_circle_outline,
+      path: '/portal/videos',
+      section: 'Treinos',
+    ),
     // Conquistas
     _PortalMenuEntry(
       label: 'Competicoes',

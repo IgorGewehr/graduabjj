@@ -13,7 +13,8 @@ enum SportId {
   judo,
   kickboxing,
   boxing,
-  lutalivre;
+  lutalivre,
+  musculacao;
 
   String get value => name;
 
@@ -249,6 +250,18 @@ const Map<SportId, SportDefinition> sports = {
     adultGrades: _lutalivreGrades,
     icon: Icons.sports_kabaddi_outlined,
   ),
+  // Musculação has no graduation system (GradeSystem.none) and no class
+  // schedule — check-in and display are handled differently from martial arts.
+  SportId.musculacao: SportDefinition(
+    id: SportId.musculacao,
+    label: 'Musculação',
+    labelShort: 'MUSC',
+    gradeSystem: GradeSystem.none,
+    supportsKids: false,
+    supportsStripes: false,
+    adultGrades: [],
+    icon: Icons.fitness_center,
+  ),
 };
 
 /// Ordered list for dropdowns/selectors
@@ -260,6 +273,7 @@ const List<SportId> sportOptions = [
   SportId.kickboxing,
   SportId.boxing,
   SportId.lutalivre,
+  SportId.musculacao,
 ];
 
 // ============================================
@@ -324,4 +338,5 @@ const Map<SportId, Color> sportChipColors = {
   SportId.kickboxing: Color(0xFFEA580C),
   SportId.boxing: Color(0xFF171717),
   SportId.lutalivre: Color(0xFF0891B2),
+  SportId.musculacao: Color(0xFF475569),
 };
