@@ -100,6 +100,11 @@ class StudentImportRow {
   bool duplicate;
   String? duplicateReason;
 
+  /// Whether this row is checked for import. Defaults: valid non-duplicate rows
+  /// start selected; duplicates and invalid rows start unselected. The user can
+  /// toggle any importable row in the preview.
+  bool selected;
+
   StudentImportRow({
     required this.line,
     required this.values,
@@ -107,6 +112,7 @@ class StudentImportRow {
     required this.warnings,
     this.duplicate = false,
     this.duplicateReason,
+    this.selected = true,
   });
 
   bool get hasError => errors.isNotEmpty;
@@ -273,6 +279,7 @@ class StudentImportService {
         values: values,
         errors: errors,
         warnings: warnings,
+        selected: errors.isEmpty,
       ));
     }
     return rows;
@@ -318,6 +325,8 @@ class StudentImportService {
       }
       row.duplicate = reason != null;
       row.duplicateReason = reason;
+      // Default selection: include valid rows, leave duplicates unchecked.
+      row.selected = reason == null;
 
       if (c.length == 11) seenCpf.add(c);
       if (e.isNotEmpty) seenEmail.add(e);
@@ -338,7 +347,6 @@ class StudentImportService {
   Future<ImportReport> importStudents({
     required BJJClass turma,
     required List<StudentImportRow> rows,
-    required bool importDuplicates,
     String? createdBy,
     void Function(int done, int total)? onProgress,
   }) async {
@@ -364,9 +372,8 @@ class StudentImportService {
     final grades = getGradesForSport(sport, category: category.value);
     final defaultBelt = grades.isNotEmpty ? grades.first.id : 'white';
 
-    final eligible = rows
-        .where((r) => !r.hasError && (importDuplicates || !r.duplicate))
-        .toList();
+    // Only rows the user kept checked (and that have no blocking error).
+    final eligible = rows.where((r) => !r.hasError && r.selected).toList();
 
     // Respect the class capacity: only fill the remaining slots. Overflow rows
     // are dropped (not created) and reported as "didn't fit".
@@ -410,9 +417,7 @@ class StudentImportService {
     }
 
     final invalid = rows.where((r) => r.hasError).length;
-    final skipped = importDuplicates
-        ? 0
-        : rows.where((r) => !r.hasError && r.duplicate).length;
+    final skipped = rows.where((r) => !r.hasError && !r.selected).length;
 
     return ImportReport(
       created: created,

@@ -9,6 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
+import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
@@ -638,7 +639,7 @@ class _AdminStudentDetailScreenState
             if (_student!.email != null)
               _InfoRow(label: 'E-mail', value: _student!.email!),
             if (_student!.phone != null)
-              _InfoRow(label: 'Telefone', value: _student!.phone!),
+              _InfoRow(label: 'Telefone', value: formatPhone(_student!.phone)),
             if (_student!.birthDate != null)
               _InfoRow(
                 label: 'Nascimento',

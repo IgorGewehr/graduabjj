@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -404,7 +405,7 @@ class _MonitorStudentDetailScreenState
             if (_student!.email != null)
               _InfoRow(label: 'Email', value: _student!.email!),
             if (_student!.phone != null)
-              _InfoRow(label: 'Telefone', value: _student!.phone!),
+              _InfoRow(label: 'Telefone', value: formatPhone(_student!.phone)),
           ]),
 
           // Guardian Info (for kids)
@@ -416,7 +417,7 @@ class _MonitorStudentDetailScreenState
             _buildInfoCard([
               _InfoRow(label: 'Nome', value: _student!.guardianName!),
               if (_student!.guardianPhone != null)
-                _InfoRow(label: 'Telefone', value: _student!.guardianPhone!),
+                _InfoRow(label: 'Telefone', value: formatPhone(_student!.guardianPhone)),
               if (_student!.guardianEmail != null)
                 _InfoRow(label: 'Email', value: _student!.guardianEmail!),
             ]),

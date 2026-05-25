@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -8,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
+import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../models/user.dart';
@@ -219,7 +221,7 @@ class ProfileScreen extends ConsumerWidget {
   String _getPersonalDataSummary(Student student) {
     final parts = <String>[];
     if (student.phone != null && student.phone!.isNotEmpty)
-      parts.add(student.phone!);
+      parts.add(formatPhone(student.phone));
     if (student.email != null && student.email!.isNotEmpty)
       parts.add(student.email!);
     if (student.nickname != null && student.nickname!.isNotEmpty)
@@ -899,9 +901,11 @@ class _EditPersonalDataSheetState extends State<_EditPersonalDataSheet> {
   void initState() {
     super.initState();
     _nicknameController = TextEditingController(text: widget.student.nickname);
-    _phoneController = TextEditingController(text: widget.student.phone);
+    _phoneController =
+        TextEditingController(text: formatPhone(widget.student.phone));
     _emailController = TextEditingController(text: widget.student.email);
-    _cpfController = TextEditingController(text: widget.student.cpf);
+    _cpfController =
+        TextEditingController(text: formatCpfCnpj(widget.student.cpf));
     _rgController = TextEditingController(text: widget.student.rg);
     _weightController = TextEditingController(
       text: widget.student.weight?.toString(),
@@ -929,13 +933,13 @@ class _EditPersonalDataSheetState extends State<_EditPersonalDataSheet> {
             : _nicknameController.text.trim(),
         'phone': _phoneController.text.trim().isEmpty
             ? null
-            : _phoneController.text.trim(),
+            : onlyDigits(_phoneController.text),
         'email': _emailController.text.trim().isEmpty
             ? null
             : _emailController.text.trim(),
         'cpf': _cpfController.text.trim().isEmpty
             ? null
-            : _cpfController.text.trim(),
+            : onlyDigits(_cpfController.text),
         'rg': _rgController.text.trim().isEmpty
             ? null
             : _rgController.text.trim(),
@@ -977,6 +981,7 @@ class _EditPersonalDataSheetState extends State<_EditPersonalDataSheet> {
           controller: _phoneController,
           hint: '(00) 00000-0000',
           keyboardType: TextInputType.phone,
+          inputFormatters: [PhoneInputFormatter()],
         ),
         _SheetTextField(
           label: 'Email',
@@ -989,6 +994,7 @@ class _EditPersonalDataSheetState extends State<_EditPersonalDataSheet> {
           controller: _cpfController,
           hint: '000.000.000-00',
           keyboardType: TextInputType.number,
+          inputFormatters: [CpfCnpjInputFormatter()],
         ),
         _SheetTextField(
           label: 'RG',
@@ -1178,7 +1184,7 @@ class _EditHealthAndEmergencySheetState
       text: widget.student.emergencyContact?.name,
     );
     _emergencyPhoneController = TextEditingController(
-      text: widget.student.emergencyContact?.phone,
+      text: formatPhone(widget.student.emergencyContact?.phone),
     );
     _emergencyRelationshipController = TextEditingController(
       text: widget.student.emergencyContact?.relationship,
@@ -1221,7 +1227,7 @@ class _EditHealthAndEmergencySheetState
         'emergencyContact': hasEmergencyData
             ? {
                 'name': _emergencyNameController.text.trim(),
-                'phone': _emergencyPhoneController.text.trim(),
+                'phone': onlyDigits(_emergencyPhoneController.text),
                 'relationship': _emergencyRelationshipController.text.trim(),
               }
             : null,
@@ -1294,6 +1300,7 @@ class _EditHealthAndEmergencySheetState
           controller: _emergencyPhoneController,
           hint: '(00) 00000-0000',
           keyboardType: TextInputType.phone,
+          inputFormatters: [PhoneInputFormatter()],
         ),
         _SheetTextField(
           label: 'Parentesco',
@@ -1425,6 +1432,7 @@ class _SheetTextField extends StatelessWidget {
   final String hint;
   final int maxLines;
   final TextInputType? keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
 
   const _SheetTextField({
     required this.label,
@@ -1432,6 +1440,7 @@ class _SheetTextField extends StatelessWidget {
     required this.hint,
     this.maxLines = 1,
     this.keyboardType,
+    this.inputFormatters,
   });
 
   @override
@@ -1450,6 +1459,7 @@ class _SheetTextField extends StatelessWidget {
             controller: controller,
             maxLines: maxLines,
             keyboardType: keyboardType,
+            inputFormatters: inputFormatters,
             style: AppTheme.bodyMedium,
             decoration: InputDecoration(
               hintText: hint,

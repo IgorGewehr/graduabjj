@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
@@ -38,7 +39,6 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
   List<StudentImportRow> _rows = [];
   List<Student> _existing = [];
 
-  bool _importDuplicates = false;
   double _progress = 0;
   ImportReport? _report;
 
@@ -103,9 +103,8 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
   bool get _nameMapped =>
       _mapping.values.contains(StudentImportField.fullName);
 
-  int get _validCount => _rows
-      .where((r) => !r.hasError && (_importDuplicates || !r.duplicate))
-      .length;
+  int get _selectedCount =>
+      _rows.where((r) => !r.hasError && r.selected).length;
   int get _dupCount => _rows.where((r) => !r.hasError && r.duplicate).length;
   int get _invalidCount => _rows.where((r) => r.hasError).length;
 
@@ -116,11 +115,19 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
     return (max - _turma!.studentIds.length).clamp(0, 1 << 30);
   }
 
-  /// How many eligible rows won't fit in the class.
+  /// How many selected rows won't fit in the class.
   int get _overflow {
     final avail = _availableSlots;
     if (avail == null) return 0;
-    return (_validCount - avail).clamp(0, _validCount);
+    return (_selectedCount - avail).clamp(0, _selectedCount);
+  }
+
+  void _setAllSelected(bool value) {
+    setState(() {
+      for (final r in _rows) {
+        if (!r.hasError) r.selected = value;
+      }
+    });
   }
 
   Future<void> _runImport() async {
@@ -135,7 +142,6 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
       final report = await _service.importStudents(
         turma: _turma!,
         rows: _rows,
-        importDuplicates: _importDuplicates,
         createdBy: user?.id,
         onProgress: (done, total) {
           if (mounted) {
@@ -162,7 +168,7 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
           title: const Text('Turma sem vagas suficientes'),
           content: Text(
             'A turma "${_turma!.name}" tem $avail vaga(s) livre(s) e voce esta '
-            'importando $_validCount aluno(s). $_overflow nao vao caber e serao '
+            'importando $_selectedCount aluno(s). $_overflow nao vao caber e serao '
             'descartados (nao serao criados). Deseja continuar?',
           ),
           actions: [
@@ -343,7 +349,7 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              _statChip('${_validCount} a importar', AppTheme.success),
+              _statChip('$_selectedCount selecionados', AppTheme.success),
               const SizedBox(width: 8),
               _statChip('$_dupCount duplicados', AppTheme.warning),
               const SizedBox(width: 8),
@@ -376,23 +382,28 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
               ],
             ),
           ),
-        if (_dupCount > 0)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Importar duplicados mesmo assim'),
-              subtitle: Text(
-                _importDuplicates
-                    ? 'Os $_dupCount duplicados SERAO criados.'
-                    : 'Os $_dupCount duplicados serao descartados.',
-                style: AppTheme.labelSmall
-                    .copyWith(color: AppTheme.textSecondary),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Marque quem deve entrar. Duplicados/invalidos ja vem desmarcados.',
+                  style: AppTheme.labelSmall
+                      .copyWith(color: AppTheme.textSecondary),
+                ),
               ),
-              value: _importDuplicates,
-              onChanged: (v) => setState(() => _importDuplicates = v),
-            ),
+              TextButton(
+                onPressed: () => _setAllSelected(true),
+                child: const Text('Todos'),
+              ),
+              TextButton(
+                onPressed: () => _setAllSelected(false),
+                child: const Text('Limpar'),
+              ),
+            ],
           ),
+        ),
         const Divider(height: 1),
         Expanded(
           child: ListView.separated(
@@ -404,8 +415,8 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
         ),
         _buildNavBar(
           onBack: () => setState(() => _step = 1),
-          onNext: _validCount > 0 ? _confirmAndImport : null,
-          nextLabel: 'Importar $_validCount aluno(s)',
+          onNext: _selectedCount > 0 ? _confirmAndImport : null,
+          nextLabel: 'Importar $_selectedCount aluno(s)',
         ),
       ],
     );
@@ -418,25 +429,39 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
             ? (Icons.content_copy, AppTheme.warning, row.duplicateReason ?? 'Duplicado')
             : (Icons.check_circle_outline, AppTheme.success,
                 row.warnings.isEmpty ? 'OK' : row.warnings.join(', '));
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, color: color, size: 18),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                row.name.isEmpty ? '(sem nome) · linha ${row.line}' : row.name,
-                style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
-              ),
-              Text(status,
-                  style: AppTheme.labelSmall.copyWith(color: color)),
-            ],
+    final selectable = !row.hasError;
+    return InkWell(
+      onTap: selectable
+          ? () => setState(() => row.selected = !row.selected)
+          : null,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Checkbox(
+            value: selectable && row.selected,
+            onChanged: selectable
+                ? (v) => setState(() => row.selected = v ?? false)
+                : null,
           ),
-        ),
-      ],
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  row.name.isEmpty
+                      ? '(sem nome) · linha ${row.line}'
+                      : row.name,
+                  style:
+                      AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+                ),
+                Text(status, style: AppTheme.labelSmall.copyWith(color: color)),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -503,7 +528,7 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
             textAlign: TextAlign.center),
         const SizedBox(height: 16),
         _resultLine('Criados', r.created, AppTheme.success),
-        _resultLine('Duplicados descartados', r.skipped, AppTheme.warning),
+        _resultLine('Nao selecionados', r.skipped, AppTheme.warning),
         _resultLine('Nao couberam (turma cheia)', r.notFitted, AppTheme.warning),
         _resultLine('Invalidos (sem nome)', r.invalid, AppTheme.error),
         _resultLine('Falhas', r.failed, AppTheme.error),
@@ -518,7 +543,7 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
         ],
         const SizedBox(height: 24),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
+          onPressed: () => context.go('/admin/alunos'),
           child: const Text('Concluir'),
         ),
       ],

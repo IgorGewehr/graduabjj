@@ -11,9 +11,11 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
+import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
@@ -203,7 +205,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _settings = settings;
           _nameController.text = settings.name;
           _sloganController.text = settings.portalSlogan ?? '';
-          _cnpjController.text = settings.cnpj ?? '';
+          _cnpjController.text = formatCpfCnpj(settings.cnpj);
           _emailController.text = settings.email ?? '';
           _phoneController.text = settings.phone ?? '';
           _addressController.text = settings.address ?? '';
@@ -340,7 +342,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       final futures = <Future<void>>[
         service.updateBasicInfo(
           name: _nameController.text,
-          cnpj: _cnpjController.text.isEmpty ? null : _cnpjController.text,
+          cnpj: _cnpjController.text.isEmpty ? null : onlyDigits(_cnpjController.text),
           email: _emailController.text.isEmpty ? null : _emailController.text,
           phone: _phoneController.text.isEmpty ? null : _phoneController.text,
           address:
@@ -916,6 +918,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                   label: 'CPF/CNPJ',
                   hint: 'CPF do responsavel ou CNPJ da academia',
                   icon: LucideIcons.fileText,
+                  inputFormatters: [CpfCnpjInputFormatter()],
                   keyboardType: TextInputType.number,
                 ),
               ],
@@ -1949,6 +1952,7 @@ class _ModernTextField extends StatelessWidget {
   final int maxLines;
   final bool readOnly;
   final VoidCallback? onTap;
+  final List<TextInputFormatter>? inputFormatters;
 
   const _ModernTextField({
     required this.controller,
@@ -1959,6 +1963,7 @@ class _ModernTextField extends StatelessWidget {
     this.maxLines = 1,
     this.readOnly = false,
     this.onTap,
+    this.inputFormatters,
   });
 
   @override
@@ -1986,6 +1991,7 @@ class _ModernTextField extends StatelessWidget {
             maxLines: maxLines,
             readOnly: readOnly,
             onTap: onTap,
+            inputFormatters: inputFormatters,
             decoration: InputDecoration(
               hintText: hint,
               hintStyle: AppTheme.bodyMedium.copyWith(

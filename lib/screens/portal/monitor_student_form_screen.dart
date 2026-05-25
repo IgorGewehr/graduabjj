@@ -6,6 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
+import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -94,12 +95,13 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
     _fullNameController.text = student.fullName;
     _nicknameController.text = student.nickname ?? '';
     _emailController.text = student.email ?? '';
-    _phoneController.text = student.phone ?? '';
+    _phoneController.text = formatPhone(student.phone);
     _emergencyContactNameController.text = student.emergencyContact?.name ?? '';
-    _emergencyContactPhoneController.text = student.emergencyContact?.phone ?? '';
+    _emergencyContactPhoneController.text =
+        formatPhone(student.emergencyContact?.phone);
     _notesController.text = student.healthNotes ?? '';
     _guardianNameController.text = student.guardianName ?? '';
-    _guardianPhoneController.text = student.guardianPhone ?? '';
+    _guardianPhoneController.text = formatPhone(student.guardianPhone);
     _guardianEmailController.text = student.guardianEmail ?? '';
     _birthDate = student.birthDate;
     _startDate = student.startDate;
@@ -127,7 +129,9 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
         'fullName': _fullNameController.text.trim(),
         'nickname': _nicknameController.text.trim().isEmpty ? null : _nicknameController.text.trim(),
         'email': _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
-        'phone': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
+        'phone': _phoneController.text.trim().isEmpty
+            ? null
+            : onlyDigits(_phoneController.text),
         'birthDate': _birthDate,
         'category': _category!.name,
         'startDate': _startDate,
@@ -144,7 +148,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
             : _guardianNameController.text.trim();
         studentData['guardianPhone'] = _guardianPhoneController.text.trim().isEmpty
             ? null
-            : _guardianPhoneController.text.trim();
+            : onlyDigits(_guardianPhoneController.text);
         studentData['guardianEmail'] = _guardianEmailController.text.trim().isEmpty
             ? null
             : _guardianEmailController.text.trim();
@@ -154,7 +158,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
       if (_emergencyContactNameController.text.trim().isNotEmpty) {
         studentData['emergencyContact'] = {
           'name': _emergencyContactNameController.text.trim(),
-          'phone': _emergencyContactPhoneController.text.trim(),
+          'phone': onlyDigits(_emergencyContactPhoneController.text),
         };
       }
 
@@ -374,6 +378,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 keyboardType: TextInputType.phone,
+                inputFormatters: [PhoneInputFormatter()],
               ),
             ),
           ],
@@ -399,6 +404,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 keyboardType: TextInputType.phone,
+                inputFormatters: [PhoneInputFormatter()],
               ),
             ),
           ],
@@ -430,6 +436,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 keyboardType: TextInputType.phone,
+                inputFormatters: [PhoneInputFormatter()],
               ),
             ),
             const SizedBox(width: 16),

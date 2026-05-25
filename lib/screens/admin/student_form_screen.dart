@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/formatters.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -173,14 +174,15 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     _fullNameController.text = student.fullName;
     _nicknameController.text = student.nickname ?? '';
     _emailController.text = student.email ?? '';
-    _phoneController.text = student.phone ?? '';
-    _cpfController.text = student.cpf ?? '';
+    _phoneController.text = formatPhone(student.phone);
+    _cpfController.text = formatCpfCnpj(student.cpf);
     _emergencyContactNameController.text = student.emergencyContact?.name ?? '';
-    _emergencyContactPhoneController.text = student.emergencyContact?.phone ?? '';
+    _emergencyContactPhoneController.text =
+        formatPhone(student.emergencyContact?.phone);
     _guardianNameController.text = student.guardian?.name ?? '';
-    _guardianPhoneController.text = student.guardian?.phone ?? '';
+    _guardianPhoneController.text = formatPhone(student.guardian?.phone);
     _guardianEmailController.text = student.guardian?.email ?? '';
-    _guardianCpfController.text = student.guardian?.cpf ?? '';
+    _guardianCpfController.text = formatCpfCnpj(student.guardian?.cpf);
     _guardianRelationship = student.guardian?.relationship ?? '';
     _tuitionValueController.text = student.tuitionValue.toStringAsFixed(2).replaceAll('.', ',');
     _tuitionDayController.text = student.tuitionDay.toString();
@@ -1374,8 +1376,12 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         'fullName': _fullNameController.text.trim(),
         'nickname': _nicknameController.text.trim().isEmpty ? null : _nicknameController.text.trim(),
         'email': _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
-        'phone': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
-        'cpf': _cpfController.text.trim().isEmpty ? null : _cpfController.text.trim(),
+        'phone': _phoneController.text.trim().isEmpty
+            ? null
+            : onlyDigits(_phoneController.text),
+        'cpf': _cpfController.text.trim().isEmpty
+            ? null
+            : onlyDigits(_cpfController.text),
         'birthDate': _birthDate != null ? Timestamp.fromDate(_birthDate!) : null,
         'category': _category.value,
         'startDate': Timestamp.fromDate(_startDate),
@@ -1402,7 +1408,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
       if (_emergencyContactNameController.text.isNotEmpty) {
         data['emergencyContact'] = {
           'name': _emergencyContactNameController.text.trim(),
-          'phone': _emergencyContactPhoneController.text.trim(),
+          'phone': onlyDigits(_emergencyContactPhoneController.text),
           'relationship': 'Emergência',
         };
       }
@@ -1411,9 +1417,9 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
       if (_category == StudentCategory.kids && _guardianNameController.text.isNotEmpty) {
         data['guardian'] = {
           'name': _guardianNameController.text.trim(),
-          'phone': _guardianPhoneController.text.trim(),
+          'phone': onlyDigits(_guardianPhoneController.text),
           'email': _guardianEmailController.text.trim().isEmpty ? null : _guardianEmailController.text.trim(),
-          'cpf': _guardianCpfController.text.trim().isEmpty ? null : _guardianCpfController.text.trim(),
+          'cpf': _guardianCpfController.text.trim().isEmpty ? null : onlyDigits(_guardianCpfController.text),
           'relationship': _guardianRelationship.isEmpty ? 'Outro' : _guardianRelationship,
         };
       }
