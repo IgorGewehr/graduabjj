@@ -1,7 +1,12 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:intl/intl.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
@@ -224,6 +229,11 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                 description: '${_students.length} alunos cadastrados',
                 actions: [
                   IconButton(
+                    onPressed: _exportStudents,
+                    icon: const Icon(Icons.download, size: 20),
+                    tooltip: 'Exportar CSV',
+                  ),
+                  IconButton(
                     onPressed: _loadStudents,
                     icon: const Icon(LucideIcons.refreshCw, size: 20),
                     tooltip: 'Atualizar',
@@ -259,6 +269,33 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         child: const Icon(LucideIcons.userPlus, color: Colors.white),
       ),
     );
+  }
+
+  Future<void> _exportStudents() async {
+    if (_students.isEmpty) {
+      context.showError('Nenhum aluno para exportar.');
+      return;
+    }
+    try {
+      final csv = StudentExportService(FirebaseService.academyId)
+          .buildCsv(_students);
+      final bytes = Uint8List.fromList(utf8.encode(csv));
+      final fileName =
+          'alunos_${DateFormat('yyyyMMdd').format(DateTime.now())}.csv';
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Exportar alunos',
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+        bytes: bytes,
+      );
+      if (!mounted) return;
+      if (path != null) {
+        context.showSuccess('${_students.length} alunos exportados.');
+      }
+    } catch (_) {
+      if (mounted) context.showError('Erro ao exportar.');
+    }
   }
 
   Widget _buildHeader() {

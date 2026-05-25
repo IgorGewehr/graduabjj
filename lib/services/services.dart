@@ -30,3 +30,5 @@ export 'financial_report_service.dart';
 export 'event_service.dart';
 export 'workout_plan_service.dart';
 export 'training_video_service.dart';
+export 'student_import_service.dart';
+export 'student_export_service.dart';

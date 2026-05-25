@@ -8,8 +8,6 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'core/theme.dart';
 import 'core/constants.dart';
 import 'providers/auth_provider.dart';
-import 'providers/subscription_provider.dart';
-import 'screens/paywall_screen.dart';
 import 'services/push_notification_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
@@ -31,6 +29,7 @@ import 'screens/portal/workouts_screen.dart';
 import 'screens/admin/workout_plans_screen.dart';
 import 'screens/portal/videos_screen.dart';
 import 'screens/admin/training_videos_screen.dart';
+import 'screens/admin/import_students_screen.dart';
 import 'screens/portal/timeline_screen.dart';
 import 'screens/portal/financial_screen.dart';
 import 'screens/portal/notifications_screen.dart';
@@ -857,6 +856,14 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
+            path: '/admin/importar-alunos',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const ImportStudentsScreen(),
+            ),
+          ),
+          GoRoute(
             path: '/admin/turmas',
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,
@@ -1027,11 +1034,6 @@ class _MonitorGuard extends ConsumerWidget {
       });
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-
-    // Monitor/staff screens are gated by subscription — only regular student
-    // portal remains free regardless of plan.
-    final hasAccess = ref.watch(hasSubscriptionAccessProvider);
-    if (!hasAccess) return const PaywallScreen();
 
     return child;
   }
