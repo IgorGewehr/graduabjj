@@ -511,6 +511,14 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Events (published content — readable by all academy members)
+      // ============================================
+      match /events/{eventId} {
+        allow read: if belongsToAcademy(academyId);
+        allow write: if isAcademyAdmin(academyId);
+      }
+
+      // ============================================
       // Competitions Subcollection
       // ============================================
       match /competitions/{competitionId} {

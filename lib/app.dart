@@ -18,6 +18,7 @@ import 'screens/auth/instructor_code_screen.dart';
 import 'screens/auth/create_academy_screen.dart';
 import 'screens/portal/portal_shell.dart';
 import 'screens/portal/home_screen.dart';
+import 'screens/portal/event_detail_screen.dart';
 import 'screens/portal/profile_screen.dart';
 import 'screens/portal/attendance_screen.dart';
 import 'screens/portal/competitions_screen.dart';
@@ -571,6 +572,16 @@ final routerProvider = Provider<GoRouter>((ref) {
               state: state,
               child: CompetitionDetailScreen(
                 competitionId: state.pathParameters['id']!,
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/eventos/:id',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: EventDetailScreen(
+                eventId: state.pathParameters['id']!,
               ),
             ),
           ),

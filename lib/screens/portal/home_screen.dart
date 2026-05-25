@@ -6,10 +6,13 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
+import '../../models/academy_event.dart';
+import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/checkin_service.dart';
 import '../../core/sports.dart';
+import '../../widgets/cached_image.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
@@ -581,6 +584,9 @@ class _DynamicCardsSection extends ConsumerWidget {
             onTap: () => onTap('/portal/competicoes'),
           ),
         ),
+
+        // Upcoming Events
+        _EventsSection(onTap: onTap),
       ],
     );
   }
@@ -1234,6 +1240,178 @@ class _GraduationProgressCard extends ConsumerWidget {
                   ),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================
+// Events Section
+// ============================================
+
+class _EventsSection extends ConsumerWidget {
+  final void Function(String path) onTap;
+
+  const _EventsSection({required this.onTap});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final eventsAsync = ref.watch(upcomingEventsProvider);
+
+    return eventsAsync.when(
+      data: (events) {
+        if (events.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                const Icon(LucideIcons.calendar, size: 16, color: AppTheme.textSecondary),
+                const SizedBox(width: 6),
+                const Text(
+                  'Eventos',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                    letterSpacing: 0.1,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ...events.map((e) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _EventCard(
+                    event: e,
+                    onTap: () => onTap('/portal/eventos/${e.id}'),
+                  ),
+                )),
+          ],
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _EventCard extends StatelessWidget {
+  final AcademyEvent event;
+  final VoidCallback onTap;
+
+  const _EventCard({required this.event, required this.onTap});
+
+  String _formatDate(DateTime d) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final eventDay = DateTime(d.year, d.month, d.day);
+    final diff = eventDay.difference(today).inDays;
+
+    if (diff == 0) return 'Hoje, ${DateFormat('HH:mm').format(d)}';
+    if (diff == 1) return 'Amanhã, ${DateFormat('HH:mm').format(d)}';
+    if (diff < 7) return DateFormat("EEEE, HH:mm", 'pt_BR').format(d);
+    return DateFormat("d 'de' MMM", 'pt_BR').format(d);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasCover = event.coverUrl != null && event.coverUrl!.isNotEmpty;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Row(
+          children: [
+            // Cover thumbnail
+            ClipRRect(
+              borderRadius: const BorderRadius.horizontal(left: Radius.circular(13)),
+              child: hasCover
+                  ? AppCachedImage(
+                      imageUrl: event.coverUrl!,
+                      width: 88,
+                      height: 80,
+                      fit: BoxFit.cover,
+                    )
+                  : Container(
+                      width: 88,
+                      height: 80,
+                      color: AppTheme.border,
+                      child: const Icon(
+                        LucideIcons.calendarDays,
+                        size: 28,
+                        color: AppTheme.textDisabled,
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (event.isOngoing)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: AppTheme.successLight,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          'Agora',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.success,
+                          ),
+                        ),
+                      ),
+                    Text(
+                      event.title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _formatDate(event.startDate),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    if (event.location != null && event.location!.isNotEmpty)
+                      Text(
+                        event.location!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textDisabled,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(right: 12),
+              child: Icon(LucideIcons.chevronRight, size: 16, color: AppTheme.textDisabled),
             ),
           ],
         ),

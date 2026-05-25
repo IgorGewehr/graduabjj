@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/academy_event.dart';
 import '../services/services.dart';
 import 'auth_provider.dart';
 import 'student_provider.dart';
@@ -303,5 +304,16 @@ final linkCodeServiceProvider = Provider<LinkCodeService?>((ref) {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;
   if (currentUser?.academyId == null) return null;
   return LinkCodeService(currentUser!.academyId!);
+});
+
+// ============================================
+// Events Providers
+// ============================================
+
+/// Upcoming published events for the student portal home screen.
+final upcomingEventsProvider = FutureProvider<List<AcademyEvent>>((ref) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+  if (currentUser?.academyId == null) return [];
+  return EventService(currentUser!.academyId!).listUpcoming(limit: 5);
 });
 

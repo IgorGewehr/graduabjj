@@ -26,3 +26,4 @@ export 'cross_academy_service.dart';
 export 'billing_reminder_service.dart';
 export 'retention_service.dart';
 export 'financial_report_service.dart';
+export 'event_service.dart';
