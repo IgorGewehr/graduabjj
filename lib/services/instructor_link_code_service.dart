@@ -28,6 +28,8 @@ const List<GrantablePermission> kGrantableExtraPermissions = [
       'Acessar dashboards e métricas'),
   GrantablePermission('competitions:create', 'Criar competições',
       'Cadastrar torneios e abrir inscrições'),
+  GrantablePermission('graduation:manage', 'Graduar alunos',
+      'Promover faixas e registrar graduações'),
 ];
 
 /// One-shot 8-char code that, when redeemed, links a user to an academy as

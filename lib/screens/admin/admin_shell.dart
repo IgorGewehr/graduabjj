@@ -141,6 +141,7 @@ class AdminSidebar extends ConsumerWidget {
     // extraPermissions entry granted at promotion time.
     final canSeeFinancial = user?.hasPermission('financial:view') == true;
     final canSeeReports = user?.hasPermission('reports:view') == true;
+    final canManageGraduation = user?.hasPermission('graduation:manage') == true;
     final isAdminUser = user?.isAdmin == true;
 
     return Container(
@@ -236,7 +237,7 @@ class AdminSidebar extends ConsumerWidget {
                   path: '/admin/turmas',
                   currentPath: currentPath,
                 ),
-                if (isGraduationEnabled)
+                if (isGraduationEnabled && canManageGraduation)
                   _NavItem(
                     icon: Icons.military_tech_outlined,
                     activeIcon: Icons.military_tech,
@@ -478,6 +479,7 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       path: '/admin/graduacao',
       section: 'Gestão',
       requiresGraduation: true,
+      requiresPermission: 'graduation:manage',
     ),
     _AdminMenuEntry(
       label: 'Campeonatos',

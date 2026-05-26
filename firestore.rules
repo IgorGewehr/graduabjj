@@ -147,6 +147,15 @@ service cloud.firestore {
       return isAcademyStaff(academyId) || isMonitor(academyId);
     }
 
+    // Check if instructor has a specific extra permission granted by the admin
+    function hasExtraPermission(academyId, permission) {
+      let mapping = getUserAcademyMapping();
+      return mapping.keys().hasAll(['academyDetails'])
+          && mapping.academyDetails.keys().hasAll([academyId])
+          && mapping.academyDetails[academyId].keys().hasAll(['extraPermissions'])
+          && permission in mapping.academyDetails[academyId].extraPermissions;
+    }
+
     // Helper: get current user's studentId for this academy (for inline use)
     // Returns studentId from mapping or academy user doc
     function getUserStudentIdFromMapping(academyId) {
@@ -225,11 +234,14 @@ service cloud.firestore {
                        && request.resource.data.academyDetails[request.resource.data.academyIds[0]].role == 'student')
                     );
 
-      // SECURITY: Role elevation cannot happen via client write. Three update patterns:
+      // SECURITY: Role elevation cannot happen via client write. Update patterns:
       // A. Update non-role metadata only (primaryAcademyId, updatedAt, sync fields)
       // B. Shrink academyDetails (leaving an academy)
-      // Adding a new academyDetails entry (joining a 2nd academy) and any role change
-      // must go through a server-side Cloud Function (validates link code / promotion).
+      // C. First-time student join: mapping was empty, adding exactly one academy as student.
+      //    This covers the createAccountWithLinkCode flow which creates an empty mapping
+      //    via createGlobalUser() and then calls linkUserToAcademy() client-side.
+      //    Role elevation (admin/instructor) still requires a server-side Cloud Function.
+      // Adding a 2nd+ academy and any role change must go through a Cloud Function.
       allow update: if isAuthenticated()
                     && request.auth.uid == userId
                     && (
@@ -239,6 +251,12 @@ service cloud.firestore {
                       // Path B: shrinking - removing an academy entry
                       (request.resource.data.academyDetails.size() < resource.data.academyDetails.size()
                        && resource.data.academyDetails.keys().hasAll(request.resource.data.academyDetails.keys()))
+                      ||
+                      // Path C: first student join from an empty mapping (role must be 'student')
+                      (resource.data.academyDetails.size() == 0
+                       && request.resource.data.academyIds.size() == 1
+                       && request.resource.data.academyDetails.size() == 1
+                       && request.resource.data.academyDetails[request.resource.data.academyIds[0]].role == 'student')
                     );
 
       // Users can delete their own mapping during account deletion
@@ -413,8 +431,8 @@ service cloud.firestore {
         // Users can query via collectionGroup to find their code across all academies
         allow read: if resource.data.usedAt == null;
 
-        // Staff can create/delete codes
-        allow write: if isAcademyStaff(academyId);
+        // Staff and monitors can create/delete codes
+        allow write: if isStaffOrMonitor(academyId);
 
         // Allow marking as used during account linking (authenticated users only)
         allow update: if isAuthenticated()
@@ -635,7 +653,9 @@ service cloud.firestore {
       match /beltProgressions/{progressionId} {
         allow read: if isAcademyStaff(academyId);
         allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
-        allow write: if isAcademyStaff(academyId);
+        // Admins always can graduate; instructors need graduation:manage permission
+        allow write: if isAcademyAdmin(academyId)
+                     || (isAcademyInstructor(academyId) && hasExtraPermission(academyId, 'graduation:manage'));
       }
 
       // ============================================
