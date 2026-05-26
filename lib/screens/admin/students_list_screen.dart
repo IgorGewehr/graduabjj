@@ -158,10 +158,20 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         filtered.sort((a, b) {
           final sportA = _sportFilter ?? a.getPrimarySport();
           final sportB = _sportFilter ?? b.getPrimarySport();
-          final gradesA = getGradesForSport(sportA, category: a.category.value);
-          final gradesB = getGradesForSport(sportB, category: b.category.value);
           final gradeA = a.getGrade(sportA)?.currentGrade ?? 'white';
           final gradeB = b.getGrade(sportB)?.currentGrade ?? 'white';
+          final gradesA = getGradesForSport(
+            sportA,
+            category: a.category.value,
+            muaythaiVariant:
+                sportA == SportId.muaythai ? resolveMuaythaiVariant(gradeA) : null,
+          );
+          final gradesB = getGradesForSport(
+            sportB,
+            category: b.category.value,
+            muaythaiVariant:
+                sportB == SportId.muaythai ? resolveMuaythaiVariant(gradeB) : null,
+          );
           final aIndex = gradesA.indexWhere((g) => g.id == gradeA);
           final bIndex = gradesB.indexWhere((g) => g.id == gradeB);
           if (aIndex != bIndex) return bIndex.compareTo(aIndex);
@@ -524,6 +534,9 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         beltFilter: _beltFilter,
         accountFilter: _accountFilter,
         sortBy: _sortBy,
+        muaythaiVariant:
+            ref.read(academySettingsProvider).valueOrNull?.muaythaiGradeSystem ??
+                muaythaiVariantCbmt,
         onApply: (status, category, sport, belt, account, sort) {
           setState(() {
             _statusFilter = status;
@@ -558,6 +571,9 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => _QuickAddStudentSheet(
+        muaythaiVariant:
+            ref.read(academySettingsProvider).valueOrNull?.muaythaiGradeSystem ??
+                muaythaiVariantCbmt,
         onCreated: (student) {
           // Refresh list with the new student.
           _loadStudents();
@@ -963,6 +979,7 @@ class _FilterBottomSheet extends StatefulWidget {
   final String? beltFilter;
   final bool? accountFilter;
   final String sortBy;
+  final String muaythaiVariant;
   final Function(
     StudentStatus?,
     StudentCategory?,
@@ -981,6 +998,7 @@ class _FilterBottomSheet extends StatefulWidget {
     required this.beltFilter,
     required this.accountFilter,
     required this.sortBy,
+    required this.muaythaiVariant,
     required this.onApply,
     required this.onClear,
   });
@@ -1107,6 +1125,9 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
                 final grades = getGradesForSport(
                   activeSport,
                   category: categoryValue,
+                  muaythaiVariant: activeSport == SportId.muaythai
+                      ? widget.muaythaiVariant
+                      : null,
                 );
                 if (grades.isEmpty) {
                   return Text(
@@ -1303,8 +1324,12 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
 /// completo (form de várias abas) se o admin precisar dos campos extras.
 class _QuickAddStudentSheet extends StatefulWidget {
   final void Function(Student) onCreated;
+  final String muaythaiVariant;
 
-  const _QuickAddStudentSheet({required this.onCreated});
+  const _QuickAddStudentSheet({
+    required this.onCreated,
+    required this.muaythaiVariant,
+  });
 
   @override
   State<_QuickAddStudentSheet> createState() => _QuickAddStudentSheetState();
@@ -1372,6 +1397,7 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
             ? null
             : _phoneController.text.trim(),
         category: _category,
+        muaythaiVariant: widget.muaythaiVariant,
       );
       if (!mounted) return;
       Navigator.pop(context);
@@ -1664,6 +1690,18 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
                         },
                   icon: const Icon(LucideIcons.fileText, size: 16),
                   label: const Text('Cadastro completo'),
+                ),
+              ),
+              Center(
+                child: TextButton.icon(
+                  onPressed: _isSaving
+                      ? null
+                      : () {
+                          Navigator.pop(context);
+                          context.go('/admin/importar-alunos');
+                        },
+                  icon: const Icon(Icons.upload_file, size: 16),
+                  label: const Text('Importar lista (CSV)'),
                 ),
               ),
             ],

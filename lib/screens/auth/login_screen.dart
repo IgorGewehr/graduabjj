@@ -289,7 +289,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   const SizedBox(height: 8),
 
                   TextButton(
-                    onPressed: () => context.push('/codigo-equipe'),
+                    // O fluxo /link-code já detecta código de 8 chars e entra
+                    // no modo instrutor (cria conta + resgata o convite). O
+                    // /codigo-equipe exige usuário logado e era barrado pelo
+                    // redirect na tela de login.
+                    onPressed: () => context.go('/link-code'),
                     child: Text(
                       'Recebi codigo de equipe (instrutor)',
                       style: AppTheme.labelSmall.copyWith(

@@ -185,6 +185,13 @@ class AcademySettings {
   /// Open/close hours that gate musculação self check-in. Empty = no time gate.
   final OperatingHours operatingHours;
 
+  // Muay Thai graduation system.
+  /// Which Muay Thai prajied ladder this academy uses: 'cbmt' (white→red→blue→
+  /// black, the default/legacy system) or 'cbmtt' (white→yellow→...→gold). Only
+  /// affects which grades are OFFERED for Muay Thai; stored grades from either
+  /// system always resolve for display. See [muaythaiVariantCbmt] in sports.dart.
+  final String muaythaiGradeSystem;
+
   // Monitors (students with additional permissions)
   final List<String> monitorIds;
 
@@ -227,6 +234,7 @@ class AcademySettings {
     this.studentCheckinEnabled = false,
     this.musculacaoCheckinMode = 'manual',
     this.operatingHours = OperatingHours.empty,
+    this.muaythaiGradeSystem = 'cbmt',
     this.monitorIds = const [],
     this.updatedAt,
   });
@@ -276,6 +284,8 @@ class AcademySettings {
       operatingHours: OperatingHours.fromMap(
         data['operatingHours'] as Map<String, dynamic>?,
       ),
+      muaythaiGradeSystem:
+          (data['muaythaiGradeSystem'] as String?) ?? 'cbmt',
       monitorIds: List<String>.from(data['monitorIds'] ?? []),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
@@ -568,6 +578,16 @@ class SettingsService {
       data['operatingHours'] = operatingHours.toMap();
     }
     await _academyRef.update(data);
+  }
+
+  // ============================================
+  // Update Muay Thai Graduation System ('cbmt' | 'cbmtt')
+  // ============================================
+  Future<void> updateMuaythaiGradeSystem(String system) async {
+    await _academyRef.update({
+      'muaythaiGradeSystem': system,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   // ============================================

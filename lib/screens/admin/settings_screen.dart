@@ -16,6 +16,7 @@ import 'package:flutter/services.dart';
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/formatters.dart';
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
@@ -71,6 +72,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   // Musculação check-in (schedule-less)
   String _musculacaoCheckinMode = 'manual'; // 'manual' | 'qr' | 'button'
   final Map<int, ({String open, String close})> _operatingHours = {};
+
+  // Muay Thai graduation ladder ('cbmt' | 'cbmtt')
+  String _muaythaiGradeSystem = muaythaiVariantCbmt;
 
   // Auto-graduation + class weights
   bool _autoGraduationEnabled = false;
@@ -156,6 +160,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _studentCheckinEnabled,
       _musculacaoCheckinMode,
       hours,
+      _muaythaiGradeSystem,
       _autoGraduationEnabled,
       _useClassWeights,
       _graduationMode,
@@ -228,6 +233,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _operatingHours
             ..clear()
             ..addAll(settings.operatingHours.byDay);
+          _muaythaiGradeSystem = settings.muaythaiGradeSystem;
           _autoGraduationEnabled = settings.autoGraduationEnabled;
           _useClassWeights = settings.useClassWeights;
           _graduationMode = settings.graduationMode;
@@ -383,6 +389,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           mode: _musculacaoCheckinMode,
           operatingHours: OperatingHours(Map.of(_operatingHours)),
         ),
+        service.updateMuaythaiGradeSystem(_muaythaiGradeSystem),
         service.updateAutoGraduation(
           _autoGraduationEnabled,
           attendances: attendancesValue,
@@ -1680,6 +1687,32 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           const SizedBox(height: 16),
 
+          // Muay Thai graduation ladder
+          _SettingsCard(
+            title: 'Graduacao do Muay Thai',
+            icon: Icons.flash_on_outlined,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'O Muay Thai nao tem graduacao oficial: cada federacao usa a sua. Escolha qual sequencia de cores (prajied) a academia vai adotar.',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _MuaythaiGradeSystemSelector(
+                  value: _muaythaiGradeSystem,
+                  onChanged: (v) => setState(() => _muaythaiGradeSystem = v),
+                ),
+                const SizedBox(height: 14),
+                _MuaythaiLadderPreview(variant: _muaythaiGradeSystem),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // Student Check-in Settings
           _SettingsCard(
             title: 'Check-in de Alunos',
@@ -2307,6 +2340,106 @@ class _GraduationModeSelector extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// Picks which Muay Thai prajied ladder the academy uses. 'cbmt' is the
+/// blue-based CBMT/CMTB system; 'cbmtt' is the CBMTT traditional (white→gold).
+class _MuaythaiGradeSystemSelector extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _MuaythaiGradeSystemSelector({
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _ModeCard(
+            title: 'CBMT / CMTB',
+            subtitle: 'Branca a Preta',
+            icon: LucideIcons.shield,
+            selected: value == muaythaiVariantCbmt,
+            onTap: () => onChanged(muaythaiVariantCbmt),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _ModeCard(
+            title: 'CBMT Tradicional',
+            subtitle: 'Branca a Ouro',
+            icon: LucideIcons.award,
+            selected: value == muaythaiVariantCbmtt,
+            onTap: () => onChanged(muaythaiVariantCbmtt),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Shows the ordered colors of the selected Muay Thai ladder so the admin can
+/// confirm it matches their federation before saving.
+class _MuaythaiLadderPreview extends StatelessWidget {
+  final String variant;
+
+  const _MuaythaiLadderPreview({required this.variant});
+
+  @override
+  Widget build(BuildContext context) {
+    final grades = getGradesForSport(
+      SportId.muaythai,
+      muaythaiVariant: variant,
+    );
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: grades.map((g) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppTheme.divider),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Body color + a small tip slice for "ponta"/combo grades.
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: g.color,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppTheme.divider),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: g.tipColor != null
+                    ? Align(
+                        alignment: Alignment.centerRight,
+                        child: FractionallySizedBox(
+                          widthFactor: 0.5,
+                          child: Container(color: g.tipColor),
+                        ),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                g.label,
+                style: AppTheme.labelSmall
+                    .copyWith(color: AppTheme.textPrimary),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
     );
   }
 }

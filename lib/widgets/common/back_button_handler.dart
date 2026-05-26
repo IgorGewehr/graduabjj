@@ -3,22 +3,29 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/feedback_utils.dart';
 
-/// Widget que gerencia o comportamento do botão voltar do sistema
+/// Widget que gerencia o comportamento do botão voltar do sistema.
 ///
-/// Implementa:
-/// - Previne fechamento acidental do app nas telas principais
-/// - Sistema "double tap to exit" (pressione 2x em 2 segundos para sair)
-/// - Permite voltar normalmente em sub-rotas
-/// - Dialogs e bottom sheets funcionam normalmente (fecham primeiro)
+/// Como a navegação do app usa `context.go(...)` (que substitui a pilha) com
+/// rotas planas, as sub-telas ficam sem histórico de Navigator — `canPop()` é
+/// false. Sem tratamento, o voltar do sistema fecharia o app. Este handler:
+/// - Faz pop real quando há histórico (dialogs, sheets, páginas empilhadas).
+/// - Em sub-telas sem histórico, navega para o caminho "pai" (ex.:
+///   `/admin/alunos/123` → `/admin/alunos`) em vez de fechar.
+/// - Só na aba-raiz (`/admin`, `/portal`) aplica "pressione 2x para sair".
 class BackButtonHandler extends StatefulWidget {
   final Widget child;
   final bool isRootRoute;
+
+  /// Caminho atual (ex.: `/admin/alunos/123`). Usado para calcular o "pai".
+  /// Quando ausente, sub-telas caem no comportamento de saída por double-tap.
+  final String? currentLocation;
   final String? exitMessage;
 
   const BackButtonHandler({
     super.key,
     required this.child,
     this.isRootRoute = false,
+    this.currentLocation,
     this.exitMessage,
   });
 
@@ -30,35 +37,32 @@ class _BackButtonHandlerState extends State<BackButtonHandler> {
   DateTime? _lastBackPressTime;
   static const _backPressInterval = Duration(seconds: 2);
 
-  /// Lida com o evento de voltar
-  ///
-  /// Retorna:
-  /// - true: Permite o pop (fecha o app ou volta)
-  /// - false: Previne o pop
-  Future<bool> _onWillPop() async {
-    // Se não é rota raiz, permite voltar normalmente
-    if (!widget.isRootRoute) {
-      return true;
-    }
+  /// Caminho "pai" removendo o último segmento da rota atual.
+  /// Ex.: `/admin/alunos/123` → `/admin/alunos`; `/admin/alunos` → `/admin`.
+  /// Retorna null quando já é uma aba-raiz (um único segmento) ou sem path.
+  String? _parentLocation() {
+    final path = widget.currentLocation;
+    if (path == null || path.isEmpty) return null;
+    final segments = path.split('/').where((s) => s.isNotEmpty).toList();
+    if (segments.length <= 1) return null; // já é raiz (/admin, /portal)
+    segments.removeLast();
+    return '/${segments.join('/')}';
+  }
 
-    // Lógica de "double tap to exit" para rota raiz
+  /// Lógica de "double tap to exit": retorna true só no segundo toque dentro
+  /// do intervalo. No primeiro toque, registra e mostra a mensagem.
+  bool _shouldExitNow() {
     final now = DateTime.now();
-
-    // Verifica se houve um tap anterior nos últimos 2 segundos
     if (_lastBackPressTime == null ||
         now.difference(_lastBackPressTime!) > _backPressInterval) {
-      // Primeiro tap: registra e mostra mensagem
       _lastBackPressTime = now;
-
       if (mounted) {
-        final message = widget.exitMessage ?? 'Pressione voltar novamente para sair';
+        final message =
+            widget.exitMessage ?? 'Pressione voltar novamente para sair';
         FeedbackUtils.showInfo(context, message);
       }
-
-      return false; // Previne o pop
+      return false;
     }
-
-    // Segundo tap dentro do intervalo: permite sair
     return true;
   }
 
@@ -66,30 +70,28 @@ class _BackButtonHandlerState extends State<BackButtonHandler> {
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false, // Sempre intercepta o pop
-      onPopInvokedWithResult: (bool didPop, dynamic result) async {
-        // Se já fez pop (por algum motivo), não faz nada
-        if (didPop) {
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        // Se já fez pop (por algum motivo), não faz nada.
+        if (didPop) return;
+
+        // 1) Pop real quando há histórico (dialogs/sheets/páginas empilhadas).
+        if (context.canPop()) {
+          context.pop();
           return;
         }
 
-        // Verifica se pode fazer pop
-        final shouldPop = await _onWillPop();
-
-        // Verifica mounted antes de usar o context
-        if (!mounted) return;
-
-        if (shouldPop) {
-          if (widget.isRootRoute) {
-            // Na rota raiz, fecha o app
-            SystemNavigator.pop();
-          } else {
-            // Usa o GoRouter para navegar — evita dessincronia com o estado interno do router
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              SystemNavigator.pop();
-            }
+        // 2) Sub-tela sem histórico: vai para o "pai" em vez de fechar o app.
+        if (!widget.isRootRoute) {
+          final parent = _parentLocation();
+          if (parent != null) {
+            context.go(parent);
+            return;
           }
+        }
+
+        // 3) Aba-raiz (ou sem pai calculável): double-tap para sair.
+        if (_shouldExitNow()) {
+          SystemNavigator.pop();
         }
       },
       child: widget.child,

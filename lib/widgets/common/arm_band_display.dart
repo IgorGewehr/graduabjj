@@ -69,11 +69,16 @@ class ArmBandDisplay extends StatelessWidget {
     final bodyColor = gradeDef?.color ?? const Color(0xFFF5F5F5);
     final tipColor = gradeDef?.tipColor ?? const Color(0xFFDC2626);
     final gradeLabel = gradeDef?.label ?? grade;
-    final isWhite = grade == 'white';
+    // Light bands (white, prata, ouro, "...e branca") need a border to stand
+    // out from the page; keyed off luminance so both systems are covered.
+    final isWhite = bodyColor.computeLuminance() > 0.7;
 
-    // Tips are shown on both ends; stripes = how many tips (0, 1 or 2)
+    // A grade with its own tipColor IS a "ponta" rank (e.g. "Branca ponta
+    // vermelha") — show that tip regardless of stripes. Stripes add the
+    // classic 1–2 tips on top for the simpler solid grades.
+    final intrinsicTip = gradeDef?.tipColor != null;
     final showLeftTip = stripes >= 1;
-    final showRightTip = stripes >= 2;
+    final showRightTip = intrinsicTip || stripes >= 2;
 
     return Column(
       mainAxisSize: MainAxisSize.min,

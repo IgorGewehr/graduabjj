@@ -757,7 +757,12 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
   }
 
   String _getNextBelt(String currentBelt, {SportId sportId = SportId.bjj}) {
-    final grades = getGradesForSport(sportId);
+    final grades = getGradesForSport(
+      sportId,
+      muaythaiVariant: sportId == SportId.muaythai
+          ? resolveMuaythaiVariant(currentBelt)
+          : null,
+    );
     final gradeIds = grades.map((g) => g.id).toList();
     final index = gradeIds.indexOf(currentBelt);
     if (index >= 0 && index < gradeIds.length - 1) {

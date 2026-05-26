@@ -413,7 +413,18 @@ class ClassService {
       final category = classCategory?.value ??
           (data['category'] as String?) ??
           'adult';
-      final grades = getGradesForSport(sport, category: category);
+      // Muay Thai's starting grade depends on the academy's chosen ladder.
+      String? muaythaiVariant;
+      if (sport == SportId.muaythai) {
+        final academyDoc = await _collections.academy.get();
+        muaythaiVariant = (academyDoc.data()
+                as Map<String, dynamic>?)?['muaythaiGradeSystem'] as String?;
+      }
+      final grades = getGradesForSport(
+        sport,
+        category: category,
+        muaythaiVariant: muaythaiVariant,
+      );
       final defaultGrade = grades.isNotEmpty ? grades.first.id : 'white';
 
       // For BJJ the legacy `currentBelt`/`currentStripes` fields already hold

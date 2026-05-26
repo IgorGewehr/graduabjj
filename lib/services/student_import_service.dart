@@ -353,8 +353,9 @@ class StudentImportService {
     // Connectivity pre-check: force a server read. Offline this throws or times
     // out, so we abort before writing anything — a partial offline import
     // (some rows cached, ids unknown, enrollment incomplete) would be messy.
+    DocumentSnapshot? academyDoc;
     try {
-      await _collections.academy
+      academyDoc = await _collections.academy
           .get(const GetOptions(source: Source.server))
           .timeout(const Duration(seconds: 8));
     } catch (_) {
@@ -369,7 +370,18 @@ class StudentImportService {
 
     final sport = turma.getSport();
     final category = turma.category ?? StudentCategory.adult;
-    final grades = getGradesForSport(sport, category: category.value);
+    // Muay Thai's starting grade depends on the academy's chosen ladder; pulled
+    // from the doc we just read for the connectivity check (no extra read).
+    String? muaythaiVariant;
+    if (sport == SportId.muaythai) {
+      final academyData = academyDoc.data() as Map<String, dynamic>?;
+      muaythaiVariant = academyData?['muaythaiGradeSystem'] as String?;
+    }
+    final grades = getGradesForSport(
+      sport,
+      category: category.value,
+      muaythaiVariant: muaythaiVariant,
+    );
     final defaultBelt = grades.isNotEmpty ? grades.first.id : 'white';
 
     // Only rows the user kept checked (and that have no blocking error).

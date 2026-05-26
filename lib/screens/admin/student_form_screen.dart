@@ -9,6 +9,7 @@ import '../../core/formatters.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../widgets/form/form_widgets.dart';
 
@@ -62,6 +63,10 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   // student's sportsList in `_loadStudentData`.
   final Map<SportId, ({String belt, int stripes})> _grades = {};
   SportId? _primarySport;
+
+  // Which Muay Thai grade ladder to offer (academy default, or the one that
+  // matches an existing student's stored grade). See [resolveMuaythaiVariant].
+  String _muaythaiVariant = muaythaiVariantCbmt;
 
   // Error tracking per tab
   final Map<String, bool> _tabErrors = {
@@ -154,6 +159,13 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
 
       _availablePlans = await planService.list();
 
+      // Academy's default Muay Thai ladder (overridden per-student below when
+      // editing someone who already has a grade from the other system). Await
+      // the future so a brand-new student lands on the right ladder even if the
+      // settings provider hasn't resolved yet.
+      final settings = await ref.read(academySettingsProvider.future);
+      _muaythaiVariant = settings?.muaythaiGradeSystem ?? muaythaiVariantCbmt;
+
       if (isEditing) {
         final studentService = StudentService(academyId);
         final student = await studentService.getById(widget.studentId!);
@@ -208,6 +220,12 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         belt: student.currentBelt,
         stripes: student.currentStripes,
       );
+    }
+    // Match the Muay Thai ladder to the student's stored grade so the selector
+    // shows their actual system even if the academy default differs.
+    final mtGrade = _grades[SportId.muaythai]?.belt;
+    if (mtGrade != null) {
+      _muaythaiVariant = resolveMuaythaiVariant(mtGrade);
     }
     _primarySport = student.getPrimarySport();
     if (!_grades.containsKey(_primarySport)) {
@@ -560,7 +578,12 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
               // to the first available grade so we never leave an orphan id.
               final categoryStr = value.value;
               for (final sport in _grades.keys.toList()) {
-                final list = getGradesForSport(sport, category: categoryStr);
+                final list = getGradesForSport(
+                  sport,
+                  category: categoryStr,
+                  muaythaiVariant:
+                      sport == SportId.muaythai ? _muaythaiVariant : null,
+                );
                 final firstId = list.isNotEmpty ? list.first.id : 'white';
                 _grades[sport] = (belt: firstId, stripes: 0);
               }
@@ -1097,13 +1120,17 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
                 subtitle: Text(
                   def.gradeSystem == GradeSystem.none
                       ? 'Sem graduação'
-                      : 'Faixas iniciam em ${getGradesForSport(sport, category: _category.value).firstOrNull?.label ?? '-'}',
+                      : 'Faixas iniciam em ${getGradesForSport(sport, category: _category.value, muaythaiVariant: sport == SportId.muaythai ? _muaythaiVariant : null).firstOrNull?.label ?? '-'}',
                   style: AppTheme.labelSmall
                       .copyWith(color: AppTheme.textSecondary),
                 ),
                 onTap: () {
-                  final grades =
-                      getGradesForSport(sport, category: _category.value);
+                  final grades = getGradesForSport(
+                    sport,
+                    category: _category.value,
+                    muaythaiVariant:
+                        sport == SportId.muaythai ? _muaythaiVariant : null,
+                  );
                   final firstId = grades.isNotEmpty ? grades.first.id : 'white';
                   setState(() {
                     _grades[sport] = (belt: firstId, stripes: 0);
@@ -1123,7 +1150,11 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   }
 
   Widget _buildBeltSelectorForSport(SportId sport) {
-    final grades = getGradesForSport(sport, category: _category.value);
+    final grades = getGradesForSport(
+      sport,
+      category: _category.value,
+      muaythaiVariant: sport == SportId.muaythai ? _muaythaiVariant : null,
+    );
     if (grades.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -1132,7 +1163,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     final value =
         gradeIds.contains(current.belt) ? current.belt : grades.first.id;
 
-    return Container(
+    final beltDropdown = Container(
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(10),
@@ -1199,6 +1230,83 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         },
         dropdownColor: AppTheme.surface,
       ),
+    );
+
+    // Muay Thai has two graduation ladders; let the admin switch this student's
+    // system. Switching resets the grade to the new ladder's first rank
+    // (Branca) — the two systems don't map 1:1, so we never auto-convert.
+    if (sport != SportId.muaythai) return beltDropdown;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildMuaythaiSystemSelector(),
+        const SizedBox(height: 8),
+        beltDropdown,
+      ],
+    );
+  }
+
+  Widget _buildMuaythaiSystemSelector() {
+    Widget chip(String variant, String label) {
+      final selected = _muaythaiVariant == variant;
+      return Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: selected
+              ? null
+              : () => setState(() {
+                    _muaythaiVariant = variant;
+                    // Trocar e reiniciar: volta ao primeiro grau do sistema novo.
+                    final first = getGradesForSport(
+                      SportId.muaythai,
+                      muaythaiVariant: variant,
+                    ).first.id;
+                    _grades[SportId.muaythai] = (belt: first, stripes: 0);
+                  }),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+            decoration: BoxDecoration(
+              color: selected
+                  ? AppTheme.primary.withValues(alpha: 0.08)
+                  : AppTheme.surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: selected ? AppTheme.primary : AppTheme.divider,
+                width: selected ? 1.5 : 1,
+              ),
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: AppTheme.labelSmall.copyWith(
+                color: selected ? AppTheme.primary : AppTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Sistema de graduacao',
+          style: AppTheme.labelSmall.copyWith(
+            color: AppTheme.textSecondary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            chip(muaythaiVariantCbmt, 'CBMT / CMTB'),
+            const SizedBox(width: 8),
+            chip(muaythaiVariantCbmtt, 'CBMT Tradicional'),
+          ],
+        ),
+      ],
     );
   }
 

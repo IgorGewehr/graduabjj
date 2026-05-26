@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
@@ -239,7 +240,15 @@ class _PortalShellState extends ConsumerState<PortalShell> {
             )
             .toList(),
         onLogout: () async {
-          Navigator.pop(sheetContext);
+          final confirmed = await FeedbackUtils.showConfirmDialog(
+            sheetContext,
+            title: 'Sair da conta',
+            message: 'Tem certeza que deseja sair?',
+            confirmText: 'Sair',
+            icon: Icons.logout,
+          );
+          if (!confirmed) return;
+          if (sheetContext.mounted) Navigator.pop(sheetContext);
           final authService = ref.read(authServiceProvider);
           await authService.signOut();
         },
@@ -281,6 +290,7 @@ class _PortalShellState extends ConsumerState<PortalShell> {
 
     return BackButtonHandler(
       isRootRoute: isRootRoute,
+      currentLocation: location,
       exitMessage: 'Pressione voltar novamente para sair',
       child: Scaffold(
       backgroundColor: AppTheme.background,

@@ -298,6 +298,7 @@ class StudentService {
     String? email,
     StudentCategory category = StudentCategory.adult,
     String? createdBy,
+    String? muaythaiVariant,
   }) async {
     if (sports.isEmpty) {
       throw ArgumentError('Pelo menos uma modalidade deve ser informada');
@@ -308,7 +309,11 @@ class StudentService {
     String legacyBelt = 'white';
     int legacyStripes = 0;
     for (final sport in sports) {
-      final grades = getGradesForSport(sport, category: category.value);
+      final grades = getGradesForSport(
+        sport,
+        category: category.value,
+        muaythaiVariant: sport == SportId.muaythai ? muaythaiVariant : null,
+      );
       final firstGradeId = grades.isNotEmpty ? grades.first.id : 'white';
       sportData[sport.value] = {
         'currentGrade': firstGradeId,

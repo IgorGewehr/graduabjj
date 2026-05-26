@@ -177,7 +177,12 @@ class BeltProgressionService {
     // No grade system = no promotions
     if (sport.gradeSystem == GradeSystem.none) return null;
 
-    final grades = getGradesForSport(sportId, category: category);
+    final grades = getGradesForSport(
+      sportId,
+      category: category,
+      muaythaiVariant:
+          sportId == SportId.muaythai ? resolveMuaythaiVariant(currentBelt) : null,
+    );
     if (grades.isEmpty) return null;
 
     final currentGrade = grades.where((g) => g.id == currentBelt).firstOrNull;

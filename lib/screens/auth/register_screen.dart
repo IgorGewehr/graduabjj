@@ -31,7 +31,7 @@ class RegisterScreen extends StatelessWidget {
                 // Logo
                 Center(
                   child: Image.asset(
-                    'assets/images/logo.png',
+                    'assets/images/bjjeasy_logo.png',
                     width: 100,
                     height: 100,
                   ),

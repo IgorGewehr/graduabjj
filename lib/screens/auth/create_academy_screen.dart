@@ -421,7 +421,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             // Logo instead of icon
             Center(
               child: Image.asset(
-                'assets/images/logo.png',
+                'assets/images/bjjeasy_logo.png',
                 width: 80,
                 height: 80,
               ),
@@ -594,7 +594,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             // Logo instead of icon
             Center(
               child: Image.asset(
-                'assets/images/logo.png',
+                'assets/images/bjjeasy_logo.png',
                 width: 80,
                 height: 80,
               ),

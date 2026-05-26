@@ -109,13 +109,55 @@ const _bjjKidsGrades = [
 
 // ============================================
 // Muay Thai Grades (Armbands / Prajied)
+//
+// Muay Thai has no single official graduation — each federation defines its
+// own. We ship the two most common Brazilian systems and let each academy
+// pick one in Settings (see [AcademySettings.muaythaiGradeSystem]).
+//
+// IDs are kept DISTINCT across both systems so a stored grade always resolves
+// to the right list, and lookups (label/color/definition) search both. The
+// CBMT ids preserve the previous simplified ones (white/red/light-blue/
+// dark-blue/black) so existing students are never orphaned.
 // ============================================
-const _muaythaiGrades = [
+
+/// Muay Thai grade-system identifiers (stored in academy settings).
+const String muaythaiVariantCbmt = 'cbmt'; // azul system (default / legacy)
+const String muaythaiVariantCbmtt = 'cbmtt'; // tradicional (branca→ouro)
+
+/// System 1 — CBMT / CMTB (white → red → blue → black, with "ponta" steps).
+const _muaythaiGradesCbmt = [
   GradeDefinition(id: 'white', label: 'Branca', color: Color(0xFFF5F5F5), maxStripes: 1),
+  GradeDefinition(id: 'white-red', label: 'Branca ponta vermelha', color: Color(0xFFF5F5F5), tipColor: Color(0xFFDC2626), maxStripes: 1),
   GradeDefinition(id: 'red', label: 'Vermelha', color: Color(0xFFDC2626), maxStripes: 1),
+  GradeDefinition(id: 'red-lightblue', label: 'Vermelha ponta azul clara', color: Color(0xFFDC2626), tipColor: Color(0xFF60A5FA), maxStripes: 1),
   GradeDefinition(id: 'light-blue', label: 'Azul Clara', color: Color(0xFF60A5FA), maxStripes: 1),
-  GradeDefinition(id: 'dark-blue', label: 'Azul Escura', color: Color(0xFF1E40AF), maxStripes: 1),
-  GradeDefinition(id: 'black', label: 'Preta', color: Color(0xFF171717), maxStripes: 2, isBlackBelt: true),
+  GradeDefinition(id: 'lightblue-darkblue', label: 'Azul Clara ponta azul escura (Monitor)', color: Color(0xFF60A5FA), tipColor: Color(0xFF1E40AF), maxStripes: 1),
+  GradeDefinition(id: 'dark-blue', label: 'Azul Escura (Instrutor Auxiliar)', color: Color(0xFF1E40AF), maxStripes: 1),
+  GradeDefinition(id: 'darkblue-black', label: 'Azul Escura ponta preta (Instrutor)', color: Color(0xFF1E40AF), tipColor: Color(0xFF171717), maxStripes: 1),
+  GradeDefinition(id: 'black', label: 'Preta (Professor)', color: Color(0xFF171717), maxStripes: 2, isBlackBelt: true),
+  GradeDefinition(id: 'black-white', label: 'Preta ponta branca (Mestre)', color: Color(0xFF171717), tipColor: Color(0xFFF5F5F5), maxStripes: 2, isBlackBelt: true),
+  GradeDefinition(id: 'black-white-red', label: 'Preta ponta branca e vermelha (Grão-Mestre)', color: Color(0xFF171717), tipColor: Color(0xFFDC2626), maxStripes: 2, isBlackBelt: true),
+];
+
+/// System 2 — CBMT Tradicional / CBMTT (white → ... → gold). IDs prefixed
+/// `mt2-` to stay distinct from the CBMT system above.
+const _muaythaiGradesCbmtt = [
+  GradeDefinition(id: 'mt2-white', label: 'Branca', color: Color(0xFFF5F5F5), maxStripes: 1),
+  GradeDefinition(id: 'mt2-yellow', label: 'Amarela', color: Color(0xFFEAB308), maxStripes: 1),
+  GradeDefinition(id: 'mt2-yellow-white', label: 'Amarela e Branca', color: Color(0xFFEAB308), tipColor: Color(0xFFF5F5F5), maxStripes: 1),
+  GradeDefinition(id: 'mt2-green', label: 'Verde', color: Color(0xFF16A34A), maxStripes: 1),
+  GradeDefinition(id: 'mt2-green-white', label: 'Verde e Branca', color: Color(0xFF16A34A), tipColor: Color(0xFFF5F5F5), maxStripes: 1),
+  GradeDefinition(id: 'mt2-blue', label: 'Azul', color: Color(0xFF1E40AF), maxStripes: 1),
+  GradeDefinition(id: 'mt2-blue-white', label: 'Azul e Branca', color: Color(0xFF1E40AF), tipColor: Color(0xFFF5F5F5), maxStripes: 1),
+  GradeDefinition(id: 'mt2-brown', label: 'Marrom', color: Color(0xFF78350F), maxStripes: 1),
+  GradeDefinition(id: 'mt2-brown-white', label: 'Marrom e Branca', color: Color(0xFF78350F), tipColor: Color(0xFFF5F5F5), maxStripes: 1),
+  GradeDefinition(id: 'mt2-red', label: 'Vermelha', color: Color(0xFFDC2626), maxStripes: 1),
+  GradeDefinition(id: 'mt2-red-white', label: 'Vermelha e Branca', color: Color(0xFFDC2626), tipColor: Color(0xFFF5F5F5), maxStripes: 1),
+  GradeDefinition(id: 'mt2-black', label: 'Preta', color: Color(0xFF171717), maxStripes: 1, isBlackBelt: true),
+  GradeDefinition(id: 'mt2-black-white', label: 'Preta e Branca (Professor)', color: Color(0xFF171717), tipColor: Color(0xFFF5F5F5), maxStripes: 1, isBlackBelt: true),
+  GradeDefinition(id: 'mt2-silver', label: 'Prata', color: Color(0xFF94A3B8), maxStripes: 1, isBlackBelt: true),
+  GradeDefinition(id: 'mt2-gold', label: 'Ouro', color: Color(0xFFD4AF37), maxStripes: 1, isBlackBelt: true),
+  GradeDefinition(id: 'mt2-gold-silver', label: 'Ouro e Prata', color: Color(0xFFD4AF37), tipColor: Color(0xFF94A3B8), maxStripes: 1, isBlackBelt: true),
 ];
 
 // ============================================
@@ -197,7 +239,7 @@ const Map<SportId, SportDefinition> sports = {
     gradeSystem: GradeSystem.armband,
     supportsKids: false,
     supportsStripes: true,
-    adultGrades: _muaythaiGrades,
+    adultGrades: _muaythaiGradesCbmt,
     icon: Icons.flash_on_outlined,
   ),
   SportId.karate: SportDefinition(
@@ -285,9 +327,24 @@ SportDefinition getSport(SportId sportId) {
 
 // ============================================
 // Helper: Get grades for a sport (respects kids)
+//
+// For Muay Thai, [muaythaiVariant] selects which federation ladder to return
+// (defaults to CBMT). When building a grade selector for an EXISTING grade,
+// resolve the variant from that grade id with [resolveMuaythaiVariant] so the
+// dropdown matches what the student already has, even if the academy later
+// switched its default system.
 // ============================================
-List<GradeDefinition> getGradesForSport(SportId sportId, {String category = 'adult'}) {
+List<GradeDefinition> getGradesForSport(
+  SportId sportId, {
+  String category = 'adult',
+  String? muaythaiVariant,
+}) {
   final sport = sports[sportId]!;
+  if (sportId == SportId.muaythai) {
+    return muaythaiVariant == muaythaiVariantCbmtt
+        ? _muaythaiGradesCbmtt
+        : _muaythaiGradesCbmt;
+  }
   if (category == 'kids' && sport.supportsKids && sport.kidsGrades != null) {
     return sport.kidsGrades!;
   }
@@ -295,11 +352,36 @@ List<GradeDefinition> getGradesForSport(SportId sportId, {String category = 'adu
 }
 
 // ============================================
+// Helper: Which Muay Thai system a grade id belongs to
+// ============================================
+/// Returns [muaythaiVariantCbmtt] when [gradeId] is part of the CBMTT ladder,
+/// otherwise [muaythaiVariantCbmt]. Lets progression/selectors pick the right
+/// ladder straight from a stored grade, no academy lookup needed.
+String resolveMuaythaiVariant(String gradeId) {
+  return _muaythaiGradesCbmtt.any((g) => g.id == gradeId)
+      ? muaythaiVariantCbmtt
+      : muaythaiVariantCbmt;
+}
+
+// ============================================
+// Helper: All grades searchable for label/color lookups
+// ============================================
+/// Every grade definition whose id could be stored for [sportId]. For Muay
+/// Thai this spans BOTH federation systems so a grade still resolves after the
+/// academy switches its default. Other sports use adult + kids grades.
+List<GradeDefinition> _searchableGrades(SportDefinition sport) {
+  if (sport.id == SportId.muaythai) {
+    return const [..._muaythaiGradesCbmt, ..._muaythaiGradesCbmtt];
+  }
+  return [...sport.adultGrades, ...(sport.kidsGrades ?? [])];
+}
+
+// ============================================
 // Helper: Get grade label for a sport
 // ============================================
 String getGradeLabel(SportId sportId, String gradeId) {
   final sport = sports[sportId]!;
-  final allGrades = [...sport.adultGrades, ...(sport.kidsGrades ?? [])];
+  final allGrades = _searchableGrades(sport);
   final grade = allGrades.where((g) => g.id == gradeId).firstOrNull;
   return grade?.label ?? gradeId;
 }
@@ -309,7 +391,7 @@ String getGradeLabel(SportId sportId, String gradeId) {
 // ============================================
 Color getGradeColor(SportId sportId, String gradeId) {
   final sport = sports[sportId]!;
-  final allGrades = [...sport.adultGrades, ...(sport.kidsGrades ?? [])];
+  final allGrades = _searchableGrades(sport);
   final grade = allGrades.where((g) => g.id == gradeId).firstOrNull;
   if (grade != null) return grade.color;
   // Fallback: extract base color for compound grade ids (e.g. 'grey-white')
@@ -323,7 +405,7 @@ Color getGradeColor(SportId sportId, String gradeId) {
 // ============================================
 GradeDefinition? getGradeDefinition(SportId sportId, String gradeId) {
   final sport = sports[sportId]!;
-  final allGrades = [...sport.adultGrades, ...(sport.kidsGrades ?? [])];
+  final allGrades = _searchableGrades(sport);
   return allGrades.where((g) => g.id == gradeId).firstOrNull;
 }
 

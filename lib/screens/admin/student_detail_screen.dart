@@ -1409,7 +1409,7 @@ class _AdminStudentDetailScreenState
     DateTime selectedDate = DateTime.now();
     AchievementType selectedType = AchievementType.milestone;
     String? selectedBelt;
-    int selectedStripes = 0;
+    int selectedStripes = 1;
 
     final beltOptions = _student?.category == StudentCategory.kids
         ? BeltConstants.kidsBelts
@@ -2496,7 +2496,11 @@ class _AdminStudentDetailScreenState
   }
 
   String _getNextGrade(SportId sportId, String current) {
-    final grades = getGradesForSport(sportId);
+    final grades = getGradesForSport(
+      sportId,
+      muaythaiVariant:
+          sportId == SportId.muaythai ? resolveMuaythaiVariant(current) : null,
+    );
     final index = grades.indexWhere((g) => g.id == current);
     if (index >= 0 && index < grades.length - 1) {
       return grades[index + 1].id;

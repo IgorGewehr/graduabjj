@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
@@ -28,6 +29,7 @@ class AdminShell extends ConsumerWidget {
 
     return BackButtonHandler(
       isRootRoute: isRootRoute,
+      currentLocation: location,
       exitMessage: 'Pressione voltar novamente para sair',
       child: Scaffold(
         backgroundColor: AppTheme.background,
@@ -331,6 +333,14 @@ class AdminSidebar extends ConsumerWidget {
             trailing: IconButton(
               icon: const Icon(Icons.logout),
               onPressed: () async {
+                final confirmed = await FeedbackUtils.showConfirmDialog(
+                  context,
+                  title: 'Sair da conta',
+                  message: 'Tem certeza que deseja sair?',
+                  confirmText: 'Sair',
+                  icon: Icons.logout,
+                );
+                if (!confirmed) return;
                 final authService = ref.read(authServiceProvider);
                 await authService.signOut();
               },
@@ -629,7 +639,15 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
             )
             .toList(),
         onLogout: () async {
-          Navigator.pop(sheetContext);
+          final confirmed = await FeedbackUtils.showConfirmDialog(
+            sheetContext,
+            title: 'Sair da conta',
+            message: 'Tem certeza que deseja sair?',
+            confirmText: 'Sair',
+            icon: Icons.logout,
+          );
+          if (!confirmed) return;
+          if (sheetContext.mounted) Navigator.pop(sheetContext);
           final authService = ref.read(authServiceProvider);
           await authService.signOut();
         },

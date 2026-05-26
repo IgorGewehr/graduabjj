@@ -497,7 +497,11 @@ class AttendanceService {
       currentStripes = sd?['currentStripes'] ?? 0;
     }
 
-    final grades = getGradesForSport(sport);
+    final grades = getGradesForSport(
+      sport,
+      muaythaiVariant:
+          sport == SportId.muaythai ? resolveMuaythaiVariant(currentBelt) : null,
+    );
     final idx = grades.indexWhere((g) => g.id == currentBelt);
     if (idx < 0) return (belt: currentBelt, stripes: currentStripes + 1);
 
