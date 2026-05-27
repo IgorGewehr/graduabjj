@@ -477,9 +477,32 @@ final routerProvider = Provider<GoRouter>((ref) {
           isLinkCode ||
           isCreatingAcademy ||
           isSplash) {
-        if (user != null && (user.isAdmin || user.isInstructor)) {
-          print('[ROUTER] Redirecting admin/instructor to /admin');
-          return '/admin';
+        if (user != null) {
+          // Admins always go to AdminShell.
+          if (user.isAdmin) {
+            print('[ROUTER] Redirecting admin to /admin');
+            return '/admin';
+          }
+
+          if (user.isInstructor) {
+            // Determine whether this instructor has a student account (was
+            // promoted from a student) and whether they have financial access.
+            final hasStudentId = user.studentId != null;
+            final hasFinancial = user.hasPermission('financial:view') ||
+                user.hasPermission('financial:create');
+
+            // Instructor who was a student AND has no financial perm →
+            // send to the monitor/chamada portal experience.
+            if (hasStudentId && !hasFinancial) {
+              print('[ROUTER] Redirecting student-instructor (no financial) to /portal');
+              return '/portal';
+            }
+
+            // All other instructors (pure professors, or those with financial) →
+            // AdminShell where nav is gated by permissions.
+            print('[ROUTER] Redirecting instructor to /admin');
+            return '/admin';
+          }
         }
         print('[ROUTER] Redirecting to /portal');
         return '/portal';
@@ -1027,8 +1050,10 @@ class _MonitorGuard extends ConsumerWidget {
     ];
     final monitorIds = settings?.monitorIds ?? const <String>[];
     final isMonitor = allStudentIds.any(monitorIds.contains);
+    // Also allow users with attendance:take permission (promoted student-instructors).
+    final hasAttendancePerm = user?.hasPermission('attendance:take') == true;
 
-    if (!isStaff && !isMonitor) {
+    if (!isStaff && !isMonitor && !hasAttendancePerm) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (context.mounted) context.go('/portal');
       });

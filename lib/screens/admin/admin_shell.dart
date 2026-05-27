@@ -150,10 +150,18 @@ class AdminSidebar extends ConsumerWidget {
     final user = currentUser.valueOrNull;
     // Permission gates. Admins always pass; instructors need the explicit
     // extraPermissions entry granted at promotion time.
+    final isAdminUser = user?.isAdmin == true;
+    final canTakeAttendance =
+        isAdminUser || user?.hasPermission('attendance:take') == true;
+    final canSeeStudents =
+        isAdminUser ||
+        user?.hasPermission('students:create') == true ||
+        user?.hasPermission('students:delete') == true;
     final canSeeFinancial = user?.hasPermission('financial:view') == true;
     final canSeeReports = user?.hasPermission('reports:view') == true;
     final canManageGraduation = user?.hasPermission('graduation:manage') == true;
-    final isAdminUser = user?.isAdmin == true;
+    final canManageCompetitions =
+        isAdminUser || user?.hasPermission('competitions:create') == true;
 
     return Container(
       width: 250,
@@ -224,23 +232,25 @@ class AdminSidebar extends ConsumerWidget {
                   path: '/admin',
                   currentPath: currentPath,
                 ),
-                _NavItem(
-                  icon: Icons.people_outline,
-                  activeIcon: Icons.people,
-                  label: 'Alunos',
-                  path: '/admin/alunos',
-                  currentPath: currentPath,
-                ),
+                if (canSeeStudents)
+                  _NavItem(
+                    icon: Icons.people_outline,
+                    activeIcon: Icons.people,
+                    label: 'Alunos',
+                    path: '/admin/alunos',
+                    currentPath: currentPath,
+                  ),
                 // 'Chamada' abre a chamada normal. O FAB 'Chamada por QR'
                 // dentro da propria tela leva pra projecao — sem precisar
                 // de duas entradas na sidebar.
-                _NavItem(
-                  icon: Icons.check_circle_outline,
-                  activeIcon: Icons.check_circle,
-                  label: 'Chamada',
-                  path: '/admin/chamada',
-                  currentPath: currentPath,
-                ),
+                if (canTakeAttendance)
+                  _NavItem(
+                    icon: Icons.check_circle_outline,
+                    activeIcon: Icons.check_circle,
+                    label: 'Chamada',
+                    path: '/admin/chamada',
+                    currentPath: currentPath,
+                  ),
                 _NavItem(
                   icon: Icons.calendar_month_outlined,
                   activeIcon: Icons.calendar_month,
@@ -256,13 +266,14 @@ class AdminSidebar extends ConsumerWidget {
                     path: '/admin/graduacao',
                     currentPath: currentPath,
                   ),
-                _NavItem(
-                  icon: Icons.emoji_events_outlined,
-                  activeIcon: Icons.emoji_events,
-                  label: 'Campeonatos',
-                  path: '/admin/campeonatos',
-                  currentPath: currentPath,
-                ),
+                if (canManageCompetitions)
+                  _NavItem(
+                    icon: Icons.emoji_events_outlined,
+                    activeIcon: Icons.emoji_events,
+                    label: 'Campeonatos',
+                    path: '/admin/campeonatos',
+                    currentPath: currentPath,
+                  ),
                 if (canSeeFinancial)
                   _NavItem(
                     icon: Icons.attach_money_outlined,
@@ -424,27 +435,6 @@ class AdminBottomNav extends ConsumerStatefulWidget {
 }
 
 class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
-  // Navigation items for bottom nav (first 4 + "Mais"). The 4th item is
-  // permission-gated below — instructors without financial:view see Turmas
-  // there instead of Financeiro.
-  static const List<_AdminNavItem> _baseBottomNavItems = [
-    _AdminNavItem(
-      label: 'Dashboard',
-      icon: LucideIcons.layoutDashboard,
-      path: '/admin',
-    ),
-    _AdminNavItem(
-      label: 'Chamada',
-      icon: LucideIcons.clipboardCheck,
-      path: '/admin/chamada',
-    ),
-    _AdminNavItem(
-      label: 'Alunos',
-      icon: LucideIcons.users,
-      path: '/admin/alunos',
-    ),
-  ];
-
   static const _AdminNavItem _financialBottomNavItem = _AdminNavItem(
     label: 'Financeiro',
     icon: LucideIcons.dollarSign,
@@ -464,12 +454,37 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
   /// Returns the current bottom nav list, gated by permissions on the user.
   List<_AdminNavItem> _bottomNavItemsFor(WidgetRef ref) {
     final user = ref.read(currentUserProvider).valueOrNull;
+    final isAdminUser = user?.isAdmin == true;
     final canSeeFinancial = user?.hasPermission('financial:view') == true;
-    return <_AdminNavItem>[
-      ..._baseBottomNavItems,
+    final canTakeAttendance =
+        isAdminUser || user?.hasPermission('attendance:take') == true;
+    final canSeeStudents =
+        isAdminUser ||
+        user?.hasPermission('students:create') == true ||
+        user?.hasPermission('students:delete') == true;
+
+    final items = <_AdminNavItem>[
+      const _AdminNavItem(
+        label: 'Dashboard',
+        icon: LucideIcons.layoutDashboard,
+        path: '/admin',
+      ),
+      if (canTakeAttendance)
+        const _AdminNavItem(
+          label: 'Chamada',
+          icon: LucideIcons.clipboardCheck,
+          path: '/admin/chamada',
+        ),
+      if (canSeeStudents)
+        const _AdminNavItem(
+          label: 'Alunos',
+          icon: LucideIcons.users,
+          path: '/admin/alunos',
+        ),
       canSeeFinancial ? _financialBottomNavItem : _turmasBottomNavItem,
       _menuBottomNavItem,
     ];
+    return items;
   }
 
   /// Catalog of everything that lives behind the "Menu" tile, tagged by
@@ -497,6 +512,7 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       icon: LucideIcons.trophy,
       path: '/admin/campeonatos',
       section: 'Gestão',
+      requiresPermission: 'competitions:create',
     ),
     _AdminMenuEntry(
       label: 'Musculação',

@@ -16,6 +16,8 @@ class GrantablePermission {
 }
 
 const List<GrantablePermission> kGrantableExtraPermissions = [
+  GrantablePermission('attendance:take', 'Fazer chamada',
+      'Registrar presença dos alunos nas aulas'),
   GrantablePermission('financial:view', 'Ver financeiro',
       'Mensalidades, quem pagou, recibos'),
   GrantablePermission('financial:create', 'Lançar cobranças',
