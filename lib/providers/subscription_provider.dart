@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/academy.dart';
@@ -18,9 +19,13 @@ final subscriptionProvider = StreamProvider<AcademySubscription?>((ref) {
       .map((snap) {
     if (!snap.exists) return null;
     final data = snap.data() as Map<String, dynamic>;
+    final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
     final subMap = data['subscription'] as Map<String, dynamic>?;
-    if (subMap == null) return null;
-    return AcademySubscription.fromMap(subMap);
+    // Base legada sem doc de subscription: ainda assim ancoramos o trial em
+    // createdAt (createdAt + trialDays). Sem subscription E sem createdAt, não
+    // há como datar → mantém liberada (retorna null → acesso por padrão).
+    if (subMap == null && createdAt == null) return null;
+    return AcademySubscription.fromMap(subMap ?? const {}, createdAt: createdAt);
   });
 });
 

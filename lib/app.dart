@@ -47,6 +47,7 @@ import 'screens/portal/monitor_student_detail_screen.dart';
 import 'screens/portal/monitor_student_form_screen.dart';
 import 'providers/portal_providers.dart';
 import 'screens/splash_screen.dart';
+import 'screens/paywall_screen.dart';
 // Admin screens
 import 'screens/admin/admin_screens.dart';
 
@@ -970,6 +971,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           context: context,
           state: state,
           child: const NotificationsScreen(),
+        ),
+      ),
+
+      // Paywall (rota navegável; o gate do admin também a renderiza inline).
+      // showClose=true pois aqui é acesso voluntário (banner/deep link), com
+      // botão de fechar — diferente do gate, que não tem saída.
+      GoRoute(
+        path: '/paywall',
+        pageBuilder: (context, state) => _buildPageWithPushTransition(
+          context: context,
+          state: state,
+          child: const PaywallScreen(showClose: true),
         ),
       ),
     ],

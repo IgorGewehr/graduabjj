@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/constants.dart';
 import '../models/user.dart';
 import '../services/firebase_service.dart';
 import '../services/global_user_service.dart';
@@ -504,7 +505,8 @@ class AuthService {
       'subscription': {
         'plan': 'free',
         'status': 'active',
-        'trialEndsAt': DateTime.now().add(const Duration(days: 30)),
+        'trialEndsAt':
+            DateTime.now().add(const Duration(days: AppConstants.trialDays)),
       },
       'storeEnabled': false,
       'storePublished': false,

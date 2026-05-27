@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,13 +7,29 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/constants.dart';
 import '../core/theme.dart';
+import '../models/academy.dart';
 import '../providers/auth_provider.dart';
 import '../providers/subscription_provider.dart';
+import '../services/firebase_service.dart';
 
 enum _BillingPlan { mensal, trimestral, anual }
 
 class PaywallScreen extends ConsumerStatefulWidget {
-  const PaywallScreen({super.key});
+  /// When true, shows a close button at the top — used when the paywall is
+  /// opened voluntarily (e.g. from the trial banner) so the user can dismiss
+  /// it. As the access gate (rendered inline by AdminShell) it stays false so
+  /// there's no escape until the academy regains access.
+  final bool showClose;
+
+  /// When true, frames the screen as "pagamento recusado / atualize o cartão"
+  /// (renovação recorrente que falhou) em vez do paywall genérico de trial.
+  final bool pastDue;
+
+  const PaywallScreen({
+    super.key,
+    this.showClose = false,
+    this.pastDue = false,
+  });
 
   @override
   ConsumerState<PaywallScreen> createState() => _PaywallScreenState();
@@ -21,6 +38,7 @@ class PaywallScreen extends ConsumerStatefulWidget {
 class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   _BillingPlan _selected = _BillingPlan.anual;
   bool _launching = false;
+  bool _checking = false;
 
   static const _plans = [
     _PlanData(
@@ -61,11 +79,26 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
         _BillingPlan.anual => AppConstants.caktoCheckoutAnual,
       };
 
+  /// Whether the 50%-off-first-month promo applies right now: the academy is in
+  /// trial, within the first [AppConstants.promoFirstDays] days, and a promo
+  /// coupon is configured. (Applies to the Mensal plan only.)
+  bool _isPromoEligible(AcademySubscription? sub) {
+    if (AppConstants.caktoMensalPromoCoupon.isEmpty) return false;
+    if (sub == null || !sub.isTrialing) return false;
+    // "Primeiros N dias do trial": trialDaysLeft cai de ~trialDays até 0.
+    return sub.trialDaysLeft >=
+        (AppConstants.trialDays - AppConstants.promoFirstDays);
+  }
+
   /// Builds the checkout URL with the admin's e-mail pre-filled (so the payment
   /// e-mail matches the account e-mail — the webhook keys off it) and the
-  /// academyId as `src` (a bonus identifier the webhook tries first).
+  /// academyId as `src`. When the Mensal plan is selected and the promo is
+  /// active, also appends `?coupon=` to auto-apply the 50%-first-month coupon.
   Uri _buildCheckoutUri() {
     final user = ref.read(currentUserProvider).valueOrNull;
+    final sub = ref.read(subscriptionProvider).valueOrNull;
+    final usePromo = _selected == _BillingPlan.mensal && _isPromoEligible(sub);
+
     final params = <String, String>{};
     final email = user?.email;
     if (email != null && email.isNotEmpty) {
@@ -75,6 +108,9 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     final academyId = user?.academyId;
     if (academyId != null && academyId.isNotEmpty) {
       params['src'] = academyId;
+    }
+    if (usePromo) {
+      params['coupon'] = AppConstants.caktoMensalPromoCoupon;
     }
     final base = Uri.parse(_checkoutUrl);
     return params.isEmpty ? base : base.replace(queryParameters: params);
@@ -99,6 +135,55 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
+  /// "Já paguei": re-checa a assinatura por até ~30s (a cada 3s, lendo o doc no
+  /// servidor) aguardando o webhook gravar o `paidUntil`. Assim que confirma,
+  /// invalida o provider — o gate do AdminShell some sozinho. Se estourar o
+  /// tempo, avisa que ainda está processando.
+  Future<void> _checkPayment() async {
+    final academyId = ref.read(currentUserProvider).valueOrNull?.academyId;
+    if (academyId == null) return;
+
+    setState(() => _checking = true);
+    final deadline = DateTime.now().add(const Duration(seconds: 30));
+    var confirmed = false;
+
+    while (mounted && DateTime.now().isBefore(deadline)) {
+      try {
+        final snap = await FirebaseService.firestore
+            .collection('academies')
+            .doc(academyId)
+            .get(const GetOptions(source: Source.server));
+        final subMap = snap.data()?['subscription'] as Map<String, dynamic>?;
+        final sub = subMap != null ? AcademySubscription.fromMap(subMap) : null;
+        // Confirma especificamente o PAGAMENTO (paidUntil futuro) — não o trial.
+        if (sub?.paidUntil != null &&
+            sub!.paidUntil!.isAfter(DateTime.now())) {
+          confirmed = true;
+          break;
+        }
+      } catch (_) {
+        // erro de rede transitório — tenta de novo no próximo ciclo
+      }
+      await Future.delayed(const Duration(seconds: 3));
+    }
+
+    if (!mounted) return;
+    setState(() => _checking = false);
+
+    if (confirmed) {
+      ref.invalidate(subscriptionProvider);
+      if (widget.showClose) Navigator.of(context).maybePop();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Pagamento ainda não confirmado. Aguarde alguns instantes e toque novamente.',
+          ),
+        ),
+      );
+    }
+  }
+
   void _showError() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Não foi possível abrir o checkout. Tente novamente.')),
@@ -110,6 +195,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     final sub = ref.watch(subscriptionProvider).valueOrNull;
     final isTrialing = sub?.isTrialing ?? false;
     final daysLeft = sub?.trialDaysLeft ?? 0;
+    final promoEligible = _isPromoEligible(sub);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -119,10 +205,28 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 48),
+              if (widget.showClose)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: IconButton(
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon: const Icon(LucideIcons.x),
+                      color: AppTheme.textSecondary,
+                      tooltip: 'Fechar',
+                    ),
+                  ),
+                )
+              else
+                const SizedBox(height: 48),
 
               // Header
-              _Header(isTrialing: isTrialing, daysLeft: daysLeft)
+              _Header(
+                isTrialing: isTrialing,
+                daysLeft: daysLeft,
+                pastDue: widget.pastDue,
+              )
                   .animate()
                   .fadeIn(duration: 400.ms)
                   .slideY(begin: -0.05, end: 0, duration: 400.ms, curve: Curves.easeOut),
@@ -135,6 +239,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                     child: _PlanCard(
                       plan: plan,
                       isSelected: _selected == plan.key,
+                      // 1º mês com 50% off — só no Mensal e dentro da janela.
+                      promoPrice: (promoEligible && plan.key == _BillingPlan.mensal)
+                          ? plan.price / 2
+                          : null,
                       onTap: () => setState(() => _selected = plan.key),
                     ).animate(delay: (100 * _plans.indexOf(plan)).ms)
                         .fadeIn(duration: 350.ms)
@@ -176,11 +284,34 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
 
               // Already paid
               TextButton(
-                onPressed: () => ref.invalidate(subscriptionProvider),
-                child: const Text(
-                  'Já paguei — atualizar acesso',
-                  style: TextStyle(fontSize: 13, color: AppTheme.textDisabled),
-                ),
+                onPressed: _checking ? null : _checkPayment,
+                child: _checking
+                    ? const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'Verificando pagamento...',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      )
+                    : const Text(
+                        'Já paguei — atualizar acesso',
+                        style:
+                            TextStyle(fontSize: 13, color: AppTheme.textDisabled),
+                      ),
               ).animate(delay: 500.ms).fadeIn(duration: 300.ms),
 
               const SizedBox(height: 32),
@@ -199,42 +330,34 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
 class _Header extends StatelessWidget {
   final bool isTrialing;
   final int daysLeft;
+  final bool pastDue;
 
-  const _Header({required this.isTrialing, required this.daysLeft});
+  const _Header({
+    required this.isTrialing,
+    required this.daysLeft,
+    this.pastDue = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Logo mark
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: AppTheme.textPrimary,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: const Center(
-            child: Text(
-              'G',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 28,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -1,
-              ),
-            ),
-          ),
+        // Logo
+        Image.asset(
+          'assets/images/bjjeasy_logo.png',
+          height: 72,
         ),
         const SizedBox(height: 24),
 
         Text(
-          isTrialing
-              ? daysLeft <= 3
-                  ? 'Seu trial encerra em $daysLeft dia${daysLeft != 1 ? 's' : ''}'
-                  : 'Escolha seu plano'
-              : 'Período de avaliação encerrado',
+          pastDue
+              ? 'Pagamento não confirmado'
+              : isTrialing
+                  ? daysLeft <= 3
+                      ? 'Seu trial encerra em $daysLeft dia${daysLeft != 1 ? 's' : ''}'
+                      : 'Escolha seu plano'
+                  : 'Período de avaliação encerrado',
           textAlign: TextAlign.center,
           style: const TextStyle(
             fontSize: 26,
@@ -247,9 +370,11 @@ class _Header extends StatelessWidget {
         const SizedBox(height: 10),
 
         Text(
-          isTrialing
-              ? 'Assine agora e continue gerenciando sua academia sem interrupções.'
-              : 'Assine para continuar usando todos os recursos do GraduaBJJ.',
+          pastDue
+              ? 'Não conseguimos renovar sua assinatura. Atualize seu pagamento para continuar usando o BJJEasy.'
+              : isTrialing
+                  ? 'Assine agora e continue gerenciando sua academia sem interrupções.'
+                  : 'Assine para continuar usando todos os recursos do BJJEasy.',
           textAlign: TextAlign.center,
           style: const TextStyle(
             fontSize: 15,
@@ -271,10 +396,15 @@ class _PlanCard extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
 
+  /// When set, shows the 50%-off first-month promo: badge + this discounted
+  /// price with the original [plan.price] struck through.
+  final double? promoPrice;
+
   const _PlanCard({
     required this.plan,
     required this.isSelected,
     required this.onTap,
+    this.promoPrice,
   });
 
   @override
@@ -348,12 +478,34 @@ class _PlanCard extends StatelessWidget {
                                 : AppTheme.textPrimary,
                             borderRadius: BorderRadius.circular(20),
                           ),
-                          child: Text(
+                          child: const Text(
                             'Mais popular',
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
-                              color: isSelected ? Colors.white : Colors.white,
+                              color: Colors.white,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (promoPrice != null) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? Colors.white.withValues(alpha: 0.2)
+                                : AppTheme.success,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text(
+                            '-50% 1º mês',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
                               letterSpacing: 0.3,
                             ),
                           ),
@@ -400,24 +552,55 @@ class _PlanCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                Text(
-                  'R\$ ${_fmt(plan.price)}',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: isSelected ? Colors.white : AppTheme.textPrimary,
-                    letterSpacing: -0.5,
+                if (promoPrice != null) ...[
+                  Text(
+                    'R\$ ${_fmt(plan.price)}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      decoration: TextDecoration.lineThrough,
+                      color: isSelected
+                          ? Colors.white.withValues(alpha: 0.6)
+                          : AppTheme.textSecondary,
+                    ),
                   ),
-                ),
-                Text(
-                  '/${plan.period}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isSelected
-                        ? Colors.white.withValues(alpha: 0.7)
-                        : AppTheme.textSecondary,
+                  Text(
+                    'R\$ ${_fmt(promoPrice!)}',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: isSelected ? Colors.white : AppTheme.textPrimary,
+                      letterSpacing: -0.5,
+                    ),
                   ),
-                ),
+                  Text(
+                    '1º mês',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isSelected
+                          ? Colors.white.withValues(alpha: 0.7)
+                          : AppTheme.textSecondary,
+                    ),
+                  ),
+                ] else ...[
+                  Text(
+                    'R\$ ${_fmt(plan.price)}',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: isSelected ? Colors.white : AppTheme.textPrimary,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  Text(
+                    '/${plan.period}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isSelected
+                          ? Colors.white.withValues(alpha: 0.7)
+                          : AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
               ],
             ),
           ],

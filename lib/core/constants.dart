@@ -41,6 +41,21 @@ class AppConstants {
   static const String caktoCheckoutAnual = 'https://pay.cakto.com.br/38yfe5r';
   static const String supportWhatsApp = 'https://wa.me/5500000000000';
 
+  /// Duração do período de avaliação grátis (em dias) ao criar uma academia.
+  /// Fonte única — usado em [createAcademy] ao gravar `subscription.trialEndsAt`.
+  static const int trialDays = 7;
+
+  /// Cupom de 50% no 1º mês do plano Mensal (criado no Cakto, código
+  /// `bonusbjjeasy`). Vazio desliga o desconto no paywall. É aplicado
+  /// automaticamente via `?coupon=` na URL do checkout do Mensal, nos primeiros
+  /// [promoFirstDays] dias do trial. O desconto vale só na 1ª cobrança (config
+  /// do cupom no Cakto); a recorrência segue R$ 89,99/mês.
+  static const String caktoMensalPromoCoupon = 'bonusbjjeasy';
+
+  /// Janela (dias desde a criação da academia) em que o desconto promocional do
+  /// 1º mês fica disponível.
+  static const int promoFirstDays = 3;
+
   // ===========================================
   // Firebase Collections
   // ===========================================

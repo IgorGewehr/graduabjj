@@ -60,5 +60,6 @@ key.properties
 # Cloud Functions
 functions/node_modules/
 functions/.runtimeconfig.json
+functions/.env
 firebase-debug.log
 firebase-debug.*.log

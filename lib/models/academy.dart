@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/constants.dart';
+
 /// Academy Subscription Plan
 enum SubscriptionPlan { free, basic, premium, enterprise }
 
@@ -121,6 +123,10 @@ class AcademySubscription {
   final DateTime? paidUntil;
   final bool freeOverride;
 
+  /// Data de criação da academia. Usada como âncora do trial quando não há um
+  /// [trialEndsAt] explícito (base legada): trial efetivo = createdAt + N dias.
+  final DateTime? createdAt;
+
   AcademySubscription({
     required this.plan,
     required this.status,
@@ -128,30 +134,53 @@ class AcademySubscription {
     this.trialEndsAt,
     this.paidUntil,
     this.freeOverride = false,
+    this.createdAt,
   });
 
+  /// Fim do trial efetivo. **`createdAt` é a fonte de verdade**: o trial é
+  /// sempre `createdAt + trialDays`, pra TODAS as academias — inclusive as
+  /// antigas, que tinham um `trialEndsAt` de 30 dias gravado (esse valor antigo
+  /// é ignorado de propósito). Quem deve manter acesso (pagantes/cortesia) é
+  /// tratado por `paidUntil`/`freeOverride`, que têm prioridade em [hasAccess].
+  /// Só cai no `trialEndsAt` explícito se, por algum motivo, não houver
+  /// `createdAt` (caso raro).
+  DateTime? get effectiveTrialEndsAt {
+    if (createdAt != null) {
+      return createdAt!.add(const Duration(days: AppConstants.trialDays));
+    }
+    return trialEndsAt;
+  }
+
   /// True when the academy has full access (override, paid, or in trial).
+  /// Ordem importa: override e pagamento têm prioridade sobre o trial — assim
+  /// quem pagou (Cakto OU externamente, via paidUntil/freeOverride) nunca é
+  /// bloqueado, mesmo sendo academia antiga.
   bool get hasAccess {
     if (freeOverride) return true;
     if (plan == SubscriptionPlan.premium || plan == SubscriptionPlan.enterprise) return true;
     if (paidUntil != null && paidUntil!.isAfter(DateTime.now())) return true;
-    if (trialEndsAt != null && trialEndsAt!.isAfter(DateTime.now())) return true;
+    final trialEnd = effectiveTrialEndsAt;
+    if (trialEnd != null && trialEnd.isAfter(DateTime.now())) return true;
     return false;
   }
 
-  bool get isTrialing =>
-      !freeOverride &&
-      plan == SubscriptionPlan.free &&
-      (paidUntil == null || paidUntil!.isBefore(DateTime.now())) &&
-      trialEndsAt != null &&
-      trialEndsAt!.isAfter(DateTime.now());
-
-  int get trialDaysLeft {
-    if (trialEndsAt == null) return 0;
-    return trialEndsAt!.difference(DateTime.now()).inDays.clamp(0, 30);
+  bool get isTrialing {
+    if (freeOverride || plan != SubscriptionPlan.free) return false;
+    if (paidUntil != null && paidUntil!.isAfter(DateTime.now())) return false;
+    final trialEnd = effectiveTrialEndsAt;
+    return trialEnd != null && trialEnd.isAfter(DateTime.now());
   }
 
-  factory AcademySubscription.fromMap(Map<String, dynamic> map) {
+  int get trialDaysLeft {
+    final trialEnd = effectiveTrialEndsAt;
+    if (trialEnd == null) return 0;
+    return trialEnd.difference(DateTime.now()).inDays.clamp(0, 30);
+  }
+
+  factory AcademySubscription.fromMap(
+    Map<String, dynamic> map, {
+    DateTime? createdAt,
+  }) {
     return AcademySubscription(
       plan: SubscriptionPlanExtension.fromString(map['plan'] ?? 'free'),
       status: SubscriptionStatusExtension.fromString(map['status'] ?? 'active'),
@@ -165,6 +194,7 @@ class AcademySubscription {
           ? (map['paidUntil'] as Timestamp).toDate()
           : null,
       freeOverride: map['freeOverride'] as bool? ?? false,
+      createdAt: createdAt,
     );
   }
 
@@ -321,7 +351,10 @@ class Academy {
       storeMinOrderAmount: data['storeMinOrderAmount'],
       studentCheckinEnabled: data['studentCheckinEnabled'] ?? false,
       subscription: data['subscription'] != null
-          ? AcademySubscription.fromMap(data['subscription'])
+          ? AcademySubscription.fromMap(
+              data['subscription'],
+              createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+            )
           : null,
       sports: data['sports'] is List
           ? List<String>.from((data['sports'] as List).map((e) => e.toString()))

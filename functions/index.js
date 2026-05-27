@@ -13,6 +13,7 @@
  */
 
 const {onCall, onRequest, HttpsError} = require('firebase-functions/v2/https');
+const {onSchedule} = require('firebase-functions/v2/scheduler');
 const {initializeApp} = require('firebase-admin/app');
 const {getFirestore, FieldValue, Timestamp} = require('firebase-admin/firestore');
 const {getAuth} = require('firebase-admin/auth');
@@ -655,12 +656,17 @@ exports.caktoWebhook = onRequest(
         provided.length !== expected.length ||
         !crypto.timingSafeEqual(provided, expected)
       ) {
+        console.warn('[caktoWebhook][diag] secret mismatch — recebido:',
+          JSON.stringify(payload.secret || null));
         return res.status(401).json({error: 'invalid secret'});
       }
     }
 
     const event = String(payload.event || payload.type || '');
-    const data = payload.data || payload;
+    // O Cakto manda `data` como ARRAY de pedidos; usamos o primeiro.
+    const data = Array.isArray(payload.data)
+        ? (payload.data[0] || {})
+        : (payload.data || payload);
 
     // ---- Classificar evento (nomes reais do Cakto) ----
     const grantEvents = [
@@ -669,17 +675,29 @@ exports.caktoWebhook = onRequest(
       'subscription_renewed',
     ];
     const revokeEvents = ['refund', 'chargeback'];
+    // Falha de renovação recorrente → marca past_due (não revoga na hora).
+    // ⚠️ Nomes a CONFIRMAR com um evento real do Cakto (a doc não cita o de
+    // falha de cobrança recorrente). Estes são defensivos.
+    const pastDueEvents = [
+      'subscription_renewal_refused',
+      'subscription_renewal_failed',
+      'subscription_late',
+      'purchase_refused',
+      'payment_failed',
+    ];
     const isGrant = grantEvents.includes(event);
     const isRevoke = revokeEvents.includes(event);
     const isCancel = event === 'subscription_canceled';
+    const isPastDue = pastDueEvents.includes(event);
 
-    if (!isGrant && !isRevoke && !isCancel) {
+    if (!isGrant && !isRevoke && !isCancel && !isPastDue) {
       return res.status(200).json({received: true, skipped: event});
     }
 
-    // ---- Resolver a academia: src (academyId) primeiro, depois e-mail ----
+    // ---- Resolver a academia: academyId (passado como ?src= → vem em `sck`)
+    // primeiro; senão, e-mail do comprador (pré-preenchido = login do dono). ----
     const srcAcademyId =
-      data.src || payload.src || data.utm_content || data.tracking?.src || null;
+      data.sck || data.src || payload.src || null;
     const buyerEmail =
       data.customer?.email || data.buyer?.email || data.email || null;
 
@@ -741,6 +759,18 @@ exports.caktoWebhook = onRequest(
       return res.status(200).json({success: true, academyId, action: 'canceled'});
     }
 
+    // ---- Falha de renovação → marca past_due (não mexe no paidUntil; o app
+    // mostra a tela "atualize seu pagamento" quando o acesso expirar). ----
+    if (isPastDue) {
+      await academyRef.update({
+        'subscription.status': 'past_due',
+        'subscription.lastEvent': event,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      console.log('[caktoWebhook] subscription past_due', {academyId, event});
+      return res.status(200).json({success: true, academyId, action: 'past_due'});
+    }
+
     // ---- Conceder/estender acesso ----
     const offerId = data.offer?.id || data.offer_id || null;
     const offerName = String(data.offer?.name || '').toLowerCase();
@@ -756,9 +786,21 @@ exports.caktoWebhook = onRequest(
     else if (offerName.includes('anual')) daysToAdd = 370;
     else if (offerName.includes('trimestral')) daysToAdd = 95;
 
+    const snap = await academyRef.get();
+
+    // Idempotência: se já processamos exatamente esta cobrança (mesmo id), não
+    // estende de novo. Evita double-grant quando o Cakto manda mais de um evento
+    // para a mesma compra (ex.: purchase_approved + subscription_created) com o
+    // mesmo id, ou em reentregas. (Eventos com ids distintos pra mesma cobrança
+    // ainda precisam ser confirmados na compra real e tratados se necessário.)
+    const chargeId = data.id || data.transaction_id || null;
+    if (chargeId && snap.get('subscription.externalPaymentId') === chargeId) {
+      console.log('[caktoWebhook] evento duplicado ignorado', {academyId, chargeId, event});
+      return res.status(200).json({success: true, academyId, action: 'duplicate'});
+    }
+
     // Estende a partir do maior entre hoje e o paidUntil atual — assim uma
     // renovação não encurta o período já pago.
-    const snap = await academyRef.get();
     const current = snap.get('subscription.paidUntil');
     const now = new Date();
     let base = now;
@@ -774,11 +816,122 @@ exports.caktoWebhook = onRequest(
       'subscription.paidUntil': Timestamp.fromDate(paidUntil),
       'subscription.lastPaymentAt': FieldValue.serverTimestamp(),
       'subscription.lastEvent': event,
-      'subscription.externalPaymentId': data.id || data.transaction_id || null,
+      'subscription.externalPaymentId': chargeId,
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
     console.log('[caktoWebhook] access granted', {academyId, event, offerId, daysToAdd, paidUntil});
     return res.status(200).json({success: true, academyId, action: 'granted', paidUntil});
+  },
+);
+
+// ============================================================
+// trialExpiryReminder — agendado (diário). Avisa por e-mail o dono de
+// academias cujo trial vence nas próximas ~48h e que ainda não assinaram.
+// Reusa o notification-server (mesmo do billing): POST /api/send-email,
+// appId "gestao-raiz" (SMTP do BJJEasy).
+//
+// Config Firebase:
+//   firebase functions:secrets:set NOTIFICATION_API_KEY   (x-api-key do server)
+//   (opcional) NOTIFICATION_API_URL — default: .../api/send-email
+// ============================================================
+async function sendTrialReminderEmail(email, academyName, daysLeft) {
+  const url = process.env.NOTIFICATION_API_URL ||
+    'https://notification.tensorroot.com/api/send-email';
+  const key = process.env.NOTIFICATION_API_KEY || '';
+  const dias = daysLeft <= 1 ? '1 dia' : `${daysLeft} dias`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(key ? {'x-api-key': key} : {}),
+      },
+      body: JSON.stringify({
+        appId: 'gestao-raiz',
+        email,
+        subject: `Seu teste gratis do BJJEasy termina em ${dias}`,
+        message:
+          `Ola! Seu periodo de avaliacao gratis do BJJEasy termina em ${dias}.\n\n` +
+          `Assine para continuar gerenciando ${academyName} sem interrupcoes — ` +
+          `alunos, graduacoes, financeiro, check-in e o portal do aluno.\n\n` +
+          `Abra o app e escolha seu plano. Qualquer duvida, e so chamar o suporte.`,
+      }),
+    });
+    return res.ok;
+  } catch (e) {
+    console.error('[trialReminder] email failed for', email, e.message);
+    return false;
+  }
+}
+
+exports.trialExpiryReminder = onSchedule(
+  {
+    schedule: 'every day 13:00',
+    timeZone: 'America/Sao_Paulo',
+    // NOTIFICATION_API_KEY vem de functions/.env (a conta atual não tem
+    // permissão de IAM no Secret Manager). A chave já é pública no build.sh.
+  },
+  async () => {
+    // Trial = createdAt + TRIAL_DAYS (mesma regra do gate no app). "Vence em
+    // ~0–2 dias" → createdAt entre (now - TRIAL_DAYS) e (now - (TRIAL_DAYS-2)].
+    const TRIAL_DAYS = 7; // = AppConstants.trialDays no app
+    const now = new Date();
+    const createdAfter = new Date(now);
+    createdAfter.setDate(createdAfter.getDate() - TRIAL_DAYS);
+    const createdBefore = new Date(now);
+    createdBefore.setDate(createdBefore.getDate() - (TRIAL_DAYS - 2));
+
+    const snap = await db
+      .collection('academies')
+      .where('createdAt', '>', Timestamp.fromDate(createdAfter))
+      .where('createdAt', '<=', Timestamp.fromDate(createdBefore))
+      .get();
+
+    let sent = 0;
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      const sub = data.subscription || {};
+      // Pula quem já paga, é cortesia, ou já foi avisado neste ciclo de trial.
+      if (sub.freeOverride === true) continue;
+      if (sub.paidUntil && sub.paidUntil.toDate() > now) continue;
+      if (sub.trialReminderSentAt) continue;
+
+      // E-mail do dono: login (Auth) primeiro; senão o contato da academia.
+      let email = null;
+      if (data.ownerId) {
+        try {
+          email = (await getAuth().getUser(data.ownerId)).email || null;
+        } catch (_) {}
+      }
+      if (!email) email = data.email || null;
+      if (!email) continue;
+
+      const created =
+        data.createdAt && typeof data.createdAt.toDate === 'function'
+          ? data.createdAt.toDate()
+          : null;
+      if (!created) continue;
+      const trialEnd = new Date(created);
+      trialEnd.setDate(trialEnd.getDate() + TRIAL_DAYS);
+      if (trialEnd <= now) continue; // já venceu (segurança)
+      const daysLeft = Math.max(
+        1,
+        Math.ceil((trialEnd.getTime() - now.getTime()) / 86400000),
+      );
+
+      const ok = await sendTrialReminderEmail(
+        email,
+        data.name || 'sua academia',
+        daysLeft,
+      );
+      if (ok) {
+        await doc.ref.update({
+          'subscription.trialReminderSentAt': FieldValue.serverTimestamp(),
+        });
+        sent++;
+      }
+    }
+    console.log(`[trialReminder] checked ${snap.size}, sent ${sent}`);
   },
 );

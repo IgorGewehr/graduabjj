@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../models/academy.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/subscription_provider.dart';
@@ -23,14 +24,24 @@ class AdminShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final location = GoRouterState.of(context).uri.path;
     ref.watch(currentUserProvider);
+    final sub = ref.watch(subscriptionProvider).valueOrNull;
 
     // Subscription gate: when the academy has no active access (trial expired
     // and unpaid), staff see the paywall instead of the admin area. Students
     // are unaffected — they live in the portal shell. Defaults to allowing
     // access while the subscription is still loading (no paywall flash).
     if (!ref.watch(hasSubscriptionAccessProvider)) {
-      return const PaywallScreen();
+      // Renovação recorrente que falhou (pastDue) → mensagem de "atualize seu
+      // pagamento" em vez do paywall genérico.
+      return PaywallScreen(
+        pastDue: sub?.status == SubscriptionStatus.pastDue,
+      );
     }
+
+    // Trial countdown banner (only while in trial, after the gate above lets
+    // us through). Tapping it opens the paywall so the admin can subscribe.
+    final showTrialBanner = sub?.isTrialing ?? false;
+    final trialDaysLeft = sub?.trialDaysLeft ?? 0;
 
     final settingsAsync = ref.watch(academySettingsProvider);
     final settings = settingsAsync.valueOrNull;
@@ -117,18 +128,82 @@ class AdminShell extends ConsumerWidget {
                 ),
               )
             : null,
-        body: Row(
+        body: Column(
           children: [
-            // Sidebar for larger screens
-            if (MediaQuery.of(context).size.width >= 768)
-              AdminSidebar(currentPath: location),
-            // Main content
-            Expanded(child: child),
+            if (showTrialBanner)
+              _TrialBanner(
+                daysLeft: trialDaysLeft,
+                onTap: () => context.push('/paywall'),
+              ),
+            Expanded(
+              child: Row(
+                children: [
+                  // Sidebar for larger screens
+                  if (MediaQuery.of(context).size.width >= 768)
+                    AdminSidebar(currentPath: location),
+                  // Main content
+                  Expanded(child: child),
+                ],
+              ),
+            ),
           ],
         ),
         bottomNavigationBar: MediaQuery.of(context).size.width < 768
             ? AdminBottomNav(currentPath: location)
             : null,
+      ),
+    );
+  }
+}
+
+/// Slim banner shown at the top of the admin area during the trial period.
+/// Turns urgent (red) in the last 3 days. Tapping opens the paywall.
+class _TrialBanner extends StatelessWidget {
+  final int daysLeft;
+  final VoidCallback onTap;
+
+  const _TrialBanner({required this.daysLeft, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final urgent = daysLeft <= 3;
+    final color = urgent ? AppTheme.error : AppTheme.warning;
+    final label = daysLeft <= 0
+        ? 'Seu trial termina hoje'
+        : daysLeft == 1
+            ? 'Falta 1 dia de trial'
+            : 'Faltam $daysLeft dias de trial';
+
+    return Material(
+      color: color.withValues(alpha: 0.12),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(LucideIcons.clock, size: 16, color: color),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: AppTheme.labelMedium.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text(
+                'Assinar',
+                style: AppTheme.labelMedium.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              Icon(LucideIcons.chevronRight, size: 16, color: color),
+            ],
+          ),
+        ),
       ),
     );
   }
