@@ -622,14 +622,20 @@ exports.selfCheckin = onCall(async (request) => {
 });
 
 // ============================================================
-// caktoWebhook — recebe eventos de pagamento do Cakto e ativa
-// a subscription da academia correspondente ao e-mail do comprador.
+// caktoWebhook — recebe eventos do Cakto e concede/revoga a
+// subscription da academia.
 //
-// Configurar no Firebase:
+// Formato real do Cakto (doc oficial):
+//   payload = { secret, event, data: { id, refId, customer:{email,...},
+//     offer:{id,name,price}, product:{id,...}, amount, paymentMethod, paidAt } }
+//   Autenticação: campo `secret` NO CORPO (não há header HMAC).
+//
+// Config Firebase:
 //   firebase functions:secrets:set CAKTO_WEBHOOK_SECRET
 //
-// IDs dos produtos Cakto (configurar como secrets ou env vars):
-//   CAKTO_PRODUCT_MENSAL, CAKTO_PRODUCT_TRIMESTRAL, CAKTO_PRODUCT_ANUAL
+// Mapa de ofertas → período (usa offer.id, pois as 3 ofertas do produto
+// "BJJEasy" compartilham o mesmo product.id):
+//   CAKTO_OFFER_MENSAL, CAKTO_OFFER_TRIMESTRAL, CAKTO_OFFER_ANUAL
 // ============================================================
 exports.caktoWebhook = onRequest(
   {cors: false, secrets: ['CAKTO_WEBHOOK_SECRET']},
@@ -638,102 +644,141 @@ exports.caktoWebhook = onRequest(
       return res.status(405).send('Method Not Allowed');
     }
 
-    // ---- Validação de assinatura HMAC-SHA256 ----
-    const secret = process.env.CAKTO_WEBHOOK_SECRET;
-    if (secret) {
-      const signature = req.headers['x-cakto-signature'] || req.headers['x-webhook-signature'];
-      if (!signature) {
-        return res.status(401).json({error: 'Missing signature'});
-      }
-      const body = JSON.stringify(req.body);
-      const expected = crypto.createHmac('sha256', secret).update(body).digest('hex');
-      if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
-        return res.status(401).json({error: 'Invalid signature'});
+    const payload = req.body || {};
+
+    // ---- Autenticação: o Cakto manda o `secret` no corpo (não em header) ----
+    const expectedSecret = process.env.CAKTO_WEBHOOK_SECRET;
+    if (expectedSecret) {
+      const provided = Buffer.from(String(payload.secret || ''));
+      const expected = Buffer.from(String(expectedSecret));
+      if (
+        provided.length !== expected.length ||
+        !crypto.timingSafeEqual(provided, expected)
+      ) {
+        return res.status(401).json({error: 'invalid secret'});
       }
     }
 
-    const payload = req.body;
-    // Cakto pode enviar o evento no root ou em payload.event
-    const event = payload.event || payload.type || '';
+    const event = String(payload.event || payload.type || '');
+    const data = payload.data || payload;
 
-    // Só processa eventos de pagamento confirmado / assinatura ativa
-    const relevantEvents = [
-      'payment.confirmed',
-      'payment.approved',
-      'subscription.active',
-      'subscription.renewed',
-      'order.paid',
+    // ---- Classificar evento (nomes reais do Cakto) ----
+    const grantEvents = [
+      'purchase_approved',
+      'subscription_created',
+      'subscription_renewed',
     ];
-    if (!relevantEvents.includes(event)) {
+    const revokeEvents = ['refund', 'chargeback'];
+    const isGrant = grantEvents.includes(event);
+    const isRevoke = revokeEvents.includes(event);
+    const isCancel = event === 'subscription_canceled';
+
+    if (!isGrant && !isRevoke && !isCancel) {
       return res.status(200).json({received: true, skipped: event});
     }
 
-    // ---- Extrair e-mail e produto ----
-    const data = payload.data || payload;
+    // ---- Resolver a academia: src (academyId) primeiro, depois e-mail ----
+    const srcAcademyId =
+      data.src || payload.src || data.utm_content || data.tracking?.src || null;
     const buyerEmail =
-      data.customer?.email ||
-      data.buyer?.email ||
-      data.email ||
-      null;
-    const productId =
-      data.product?.id ||
-      data.offer?.id ||
-      data.offer_id ||
-      data.product_id ||
-      null;
+      data.customer?.email || data.buyer?.email || data.email || null;
 
-    if (!buyerEmail) {
-      console.warn('[caktoWebhook] Missing buyer email in payload', JSON.stringify(payload));
-      return res.status(200).json({received: true, warning: 'missing_email'});
+    let academyRef = null;
+
+    if (srcAcademyId) {
+      const snap = await db
+        .collection('academies')
+        .doc(String(srcAcademyId))
+        .get();
+      if (snap.exists) academyRef = snap.ref;
     }
 
-    // ---- Mapear e-mail → uid Firebase ----
-    let uid;
-    try {
-      const userRecord = await getAuth().getUserByEmail(buyerEmail);
-      uid = userRecord.uid;
-    } catch (e) {
-      console.warn('[caktoWebhook] Firebase user not found for email:', buyerEmail);
-      return res.status(200).json({received: true, warning: 'user_not_found', email: buyerEmail});
+    if (!academyRef && buyerEmail) {
+      let uid;
+      try {
+        uid = (await getAuth().getUserByEmail(buyerEmail)).uid;
+      } catch (e) {
+        console.warn('[caktoWebhook] user not found for email:', buyerEmail);
+        return res
+          .status(200)
+          .json({received: true, warning: 'user_not_found', email: buyerEmail});
+      }
+      const academySnap = await db
+        .collection('academies')
+        .where('ownerId', '==', uid)
+        .limit(1)
+        .get();
+      if (!academySnap.empty) academyRef = academySnap.docs[0].ref;
     }
 
-    // ---- Encontrar academia do owner ----
-    const academySnap = await db
-      .collection('academies')
-      .where('ownerId', '==', uid)
-      .limit(1)
-      .get();
-
-    if (academySnap.empty) {
-      console.warn('[caktoWebhook] Academy not found for uid:', uid);
+    if (!academyRef) {
+      console.warn('[caktoWebhook] academy not resolved', {srcAcademyId, buyerEmail});
       return res.status(200).json({received: true, warning: 'academy_not_found'});
     }
+    const academyId = academyRef.id;
 
-    const academyId = academySnap.docs[0].id;
+    // ---- Reembolso / chargeback → revoga acesso imediatamente ----
+    if (isRevoke) {
+      await academyRef.update({
+        'subscription.status': 'cancelled',
+        'subscription.plan': 'free',
+        'subscription.paidUntil': Timestamp.fromDate(new Date()),
+        'subscription.lastEvent': event,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      console.log('[caktoWebhook] access revoked', {academyId, event});
+      return res.status(200).json({success: true, academyId, action: 'revoked'});
+    }
 
-    // ---- Calcular paidUntil com base no produto ----
-    const mensalId = process.env.CAKTO_PRODUCT_MENSAL || 'MENSAL_ID';
-    const trimestralId = process.env.CAKTO_PRODUCT_TRIMESTRAL || 'TRIMESTRAL_ID';
-    const anualId = process.env.CAKTO_PRODUCT_ANUAL || 'ANUAL_ID';
+    // ---- Cancelamento de assinatura → mantém acesso até o paidUntil atual ----
+    if (isCancel) {
+      await academyRef.update({
+        'subscription.status': 'cancelled',
+        'subscription.lastEvent': event,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      console.log('[caktoWebhook] subscription canceled (acesso até paidUntil)', {academyId});
+      return res.status(200).json({success: true, academyId, action: 'canceled'});
+    }
 
-    let daysToAdd = 35; // default: mensal + 4 dias de buffer
-    if (productId === trimestralId) daysToAdd = 95;
-    else if (productId === anualId) daysToAdd = 370;
+    // ---- Conceder/estender acesso ----
+    const offerId = data.offer?.id || data.offer_id || null;
+    const offerName = String(data.offer?.name || '').toLowerCase();
 
-    const paidUntil = new Date();
+    const anualOffer = process.env.CAKTO_OFFER_ANUAL || '';
+    const trimestralOffer = process.env.CAKTO_OFFER_TRIMESTRAL || '';
+    const mensalOffer = process.env.CAKTO_OFFER_MENSAL || '';
+
+    let daysToAdd = 35; // default: mensal + buffer
+    if (offerId && offerId === anualOffer) daysToAdd = 370;
+    else if (offerId && offerId === trimestralOffer) daysToAdd = 95;
+    else if (offerId && offerId === mensalOffer) daysToAdd = 35;
+    else if (offerName.includes('anual')) daysToAdd = 370;
+    else if (offerName.includes('trimestral')) daysToAdd = 95;
+
+    // Estende a partir do maior entre hoje e o paidUntil atual — assim uma
+    // renovação não encurta o período já pago.
+    const snap = await academyRef.get();
+    const current = snap.get('subscription.paidUntil');
+    const now = new Date();
+    let base = now;
+    if (current && typeof current.toDate === 'function' && current.toDate() > now) {
+      base = current.toDate();
+    }
+    const paidUntil = new Date(base);
     paidUntil.setDate(paidUntil.getDate() + daysToAdd);
 
-    // ---- Atualizar Firestore ----
-    await db.collection('academies').doc(academyId).update({
+    await academyRef.update({
       'subscription.plan': 'pro',
       'subscription.status': 'active',
       'subscription.paidUntil': Timestamp.fromDate(paidUntil),
       'subscription.lastPaymentAt': FieldValue.serverTimestamp(),
+      'subscription.lastEvent': event,
       'subscription.externalPaymentId': data.id || data.transaction_id || null,
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
-    console.log('[caktoWebhook] Subscription activated', {academyId, buyerEmail, paidUntil, daysToAdd});
-    return res.status(200).json({success: true, academyId, paidUntil});
+    console.log('[caktoWebhook] access granted', {academyId, event, offerId, daysToAdd, paidUntil});
+    return res.status(200).json({success: true, academyId, action: 'granted', paidUntil});
   },
 );

@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/constants.dart';
 import '../core/theme.dart';
+import '../providers/auth_provider.dart';
 import '../providers/subscription_provider.dart';
 
 enum _BillingPlan { mensal, trimestral, anual }
@@ -60,8 +61,27 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
         _BillingPlan.anual => AppConstants.caktoCheckoutAnual,
       };
 
+  /// Builds the checkout URL with the admin's e-mail pre-filled (so the payment
+  /// e-mail matches the account e-mail — the webhook keys off it) and the
+  /// academyId as `src` (a bonus identifier the webhook tries first).
+  Uri _buildCheckoutUri() {
+    final user = ref.read(currentUserProvider).valueOrNull;
+    final params = <String, String>{};
+    final email = user?.email;
+    if (email != null && email.isNotEmpty) {
+      params['email'] = email;
+      params['confirmEmail'] = email;
+    }
+    final academyId = user?.academyId;
+    if (academyId != null && academyId.isNotEmpty) {
+      params['src'] = academyId;
+    }
+    final base = Uri.parse(_checkoutUrl);
+    return params.isEmpty ? base : base.replace(queryParameters: params);
+  }
+
   Future<void> _openCheckout() async {
-    final uri = Uri.parse(_checkoutUrl);
+    final uri = _buildCheckoutUri();
     setState(() => _launching = true);
     try {
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {

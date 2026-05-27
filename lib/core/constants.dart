@@ -33,11 +33,12 @@ class AppConstants {
 
   // ===========================================
   // Subscription / Cakto Checkout
-  // TODO: substituir pelas URLs reais após criar os produtos no Cakto
+  // Produto "BJJEasy" (assinatura recorrente) — 3 ofertas do mesmo produto.
+  // O e-mail do admin e o academyId (src) são anexados em runtime no paywall.
   // ===========================================
-  static const String caktoCheckoutMensal = 'https://pay.cakto.com.br/MENSAL_ID';
-  static const String caktoCheckoutTrimestral = 'https://pay.cakto.com.br/TRIMESTRAL_ID';
-  static const String caktoCheckoutAnual = 'https://pay.cakto.com.br/ANUAL_ID';
+  static const String caktoCheckoutMensal = 'https://pay.cakto.com.br/eo9omtc_889968';
+  static const String caktoCheckoutTrimestral = 'https://pay.cakto.com.br/xisui3m';
+  static const String caktoCheckoutAnual = 'https://pay.cakto.com.br/38yfe5r';
   static const String supportWhatsApp = 'https://wa.me/5500000000000';
 
   // ===========================================

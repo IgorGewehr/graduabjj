@@ -7,9 +7,11 @@ import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
+import '../../providers/subscription_provider.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/more_menu_sheet.dart';
 import '../../widgets/common/back_button_handler.dart';
+import '../paywall_screen.dart';
 
 /// Admin Navigation Shell - Main navigation for admin screens
 class AdminShell extends ConsumerWidget {
@@ -21,6 +23,15 @@ class AdminShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final location = GoRouterState.of(context).uri.path;
     ref.watch(currentUserProvider);
+
+    // Subscription gate: when the academy has no active access (trial expired
+    // and unpaid), staff see the paywall instead of the admin area. Students
+    // are unaffected — they live in the portal shell. Defaults to allowing
+    // access while the subscription is still loading (no paywall flash).
+    if (!ref.watch(hasSubscriptionAccessProvider)) {
+      return const PaywallScreen();
+    }
+
     final settingsAsync = ref.watch(academySettingsProvider);
     final settings = settingsAsync.valueOrNull;
 
