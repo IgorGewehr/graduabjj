@@ -32,6 +32,8 @@ const List<GrantablePermission> kGrantableExtraPermissions = [
       'Cadastrar torneios e abrir inscrições'),
   GrantablePermission('graduation:manage', 'Graduar alunos',
       'Promover faixas e registrar graduações'),
+  GrantablePermission('students:manage', 'Gerenciar alunos',
+      'Acessar perfis e adicionar/remover alunos de turmas'),
 ];
 
 /// One-shot 8-char code that, when redeemed, links a user to an academy as

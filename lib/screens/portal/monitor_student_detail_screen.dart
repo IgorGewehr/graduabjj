@@ -9,6 +9,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 
@@ -445,8 +446,124 @@ class _MonitorStudentDetailScreenState
               ),
             ),
           ],
+
+          // Turmas section — visible to admins and users with students:manage
+          Builder(
+            builder: (context) {
+              final currentUser =
+                  ref.watch(currentUserProvider).valueOrNull;
+              final canManage = currentUser != null &&
+                  currentUser.hasPermission('students:manage');
+              if (!canManage) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildSectionTitle('Turmas'),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _showManageClassesDialog,
+                        icon: const Icon(LucideIcons.users, size: 16),
+                        label: const Text('Gerenciar turmas'),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
         ],
       ),
+    );
+  }
+
+  Future<void> _showManageClassesDialog() async {
+    final academyId = FirebaseService.academyId;
+    final classService = ClassService(academyId);
+
+    List<BJJClass> classes;
+    try {
+      classes = await classService.list();
+    } catch (e) {
+      if (mounted) context.showError('Erro ao carregar turmas');
+      return;
+    }
+
+    if (!mounted) return;
+
+    final studentId = _student!.id;
+    final enrolled = <String, bool>{
+      for (final c in classes) c.id: c.studentIds.contains(studentId),
+    };
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(LucideIcons.users, color: AppTheme.primary, size: 20),
+                  const SizedBox(width: 8),
+                  const Text('Gerenciar turmas'),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: classes.isEmpty
+                    ? const Text('Nenhuma turma cadastrada.')
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: classes.length,
+                        itemBuilder: (_, i) {
+                          final cls = classes[i];
+                          final isIn = enrolled[cls.id] ?? false;
+                          return SwitchListTile(
+                            dense: true,
+                            title: Text(cls.name),
+                            value: isIn,
+                            activeColor: AppTheme.primary,
+                            onChanged: (value) async {
+                              try {
+                                if (value) {
+                                  await classService.addStudentToClass(
+                                    cls.id,
+                                    studentId,
+                                  );
+                                } else {
+                                  await classService.removeStudentFromClass(
+                                    cls.id,
+                                    studentId,
+                                  );
+                                }
+                                setDialogState(() => enrolled[cls.id] = value);
+                              } catch (e) {
+                                if (ctx.mounted) {
+                                  ctx.showError('Erro ao atualizar turma');
+                                }
+                              }
+                            },
+                          );
+                        },
+                      ),
+              ),
+              actions: [
+                FilledButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                    _loadData();
+                  },
+                  child: const Text('Fechar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 

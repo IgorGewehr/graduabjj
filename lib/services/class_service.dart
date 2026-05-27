@@ -363,6 +363,26 @@ class ClassService {
   }
 
   // ============================================
+  // Add Student to Class (membership-only, no sport enrollment side-effects)
+  // ============================================
+  Future<void> addStudentToClass(String classId, String studentId) async {
+    await _collections.classDoc(classId).update({
+      'studentIds': FieldValue.arrayUnion([studentId]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ============================================
+  // Remove Student from Class (membership-only)
+  // ============================================
+  Future<void> removeStudentFromClass(String classId, String studentId) async {
+    await _collections.classDoc(classId).update({
+      'studentIds': FieldValue.arrayRemove([studentId]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ============================================
   // Add Student to Class
   //
   // Also enrolls the student in the class's sport: adds the sport to
