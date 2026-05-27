@@ -429,10 +429,14 @@ service cloud.firestore {
         // Update/delete stay staff-only — a student can mark present but cannot
         // rewrite or remove attendance history.
         allow create: if isAuthenticated()
-          && request.resource.data.studentId == getUserStudentIdFromMapping(academyId)
+          && isOwnStudentRecord(academyId, request.resource.data.studentId)
           && request.resource.data.verifiedBy == request.auth.uid
           && (
-               !get(/databases/$(database)/documents/academies/$(academyId)/classes/$(request.resource.data.classId)).data.keys().hasAny(['studentIds'])
+               // Skip the roster check if the class doc is missing (deleted /
+               // synthetic id) so a valid self-check-in is never denied by a
+               // failed get(); enrolled in the class; or the class is "open".
+               !exists(/databases/$(database)/documents/academies/$(academyId)/classes/$(request.resource.data.classId))
+               || !get(/databases/$(database)/documents/academies/$(academyId)/classes/$(request.resource.data.classId)).data.keys().hasAny(['studentIds'])
                || get(/databases/$(database)/documents/academies/$(academyId)/classes/$(request.resource.data.classId)).data.studentIds.size() == 0
                || request.resource.data.studentId in get(/databases/$(database)/documents/academies/$(academyId)/classes/$(request.resource.data.classId)).data.studentIds
              )
@@ -440,6 +444,28 @@ service cloud.firestore {
                !request.resource.data.keys().hasAny(['weight'])
                || (request.resource.data.weight is number && request.resource.data.weight > 0)
              );
+      }
+
+      // ============================================
+      // Check-ins (student-requested presence, confirmed by staff)
+      // ============================================
+      // graduabjj's "student check-in" writes here first (status 'pending');
+      // staff later confirm → AttendanceService.markPresent. Had no rule before,
+      // so every student check-in fell through to deny-all and was rejected.
+      match /checkins/{checkinId} {
+        // Staff and monitors manage check-ins (list, confirm, delete).
+        allow read, write: if isStaffOrMonitor(academyId);
+
+        // Students read their own check-ins.
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+
+        // Students create their own pending check-in.
+        allow create: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, request.resource.data.studentId)
+                      && request.resource.data.status == 'pending';
+
+        // Students can cancel their own check-in.
+        allow delete: if isOwnStudentRecord(academyId, resource.data.studentId);
       }
 
       // ============================================
