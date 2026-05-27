@@ -331,7 +331,11 @@ class _AdminStudentDetailScreenState
                     children: [
                       // Avatar com borda colorida
                       ProfilePhotoPicker(
-                        academyId: ref.watch(selectedAcademyIdProvider) ?? '',
+                        // Use the authoritative academy context (same source the
+                        // rest of this screen uses to load the student). The
+                        // selectedAcademyIdProvider can be null here, which made
+                        // the upload path academies//students/... → Storage denied.
+                        academyId: FirebaseService.academyId,
                         studentId: _student!.id,
                         photoUrl: _student!.photoUrl,
                         fullName: _student!.fullName,
