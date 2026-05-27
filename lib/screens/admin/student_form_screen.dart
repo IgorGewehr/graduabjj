@@ -1568,7 +1568,13 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
 
       if (mounted) {
         context.showSuccess(isEditing ? 'Aluno atualizado!' : 'Aluno cadastrado!');
-        context.go('/admin/alunos');
+        if (isEditing) {
+          // Return `true` so the detail screen's `context.push(...)` receives a
+          // result and knows to call `_loadData()` with fresh Firestore data.
+          context.pop(true);
+        } else {
+          context.go('/admin/alunos');
+        }
       }
     } catch (e) {
       if (mounted) {
