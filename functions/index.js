@@ -978,3 +978,12 @@ exports.trialExpiryReminder = onSchedule(
   },
 );
 */
+
+// ============================================================
+// Server-side functions (payments + notifications) migrated from the
+// discontinued ERP web repo. Required AFTER initializeApp() so the module's
+// top-level admin.firestore()/admin.messaging() resolve against the default
+// app. Callables are gen2; Firestore triggers and scheduled jobs are gen1.
+// They coexist with the gen2 functions above (no name collisions).
+// ============================================================
+Object.assign(exports, require('./server_functions'));
