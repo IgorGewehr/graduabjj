@@ -30,6 +30,10 @@ const List<String> adultBeltOrder = [
   'purple',
   'brown',
   'black',
+  // Above black (master ranks)
+  'red-black',
+  'red-white',
+  'red',
 ];
 
 /// Admin Reports Screen - Complete dashboard with separated stats
@@ -2461,6 +2465,11 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
         'purple': Color(0xFF7C3AED),
         'brown': Color(0xFF92400E),
         'black': Color(0xFF171717),
+        // Above black (master ranks)
+        'red-black': Color(0xFFDC2626),
+        'red-white': Color(0xFFDC2626),
+        'red': Color(0xFFDC2626),
+        'coral': Color(0xFFDC2626),
       };
       return colors[belt] ?? Colors.grey;
     }

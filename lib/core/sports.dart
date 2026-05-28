@@ -39,6 +39,10 @@ class GradeDefinition {
   final bool isBlackBelt;
   final bool kidsOnly;
   final bool adultOnly;
+  /// Master ranks above the black belt (coral / red). These are time- and
+  /// honor-based (decades), so attendance-based auto-graduation must NOT reach
+  /// them — they're only awarded via manual promotion by the mestre.
+  final bool aboveBlack;
 
   const GradeDefinition({
     required this.id,
@@ -49,6 +53,7 @@ class GradeDefinition {
     this.isBlackBelt = false,
     this.kidsOnly = false,
     this.adultOnly = false,
+    this.aboveBlack = false,
   });
 }
 
@@ -85,7 +90,11 @@ const _bjjAdultGrades = [
   GradeDefinition(id: 'blue', label: 'Azul', color: Color(0xFF1E40AF), maxStripes: 4),
   GradeDefinition(id: 'purple', label: 'Roxa', color: Color(0xFF7C3AED), maxStripes: 4),
   GradeDefinition(id: 'brown', label: 'Marrom', color: Color(0xFF78350F), maxStripes: 4),
-  GradeDefinition(id: 'black', label: 'Preta', color: Color(0xFF171717), maxStripes: 4, isBlackBelt: true),
+  GradeDefinition(id: 'black', label: 'Preta', color: Color(0xFF171717), maxStripes: 6, isBlackBelt: true),
+  // Above black (manual/honorary only — décadas de faixa preta):
+  GradeDefinition(id: 'red-black', label: 'Coral (7º grau)', color: Color(0xFFDC2626), tipColor: Color(0xFF171717), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'red-white', label: 'Coral Vermelha e Branca (8º grau)', color: Color(0xFFDC2626), tipColor: Color(0xFFF5F5F5), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'red', label: 'Vermelha (9º/10º grau)', color: Color(0xFFDC2626), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
 ];
 
 // ============================================
@@ -135,8 +144,8 @@ const _muaythaiGradesCbmt = [
   GradeDefinition(id: 'dark-blue', label: 'Azul Escura (Instrutor Auxiliar)', color: Color(0xFF1E40AF), maxStripes: 1),
   GradeDefinition(id: 'darkblue-black', label: 'Azul Escura ponta preta (Instrutor)', color: Color(0xFF1E40AF), tipColor: Color(0xFF171717), maxStripes: 1),
   GradeDefinition(id: 'black', label: 'Preta (Professor)', color: Color(0xFF171717), maxStripes: 2, isBlackBelt: true),
-  GradeDefinition(id: 'black-white', label: 'Preta ponta branca (Mestre)', color: Color(0xFF171717), tipColor: Color(0xFFF5F5F5), maxStripes: 2, isBlackBelt: true),
-  GradeDefinition(id: 'black-white-red', label: 'Preta ponta branca e vermelha (Grão-Mestre)', color: Color(0xFF171717), tipColor: Color(0xFFDC2626), maxStripes: 2, isBlackBelt: true),
+  GradeDefinition(id: 'black-white', label: 'Preta ponta branca (Mestre)', color: Color(0xFF171717), tipColor: Color(0xFFF5F5F5), maxStripes: 2, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'black-white-red', label: 'Preta ponta branca e vermelha (Grão-Mestre)', color: Color(0xFF171717), tipColor: Color(0xFFDC2626), maxStripes: 2, isBlackBelt: true, aboveBlack: true),
 ];
 
 /// System 2 — CBMT Tradicional / CBMTT (white → ... → gold). IDs prefixed
@@ -155,9 +164,9 @@ const _muaythaiGradesCbmtt = [
   GradeDefinition(id: 'mt2-red-white', label: 'Vermelha e Branca', color: Color(0xFFDC2626), tipColor: Color(0xFFF5F5F5), maxStripes: 1),
   GradeDefinition(id: 'mt2-black', label: 'Preta', color: Color(0xFF171717), maxStripes: 1, isBlackBelt: true),
   GradeDefinition(id: 'mt2-black-white', label: 'Preta e Branca (Professor)', color: Color(0xFF171717), tipColor: Color(0xFFF5F5F5), maxStripes: 1, isBlackBelt: true),
-  GradeDefinition(id: 'mt2-silver', label: 'Prata', color: Color(0xFF94A3B8), maxStripes: 1, isBlackBelt: true),
-  GradeDefinition(id: 'mt2-gold', label: 'Ouro', color: Color(0xFFD4AF37), maxStripes: 1, isBlackBelt: true),
-  GradeDefinition(id: 'mt2-gold-silver', label: 'Ouro e Prata', color: Color(0xFFD4AF37), tipColor: Color(0xFF94A3B8), maxStripes: 1, isBlackBelt: true),
+  GradeDefinition(id: 'mt2-silver', label: 'Prata', color: Color(0xFF94A3B8), maxStripes: 1, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'mt2-gold', label: 'Ouro', color: Color(0xFFD4AF37), maxStripes: 1, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'mt2-gold-silver', label: 'Ouro e Prata', color: Color(0xFFD4AF37), tipColor: Color(0xFF94A3B8), maxStripes: 1, isBlackBelt: true, aboveBlack: true),
 ];
 
 // ============================================
@@ -187,7 +196,9 @@ const _judoGrades = [
   GradeDefinition(id: 'purple', label: 'Roxa', color: Color(0xFF7C3AED), maxStripes: 0),
   GradeDefinition(id: 'brown', label: 'Marrom', color: Color(0xFF78350F), maxStripes: 0),
   GradeDefinition(id: 'black', label: 'Preta', color: Color(0xFF171717), maxStripes: 0, isBlackBelt: true),
-  GradeDefinition(id: 'coral', label: 'Coral', color: Color(0xFFE11D48), maxStripes: 0),
+  // Above black (manual only): coral kōhaku (6º–8º dan) → vermelha (9º–10º dan).
+  GradeDefinition(id: 'coral', label: 'Coral (6º–8º dan)', color: Color(0xFFDC2626), tipColor: Color(0xFFF5F5F5), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'red', label: 'Vermelha (9º–10º dan)', color: Color(0xFFDC2626), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
 ];
 
 // ============================================
@@ -215,6 +226,10 @@ const _lutalivreGrades = [
   GradeDefinition(id: 'purple', label: 'Roxa', color: Color(0xFF7C3AED), maxStripes: 4),
   GradeDefinition(id: 'brown', label: 'Marrom', color: Color(0xFF78350F), maxStripes: 4),
   GradeDefinition(id: 'black', label: 'Preta', color: Color(0xFF171717), maxStripes: 4, isBlackBelt: true),
+  // Above black (manual only): coral (vermelha/preta) → vermelha/branca → vermelha.
+  GradeDefinition(id: 'red-black', label: 'Coral (vermelha/preta)', color: Color(0xFFDC2626), tipColor: Color(0xFF171717), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'red-white', label: 'Vermelha e Branca', color: Color(0xFFDC2626), tipColor: Color(0xFFF5F5F5), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'red', label: 'Vermelha', color: Color(0xFFDC2626), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
 ];
 
 // ============================================

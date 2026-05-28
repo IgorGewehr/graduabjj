@@ -91,6 +91,11 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
       'purple': 14,
       'brown': 15,
       'black': 16,
+      // Above black (master ranks)
+      'red-black': 17,
+      'coral': 17,
+      'red-white': 18,
+      'red': 19,
     };
     return beltOrder[belt] ?? 0;
   }

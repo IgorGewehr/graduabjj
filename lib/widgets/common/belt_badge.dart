@@ -25,10 +25,17 @@ const Map<String, String> _beltLabels = {
   'green': 'Verde',
   'green-white': 'Verde/Branca',
   'green-black': 'Verde/Preta',
+  // Above-black master ranks (coral / red)
+  'coral': 'Coral',
+  'red-black': 'Coral',
+  'red-white': 'Vermelha/Branca',
+  'red': 'Vermelha',
 };
 
 String getBeltLabel(String belt) => _beltLabels[belt] ?? belt;
-bool _hasWhiteStripe(String belt) => belt.endsWith('-white');
+// '-white' suffix and judô's 'coral' (kōhaku) draw a white middle stripe;
+// '-black' suffix draws a black middle stripe (e.g. BJJ/Luta Livre coral).
+bool _hasWhiteStripe(String belt) => belt.endsWith('-white') || belt == 'coral';
 bool _hasBlackStripe(String belt) => belt.endsWith('-black');
 
 // ============================================

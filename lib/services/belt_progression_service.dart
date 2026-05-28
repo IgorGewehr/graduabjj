@@ -186,6 +186,8 @@ class BeltProgressionService {
     if (grades.isEmpty) return null;
 
     final currentGrade = grades.where((g) => g.id == currentBelt).firstOrNull;
+    // Coral/red are above black — never reached automatically (manual only).
+    if (currentGrade?.aboveBlack == true) return null;
     final maxStripes = currentGrade?.maxStripes ?? 4;
 
     if (sport.supportsStripes && currentStripes < maxStripes) {
@@ -201,8 +203,11 @@ class BeltProgressionService {
       if (currentIndex < 0 || currentIndex >= gradeIds.length - 1) {
         return null; // Already at max grade
       }
+      final nextGrade = grades[currentIndex + 1];
+      // Don't auto-advance into above-black master ranks (coral/red).
+      if (nextGrade.aboveBlack) return null;
       return {
-        'belt': gradeIds[currentIndex + 1],
+        'belt': nextGrade.id,
         'stripes': 0,
       };
     }
@@ -431,51 +436,50 @@ class BeltProgressionService {
   }
 
   /// Batch helper: loads the config once, then resolves eligibility for every
-  /// active student. Used by the admin students list to render the progress
-  /// column / "Elegível" badge.
-  Future<List<EligibilitySnapshotEntry>> getEligibilitySnapshot({
-    SportId sportId = SportId.bjj,
-  }) async {
+  /// active student — each evaluated against THEIR OWN primary sport, not a
+  /// single global sport. Students whose primary sport has no graduation ladder
+  /// (e.g. musculação, boxe) get an empty entry (requiredClasses == 0) so the
+  /// list renders no progress/badge for them. Used by the admin students list.
+  Future<List<EligibilitySnapshotEntry>> getEligibilitySnapshot() async {
     final cfg = await loadAcademyConfig();
     final snap = await _studentsRef.where('status', isEqualTo: 'active').get();
 
-    // Pre-fetch the most recent promotion per student in one query, so the
-    // per-student loop below doesn't trigger N progression reads.
-    final progSnap = await _progressionsRef
-        .where('sport', isEqualTo: sportId.value)
-        .get();
-    final baselineByStudent = <String, int>{};
+    // Pre-fetch ALL promotions once, then index the latest baseline per
+    // (student, sport) so the per-student loop doesn't trigger N reads.
+    // Legacy progressions without a `sport` field are treated as BJJ.
+    final progSnap = await _progressionsRef.get();
+    final latestPromotion =
+        <String, Map<String, ({DateTime date, int baseline})>>{};
     for (final p in progSnap.docs) {
       final bp = BeltProgression.fromFirestore(p);
-      final existing = baselineByStudent[bp.studentId];
-      // Keep the latest baseline only (sorted by promotionDate desc).
-      if (existing == null) {
-        baselineByStudent[bp.studentId] = bp.baselineCount;
-      } else {
-        // Re-evaluate: we sort the docs after collecting; here just keep
-        // the highest baseline (last promotion has the biggest snapshot).
-        baselineByStudent[bp.studentId] =
-            bp.baselineCount > existing ? bp.baselineCount : existing;
-      }
-    }
-    // Also include BJJ progressions without a sport field (legacy data).
-    if (sportId == SportId.bjj) {
-      final legacy = await _progressionsRef.get();
-      for (final p in legacy.docs) {
-        final data = p.data() as Map<String, dynamic>;
-        if (data['sport'] != null) continue; // skip already-sport-tagged docs
-        final bp = BeltProgression.fromFirestore(p);
-        final existing = baselineByStudent[bp.studentId];
-        if (existing == null || bp.baselineCount > existing) {
-          baselineByStudent[bp.studentId] = bp.baselineCount;
-        }
+      final sportVal = bp.sport ?? 'bjj';
+      final bySport = latestPromotion.putIfAbsent(bp.studentId, () => {});
+      final existing = bySport[sportVal];
+      if (existing == null || bp.promotionDate.isAfter(existing.date)) {
+        bySport[sportVal] = (date: bp.promotionDate, baseline: bp.baselineCount);
       }
     }
 
     final results = <EligibilitySnapshotEntry>[];
     for (final doc in snap.docs) {
       final data = doc.data() as Map<String, dynamic>;
+      final sportId = _primarySportFromData(data);
 
+      // Sports without a graduation ladder never graduate — emit an empty
+      // entry so the card shows no progress/badge for them.
+      if (getSport(sportId).gradeSystem == GradeSystem.none) {
+        results.add(EligibilitySnapshotEntry(
+          studentId: doc.id,
+          eligible: false,
+          currentClasses: 0,
+          requiredClasses: 0,
+          missingClasses: 0,
+          weighted: cfg.useClassWeights,
+        ));
+        continue;
+      }
+
+      // Current grade for the student's sport (legacy fields for BJJ).
       String currentBelt;
       int currentStripes;
       final sportData = (data['sportData'] as Map?)?[sportId.value];
@@ -488,6 +492,8 @@ class BeltProgressionService {
       }
       final category = data['category'] ?? 'adult';
 
+      // Attendance count filtered to the student's sport (legacy null = BJJ),
+      // matching checkEligibilityForStudent so the list and detail agree.
       int systemCount;
       if (cfg.useClassWeights) {
         systemCount = await getWeightedAttendanceCount(doc.id);
@@ -495,11 +501,16 @@ class BeltProgressionService {
         final ac = await _collections.attendance
             .where('studentId', isEqualTo: doc.id)
             .get();
-        systemCount = ac.size;
+        systemCount = ac.docs.where((d) {
+          final s = (d.data() as Map<String, dynamic>)['sport'];
+          return sportId == SportId.bjj
+              ? (s == null || s == 'bjj')
+              : s == sportId.value;
+        }).length;
       }
       final initial = (data['initialAttendanceCount'] ?? 0) as int;
       final total = systemCount + initial;
-      final baseline = baselineByStudent[doc.id] ?? 0;
+      final baseline = latestPromotion[doc.id]?[sportId.value]?.baseline ?? 0;
       final sinceLastPromotion = (total - baseline).clamp(0, total);
 
       final e = checkEligibility(
@@ -522,6 +533,21 @@ class BeltProgressionService {
       );
     }
     return results;
+  }
+
+  /// Resolves a student's primary sport from a raw Firestore doc map, mirroring
+  /// Student.getPrimarySport(): `primarySport` field, else first of `sports`,
+  /// else BJJ (back-compat for docs predating multi-sport).
+  SportId _primarySportFromData(Map<String, dynamic> data) {
+    final primary = data['primarySport'];
+    if (primary is String && primary.isNotEmpty) {
+      return SportId.fromString(primary);
+    }
+    final list = data['sports'];
+    if (list is List && list.isNotEmpty) {
+      return SportId.fromString(list.first.toString());
+    }
+    return SportId.bjj;
   }
 
   // ============================================

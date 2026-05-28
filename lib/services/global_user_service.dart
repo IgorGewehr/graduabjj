@@ -32,6 +32,11 @@ class GlobalUserService {
     'purple',
     'brown',
     'black',
+    // Above black (master ranks): coral / red across BJJ, Judô, Luta Livre.
+    'red-black',
+    'coral',
+    'red-white',
+    'red',
   ];
 
   int _compareBelts(String belt1, String belt2) {

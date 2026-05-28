@@ -499,19 +499,26 @@ class AttendanceService {
 
     final grades = getGradesForSport(
       sport,
+      category: (studentData['category'] ?? 'adult') as String,
       muaythaiVariant:
           sport == SportId.muaythai ? resolveMuaythaiVariant(currentBelt) : null,
     );
     final idx = grades.indexWhere((g) => g.id == currentBelt);
     if (idx < 0) return (belt: currentBelt, stripes: currentStripes + 1);
 
-    // Add a stripe until we reach the per-belt cap (4 in BJJ), then advance.
-    const stripeCap = 4;
-    if (currentStripes < stripeCap) {
+    // Coral/red are above black — auto-graduation never reaches them (manual).
+    if (grades[idx].aboveBlack) return null;
+
+    // Add a stripe until this grade's cap, then advance to the next grade —
+    // but stop before any above-black master rank (coral/red).
+    final maxStripes = grades[idx].maxStripes;
+    if (currentStripes < maxStripes) {
       return (belt: currentBelt, stripes: currentStripes + 1);
     }
     if (idx + 1 >= grades.length) return null; // already at top
-    return (belt: grades[idx + 1].id, stripes: 0);
+    final nextGrade = grades[idx + 1];
+    if (nextGrade.aboveBlack) return null;
+    return (belt: nextGrade.id, stripes: 0);
   }
 
   /// Student ids that already have a [classId] attendance dated today. Used by

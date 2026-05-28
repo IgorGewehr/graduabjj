@@ -43,6 +43,7 @@ class AppTheme {
   static const Color beltYellow = Color(0xFFFBBF24);
   static const Color beltOrange = Color(0xFFF97316);
   static const Color beltGreen = Color(0xFF22C55E);
+  static const Color beltRed = Color(0xFFDC2626);
 
   // ===========================================
   // Text Styles
@@ -489,6 +490,14 @@ class AppTheme {
       case 'green-white':
       case 'green-black':
         return beltGreen;
+      // Above-black master ranks (coral / red) — shared across BJJ, Judô and
+      // Luta Livre. The red/black and red/white "coral" splits are drawn by
+      // BeltBadge via the -black / -white / 'coral' middle-stripe logic.
+      case 'red':
+      case 'red-white':
+      case 'red-black':
+      case 'coral':
+        return beltRed;
       default:
         return beltWhite;
     }

@@ -113,7 +113,7 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
         );
         break;
       case 'belt':
-        const beltOrder = ['white', 'blue', 'purple', 'brown', 'black'];
+        const beltOrder = ['white', 'blue', 'purple', 'brown', 'black', 'red-black', 'coral', 'red-white', 'red'];
         filtered.sort((a, b) {
           final aIndex = beltOrder.indexOf(a.currentBelt);
           final bIndex = beltOrder.indexOf(b.currentBelt);
