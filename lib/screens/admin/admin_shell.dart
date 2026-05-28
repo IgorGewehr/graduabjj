@@ -38,10 +38,16 @@ class AdminShell extends ConsumerWidget {
       );
     }
 
-    // Trial countdown banner (only while in trial, after the gate above lets
-    // us through). Tapping it opens the paywall so the admin can subscribe.
-    final showTrialBanner = sub?.isTrialing ?? false;
+    // Avisos de trial / vencimento da assinatura — só aparecem depois do gate
+    // acima liberar o acesso. Tocar abre o paywall; o X dispensa o aviso apenas
+    // nesta sessão (volta ao reabrir o app — ver dismissedBannersProvider).
+    final dismissed = ref.watch(dismissedBannersProvider);
+    final showTrialBanner =
+        (sub?.isTrialing ?? false) && !dismissed.contains('trial');
+    final showExpiryBanner =
+        (sub?.isPaidExpiringSoon ?? false) && !dismissed.contains('expiry');
     final trialDaysLeft = sub?.trialDaysLeft ?? 0;
+    final paidDaysLeft = sub?.paidDaysLeft ?? 0;
 
     final settingsAsync = ref.watch(academySettingsProvider);
     final settings = settingsAsync.valueOrNull;
@@ -131,9 +137,22 @@ class AdminShell extends ConsumerWidget {
         body: Column(
           children: [
             if (showTrialBanner)
-              _TrialBanner(
+              _SubscriptionBanner(
+                kind: _BannerKind.trial,
                 daysLeft: trialDaysLeft,
                 onTap: () => context.push('/paywall'),
+                onClose: () => ref
+                    .read(dismissedBannersProvider.notifier)
+                    .update((s) => {...s, 'trial'}),
+              ),
+            if (showExpiryBanner)
+              _SubscriptionBanner(
+                kind: _BannerKind.expiry,
+                daysLeft: paidDaysLeft,
+                onTap: () => context.push('/paywall'),
+                onClose: () => ref
+                    .read(dismissedBannersProvider.notifier)
+                    .update((s) => {...s, 'expiry'}),
               ),
             Expanded(
               child: Row(
@@ -156,23 +175,45 @@ class AdminShell extends ConsumerWidget {
   }
 }
 
-/// Slim banner shown at the top of the admin area during the trial period.
-/// Turns urgent (red) in the last 3 days. Tapping opens the paywall.
-class _TrialBanner extends StatelessWidget {
+/// Tipo de aviso exibido no topo da área admin.
+enum _BannerKind { trial, expiry }
+
+/// Slim banner no topo da área admin: contagem do trial OU aviso de assinatura
+/// prestes a vencer. Fica vermelho (urgente) nos últimos 3 dias. Tocar abre o
+/// paywall; o X dispensa o aviso só na sessão atual (volta ao reabrir o app).
+class _SubscriptionBanner extends StatelessWidget {
+  final _BannerKind kind;
   final int daysLeft;
   final VoidCallback onTap;
+  final VoidCallback onClose;
 
-  const _TrialBanner({required this.daysLeft, required this.onTap});
+  const _SubscriptionBanner({
+    required this.kind,
+    required this.daysLeft,
+    required this.onTap,
+    required this.onClose,
+  });
 
   @override
   Widget build(BuildContext context) {
     final urgent = daysLeft <= 3;
     final color = urgent ? AppTheme.error : AppTheme.warning;
-    final label = daysLeft <= 0
-        ? 'Seu trial termina hoje'
-        : daysLeft == 1
-            ? 'Falta 1 dia de trial'
-            : 'Faltam $daysLeft dias de trial';
+    final isTrial = kind == _BannerKind.trial;
+    final String label;
+    if (isTrial) {
+      label = daysLeft <= 0
+          ? 'Seu trial termina hoje'
+          : daysLeft == 1
+              ? 'Falta 1 dia de trial'
+              : 'Faltam $daysLeft dias de trial';
+    } else {
+      label = daysLeft <= 0
+          ? 'Sua assinatura vence hoje'
+          : daysLeft == 1
+              ? 'Sua assinatura vence em 1 dia'
+              : 'Sua assinatura vence em $daysLeft dias';
+    }
+    final cta = isTrial ? 'Assinar' : 'Renovar';
 
     return Material(
       color: color.withValues(alpha: 0.12),
@@ -194,13 +235,27 @@ class _TrialBanner extends StatelessWidget {
                 ),
               ),
               Text(
-                'Assinar',
+                cta,
                 style: AppTheme.labelMedium.copyWith(
                   color: color,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               Icon(LucideIcons.chevronRight, size: 16, color: color),
+              const SizedBox(width: 2),
+              // Dispensa o aviso só nesta sessão (volta ao reabrir o app).
+              InkResponse(
+                onTap: onClose,
+                radius: 18,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    LucideIcons.x,
+                    size: 16,
+                    color: color.withValues(alpha: 0.7),
+                  ),
+                ),
+              ),
             ],
           ),
         ),

@@ -656,8 +656,7 @@ exports.caktoWebhook = onRequest(
         provided.length !== expected.length ||
         !crypto.timingSafeEqual(provided, expected)
       ) {
-        console.warn('[caktoWebhook][diag] secret mismatch — recebido:',
-          JSON.stringify(payload.secret || null));
+        console.warn('[caktoWebhook] secret mismatch — requisição rejeitada');
         return res.status(401).json({error: 'invalid secret'});
       }
     }
@@ -772,6 +771,13 @@ exports.caktoWebhook = onRequest(
     }
 
     // ---- Conceder/estender acesso ----
+    // Período: o Cakto manda `subscription.recurrence_period` = ciclo em DIAS
+    // (mensal=30, trimestral=90, anual=365). É o sinal mais confiável, pois
+    // independe do nome/id da oferta — funciona até para ofertas novas. Só
+    // caímos no offer id (env) / nome da oferta se o ciclo não vier.
+    const recurrenceDays = Number(
+      data.subscription?.recurrence_period ?? data.recurrence_period ?? 0,
+    );
     const offerId = data.offer?.id || data.offer_id || null;
     const offerName = String(data.offer?.name || '').toLowerCase();
 
@@ -779,12 +785,23 @@ exports.caktoWebhook = onRequest(
     const trimestralOffer = process.env.CAKTO_OFFER_TRIMESTRAL || '';
     const mensalOffer = process.env.CAKTO_OFFER_MENSAL || '';
 
-    let daysToAdd = 35; // default: mensal + buffer
-    if (offerId && offerId === anualOffer) daysToAdd = 370;
-    else if (offerId && offerId === trimestralOffer) daysToAdd = 95;
-    else if (offerId && offerId === mensalOffer) daysToAdd = 35;
-    else if (offerName.includes('anual')) daysToAdd = 370;
-    else if (offerName.includes('trimestral')) daysToAdd = 95;
+    const graceDays = 5; // folga p/ atraso de webhook/renovação
+    let daysToAdd;
+    if (recurrenceDays > 0) {
+      daysToAdd = recurrenceDays + graceDays; // 30→35, 90→95, 365→370
+    } else if (offerId && offerId === anualOffer) {
+      daysToAdd = 370;
+    } else if (offerId && offerId === trimestralOffer) {
+      daysToAdd = 95;
+    } else if (offerId && offerId === mensalOffer) {
+      daysToAdd = 35;
+    } else if (offerName.includes('anual')) {
+      daysToAdd = 370;
+    } else if (offerName.includes('trimestral')) {
+      daysToAdd = 95;
+    } else {
+      daysToAdd = 35; // default: mensal + buffer
+    }
 
     const snap = await academyRef.get();
 
@@ -820,11 +837,13 @@ exports.caktoWebhook = onRequest(
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
-    console.log('[caktoWebhook] access granted', {academyId, event, offerId, daysToAdd, paidUntil});
+    console.log('[caktoWebhook] access granted', {academyId, event, offerId, recurrenceDays, daysToAdd, paidUntil});
     return res.status(200).json({success: true, academyId, action: 'granted', paidUntil});
   },
 );
 
+/* DESABILITADO TEMPORARIAMENTE — cobrança por e-mail será finalizada depois.
+   Mantido comentado pra não disparar e-mails enquanto não está 100%.
 // ============================================================
 // trialExpiryReminder — agendado (diário). Avisa por e-mail o dono de
 // academias cujo trial vence nas próximas ~48h e que ainda não assinaram.
@@ -935,3 +954,4 @@ exports.trialExpiryReminder = onSchedule(
     console.log(`[trialReminder] checked ${snap.size}, sent ${sent}`);
   },
 );
+*/

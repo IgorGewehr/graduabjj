@@ -2,8 +2,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/constants.dart';
 
-/// Academy Subscription Plan
-enum SubscriptionPlan { free, basic, premium, enterprise }
+/// Academy Subscription Plan.
+/// `pro` = assinante pago via Cakto. Importante: `pro` NÃO concede acesso
+/// permanente (diferente de premium/enterprise) — o acesso do assinante é
+/// regido por `paidUntil`, então quando o período pago vence ele é bloqueado.
+enum SubscriptionPlan { free, basic, pro, premium, enterprise }
 
 extension SubscriptionPlanExtension on SubscriptionPlan {
   String get value {
@@ -12,6 +15,8 @@ extension SubscriptionPlanExtension on SubscriptionPlan {
         return 'free';
       case SubscriptionPlan.basic:
         return 'basic';
+      case SubscriptionPlan.pro:
+        return 'pro';
       case SubscriptionPlan.premium:
         return 'premium';
       case SubscriptionPlan.enterprise:
@@ -23,6 +28,8 @@ extension SubscriptionPlanExtension on SubscriptionPlan {
     switch (value) {
       case 'basic':
         return SubscriptionPlan.basic;
+      case 'pro':
+        return SubscriptionPlan.pro;
       case 'premium':
         return SubscriptionPlan.premium;
       case 'enterprise':
@@ -175,6 +182,40 @@ class AcademySubscription {
     final trialEnd = effectiveTrialEndsAt;
     if (trialEnd == null) return 0;
     return trialEnd.difference(DateTime.now()).inDays.clamp(0, 30);
+  }
+
+  /// Janela do aviso de vencimento: só aparece nos últimos N dias antes do
+  /// `paidUntil`. Como `paidUntil = ciclo (30) + 5 de folga`, N=5 faz o aviso
+  /// surgir só DEPOIS da data de cobrança (dias ~30→35) — ou seja, quando a
+  /// renovação não veio e o acesso está pra acabar. Antes disso, nada.
+  static const int expiryWarningDays = 5;
+
+  /// Dias restantes de acesso PAGO (baseado em [paidUntil]). 0 se não houver
+  /// pagamento ativo no futuro.
+  int get paidDaysLeft {
+    if (paidUntil == null) return 0;
+    final d = paidUntil!.difference(DateTime.now()).inDays;
+    return d < 0 ? 0 : d;
+  }
+
+  /// True quando é uma assinatura PAGA ativa que vence em breve
+  /// (≤ [expiryWarningDays] dias) — usado no banner "assinatura prestes a
+  /// vencer". Não vale para trial (tem banner próprio) nem cortesia.
+  bool get isPaidExpiringSoon {
+    if (freeOverride || isTrialing) return false;
+    if (paidUntil == null || !paidUntil!.isAfter(DateTime.now())) return false;
+    return paidDaysLeft <= expiryWarningDays;
+  }
+
+  /// True quando a academia está na janela do desconto de 1º mês (50% no plano
+  /// Mensal): precisa estar **em trial**, dentro dos primeiros
+  /// [AppConstants.promoFirstDays] dias desde a criação, e com cupom
+  /// configurado. A restrição ao plano Mensal é aplicada na tela (paywall).
+  bool get isFirstMonthPromoEligible {
+    if (AppConstants.caktoMensalPromoCoupon.isEmpty) return false;
+    if (!isTrialing) return false;
+    return trialDaysLeft >=
+        (AppConstants.trialDays - AppConstants.promoFirstDays);
   }
 
   factory AcademySubscription.fromMap(

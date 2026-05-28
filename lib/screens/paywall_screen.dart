@@ -82,13 +82,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   /// Whether the 50%-off-first-month promo applies right now: the academy is in
   /// trial, within the first [AppConstants.promoFirstDays] days, and a promo
   /// coupon is configured. (Applies to the Mensal plan only.)
-  bool _isPromoEligible(AcademySubscription? sub) {
-    if (AppConstants.caktoMensalPromoCoupon.isEmpty) return false;
-    if (sub == null || !sub.isTrialing) return false;
-    // "Primeiros N dias do trial": trialDaysLeft cai de ~trialDays até 0.
-    return sub.trialDaysLeft >=
-        (AppConstants.trialDays - AppConstants.promoFirstDays);
-  }
+  // Regra movida para o modelo (AcademySubscription.isFirstMonthPromoEligible),
+  // onde é testável. Mantido como wrapper pra não mexer nos call sites.
+  bool _isPromoEligible(AcademySubscription? sub) =>
+      sub?.isFirstMonthPromoEligible ?? false;
 
   /// Builds the checkout URL with the admin's e-mail pre-filled (so the payment
   /// e-mail matches the account e-mail — the webhook keys off it) and the

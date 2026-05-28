@@ -39,3 +39,10 @@ final hasSubscriptionAccessProvider = Provider<bool>((ref) {
     error: (e, _) => true,
   );
 });
+
+/// Avisos (trial / vencimento) dispensados NESTA sessão. Em memória de
+/// propósito: ao reabrir o app (cold start) o provider zera e o aviso volta a
+/// aparecer no topo — assim não somos chatos, mas o usuário não esquece.
+/// Chaves usadas: 'trial' e 'expiry'.
+final dismissedBannersProvider =
+    StateProvider<Set<String>>((ref) => <String>{});
