@@ -246,7 +246,7 @@ class _AdminStudentDetailScreenState
             if (value == 'promote') _showPromoteDialog();
             if (value == 'toggle_status') _toggleStatus();
             if (value == 'generate_code') _generateLinkCode();
-            if (value == 'delete') _showDeleteConfirmation();
+            if (value == 'delete') _showHardDeleteConfirmation();
           },
           itemBuilder: (context) => [
             const PopupMenuItem(
@@ -293,9 +293,10 @@ class _AdminStudentDetailScreenState
               value: 'delete',
               child: Row(
                 children: [
-                  Icon(Icons.delete, color: Colors.red),
+                  Icon(Icons.delete_forever, color: Colors.red),
                   SizedBox(width: 8),
-                  Text('Excluir', style: TextStyle(color: Colors.red)),
+                  Text('Apagar definitivamente',
+                      style: TextStyle(color: Colors.red)),
                 ],
               ),
             ),
@@ -2674,42 +2675,83 @@ class _AdminStudentDetailScreenState
     }
   }
 
-  void _showDeleteConfirmation() {
-    showDialog(
+  /// Exclusão PERMANENTE (hard delete) com cascata. Para apenas desativar o
+  /// aluno (reversível), use a opção "Desativar" do menu (_toggleStatus).
+  void _showHardDeleteConfirmation() async {
+    final hasLinkedAccount = _student!.linkedUserId != null;
+
+    final firstConfirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Excluir Aluno'),
+        title: const Text('Apagar definitivamente'),
         content: Text(
-          'Deseja excluir ${_student!.fullName}? Esta ação não pode ser desfeita.',
+          'Esta ação é PERMANENTE e não pode ser desfeita.\n\n'
+          'Serão apagados de ${_student!.fullName}:\n'
+          '• Dados pessoais e cadastro\n'
+          '• Presenças e check-ins\n'
+          '• Graduações e progresso\n'
+          '• Conquistas e avaliações\n'
+          '• Inscrições, resultados e fotos de competição\n'
+          '• Mensalidades em aberto\n\n'
+          'Mensalidades e pedidos JÁ PAGOS são mantidos como histórico financeiro da academia.'
+          '${hasLinkedAccount ? '\n\n⚠️ Este aluno tem conta no app vinculada. Ele perderá o acesso a esta academia.' : ''}',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancelar'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () async {
-              try {
-                final service = StudentService(FirebaseService.academyId);
-                await service.delete(_student!.id);
-
-                if (mounted) {
-                  Navigator.pop(context);
-                  this.context.showSuccess('Aluno excluído!');
-                  this.context.go('/admin/alunos');
-                }
-              } catch (e) {
-                if (mounted) {
-                  this.context.showError('Erro: $e');
-                }
-              }
-            },
-            child: const Text('Excluir'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Continuar'),
           ),
         ],
       ),
     );
+    if (firstConfirm != true || !mounted) return;
+
+    final finalConfirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmação final'),
+        content: Text(
+          'Apagar permanentemente ${_student!.fullName}? '
+          'Não há como recuperar esses dados.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Apagar definitivamente'),
+          ),
+        ],
+      ),
+    );
+    if (finalConfirm != true || !mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final service = StudentService(FirebaseService.academyId);
+      await service.hardDelete(_student!.id);
+      if (!mounted) return;
+      Navigator.pop(context); // fecha o loading
+      context.showSuccess('Aluno apagado definitivamente.');
+      context.go('/admin/alunos');
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // fecha o loading
+      context.showError('Erro ao apagar: $e');
+    }
   }
 
   Future<void> _generateLinkCode() async {

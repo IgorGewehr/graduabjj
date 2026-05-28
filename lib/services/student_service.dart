@@ -364,10 +364,93 @@ class StudentService {
   }
 
   // ============================================
-  // Hard Delete Student (permanent)
+  // Hard Delete Student (permanent, com cascata)
   // ============================================
+  /// Apaga o aluno e seus dados pessoais/de treino em cascata.
+  ///
+  /// Mantém de propósito os registros financeiros PAGOS (mensalidades e
+  /// pedidos de loja já pagos) — as regras do Firestore proíbem o cliente de
+  /// apagá-los (auditoria contábil), e a academia normalmente quer manter esse
+  /// histórico. `workoutLogs` e `billingContactLog` também não são apagáveis
+  /// pelo cliente, então permanecem.
+  ///
+  /// Para aluno com conta vinculada (`linkedUserId`), só o lado do aluno é
+  /// removido: o `userAcademyMapping`/doc de usuário da conta vinculada não é
+  /// editável pelo admin (regras de segurança), então não é tocado aqui.
   Future<void> hardDelete(String id) async {
+    final firestore = FirebaseFirestore.instance;
+    final academyPath = 'academies/$academyId';
+
+    // Coleções 100% do aluno — apaga todos os docs com este studentId.
+    const ownedCollections = [
+      'attendance',
+      'checkins',
+      'achievements',
+      'beltProgressions',
+      'assessments',
+      'competitionEnrollments',
+      'competitionResults',
+      'competitionPhotos',
+      'linkCodes',
+    ];
+    for (final name in ownedCollections) {
+      await _deleteByStudentId(firestore.collection('$academyPath/$name'), id);
+    }
+
+    // Financeiro: as regras só permitem apagar mensalidades NÃO pagas.
+    await _deleteByStudentId(
+      firestore.collection('$academyPath/financials'),
+      id,
+      skip: (data) => data['status'] == 'paid',
+    );
+
+    // Loja: as regras só permitem apagar pedidos ainda pendentes de pagamento.
+    await _deleteByStudentId(
+      firestore.collection('$academyPath/storeOrders'),
+      id,
+      skip: (data) => data['status'] != 'pending_payment',
+    );
+
+    // Remove o aluno das listas (rosters) das turmas — senão fica uma
+    // referência fantasma a um aluno inexistente na chamada/turma.
+    final classesSnap = await firestore
+        .collection('$academyPath/classes')
+        .where('studentIds', arrayContains: id)
+        .get();
+    for (final doc in classesSnap.docs) {
+      await doc.reference.update({
+        'studentIds': FieldValue.arrayRemove([id]),
+      });
+    }
+
+    // Por fim, o documento do aluno.
     await _collections.student(id).delete();
+  }
+
+  /// Apaga, em lotes (≤450 ops por batch, limite do Firestore é 500), todos os
+  /// docs de [ref] com `studentId == studentId`. [skip] permite preservar docs
+  /// que as regras não deixam apagar (ex.: financeiro pago).
+  Future<void> _deleteByStudentId(
+    CollectionReference<Map<String, dynamic>> ref,
+    String studentId, {
+    bool Function(Map<String, dynamic> data)? skip,
+  }) async {
+    final snap = await ref.where('studentId', isEqualTo: studentId).get();
+    if (snap.docs.isEmpty) return;
+
+    var batch = FirebaseFirestore.instance.batch();
+    var count = 0;
+    for (final doc in snap.docs) {
+      if (skip != null && skip(doc.data())) continue;
+      batch.delete(doc.reference);
+      count++;
+      if (count == 450) {
+        await batch.commit();
+        batch = FirebaseFirestore.instance.batch();
+        count = 0;
+      }
+    }
+    if (count > 0) await batch.commit();
   }
 
   // ============================================
