@@ -61,11 +61,14 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     path: '', // Special case for bottom sheet
   );
 
-  /// Builds the bottom nav for the current role. Monitors get Chamada
-  /// and Alunos as primary entries (the two screens they actually use);
-  /// students get Horários in that slot.
-  List<_NavItem> _bottomNavItemsFor({required bool isMonitor}) {
-    if (isMonitor) {
+  /// Builds the bottom nav for the current role. Monitors (or users with
+  /// attendance:take) get Chamada and Alunos as primary entries; students get
+  /// Horários in that slot.
+  List<_NavItem> _bottomNavItemsFor({
+    required bool isMonitor,
+    required bool hasAttendancePerm,
+  }) {
+    if (isMonitor || hasAttendancePerm) {
       return const [
         _homeNavItem,
         _chamadaNavItem,
@@ -208,6 +211,8 @@ class _PortalShellState extends ConsumerState<PortalShell> {
         : linkedStudentIds;
     final monitorIds = settings?.monitorIds ?? const <String>[];
     final isMonitor = allStudentIds.any(monitorIds.contains);
+    final hasAttendancePermMenu =
+        currentUser?.hasPermission('attendance:take') == true;
 
     final studentDocId = student?.id;
     final hasPlan = studentDocId != null &&
@@ -217,7 +222,7 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       if (e.requiresKidsCategory && !isKids) return false;
       if (e.requiresStorePublished && !isStorePublished) return false;
       if (e.requiresPlan && !hasPlan) return false;
-      if (e.hideWhen == _PortalGate.monitor && isMonitor) return false;
+      if (e.hideWhen == _PortalGate.monitor && (isMonitor || hasAttendancePermMenu)) return false;
       return true;
     }).toList();
 
@@ -279,7 +284,12 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     ];
     final monitorIds = settings?.monitorIds ?? const <String>[];
     final isMonitor = studentIds.any(monitorIds.contains);
-    final bottomNavItems = _bottomNavItemsFor(isMonitor: isMonitor);
+    final hasAttendancePerm =
+        currentUser?.hasPermission('attendance:take') == true;
+    final bottomNavItems = _bottomNavItemsFor(
+      isMonitor: isMonitor,
+      hasAttendancePerm: hasAttendancePerm,
+    );
 
     // Get current location from GoRouter
     final location = GoRouterState.of(context).matchedLocation;

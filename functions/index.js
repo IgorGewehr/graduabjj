@@ -332,15 +332,38 @@ exports.promoteToInstructor = onCall(async (request) => {
     }
     const data = mappingSnap.data() || {};
     const details = data.academyDetails || {};
-    if (!details[academyId]) {
-      throw new HttpsError('failed-precondition',
-          'Usuário precisa estar na academia antes de virar instrutor.');
+    const hasEntry = !!details[academyId];
+
+    // Legacy monitors were added via academy.monitorIds only and have no
+    // academyDetails entry. Resolve their studentId from the students
+    // subcollection so we can synthesise the entry and let the promote proceed
+    // (previously this threw failed-precondition — the reported promote error).
+    // All reads must precede writes in a transaction.
+    let studentId = hasEntry ? (details[academyId].studentId || null) : null;
+    if (!hasEntry) {
+      const studentsSnap = await tx.get(
+          db.collection('academies').doc(academyId)
+              .collection('students')
+              .where('linkedUserId', '==', userId)
+              .limit(1),
+      );
+      studentId = studentsSnap.empty ? null : studentsSnap.docs[0].id;
     }
 
+    // One field-path update: creates the entry when missing (keeping studentId
+    // so the user stays linked to their student record), otherwise just flips
+    // role → instructor. Distinct leaf paths never conflict.
     const update = {
       [`academyDetails.${academyId}.role`]: 'instructor',
+      [`academyDetails.${academyId}.status`]: 'active',
       updatedAt: FieldValue.serverTimestamp(),
     };
+    if (!hasEntry) {
+      update.academyIds = FieldValue.arrayUnion(academyId);
+      update.primaryAcademyId = data.primaryAcademyId || academyId;
+      update[`academyDetails.${academyId}.studentId`] = studentId;
+      update[`academyDetails.${academyId}.joinedAt`] = FieldValue.serverTimestamp();
+    }
     if (Array.isArray(extraPermissions)) {
       update[`academyDetails.${academyId}.extraPermissions`] = extraPermissions;
     }

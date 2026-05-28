@@ -13,6 +13,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../models/user.dart';
 import '../../providers/providers.dart';
+import '../../services/firebase_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/delete_account_helper.dart';
 import '../../widgets/common/grade_display.dart';
@@ -437,13 +438,16 @@ class _HeroHeader extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final academyId = ref.watch(selectedAcademyIdProvider);
+    // Fall back to the authoritative academy context when the selected-academy
+    // provider hasn't settled (null) — otherwise the upload path would be
+    // academies//students/... and Storage denies it.
+    final academyId = ref.watch(selectedAcademyIdProvider) ?? FirebaseService.academyId;
 
     return Column(
       children: [
         // Avatar
         ProfilePhotoPicker(
-          academyId: academyId ?? '',
+          academyId: academyId,
           studentId: student.id,
           photoUrl: student.photoUrl,
           fullName: student.fullName,

@@ -4,93 +4,151 @@ service firebase.storage {
   match /b/{bucket}/o {
 
     // ============================================================
-    // Helpers — mirrors firestore.rules role model via
-    // userAcademyMapping/{uid}.academyDetails.{academyId}.role
+    // Helpers — role model mirrors firestore.rules:
+    //   userAcademyMapping/{uid}.academyDetails.{academyId}.role  (primary)
+    //   academies/{academyId}/users/{uid}.role                    (fallback)
+    // Every firestore lookup is exists()-guarded so a missing doc returns ''
+    // instead of erroring (which would deny a legitimate write). This is the
+    // canonical superset shared by graduabjj (mobile) and the web app.
     // ============================================================
 
-    function authed() {
-      return request.auth != null;
+    function authed() { return request.auth != null; }
+
+    function mappingRef() {
+      return /databases/(default)/documents/userAcademyMapping/$(request.auth.uid);
+    }
+    function acadUserRef(academyId) {
+      return /databases/(default)/documents/academies/$(academyId)/users/$(request.auth.uid);
     }
 
-    function academyRole(academyId) {
-      return firestore.get(
-        /databases/(default)/documents/userAcademyMapping/$(request.auth.uid)
-      ).data.academyDetails[academyId].role;
+    // role from the user-academy mapping (or '' if absent at any level)
+    function roleInMapping(academyId) {
+      return firestore.exists(mappingRef())
+        && firestore.get(mappingRef()).data.keys().hasAll(['academyDetails'])
+        && firestore.get(mappingRef()).data.academyDetails.keys().hasAll([academyId])
+        && firestore.get(mappingRef()).data.academyDetails[academyId].keys().hasAll(['role'])
+        ? firestore.get(mappingRef()).data.academyDetails[academyId].role : '';
+    }
+    // role from the academy-scoped user doc (fallback; '' if absent)
+    function roleInAcadUser(academyId) {
+      return firestore.exists(acadUserRef(academyId))
+        && firestore.get(acadUserRef(academyId)).data.keys().hasAll(['role'])
+        ? firestore.get(acadUserRef(academyId)).data.role : '';
     }
 
     function isAdmin(academyId) {
-      return authed() && academyRole(academyId) == 'admin';
+      return authed()
+        && (roleInMapping(academyId) == 'admin' || roleInAcadUser(academyId) == 'admin');
     }
-
     function isStaff(academyId) {
       return authed() && (
-        academyRole(academyId) == 'admin' ||
-        academyRole(academyId) == 'instructor'
+        roleInMapping(academyId) == 'admin' || roleInMapping(academyId) == 'instructor' ||
+        roleInAcadUser(academyId) == 'admin' || roleInAcadUser(academyId) == 'instructor'
+      );
+    }
+    function belongs(academyId) {
+      return authed() && firestore.exists(mappingRef()) && (
+        academyId in firestore.get(mappingRef()).data.academyIds ||
+        firestore.get(mappingRef()).data.primaryAcademyId == academyId
       );
     }
 
-    // ============================================================
-    // Academy files — public read, role-gated write
-    // ============================================================
-
-    // Logo da academia — só admin altera a identidade visual
-    match /academies/{academyId}/logo.png {
-      allow read: if true;
-      allow write: if isAdmin(academyId);
-      allow delete: if isAdmin(academyId);
+    // own studentId (mapping primary, academy-user-doc fallback)
+    function studentIdInMapping(academyId) {
+      return firestore.exists(mappingRef())
+        && firestore.get(mappingRef()).data.keys().hasAll(['academyDetails'])
+        && firestore.get(mappingRef()).data.academyDetails.keys().hasAll([academyId])
+        && firestore.get(mappingRef()).data.academyDetails[academyId].keys().hasAll(['studentId'])
+        ? firestore.get(mappingRef()).data.academyDetails[academyId].studentId : '';
+    }
+    function studentIdInAcadUser(academyId) {
+      return firestore.exists(acadUserRef(academyId))
+        && firestore.get(acadUserRef(academyId)).data.keys().hasAll(['studentId'])
+        ? firestore.get(acadUserRef(academyId)).data.studentId : '';
+    }
+    function isOwnStudent(academyId, studentId) {
+      return authed() && studentId != null && (
+        studentIdInMapping(academyId) == studentId ||
+        studentIdInAcadUser(academyId) == studentId
+      );
     }
 
-    // Fotos de perfil dos alunos — admin ou instrutor
+    // request.resource is null on delete — allow those checks to pass for deletes.
+    function isImage() {
+      return request.resource == null || request.resource.contentType.matches('image/.*');
+    }
+    function sizeUnderMb(mb) {
+      return request.resource == null || request.resource.size < mb * 1024 * 1024;
+    }
+
+    // ============================================================
+    // Student profile photos — staff OR the student themselves.
+    // Public read so the public site can render opted-in avatars.
+    // ============================================================
     match /academies/{academyId}/students/{studentId}/profile.jpg {
       allow read: if true;
-      allow write: if isStaff(academyId);
-      allow delete: if isStaff(academyId);
+      allow write: if (isStaff(academyId) || isOwnStudent(academyId, studentId))
+                   && isImage() && sizeUnderMb(5);
+      allow delete: if isStaff(academyId) || isOwnStudent(academyId, studentId);
     }
 
-    // Fotos de campeonatos — admin ou instrutor
+    // ============================================================
+    // Competition photos — any academy member uploads (Firestore rules
+    // enforce own/staff on the matching doc). Public read for the gallery.
+    // ============================================================
     match /academies/{academyId}/competitions/{competitionId}/photos/{photoId} {
       allow read: if true;
-      allow write: if isStaff(academyId);
-      allow delete: if isStaff(academyId);
+      allow write: if authed() && belongs(academyId) && isImage() && sizeUnderMb(10);
+      allow delete: if isStaff(academyId) || authed();
     }
 
-    // Imagens de eventos e notícias — admin ou instrutor
-    match /academies/{academyId}/events/{file=**} {
+    // Academy logo (graduabjj) — admin only.
+    match /academies/{academyId}/logo.png {
       allow read: if true;
-      allow write: if isStaff(academyId);
-      allow delete: if isStaff(academyId);
+      allow write, delete: if isAdmin(academyId) && isImage() && sizeUnderMb(5);
     }
 
+    // Branding images (web) — admin only.
+    match /academies/{academyId}/branding/{imageId} {
+      allow read: if true;
+      allow write, delete: if isAdmin(academyId) && isImage() && sizeUnderMb(5);
+    }
+
+    // News cover images (public site) — staff.
     match /academies/{academyId}/news/{file=**} {
       allow read: if true;
-      allow write: if isStaff(academyId);
-      allow delete: if isStaff(academyId);
+      allow write, delete: if isStaff(academyId) && isImage() && sizeUnderMb(10);
     }
 
-    // Imagens de produtos da loja — só admin gerencia o catálogo
-    match /academies/{academyId}/products/{filename} {
+    // Event cover images (public site) — staff.
+    match /academies/{academyId}/events/{file=**} {
       allow read: if true;
-      allow write: if isAdmin(academyId);
-      allow delete: if isAdmin(academyId);
+      allow write, delete: if isStaff(academyId) && isImage() && sizeUnderMb(10);
     }
 
-    // Conteúdo de treino (vídeos e docs) — até 300 MB, staff
+    // Store product images — admin manages the catalog.
+    match /academies/{academyId}/products/{file=**} {
+      allow read: if true;
+      allow write, delete: if isAdmin(academyId) && isImage() && sizeUnderMb(5);
+    }
+
+    // Training content (videos & docs) — staff, up to 300 MB.
     match /academies/{academyId}/content/{file=**} {
       allow read: if true;
-      allow write: if isStaff(academyId)
-                   && (request.resource == null
-                       || request.resource.size < 300 * 1024 * 1024);
-      allow delete: if isStaff(academyId);
+      allow write, delete: if isStaff(academyId) && sizeUnderMb(300);
     }
 
-    // Fallback: qualquer outro arquivo dentro de academies — admin escreve, leitura pública
+    // Fallback: any other file under an academy (backgrounds, sidebar logos,
+    // misc assets) — admin writes, public read. Storage evaluates rules as a
+    // UNION, so the more specific rules above already grant their narrower
+    // cases (e.g. a student writing their own photo); this only ADDS admin
+    // write to everything else under the academy.
     match /academies/{academyId}/{allPaths=**} {
       allow read: if true;
-      allow write: if isAdmin(academyId);
-      allow delete: if isAdmin(academyId);
+      allow write, delete: if isAdmin(academyId);
     }
 
-    // Nega tudo fora de academies
+    // Deny everything outside /academies.
     match /{allPaths=**} {
       allow read, write: if false;
     }

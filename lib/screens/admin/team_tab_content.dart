@@ -169,6 +169,20 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
       context: context,
       builder: (_) => _PromoteDialog(academyId: user!.academyId!),
     );
+    _refresh();
+  }
+
+  Future<void> _openEditPermissionsDialog(AcademyMember m) async {
+    final academyId = _academyId;
+    if (academyId == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _EditPermissionsDialog(
+        member: m,
+        academyId: academyId,
+      ),
+    );
+    _refresh();
   }
 
   Future<void> _copyCode(String code) async {
@@ -258,6 +272,7 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
               instructors: _members.instructors,
               onDemote: _demoteMember,
               onRevoke: _revokeMember,
+              onEditPermissions: _openEditPermissionsDialog,
               currentUserId: ref.read(currentUserProvider).valueOrNull?.id,
             ),
             const SizedBox(height: 24),
@@ -840,6 +855,7 @@ class _TeamMembersSection extends StatelessWidget {
   final List<AcademyMember> instructors;
   final ValueChanged<AcademyMember> onDemote;
   final ValueChanged<AcademyMember> onRevoke;
+  final ValueChanged<AcademyMember> onEditPermissions;
   final String? currentUserId;
 
   const _TeamMembersSection({
@@ -848,6 +864,7 @@ class _TeamMembersSection extends StatelessWidget {
     required this.instructors,
     required this.onDemote,
     required this.onRevoke,
+    required this.onEditPermissions,
     required this.currentUserId,
   });
 
@@ -895,6 +912,12 @@ class _TeamMembersSection extends StatelessWidget {
                 ? const []
                 : [
                     _MemberAction(
+                      icon: LucideIcons.settings,
+                      label: 'Editar permissões',
+                      color: AppTheme.info,
+                      onTap: () => onEditPermissions(m),
+                    ),
+                    _MemberAction(
                       icon: LucideIcons.userMinus,
                       label: 'Rebaixar',
                       color: AppTheme.warning,
@@ -924,6 +947,119 @@ class _MemberAction {
     required this.color,
     required this.onTap,
   });
+}
+
+/// Edit the extra permissions of an existing instructor (re-promotes idempotently).
+class _EditPermissionsDialog extends ConsumerStatefulWidget {
+  final AcademyMember member;
+  final String academyId;
+  const _EditPermissionsDialog({required this.member, required this.academyId});
+
+  @override
+  ConsumerState<_EditPermissionsDialog> createState() =>
+      _EditPermissionsDialogState();
+}
+
+class _EditPermissionsDialogState
+    extends ConsumerState<_EditPermissionsDialog> {
+  late Set<String> _selected;
+  bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = Set.from(widget.member.extraPermissions);
+  }
+
+  Future<void> _save() async {
+    setState(() => _submitting = true);
+    try {
+      await teamService.promoteToInstructor(
+        userId: widget.member.userId,
+        academyId: widget.academyId,
+        extraPermissions: _selected.toList(),
+      );
+      if (!mounted) return;
+      context.showSuccess('Permissões de ${widget.member.displayName} atualizadas.');
+      Navigator.of(context).pop();
+    } catch (_) {
+      if (!mounted) return;
+      context.showError('Erro ao atualizar permissões.');
+      setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Permissões de ${widget.member.displayName}'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Selecione as permissões extras deste instrutor.',
+              style: AppTheme.bodySmall.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            ...kGrantableExtraPermissions.map(
+              (def) => CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: _selected.contains(def.permission),
+                onChanged: _submitting
+                    ? null
+                    : (v) {
+                        setState(() {
+                          if (v == true) {
+                            _selected.add(def.permission);
+                          } else {
+                            _selected.remove(def.permission);
+                          }
+                        });
+                      },
+                title: Text(
+                  def.label,
+                  style: AppTheme.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                subtitle: Text(
+                  def.description,
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton(
+          onPressed: _submitting ? null : _save,
+          child: _submitting
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                )
+              : const Text('Salvar'),
+        ),
+      ],
+    );
+  }
 }
 
 class _MemberRow extends StatelessWidget {

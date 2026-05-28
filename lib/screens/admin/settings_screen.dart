@@ -18,7 +18,6 @@ import '../../core/feedback_utils.dart';
 import '../../core/formatters.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
-import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
@@ -85,10 +84,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     text: '70',
   );
 
-  // Monitors
-  List<String> _monitorIds = [];
-  List<Map<String, dynamic>> _linkedStudents = [];
-  bool _isLoadingMonitors = false;
 
   // KYC
   String _kycStatus = 'not_checked';
@@ -98,7 +93,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _tabs = [
     'Academia',
     'Financeiro',
-    'Monitores',
     'Funcionalidades',
     'Equipe',
   ];
@@ -244,12 +238,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 .autoGraduationAttendances
                 .toString();
           }
-          _monitorIds = settings.monitorIds;
         });
       }
-
-      // Load linked students for monitors selection
-      await _loadLinkedStudents();
 
       // Auto-check KYC status if Asaas is enabled
       if (_asaasEnabled) {
@@ -261,71 +251,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       setState(() => _isLoading = false);
     } catch (e) {
       setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _loadLinkedStudents() async {
-    try {
-      final studentService = StudentService(FirebaseService.academyId);
-      final allStudents = await studentService.getAll();
-
-      // Filter students that have linkedUserId and are active
-      final linked = allStudents
-          .where(
-            (s) => s.linkedUserId != null && s.status == StudentStatus.active,
-          )
-          .map(
-            (s) => {'id': s.id, 'fullName': s.fullName, 'nickname': s.nickname},
-          )
-          .toList();
-
-      setState(() {
-        _linkedStudents = linked;
-      });
-    } catch (e) {
-      // Ignore errors
-    }
-  }
-
-  Future<void> _addMonitor(String studentId) async {
-    setState(() => _isLoadingMonitors = true);
-    try {
-      final service = SettingsService(FirebaseService.academyId);
-      await service.addMonitor(studentId);
-      setState(() {
-        _monitorIds = [..._monitorIds, studentId];
-      });
-      ref.invalidate(academySettingsProvider);
-      if (mounted) {
-        context.showSuccess('Monitor adicionado!');
-      }
-    } catch (e) {
-      if (mounted) {
-        context.showError('Erro: $e');
-      }
-    } finally {
-      setState(() => _isLoadingMonitors = false);
-    }
-  }
-
-  Future<void> _removeMonitor(String studentId) async {
-    setState(() => _isLoadingMonitors = true);
-    try {
-      final service = SettingsService(FirebaseService.academyId);
-      await service.removeMonitor(studentId);
-      setState(() {
-        _monitorIds = _monitorIds.where((id) => id != studentId).toList();
-      });
-      ref.invalidate(academySettingsProvider);
-      if (mounted) {
-        context.showSuccess('Monitor removido!');
-      }
-    } catch (e) {
-      if (mounted) {
-        context.showError('Erro: $e');
-      }
-    } finally {
-      setState(() => _isLoadingMonitors = false);
     }
   }
 
@@ -777,10 +702,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       case 1:
         return _buildFinancialTab();
       case 2:
-        return _buildMonitorsTab();
-      case 3:
         return _buildFeaturesTab();
-      case 4:
+      case 3:
         return const TeamTabContent();
       default:
         return const SizedBox.shrink();
@@ -1268,252 +1191,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           const SizedBox(height: 8),
           Text(message, style: AppTheme.bodySmall.copyWith(color: color)),
           if (action != null) ...[const SizedBox(height: 12), action],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMonitorsTab() {
-    // Get current monitors (students who are in monitorIds)
-    final currentMonitors = _linkedStudents
-        .where((s) => _monitorIds.contains(s['id']))
-        .toList();
-
-    // Get available students (linked but not monitors)
-    final availableStudents = _linkedStudents
-        .where((s) => !_monitorIds.contains(s['id']))
-        .toList();
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        key: const ValueKey('monitors'),
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 8),
-
-          // Add Monitor Section
-          _SettingsCard(
-            title: 'Adicionar Monitor',
-            icon: LucideIcons.userPlus,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Selecione um aluno com conta vinculada para adiciona-lo como monitor.',
-                  style: AppTheme.bodySmall.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (availableStudents.isEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surfaceVariant,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          LucideIcons.info,
-                          color: AppTheme.textSecondary,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            _linkedStudents.isEmpty
-                                ? 'Nenhum aluno possui conta vinculada.'
-                                : 'Todos os alunos vinculados ja sao monitores.',
-                            style: AppTheme.bodySmall.copyWith(
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  Container(
-                    decoration: BoxDecoration(
-                      color: AppTheme.surfaceVariant,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppTheme.divider),
-                    ),
-                    child: DropdownButtonFormField<String>(
-                      value: null,
-                      hint: Text(
-                        'Selecionar aluno',
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      items: availableStudents.map((student) {
-                        final name = student['nickname'] ?? student['fullName'];
-                        return DropdownMenuItem(
-                          value: student['id'] as String,
-                          child: Text(name),
-                        );
-                      }).toList(),
-                      onChanged: _isLoadingMonitors
-                          ? null
-                          : (value) {
-                              if (value != null) {
-                                _addMonitor(value);
-                              }
-                            },
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                      ),
-                      dropdownColor: AppTheme.surface,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Current Monitors List
-          _SettingsCard(
-            title: 'Monitores Atuais (${currentMonitors.length})',
-            icon: LucideIcons.shield,
-            child: currentMonitors.isEmpty
-                ? Container(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      children: [
-                        Icon(
-                          LucideIcons.shield,
-                          color: AppTheme.textDisabled,
-                          size: 48,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Nenhum monitor cadastrado',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : Column(
-                    children: currentMonitors.map((monitor) {
-                      final name = monitor['nickname'] ?? monitor['fullName'];
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppTheme.surfaceVariant,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: AppTheme.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  name.substring(0, 1).toUpperCase(),
-                                  style: AppTheme.titleMedium.copyWith(
-                                    color: AppTheme.primary,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    name,
-                                    style: AppTheme.bodyMedium.copyWith(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  if (monitor['nickname'] != null)
-                                    Text(
-                                      monitor['fullName'],
-                                      style: AppTheme.labelSmall.copyWith(
-                                        color: AppTheme.textSecondary,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: _isLoadingMonitors
-                                  ? null
-                                  : () =>
-                                        _removeMonitor(monitor['id'] as String),
-                              icon: Icon(
-                                LucideIcons.x,
-                                color: AppTheme.error,
-                                size: 20,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Info about permissions
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.blue.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(LucideIcons.info, color: Colors.blue, size: 18),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Permissoes do Monitor',
-                      style: AppTheme.bodyMedium.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: Colors.blue.shade700,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '• Fazer chamada de presenca\n• Visualizar, cadastrar e editar alunos',
-                  style: AppTheme.bodySmall.copyWith(
-                    color: Colors.blue.shade700,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Monitores NAO tem acesso a: Financeiro, Relatorios, Configuracoes.',
-                  style: AppTheme.labelSmall.copyWith(
-                    color: Colors.blue.shade600,
-                  ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
