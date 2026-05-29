@@ -135,6 +135,22 @@ async function getStudentUserId(studentId, academyId) {
   return student?.linkedUserId || null;
 }
 
+// Billing recipient for a student's charges: the responsible adult (kids ->
+// adult) when set on the student doc, otherwise the student's own linked user.
+async function getBillingRecipientUid(studentId, academyId) {
+  try {
+    const stuSnap = await db
+      .collection('academies').doc(academyId)
+      .collection('students').doc(studentId)
+      .get();
+    const resp = stuSnap.exists ? stuSnap.data()?.responsibleUserId : null;
+    if (resp) return resp;
+  } catch (e) {
+    // fall through to the student's own user
+  }
+  return getStudentUserId(studentId, academyId);
+}
+
 // ============================================
 // Internal Notification Helper
 // ============================================
@@ -422,8 +438,9 @@ exports.scheduledOverdueCheck = functions.pubsub
             (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)
           );
 
-          // Notify student about overdue payment (push + internal)
-          const userId = await getStudentUserId(financial.studentId, academyId);
+          // Notify the billing recipient (responsible adult for kids, else
+          // the student) about the overdue payment (push + internal)
+          const userId = await getBillingRecipientUid(financial.studentId, academyId);
           if (userId) {
             await sendToUser(
               userId,
@@ -504,7 +521,7 @@ exports.scheduledDueSoonReminder = functions.pubsub
 
         // Check if due within 3 days (but not overdue)
         if (dueDate > now && dueDate <= threeDaysFromNow) {
-          const userId = await getStudentUserId(financial.studentId, academyId);
+          const userId = await getBillingRecipientUid(financial.studentId, academyId);
           if (userId) {
             const daysUntilDue = Math.ceil(
               (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
@@ -782,10 +799,14 @@ exports.createPixPayment = onCall(async (request) => {
     throw new HttpsError('permission-denied', 'Access denied: Invalid academy');
   }
 
-  // 4. Validate user is paying for themselves or is staff
+  // 4. Validate user is paying for themselves, is staff, or is the responsible
+  // adult for this (kids) student.
   const isStaff = userInfo.role === 'admin' || userInfo.role === 'instructor';
   if (!isStaff && userInfo.studentId !== studentId) {
-    throw new HttpsError('permission-denied', 'Access denied: Cannot pay for another student');
+    const stuSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
+    if (!stuSnap.exists || stuSnap.data()?.responsibleUserId !== context.auth.uid) {
+      throw new HttpsError('permission-denied', 'Access denied: Cannot pay for another student');
+    }
   }
 
   // 5. Validate amount
@@ -912,10 +933,14 @@ exports.createOrderPixPayment = onCall(async (request) => {
     throw new HttpsError('permission-denied', 'Access denied: Invalid academy');
   }
 
-  // 4. Validate user is paying for themselves or is staff
+  // 4. Validate user is paying for themselves, is staff, or is the responsible
+  // adult for this (kids) student.
   const isStaff = userInfo.role === 'admin' || userInfo.role === 'instructor';
   if (!isStaff && userInfo.studentId !== studentId) {
-    throw new HttpsError('permission-denied', 'Access denied: Cannot pay for another student');
+    const stuSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
+    if (!stuSnap.exists || stuSnap.data()?.responsibleUserId !== context.auth.uid) {
+      throw new HttpsError('permission-denied', 'Access denied: Cannot pay for another student');
+    }
   }
 
   // 5. Validate amount
@@ -1057,10 +1082,14 @@ exports.createCardPayment = onCall(async (request) => {
     throw new HttpsError('permission-denied', 'Access denied: Invalid academy');
   }
 
-  // 4. Validate user is paying for themselves or is staff
+  // 4. Validate user is paying for themselves, is staff, or is the responsible
+  // adult for this (kids) student.
   const isStaff = userInfo.role === 'admin' || userInfo.role === 'instructor';
   if (!isStaff && userInfo.studentId !== studentId) {
-    throw new HttpsError('permission-denied', 'Access denied: Cannot pay for another student');
+    const stuSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
+    if (!stuSnap.exists || stuSnap.data()?.responsibleUserId !== context.auth.uid) {
+      throw new HttpsError('permission-denied', 'Access denied: Cannot pay for another student');
+    }
   }
 
   // 5. Validate amount

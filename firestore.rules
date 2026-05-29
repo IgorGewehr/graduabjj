@@ -115,6 +115,15 @@ service cloud.firestore {
         && mapping.academyDetails[academyId].studentId in ids;
     }
 
+    // Check if the caller is the responsible adult for [docStudentId]
+    // (kids -> adult linking). The student doc stores responsibleUserId = the
+    // adult's auth uid; lets a responsible read/pay their dependents' data.
+    function isResponsibleForStudent(academyId, docStudentId) {
+      return belongsToAcademy(academyId)
+        && exists(/databases/$(database)/documents/academies/$(academyId)/students/$(docStudentId))
+        && get(/databases/$(database)/documents/academies/$(academyId)/students/$(docStudentId)).data.get('responsibleUserId', null) == request.auth.uid;
+    }
+
     // Check if user is the owner of the academy
     function isAcademyOwner(academyId) {
       let academy = get(/databases/$(database)/documents/academies/$(academyId)).data;
@@ -339,6 +348,10 @@ service cloud.firestore {
         // Students can read their own record
         allow read: if isOwnStudent(academyId, studentId);
 
+        // Responsible adult can read their dependents' record (kids -> adult)
+        allow read: if belongsToAcademy(academyId)
+                    && resource.data.get('responsibleUserId', null) == request.auth.uid;
+
         // Public read of opted-in profiles (public fighter profile / public site).
         // Gated by the per-student isProfilePublic flag (default false).
         allow read: if resource.data.isProfilePublic == true;
@@ -353,12 +366,16 @@ service cloud.firestore {
         // Staff can update all fields
         allow update: if isAcademyStaff(academyId);
 
-        // Monitors can update students (except financial and sensitive fields)
+        // Monitors can update students (except financial and sensitive fields).
+        // responsibleUserId/* gate the kids->adult payer access, so only staff
+        // (admins) may set them — never a monitor (a student-level role).
         allow update: if isMonitor(academyId)
                       && !request.resource.data.diff(resource.data).affectedKeys()
                           .hasAny(['tuitionValue', 'tuitionDay', 'planId',
                                    'currentBelt', 'currentStripes', 'status',
-                                   'beltHistory', 'createdAt', 'createdBy']);
+                                   'beltHistory', 'createdAt', 'createdBy',
+                                   'responsibleUserId', 'responsibleStudentId',
+                                   'responsibleName']);
 
         // Students can update only personal info (including photoUrl and registration linking fields) or soft-delete their own record
         allow update: if isOwnStudent(academyId, studentId)
@@ -530,6 +547,9 @@ service cloud.firestore {
 
         // Students can read their own financials
         allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+
+        // Responsible adult can read their dependents' financials (kids -> adult)
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
 
         // Staff can create financials
         allow create: if isAcademyStaff(academyId)

@@ -290,6 +290,14 @@ class Student {
   final bool isProfilePublic;
   final String? linkedUserId;
 
+  // Responsible (kids → adult): the adult student/account who pays this kid's
+  // charges. Set by an admin. `responsibleUserId` is the adult's auth uid and is
+  // the source of truth for the portal, Firestore rules and payment auth; the
+  // other two are denormalized for display.
+  final String? responsibleUserId;
+  final String? responsibleStudentId;
+  final String? responsibleName;
+
   // Metadata
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -333,6 +341,9 @@ class Student {
     this.primarySport,
     this.isProfilePublic = false,
     this.linkedUserId,
+    this.responsibleUserId,
+    this.responsibleStudentId,
+    this.responsibleName,
     required this.createdAt,
     required this.updatedAt,
     this.createdBy,
@@ -395,6 +406,9 @@ class Student {
       primarySport: data['primarySport'],
       isProfilePublic: data['isProfilePublic'] ?? false,
       linkedUserId: data['linkedUserId'],
+      responsibleUserId: data['responsibleUserId'],
+      responsibleStudentId: data['responsibleStudentId'],
+      responsibleName: data['responsibleName'],
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       createdBy: data['createdBy'],
@@ -442,6 +456,9 @@ class Student {
       'primarySport': primarySport,
       'isProfilePublic': isProfilePublic,
       'linkedUserId': linkedUserId,
+      'responsibleUserId': responsibleUserId,
+      'responsibleStudentId': responsibleStudentId,
+      'responsibleName': responsibleName,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(DateTime.now()),
       'createdBy': createdBy,
@@ -468,6 +485,10 @@ class Student {
   bool get isKids => category == StudentCategory.kids;
   bool get isAdult => category == StudentCategory.adult;
   bool get isActive => status == StudentStatus.active;
+
+  /// True when an adult responsible is set to pay this (kids) student's charges.
+  bool get hasResponsible =>
+      responsibleUserId != null && responsibleUserId!.isNotEmpty;
 
   // Guardian convenience getters (for backwards compatibility)
   String? get guardianName => guardian?.name;
@@ -549,6 +570,9 @@ class Student {
     String? primarySport,
     bool? isProfilePublic,
     String? linkedUserId,
+    String? responsibleUserId,
+    String? responsibleStudentId,
+    String? responsibleName,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? createdBy,
@@ -591,6 +615,9 @@ class Student {
       primarySport: primarySport ?? this.primarySport,
       isProfilePublic: isProfilePublic ?? this.isProfilePublic,
       linkedUserId: linkedUserId ?? this.linkedUserId,
+      responsibleUserId: responsibleUserId ?? this.responsibleUserId,
+      responsibleStudentId: responsibleStudentId ?? this.responsibleStudentId,
+      responsibleName: responsibleName ?? this.responsibleName,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       createdBy: createdBy ?? this.createdBy,

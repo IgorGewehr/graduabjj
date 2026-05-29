@@ -16,6 +16,7 @@ import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import '../../services/abacate_pay_service.dart';
 import '../../services/asaas_payment_service.dart';
+import '../../models/student.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
 /// Payment enabled provider (either AbacatePay or Asaas)
@@ -29,6 +30,75 @@ final abacatePayEnabledProvider = FutureProvider<bool>((ref) async {
   final settingsService = SettingsService(academyId);
   return settingsService.isAsaasEnabled();
 });
+
+/// Dependents (kids) whose responsible is the logged-in user. Lets a parent
+/// who also trains (adult student) see and pay their kids' charges.
+final dependentsProvider =
+    StreamProvider.autoDispose<List<Student>>((ref) async* {
+  final user = await ref.watch(currentUserProvider.future);
+  final academyId = user?.academyId;
+  final uid = user?.id;
+  if (academyId == null || uid == null) {
+    yield <Student>[];
+    return;
+  }
+  yield* StudentService(academyId).streamDependents(uid);
+});
+
+/// One section per dependent: their OPEN charges with a pay button. Hidden when
+/// the dependent has no open charges.
+class _DependentSection extends ConsumerWidget {
+  final Student dependent;
+  final bool abacatePayEnabled;
+  final String Function(double) formatCurrency;
+  final void Function(Payment) onPayPix;
+
+  const _DependentSection({
+    required this.dependent,
+    required this.abacatePayEnabled,
+    required this.formatCurrency,
+    required this.onPayPix,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final paymentsAsync = ref.watch(studentPaymentsProvider(dependent.id));
+    return paymentsAsync.maybeWhen(
+      data: (payments) {
+        final open = payments
+            .where((p) =>
+                p.status == PaymentStatus.pending ||
+                p.status == PaymentStatus.overdue)
+            .toList()
+          ..sort((a, b) => a.dueDate.compareTo(b.dueDate));
+        if (open.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SectionHeader(
+              title: 'Dependente: ${dependent.displayName}',
+              count: open.length,
+            ),
+            const SizedBox(height: 12),
+            ...open.map(
+              (payment) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _PaymentCard(
+                  payment: payment,
+                  formatCurrency: formatCurrency,
+                  showPayButton: abacatePayEnabled,
+                  onPayPix: () => onPayPix(payment),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+}
 
 /// Financial Screen - Pagamentos (Simplified)
 class FinancialScreen extends ConsumerStatefulWidget {
@@ -84,6 +154,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
           onRefresh: () async {
             HapticFeedback.mediumImpact();
             ref.invalidate(studentPaymentsProvider(student.id));
+            ref.invalidate(dependentsProvider);
             ref.invalidate(pixInfoProvider);
             ref.invalidate(abacatePayEnabledProvider);
           },
@@ -189,6 +260,23 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                     _AllPaidCard(),
                     const SizedBox(height: 24),
                   ],
+
+                  // Dependentes — cobrancas de alunos kids sob este responsavel
+                  ...ref.watch(dependentsProvider).maybeWhen(
+                        data: (deps) => deps
+                            .where((d) => d.id != student.id)
+                            .map<Widget>(
+                              (dep) => _DependentSection(
+                                dependent: dep,
+                                abacatePayEnabled: abacatePayEnabled,
+                                formatCurrency: _formatCurrency,
+                                onPayPix: (payment) =>
+                                    _showPixPaymentDialog(payment, dep.fullName),
+                              ),
+                            )
+                            .toList(),
+                        orElse: () => const <Widget>[],
+                      ),
 
                   // History Section
                   _SectionHeader(

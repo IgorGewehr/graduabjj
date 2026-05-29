@@ -673,6 +673,12 @@ class _AdminStudentDetailScreenState
           ]),
           const SizedBox(height: 16),
 
+          // Responsável financeiro (kids → adulto que paga as cobrancas)
+          if (_student!.isKids) ...[
+            _buildResponsibleCard(),
+            const SizedBox(height: 16),
+          ],
+
           // Turmas section — visible to admins and users with students:manage
           Builder(
             builder: (context) {
@@ -723,6 +729,217 @@ class _AdminStudentDetailScreenState
         ],
       ),
     );
+  }
+
+  // ============================================
+  // Responsável financeiro (kids → adulto)
+  // ============================================
+  Widget _buildResponsibleCard() {
+    final hasResp = _student!.hasResponsible;
+    return Card(
+      elevation: 1,
+      shadowColor: Colors.black.withValues(alpha: 0.05),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Responsavel financeiro',
+                    style: AppTheme.titleMedium.copyWith(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              hasResp
+                  ? 'As cobrancas deste aluno aparecem para ${_student!.responsibleName} no app, que pode paga-las.'
+                  : 'Nenhum responsavel definido. Escolha um aluno adulto (com conta) para receber e pagar as cobrancas deste aluno.',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _showManageResponsibleDialog,
+                    icon: const Icon(LucideIcons.userPlus, size: 16),
+                    label: Text(hasResp ? 'Trocar responsavel' : 'Definir responsavel'),
+                  ),
+                ),
+                if (hasResp) ...[
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: _removeResponsible,
+                    icon: const Icon(LucideIcons.userMinus, size: 18),
+                    color: AppTheme.error,
+                    tooltip: 'Remover responsavel',
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showManageResponsibleDialog() async {
+    final studentService = StudentService(FirebaseService.academyId);
+    List<Student> adults;
+    try {
+      adults = await studentService.listAll(status: StudentStatus.active);
+    } catch (e) {
+      if (mounted) context.showError('Erro ao carregar alunos');
+      return;
+    }
+    // Only adults with a linked account can be responsible — they need a login
+    // to see and pay the kid's charges. Category is filtered client-side to
+    // avoid requiring a (status + category) composite index.
+    adults = adults
+        .where((a) =>
+            a.category == StudentCategory.adult &&
+            a.linkedUserId != null &&
+            a.linkedUserId!.isNotEmpty &&
+            a.id != _student!.id)
+        .toList()
+      ..sort((a, b) => a.fullName.compareTo(b.fullName));
+    if (!mounted) return;
+    if (adults.isEmpty) {
+      context.showError('Nenhum aluno adulto com conta vinculada disponivel.');
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.divider,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Escolher responsavel',
+                    style: AppTheme.titleMedium
+                        .copyWith(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: adults.length,
+                  itemBuilder: (c, i) {
+                    final a = adults[i];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
+                        child: Text(
+                          a.fullName.isNotEmpty
+                              ? a.fullName[0].toUpperCase()
+                              : '?',
+                          style: TextStyle(
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      title: Text(a.fullName),
+                      subtitle: (a.email != null && a.email!.isNotEmpty)
+                          ? Text(a.email!)
+                          : (a.phone != null && a.phone!.isNotEmpty)
+                              ? Text(formatPhone(a.phone))
+                              : null,
+                      onTap: () => _assignResponsible(a, sheetCtx),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _assignResponsible(Student adult, BuildContext sheetCtx) async {
+    try {
+      await StudentService(FirebaseService.academyId)
+          .setResponsible(_student!.id, adult);
+      if (!mounted) return;
+      Navigator.pop(sheetCtx);
+      context.showSuccess('Responsavel definido: ${adult.fullName}');
+      _loadData();
+    } catch (e) {
+      if (mounted) context.showError('Erro ao definir responsavel');
+    }
+  }
+
+  Future<void> _removeResponsible() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Remover responsavel'),
+        content: const Text(
+          'As cobrancas deste aluno deixarao de aparecer para o responsavel. Continuar?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await StudentService(FirebaseService.academyId)
+          .removeResponsible(_student!.id);
+      if (!mounted) return;
+      context.showSuccess('Responsavel removido');
+      _loadData();
+    } catch (e) {
+      if (mounted) context.showError('Erro ao remover responsavel');
+    }
   }
 
   Future<void> _showManageClassesDialog() async {

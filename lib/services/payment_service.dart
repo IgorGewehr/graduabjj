@@ -462,9 +462,12 @@ class PaymentService {
     if (sendNotification && type == 'monthly_tuition') {
       try {
         final student = await _studentService.getById(studentId);
-        if (student != null && student.linkedUserId != null) {
+        // Route to the responsible adult (kids) when set, else the student's
+        // own account.
+        final notifyUserId = student?.responsibleUserId ?? student?.linkedUserId;
+        if (student != null && notifyUserId != null) {
           await _notificationDispatcher.notifyNewTuition(
-            userId: student.linkedUserId!,
+            userId: notifyUserId,
             studentName: studentName,
             amount: (value * 100).toInt(), // Convert to cents
             dueDate: dueDate,
@@ -770,9 +773,11 @@ class PaymentService {
         if (sendNotifications) {
           try {
             final student = await _studentService.getById(payment.studentId);
-            if (student != null && student.linkedUserId != null) {
+            final notifyUserId =
+                student?.responsibleUserId ?? student?.linkedUserId;
+            if (student != null && notifyUserId != null) {
               await _notificationDispatcher.notifyOverdueTuition(
-                userId: student.linkedUserId!,
+                userId: notifyUserId,
                 studentName: payment.studentName,
                 amount: (payment.value * 100).toInt(),
                 daysOverdue: payment.daysOverdue,

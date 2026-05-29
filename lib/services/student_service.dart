@@ -38,6 +38,49 @@ class StudentService {
   }
 
   // ============================================
+  // Responsible (kids → adult) linking
+  // ============================================
+
+  /// Sets [responsible] (an adult student with a linked account) as the payer
+  /// for the kids student [kidId]. Stores the adult's auth uid as the source of
+  /// truth (portal/rules/payment-auth read it) plus name/studentId for display.
+  Future<void> setResponsible(String kidId, Student responsible) async {
+    if (responsible.linkedUserId == null || responsible.linkedUserId!.isEmpty) {
+      throw Exception('O responsável precisa ter uma conta vinculada.');
+    }
+    await _collections.student(kidId).update({
+      'responsibleUserId': responsible.linkedUserId,
+      'responsibleStudentId': responsible.id,
+      'responsibleName': responsible.fullName,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Clears the responsible link from a kids student.
+  Future<void> removeResponsible(String kidId) async {
+    await _collections.student(kidId).update({
+      'responsibleUserId': FieldValue.delete(),
+      'responsibleStudentId': FieldValue.delete(),
+      'responsibleName': FieldValue.delete(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Students whose `responsibleUserId` is [userId] — i.e. the dependents an
+  /// adult account is responsible for. Used by the portal to surface their
+  /// charges to the responsible adult.
+  Stream<List<Student>> streamDependents(String userId) {
+    return _studentsRef
+        .where('responsibleUserId', isEqualTo: userId)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map(Student.fromFirestore)
+            // Don't surface inactive/deleted dependents (no billing for them).
+            .where((s) => s.isActive)
+            .toList());
+  }
+
+  // ============================================
   // List All Students (sorted by attendance)
   // ============================================
   Future<List<Student>> listAll({
