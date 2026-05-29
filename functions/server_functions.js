@@ -381,6 +381,56 @@ exports.onTimelineEventCreated = functions.firestore
     console.log(`Notification sent to user ${userId} for timeline event ${eventId}`);
   });
 
+/**
+ * Trigger: a student doc is written.
+ * Action: if a responsible adult became unavailable (their student doc was
+ * deleted, their account was unlinked, or they were permanently removed —
+ * status 'deleted'), clear the dangling responsibleUserId on every kid that
+ * pointed at them. This is the safety net against orphan links: without it a
+ * kid's charges would silently stop being payable in-app. A temporary
+ * 'inactive' adult can still log in and pay, so it is intentionally NOT cleared.
+ *
+ * Note: clearing only touches responsible* fields, so the resulting writes on
+ * the dependents do not re-trigger this cleanup (linkedUserId/status unchanged).
+ */
+exports.clearDependentsOnResponsibleGone = functions.firestore
+  .document('academies/{academyId}/students/{studentId}')
+  .onWrite(async (change, context) => {
+    const { academyId } = context.params;
+    const before = change.before.exists ? change.before.data() : null;
+    if (!before) return null; // created — nothing to clean
+
+    const oldUid = before.linkedUserId;
+    if (!oldUid) return null; // never had an account → was never a responsible
+
+    const after = change.after.exists ? change.after.data() : null;
+    const deleted = after === null;
+    const unlinked = after !== null && after.linkedUserId !== oldUid;
+    const permanentlyRemoved = after !== null && after.status === 'deleted';
+    if (!deleted && !unlinked && !permanentlyRemoved) return null;
+
+    const deps = await db
+      .collection(`academies/${academyId}/students`)
+      .where('responsibleUserId', '==', oldUid)
+      .get();
+    if (deps.empty) return null;
+
+    const batch = db.batch();
+    deps.forEach((d) => {
+      batch.update(d.ref, {
+        responsibleUserId: admin.firestore.FieldValue.delete(),
+        responsibleStudentId: admin.firestore.FieldValue.delete(),
+        responsibleName: admin.firestore.FieldValue.delete(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+    await batch.commit();
+    console.log(
+      `Cleared ${deps.size} orphan responsible link(s) for uid ${oldUid} in ${academyId}`
+    );
+    return null;
+  });
+
 // ============================================
 // Cloud Functions - Scheduled (Cron Jobs)
 // ============================================
@@ -837,6 +887,22 @@ exports.createPixPayment = onCall(async (request) => {
     throw new HttpsError('already-exists', 'This payment has already been completed');
   }
 
+  // 7b. Idempotency: if a still-valid PIX already exists for this charge, return
+  // it instead of creating a SECOND gateway charge. The kid (own login) and the
+  // responsible adult can both open the same charge — both must get the SAME PIX.
+  const existingPixExpiry =
+    financialData.pixExpiresAt && typeof financialData.pixExpiresAt.toMillis === 'function'
+      ? financialData.pixExpiresAt.toMillis()
+      : 0;
+  if (financialData.externalId && financialData.pixCode && existingPixExpiry > Date.now()) {
+    return {
+      pixCode: financialData.pixCode,
+      qrCodeUrl: financialData.pixQrCode || '',
+      abacatePayId: financialData.externalId,
+      expiresAt: financialData.pixExpiresAt.toDate().toISOString(),
+    };
+  }
+
   // 8. Get API key
   const apiKey = getAbacatePayApiKey();
   if (!apiKey) {
@@ -874,11 +940,13 @@ exports.createPixPayment = onCall(async (request) => {
     throw new HttpsError('internal', 'Payment service returned invalid response');
   }
 
-  // 10. Update financial record with PIX info
+  // 10. Update financial record with PIX info (pixExpiresAt drives idempotency
+  // above so a second request within the window reuses this same charge).
   await db.doc(`academies/${academyId}/financials/${financialId}`).update({
     pixCode: pixData.brCode || null,
     pixQrCode: pixData.brCodeBase64 || null,
     externalId: abacatePayId,
+    pixExpiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
