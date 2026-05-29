@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -73,10 +74,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     ),
   ];
 
-  String get _checkoutUrl => switch (_selected) {
-        _BillingPlan.mensal => AppConstants.caktoCheckoutMensal,
-        _BillingPlan.trimestral => AppConstants.caktoCheckoutTrimestral,
-        _BillingPlan.anual => AppConstants.caktoCheckoutAnual,
+  String get _planKey => switch (_selected) {
+        _BillingPlan.mensal => 'mensal',
+        _BillingPlan.trimestral => 'trimestral',
+        _BillingPlan.anual => 'anual',
       };
 
   /// Whether the 50%-off-first-month promo applies right now: the academy is in
@@ -87,39 +88,36 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   bool _isPromoEligible(AcademySubscription? sub) =>
       sub?.isFirstMonthPromoEligible ?? false;
 
-  /// Builds the checkout URL with the admin's e-mail pre-filled (so the payment
-  /// e-mail matches the account e-mail — the webhook keys off it) and the
-  /// academyId as `src`. When the Mensal plan is selected and the promo is
-  /// active, also appends `?coupon=` to auto-apply the 50%-first-month coupon.
-  Uri _buildCheckoutUri() {
-    final user = ref.read(currentUserProvider).valueOrNull;
-    final sub = ref.read(subscriptionProvider).valueOrNull;
-    final usePromo = _selected == _BillingPlan.mensal && _isPromoEligible(sub);
-
-    final params = <String, String>{};
-    final email = user?.email;
-    if (email != null && email.isNotEmpty) {
-      params['email'] = email;
-      params['confirmEmail'] = email;
+  /// Cria o checkout no Mercado Pago (via Cloud Function `createMercadoPagoCheckout`)
+  /// e abre a URL hospedada (init_point) no navegador. [recurring] true =
+  /// assinatura que renova sozinha; false = pagamento avulso (Pix/boleto/cartão
+  /// à vista). O período vem do plano selecionado; a função usa o academyId no
+  /// `external_reference` pra o webhook liberar o acesso depois.
+  Future<void> _openCheckout({required bool recurring}) async {
+    final academyId = ref.read(currentUserProvider).valueOrNull?.academyId;
+    if (academyId == null || academyId.isEmpty) {
+      _showError();
+      return;
     }
-    final academyId = user?.academyId;
-    if (academyId != null && academyId.isNotEmpty) {
-      params['src'] = academyId;
-    }
-    if (usePromo) {
-      params['coupon'] = AppConstants.caktoMensalPromoCoupon;
-    }
-    final base = Uri.parse(_checkoutUrl);
-    return params.isEmpty ? base : base.replace(queryParameters: params);
-  }
-
-  Future<void> _openCheckout() async {
-    final uri = _buildCheckoutUri();
     setState(() => _launching = true);
     try {
-      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('createMercadoPagoCheckout')
+          .call(<String, dynamic>{
+        'academyId': academyId,
+        'plan': _planKey,
+        'recurring': recurring,
+      });
+      final initPoint = (result.data as Map?)?['initPoint'] as String?;
+      if (initPoint == null || initPoint.isEmpty) {
         if (mounted) _showError();
+        return;
       }
+      final ok = await launchUrl(
+        Uri.parse(initPoint),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!ok && mounted) _showError();
     } catch (_) {
       if (mounted) _showError();
     } finally {
@@ -255,14 +253,26 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
 
               const SizedBox(height: 32),
 
-              // CTA button
+              // CTA button — assinatura recorrente (renova sozinha)
               _CtaButton(
                 plan: _plans.firstWhere((p) => p.key == _selected),
                 loading: _launching,
-                onTap: _openCheckout,
+                onTap: () => _openCheckout(recurring: true),
               ).animate(delay: 400.ms)
                   .fadeIn(duration: 350.ms)
                   .slideY(begin: 0.04, end: 0, duration: 350.ms, curve: Curves.easeOut),
+
+              const SizedBox(height: 12),
+
+              // Pagamento avulso — Pix/boleto/cartão à vista (não renova)
+              TextButton(
+                onPressed:
+                    _launching ? null : () => _openCheckout(recurring: false),
+                child: const Text(
+                  'Pagar à vista (Pix ou boleto)',
+                  style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
+                ),
+              ).animate(delay: 430.ms).fadeIn(duration: 300.ms),
 
               const SizedBox(height: 16),
 

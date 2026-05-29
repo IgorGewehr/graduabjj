@@ -865,6 +865,359 @@ exports.caktoWebhook = onRequest(
   },
 );
 
+// ============================================================
+// mercadoPagoWebhook — recebe notificações do Mercado Pago e concede/revoga
+// a assinatura da academia. Espelha o caktoWebhook.
+//
+// CONTRATO com a criação do checkout (createMercadoPagoCheckout, a fazer):
+//   - external_reference = `${academyId}:${period}`  (period = mensal|trimestral|anual)
+//     academyId é id do Firestore (alfanumérico, nunca tem ':'), então o split é seguro.
+//   - como reforço, metadata.period também é enviado.
+//   - se nada disso vier (ex.: cobrança recorrente de assinatura), o período é
+//     inferido pelo valor pago (amountToPeriod).
+//
+// Config Firebase (a conta precisa de IAM no Secret Manager p/ estes):
+//   firebase functions:secrets:set MP_WEBHOOK_SECRET        (segredo de assinatura do webhook)
+//   firebase functions:secrets:set MERCADOPAGO_ACCESS_TOKEN (token de produção)
+// Cadastre a URL desta function em: MP → sua aplicação → Webhooks.
+// ============================================================
+const MP_API = 'https://api.mercadopago.com';
+const MP_GRACE_DAYS = 5;
+
+function mpPeriodToDays(period) {
+  switch (String(period || '').toLowerCase()) {
+    case 'anual': return 365 + MP_GRACE_DAYS;
+    case 'trimestral': return 90 + MP_GRACE_DAYS;
+    case 'mensal': return 30 + MP_GRACE_DAYS;
+    default: return 0;
+  }
+}
+
+// Fallback: infere o ciclo pelo valor pago (preços do paywall em constants.dart).
+function mpAmountToDays(amount) {
+  const v = Number(amount || 0);
+  if (v >= 800) return 365 + MP_GRACE_DAYS; // anual 854,99
+  if (v >= 200) return 90 + MP_GRACE_DAYS; // trimestral 224,99
+  if (v >= 80) return 30 + MP_GRACE_DAYS; // mensal 89,99
+  return 30 + MP_GRACE_DAYS;
+}
+
+function mpParseExternalRef(ref) {
+  const s = String(ref || '');
+  const idx = s.indexOf(':');
+  if (idx === -1) return {academyId: s || null, period: ''};
+  return {academyId: s.slice(0, idx) || null, period: s.slice(idx + 1)};
+}
+
+async function mpFetch(path, accessToken) {
+  const r = await fetch(`${MP_API}${path}`, {
+    headers: {Authorization: `Bearer ${accessToken}`},
+  });
+  if (!r.ok) throw new Error(`MP API ${path} -> ${r.status}`);
+  return r.json();
+}
+
+// Resolve a academia: external_reference (academyId) primeiro; senão, e-mail do
+// pagador → Firebase Auth UID → academia ownerId==uid. (Mesma estratégia do Cakto.)
+async function mpResolveAcademyRef(academyId, payerEmail) {
+  if (academyId) {
+    const snap = await db.collection('academies').doc(String(academyId)).get();
+    if (snap.exists) return snap.ref;
+  }
+  if (payerEmail) {
+    let uid;
+    try {
+      uid = (await getAuth().getUserByEmail(payerEmail)).uid;
+    } catch (e) {
+      return null;
+    }
+    const q = await db.collection('academies')
+        .where('ownerId', '==', uid).limit(1).get();
+    if (!q.empty) return q.docs[0].ref;
+  }
+  return null;
+}
+
+async function mpHandlePayment(payment, res) {
+  const status = payment.status; // approved|pending|in_process|rejected|refunded|cancelled|charged_back
+  const {academyId: refAcademyId, period: refPeriod} =
+    mpParseExternalRef(payment.external_reference);
+  const payerEmail = payment.payer && payment.payer.email;
+
+  const academyRef = await mpResolveAcademyRef(refAcademyId, payerEmail);
+  if (!academyRef) {
+    console.warn('[mpWebhook] academia não resolvida', {refAcademyId, payerEmail});
+    return res.status(200).json({received: true, warning: 'academy_not_found'});
+  }
+  const academyId = academyRef.id;
+  const chargeId = String(payment.id);
+
+  // Reembolso / chargeback / cancelado → revoga acesso.
+  if (status === 'refunded' || status === 'charged_back' || status === 'cancelled') {
+    await academyRef.update({
+      'subscription.status': 'cancelled',
+      'subscription.plan': 'free',
+      'subscription.paidUntil': Timestamp.fromDate(new Date()),
+      'subscription.lastEvent': `payment_${status}`,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    console.log('[mpWebhook] acesso revogado', {academyId, status});
+    return res.status(200).json({success: true, academyId, action: 'revoked'});
+  }
+
+  // Só concede no approved.
+  if (status !== 'approved') {
+    return res.status(200).json({received: true, academyId, status});
+  }
+
+  const snap = await academyRef.get();
+
+  // Idempotência: mesma cobrança já processada.
+  if (snap.get('subscription.externalPaymentId') === chargeId) {
+    return res.status(200).json({success: true, academyId, action: 'duplicate'});
+  }
+
+  // Período: external_reference > metadata.period > valor pago.
+  const metaPeriod = payment.metadata &&
+    (payment.metadata.period || payment.metadata.Period);
+  let daysToAdd = mpPeriodToDays(refPeriod) || mpPeriodToDays(metaPeriod);
+  if (daysToAdd === 0) daysToAdd = mpAmountToDays(payment.transaction_amount);
+
+  // Estende a partir do maior entre hoje e o paidUntil atual.
+  const current = snap.get('subscription.paidUntil');
+  const now = new Date();
+  let base = now;
+  if (current && typeof current.toDate === 'function' && current.toDate() > now) {
+    base = current.toDate();
+  }
+  const paidUntil = new Date(base);
+  paidUntil.setDate(paidUntil.getDate() + daysToAdd);
+
+  await academyRef.update({
+    'subscription.plan': 'pro',
+    'subscription.status': 'active',
+    'subscription.paidUntil': Timestamp.fromDate(paidUntil),
+    'subscription.lastPaymentAt': FieldValue.serverTimestamp(),
+    'subscription.lastEvent': 'payment_approved',
+    'subscription.externalPaymentId': chargeId,
+    'subscription.gateway': 'mercadopago',
+    'updatedAt': FieldValue.serverTimestamp(),
+  });
+  console.log('[mpWebhook] acesso concedido', {academyId, chargeId, daysToAdd, paidUntil});
+  return res.status(200).json({success: true, academyId, action: 'granted', paidUntil});
+}
+
+async function mpHandlePreapproval(pre, res) {
+  // pre.status: authorized | paused | pending | cancelled
+  const {academyId: refAcademyId} = mpParseExternalRef(pre.external_reference);
+  const academyRef = await mpResolveAcademyRef(refAcademyId, pre.payer_email);
+  if (!academyRef) {
+    return res.status(200).json({received: true, warning: 'academy_not_found'});
+  }
+  const academyId = academyRef.id;
+
+  if (pre.status === 'cancelled') {
+    // Mantém acesso até o paidUntil atual (igual ao cancelamento do Cakto).
+    await academyRef.update({
+      'subscription.status': 'cancelled',
+      'subscription.lastEvent': 'preapproval_cancelled',
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return res.status(200).json({success: true, academyId, action: 'canceled'});
+  }
+  if (pre.status === 'paused') {
+    await academyRef.update({
+      'subscription.status': 'past_due',
+      'subscription.lastEvent': 'preapproval_paused',
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return res.status(200).json({success: true, academyId, action: 'past_due'});
+  }
+  // authorized/pending: a concessão de período vem dos pagamentos
+  // (subscription_authorized_payment → mpHandlePayment). Aqui só marca o estado.
+  await academyRef.update({
+    'subscription.status': 'active',
+    'subscription.lastEvent': 'preapproval_authorized',
+    'subscription.gateway': 'mercadopago',
+    'updatedAt': FieldValue.serverTimestamp(),
+  });
+  return res.status(200).json({success: true, academyId, action: 'preapproval_active'});
+}
+
+exports.mercadoPagoWebhook = onRequest(
+  {cors: false, secrets: ['MP_WEBHOOK_SECRET', 'MERCADOPAGO_ACCESS_TOKEN']},
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      return res.status(405).send('Method Not Allowed');
+    }
+
+    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+    const webhookSecret = process.env.MP_WEBHOOK_SECRET;
+
+    // O id do recurso vem em ?data.id= (ou ?id= no IPN legado) ou no corpo.
+    const dataId = String(
+      req.query['data.id'] ||
+      (req.query.data && req.query.data.id) ||
+      req.query.id ||
+      (req.body && req.body.data && req.body.data.id) ||
+      '',
+    ).toLowerCase();
+
+    // ---- Validação de assinatura (x-signature) ----
+    // header: "ts=<ms>,v1=<hmac>"; manifest = id:<data.id>;request-id:<x-request-id>;ts:<ts>;
+    if (webhookSecret) {
+      const xSignature = req.header('x-signature') || '';
+      const xRequestId = req.header('x-request-id') || '';
+      let ts = '';
+      let v1 = '';
+      for (const part of xSignature.split(',')) {
+        const [k, val] = part.split('=').map((s) => (s || '').trim());
+        if (k === 'ts') ts = val;
+        if (k === 'v1') v1 = val;
+      }
+      const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
+      const expected = crypto.createHmac('sha256', webhookSecret)
+          .update(manifest).digest('hex');
+      const valid = v1.length === expected.length &&
+        crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(expected));
+      if (!valid) {
+        console.warn('[mpWebhook] assinatura inválida — rejeitado');
+        return res.status(401).json({error: 'invalid signature'});
+      }
+    }
+
+    if (!dataId) {
+      return res.status(200).json({received: true, skipped: 'no_id'});
+    }
+
+    const type = String(
+      req.query.type || req.query.topic || (req.body && req.body.type) || '',
+    );
+
+    try {
+      if (type === 'payment') {
+        const payment = await mpFetch(`/v1/payments/${dataId}`, accessToken);
+        return await mpHandlePayment(payment, res);
+      }
+      if (type === 'subscription_preapproval' || type === 'preapproval') {
+        const pre = await mpFetch(`/preapproval/${dataId}`, accessToken);
+        return await mpHandlePreapproval(pre, res);
+      }
+      if (type === 'subscription_authorized_payment') {
+        const authPay = await mpFetch(`/authorized_payments/${dataId}`, accessToken);
+        const paymentId = authPay.payment && authPay.payment.id;
+        if (!paymentId) {
+          return res.status(200).json({received: true, skipped: 'no_payment'});
+        }
+        const payment = await mpFetch(`/v1/payments/${paymentId}`, accessToken);
+        return await mpHandlePayment(payment, res);
+      }
+      // merchant_order, plan, etc. — ignorados.
+      return res.status(200).json({received: true, skipped: type});
+    } catch (e) {
+      // 500 → MP re-tenta (bom p/ falhas transitórias de rede/API).
+      console.error('[mpWebhook] erro', e.message);
+      return res.status(500).json({error: e.message});
+    }
+  },
+);
+
+// ============================================================
+// createMercadoPagoCheckout — callable. O app pede o checkout de um plano e
+// recebe de volta a URL hospedada do MP (init_point) pra abrir no navegador.
+// recurring=true → assinatura (preapproval, renova sozinha);
+// recurring=false → pagamento avulso (preference: Pix/boleto/cartão à vista).
+// O external_reference carrega `${academyId}:${plano}` — é o que o
+// mercadoPagoWebhook lê pra liberar o período certo.
+// ============================================================
+const MP_PLANS = {
+  mensal: {label: 'Mensal', amount: 89.99, freq: 1},
+  trimestral: {label: 'Trimestral', amount: 224.99, freq: 3},
+  anual: {label: 'Anual', amount: 854.99, freq: 12},
+};
+
+exports.createMercadoPagoCheckout = onCall(
+  {secrets: ['MERCADOPAGO_ACCESS_TOKEN']},
+  async (request) => {
+    const uid = requireAuth(request);
+    const academyId = String((request.data && request.data.academyId) || '');
+    const plan = String((request.data && request.data.plan) || 'mensal').toLowerCase();
+    const recurring = (request.data && request.data.recurring) !== false; // default: recorrente
+
+    if (!academyId) {
+      throw new HttpsError('invalid-argument', 'academyId é obrigatório.');
+    }
+    const cfg = MP_PLANS[plan];
+    if (!cfg) {
+      throw new HttpsError('invalid-argument', `Plano inválido: ${plan}`);
+    }
+    // Só o admin/dono da academia pode iniciar a assinatura dela.
+    if (!(await isAdmin(uid, academyId))) {
+      throw new HttpsError('permission-denied', 'Apenas o admin da academia pode assinar.');
+    }
+
+    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+    const email = (await getAuth().getUser(uid)).email || undefined;
+    const externalReference = `${academyId}:${plan}`;
+    const appUrl = process.env.APP_BASE_URL || 'https://bjjeasy.netlify.app';
+    const backUrl = `${appUrl}/obrigado`;
+
+    let endpoint;
+    let body;
+    if (recurring) {
+      endpoint = '/preapproval';
+      body = {
+        reason: `BJJEasy — Plano ${cfg.label}`,
+        external_reference: externalReference,
+        payer_email: email,
+        back_url: backUrl,
+        status: 'pending', // sem card_token → MP coleta o cartão na página
+        auto_recurring: {
+          frequency: cfg.freq,
+          frequency_type: 'months',
+          transaction_amount: cfg.amount,
+          currency_id: 'BRL',
+        },
+      };
+    } else {
+      endpoint = '/checkout/preferences';
+      body = {
+        items: [{
+          title: `BJJEasy — Plano ${cfg.label}`,
+          quantity: 1,
+          unit_price: cfg.amount,
+          currency_id: 'BRL',
+        }],
+        payer: email ? {email} : undefined,
+        external_reference: externalReference,
+        metadata: {academy_id: academyId, period: plan},
+        back_urls: {success: backUrl, pending: backUrl, failure: backUrl},
+        auto_return: 'approved',
+      };
+    }
+
+    const r = await fetch(`${MP_API}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      console.error('[mpCheckout] erro', r.status, data);
+      throw new HttpsError('internal', `Falha ao criar checkout (MP ${r.status}).`);
+    }
+
+    return {
+      initPoint: data.init_point || data.sandbox_init_point,
+      id: data.id,
+      recurring,
+    };
+  },
+);
+
 /* DESABILITADO TEMPORARIAMENTE — cobrança por e-mail será finalizada depois.
    Mantido comentado pra não disparar e-mails enquanto não está 100%.
 // ============================================================
