@@ -101,16 +101,34 @@ void main() {
   });
 
   group('Max grade reached', () {
-    test('black belt with 4 stripes returns max-grade message', () {
+    // Faixa preta adulta vai até o 6º grau (maxStripes: 6 em _bjjAdultGrades);
+    // depois vem coral (aboveBlack, só manual). Então o grau máximo do fluxo
+    // automático é preta + 6 graus — aí não há próxima promoção.
+    test('black belt with 6 stripes (último grau) returns max-grade message', () {
       final r = svc.checkEligibility(
         currentBelt: 'black',
-        currentStripes: 4,
+        currentStripes: 6,
         totalClasses: 9999,
         config: const AcademyGraduationConfig(threshold: 75),
       );
       expect(r.eligible, isFalse);
       expect(r.nextBelt, isNull);
       expect(r.message, contains('máximo'));
+    });
+
+    // Contraprova: preta com menos de 6 graus AINDA é promovível (5º grau),
+    // não é grau máximo — garante que o teste acima não vire falso positivo
+    // se um dia alguém reduzir o maxStripes da preta.
+    test('black belt with 4 stripes is still promotable (not max grade)', () {
+      final r = svc.checkEligibility(
+        currentBelt: 'black',
+        currentStripes: 4,
+        totalClasses: 9999,
+        config: const AcademyGraduationConfig(threshold: 75),
+      );
+      expect(r.eligible, isTrue);
+      expect(r.nextBelt, 'black');
+      expect(r.nextStripes, 5);
     });
   });
 
