@@ -12,6 +12,7 @@ import '../../providers/subscription_provider.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/more_menu_sheet.dart';
 import '../../widgets/common/back_button_handler.dart';
+import '../../widgets/update_banner.dart';
 import '../paywall_screen.dart';
 
 /// Admin Navigation Shell - Main navigation for admin screens
@@ -154,6 +155,9 @@ class AdminShell extends ConsumerWidget {
                     .read(dismissedBannersProvider.notifier)
                     .update((s) => {...s, 'expiry'}),
               ),
+            // Aviso de atualização — menor prioridade, fica abaixo dos avisos
+            // de cobrança acima (some sozinho se não houver versão nova).
+            const UpdateBanner(),
             Expanded(
               child: Row(
                 children: [

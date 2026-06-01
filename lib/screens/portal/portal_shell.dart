@@ -10,6 +10,7 @@ import '../../providers/providers.dart';
 import '../../widgets/common/more_menu_sheet.dart';
 import '../../widgets/common/back_button_handler.dart';
 import '../../widgets/academy_switcher.dart';
+import '../../widgets/update_banner.dart';
 
 /// Portal Shell - Main navigation structure for student portal
 class PortalShell extends ConsumerStatefulWidget {
@@ -321,7 +322,12 @@ class _PortalShellState extends ConsumerState<PortalShell> {
           ),
         ),
       ),
-        body: widget.child,
+        body: Column(
+          children: [
+            const UpdateBanner(),
+            Expanded(child: widget.child),
+          ],
+        ),
         bottomNavigationBar: Container(
           decoration: BoxDecoration(
             color: AppTheme.surface.withValues(alpha: 0.95),
