@@ -1779,40 +1779,42 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
         cpf: _cpfController.text,
       );
 
-      // Mercado Pago is PIX-only: card is unavailable for MP academies.
-      if (await MercadoPagoService(academyId).isEnabled()) {
-        if (mounted) {
-          context.showError(
-              'Pagamento com cartão indisponível. Pague via PIX.');
-        }
-        return;
-      }
+      final desc =
+          'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}';
 
-      // Check which provider is active
+      // Gateway precedence: Mercado Pago (connected) > Asaas > AbacatePay.
+      final mp = MercadoPagoService(academyId);
       final asaasService = AsaasPaymentService(academyId);
-      final isAsaas = await asaasService.isEnabled();
+      final useMp = await mp.isEnabled();
+      final isAsaas = !useMp && await asaasService.isEnabled();
 
       CardPaymentResult result;
-      if (isAsaas) {
+      if (useMp) {
+        result = await mp.createStoreOrderCardPayment(
+          amount: widget.amount,
+          orderId: widget.orderId,
+          studentId: widget.studentId,
+          studentName: widget.studentName,
+          cardData: cardData,
+          description: desc,
+        );
+      } else if (isAsaas) {
         result = await asaasService.createStoreOrderCardPayment(
           amount: widget.amount,
           orderId: widget.orderId,
           studentId: widget.studentId,
           studentName: widget.studentName,
           cardData: cardData,
-          description:
-              'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}',
+          description: desc,
         );
       } else {
-        final service = AbacatePayService(academyId);
-        result = await service.createStoreOrderCardPayment(
+        result = await AbacatePayService(academyId).createStoreOrderCardPayment(
           amount: widget.amount,
           orderId: widget.orderId,
           studentId: widget.studentId,
           studentName: widget.studentName,
           cardData: cardData,
-          description:
-              'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}',
+          description: desc,
         );
       }
 

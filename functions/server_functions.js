@@ -1675,32 +1675,57 @@ async function mpRequest(method, path, { body, token, idempotencyKey } = {}) {
  */
 async function getMpAccessToken(academyId) {
   const ref = db.doc(`academies/${academyId}/private/mpAuth`);
-  const snap = await ref.get();
-  if (!snap.exists || !snap.data().refreshToken) {
-    throw new HttpsError('failed-precondition', 'Academia não conectou o Mercado Pago.');
-  }
-  const d = snap.data();
-  const expiresAt = d.expiresAt && typeof d.expiresAt.toMillis === 'function'
-    ? d.expiresAt.toMillis() : 0;
-  if (d.accessToken && Date.now() < expiresAt - 5 * 60 * 1000) {
+  const lockRef = db.doc(`academies/${academyId}/private/mpTokenLock`);
+  const bufferMs = 5 * 60 * 1000;
+
+  const readTokens = async () => {
+    const s = await ref.get();
+    if (!s.exists || !s.data().refreshToken) {
+      throw new HttpsError('failed-precondition', 'Academia não conectou o Mercado Pago.');
+    }
+    return s.data();
+  };
+
+  const d = await readTokens();
+  const exp = (x) => (x && typeof x.toMillis === 'function') ? x.toMillis() : 0;
+  if (d.accessToken && Date.now() < exp(d.expiresAt) - bufferMs) {
     return d.accessToken;
   }
-  const tok = await mpRequest('POST', '/oauth/token', {
-    body: {
-      client_id: process.env.MP_OAUTH_CLIENT_ID,
-      client_secret: process.env.MP_OAUTH_CLIENT_SECRET,
-      grant_type: 'refresh_token',
-      refresh_token: d.refreshToken,
-    },
-  });
-  await ref.set({
-    accessToken: tok.access_token,
-    refreshToken: tok.refresh_token || d.refreshToken,
-    expiresAt: admin.firestore.Timestamp.fromMillis(
-      Date.now() + (Number(tok.expires_in) || 0) * 1000),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
-  return tok.access_token;
+
+  // Token expired/near expiry. Acquire a lock so concurrent calls don't both
+  // refresh — MP ROTATES the refresh_token on every refresh, so a double
+  // refresh would invalidate the connection.
+  try {
+    await lockRef.create({ at: admin.firestore.FieldValue.serverTimestamp() });
+  } catch (_) {
+    // Another call is refreshing — wait briefly and return the fresh token.
+    await new Promise((r) => setTimeout(r, 2000));
+    return (await readTokens()).accessToken;
+  }
+  try {
+    const fresh = await readTokens();
+    if (fresh.accessToken && Date.now() < exp(fresh.expiresAt) - bufferMs) {
+      return fresh.accessToken; // someone else refreshed before we locked
+    }
+    const tok = await mpRequest('POST', '/oauth/token', {
+      body: {
+        client_id: process.env.MP_OAUTH_CLIENT_ID,
+        client_secret: process.env.MP_OAUTH_CLIENT_SECRET,
+        grant_type: 'refresh_token',
+        refresh_token: fresh.refreshToken,
+      },
+    });
+    await ref.set({
+      accessToken: tok.access_token,
+      refreshToken: tok.refresh_token || fresh.refreshToken,
+      expiresAt: admin.firestore.Timestamp.fromMillis(
+        Date.now() + (Number(tok.expires_in) || 0) * 1000),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return tok.access_token;
+  } finally {
+    await lockRef.delete().catch(() => {});
+  }
 }
 
 /** Ensures the caller is the admin of academyId. Returns userInfo. */
@@ -1748,6 +1773,13 @@ exports.mercadoPagoOAuthCallback = onRequest({ secrets: MP_MKT_SECRETS }, async 
   const snap = await ref.get();
   if (!snap.exists || snap.data().oauthNonce !== nonce) {
     return res.status(403).send('Sessão de conexão inválida ou expirada.');
+  }
+  // Anti-replay: the state is good for 10 min only.
+  const startedAt = snap.data().oauthStartedAt;
+  if (startedAt && typeof startedAt.toMillis === 'function' &&
+      Date.now() - startedAt.toMillis() > 10 * 60 * 1000) {
+    await ref.update({ oauthNonce: admin.firestore.FieldValue.delete() }).catch(() => {});
+    return res.status(403).send('Autorização expirada. Volte ao app e tente novamente.');
   }
   try {
     const tok = await mpRequest('POST', '/oauth/token', {
@@ -1824,34 +1856,66 @@ async function assertCanPayFor(request, academyId, studentId) {
   }
 }
 
-/** Creates a PIX payment on the academy's MP account. transactionAmount is in REAIS. */
-async function createMpPix({ academyId, transactionAmount, description, externalReference, payerEmail }) {
+/** Maps an MP error to a friendly message — notably the seller-has-no-PIX-key case. */
+function mapMpPixError(e) {
+  const text = `${e && e.data ? JSON.stringify(e.data) : ''} ${e && e.message ? e.message : ''}`
+    .toLowerCase();
+  if (text.includes('without key enabled for qr') || text.includes('qr render')) {
+    return new HttpsError('failed-precondition',
+      'A conta Mercado Pago da academia ainda nao tem uma chave PIX habilitada. ' +
+      'Ative o PIX no app do Mercado Pago e tente novamente.');
+  }
+  return new HttpsError('internal', 'Falha ao gerar a cobranca PIX.');
+}
+
+/**
+ * Creates a PIX payment on the academy's MP account. transactionAmount in REAIS.
+ * MP requires the payer identification (CPF) for PIX — pass it when available.
+ */
+async function createMpPix({ academyId, transactionAmount, description, externalReference, payer }) {
   const token = await getMpAccessToken(academyId);
-  const payment = await mpRequest('POST', '/v1/payments', {
-    token,
-    idempotencyKey: externalReference,
-    body: {
-      transaction_amount: Number(transactionAmount.toFixed(2)),
-      description: description || 'Pagamento',
-      payment_method_id: 'pix',
-      external_reference: externalReference,
-      notification_url: `${mpMktWebhookUrl()}?acad=${encodeURIComponent(academyId)}`,
-      application_fee: 0,
-      payer: { email: payerEmail || 'sememail@bjjeasy.com.br' },
-    },
-  });
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const cpf = ((payer && payer.cpf) || '').replace(/\D/g, '');
+  const nameParts = ((payer && payer.name) || '').trim().split(/\s+/);
+  let payment;
+  try {
+    payment = await mpRequest('POST', '/v1/payments', {
+      token,
+      idempotencyKey: externalReference,
+      body: {
+        transaction_amount: Number(transactionAmount.toFixed(2)),
+        description: description || 'Pagamento',
+        payment_method_id: 'pix',
+        date_of_expiration: expiresAt.toISOString(),
+        external_reference: externalReference,
+        notification_url: `${mpMktWebhookUrl()}?acad=${encodeURIComponent(academyId)}`,
+        application_fee: 0,
+        payer: {
+          email: (payer && payer.email) || 'sememail@bjjeasy.com.br',
+          first_name: nameParts[0] || undefined,
+          last_name: nameParts.length > 1 ? nameParts.slice(1).join(' ') : undefined,
+          identification: cpf.length >= 11 ? { type: 'CPF', number: cpf } : undefined,
+        },
+      },
+    });
+  } catch (e) {
+    throw mapMpPixError(e);
+  }
   const tx = payment.point_of_interaction &&
     payment.point_of_interaction.transaction_data;
   return {
     paymentId: String(payment.id),
     pixCode: (tx && tx.qr_code) || '',
     qrCodeBase64: (tx && tx.qr_code_base64) || '',
+    ticketUrl: (tx && tx.ticket_url) || '',
+    expiresAt,
   };
 }
 
 // ---- PIX: mensalidade (amount in CENTAVOS, matching createPixPayment) -----
 exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
-  const { academyId, amount, description, financialId, studentId } = request.data || {};
+  const { academyId, amount, description, financialId, studentId, studentName,
+    payerCpf, payerEmail } = request.data || {};
   if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
   if (!academyId || !amount || !financialId || !studentId) {
     throw new HttpsError('invalid-argument', 'Missing required fields');
@@ -1891,12 +1955,14 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
     transactionAmount: amount / 100, // centavos -> reais
     description: sanitizeString(description) || 'Mensalidade',
     externalReference: `${academyId}:fin:${financialId}`,
+    payer: { email: payerEmail, cpf: payerCpf, name: studentName },
   });
 
-  const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000);
+  const expiresAt = admin.firestore.Timestamp.fromDate(pix.expiresAt);
   await finRef.update({
     pixCode: pix.pixCode || null,
     pixQrCode: pix.qrCodeBase64 || null,
+    pixTicketUrl: pix.ticketUrl || null,
     gatewayPaymentId: pix.paymentId,
     paymentGateway: 'mercadopago',
     pixExpiresAt: expiresAt,
@@ -1913,7 +1979,8 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
 
 // ---- PIX: loja (amount in REAIS, matching createOrderPixPayment) ----------
 exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
-  const { academyId, amount, description, orderId, studentId } = request.data || {};
+  const { academyId, amount, description, orderId, studentId, studentName,
+    payerCpf, payerEmail } = request.data || {};
   if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
   if (!academyId || !amount || !orderId || !studentId) {
     throw new HttpsError('invalid-argument', 'Missing required fields');
@@ -1948,12 +2015,14 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
     transactionAmount: Number(amount), // already in reais
     description: sanitizeString(description) || 'Pedido da Loja',
     externalReference: `${academyId}:order:${orderId}`,
+    payer: { email: payerEmail, cpf: payerCpf, name: studentName },
   });
 
-  const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000);
+  const expiresAt = admin.firestore.Timestamp.fromDate(pix.expiresAt);
   await orderRef.update({
     pixCode: pix.pixCode || null,
     pixQrCode: pix.qrCodeBase64 || null,
+    pixTicketUrl: pix.ticketUrl || null,
     gatewayPaymentId: pix.paymentId,
     paymentGateway: 'mercadopago',
     pixExpiresAt: expiresAt,
@@ -1965,6 +2034,88 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
     qrCodeUrl: pix.qrCodeBase64,
     paymentId: pix.paymentId,
     expiresAt: expiresAt.toDate().toISOString(),
+  };
+});
+
+// ---- Card (token tokenized client-side with the admin's public_key) -------
+// Handles BOTH mensalidade (financialId, amount in CENTAVOS) and loja
+// (orderId, amount in REAIS). Card is synchronous: settle inline when approved;
+// the webhook is the backup for async/3DS confirmations.
+exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
+  const { academyId, amount, description, financialId, orderId, studentId,
+    studentName, cardToken, installments, payerCpf, payerEmail } = request.data || {};
+  if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
+  if (!academyId || !amount || !studentId || !cardToken || (!financialId && !orderId)) {
+    throw new HttpsError('invalid-argument', 'Missing required fields');
+  }
+  await assertCanPayFor(request, academyId, studentId);
+  const amountValidation = validateAmount(amount);
+  if (!amountValidation.valid) {
+    throw new HttpsError('invalid-argument', amountValidation.error || 'Invalid amount');
+  }
+
+  const isOrder = !!orderId;
+  const docId = isOrder ? orderId : financialId;
+  const ref = isOrder
+    ? db.doc(`academies/${academyId}/storeOrders/${orderId}`)
+    : db.doc(`academies/${academyId}/financials/${financialId}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Record not found');
+  if (snap.data().status === 'paid') {
+    throw new HttpsError('already-exists', 'Already paid');
+  }
+  if (!isOrder && snap.data().studentId !== studentId) {
+    throw new HttpsError('permission-denied', 'Record does not belong to this student');
+  }
+
+  // mensalidade=centavos, loja=reais (match the PIX contracts).
+  const transactionAmount = isOrder ? Number(amount) : amount / 100;
+  const token = await getMpAccessToken(academyId);
+  const cpf = String(payerCpf || '').replace(/\D/g, '');
+  const nameParts = String(studentName || '').trim().split(/\s+/);
+  const externalReference = `${academyId}:${isOrder ? 'order' : 'fin'}:${docId}`;
+
+  let payment;
+  try {
+    payment = await mpRequest('POST', '/v1/payments', {
+      token,
+      idempotencyKey: `${externalReference}:card`,
+      body: {
+        transaction_amount: Number(transactionAmount.toFixed(2)),
+        description: sanitizeString(description) ||
+          (isOrder ? 'Pedido da Loja' : 'Mensalidade'),
+        token: cardToken,
+        installments: Number(installments) > 0 ? Number(installments) : 1,
+        three_d_secure_mode: 'optional',
+        binary_mode: false,
+        external_reference: externalReference,
+        notification_url: `${mpMktWebhookUrl()}?acad=${encodeURIComponent(academyId)}`,
+        application_fee: 0,
+        payer: {
+          email: payerEmail || 'sememail@bjjeasy.com.br',
+          first_name: nameParts[0] || undefined,
+          last_name: nameParts.length > 1 ? nameParts.slice(1).join(' ') : undefined,
+          identification: cpf.length >= 11 ? { type: 'CPF', number: cpf } : undefined,
+        },
+      },
+    });
+  } catch (e) {
+    console.error('[createMpCardPayment] erro', e.message, e.data);
+    throw new HttpsError('internal', 'Falha ao processar o cartao.');
+  }
+
+  // Synchronous approval → settle now; webhook covers async/3DS later.
+  if (payment.status === 'approved') {
+    await mpMktSettle({ academyId, type: isOrder ? 'order' : 'fin', docId }, payment);
+  }
+
+  return {
+    success: payment.status === 'approved',
+    status: payment.status,
+    statusDetail: payment.status_detail || '',
+    transactionId: String(payment.id),
+    threeDsUrl: (payment.three_ds_info &&
+      payment.three_ds_info.external_resource_url) || null,
   };
 });
 
@@ -2036,6 +2187,8 @@ exports.mercadoPagoMarketplaceWebhook = onRequest(
 async function mpMktSettle({ academyId, type, docId }, payment) {
   const chargeId = String(payment.id);
   const amtFmt = (Number(payment.transaction_amount) || 0).toFixed(2);
+  const method = payment.payment_method_id === 'pix' ? 'pix' : 'card';
+  const viaLabel = method === 'pix' ? 'via PIX' : 'via cartao';
 
   if (type === 'order') {
     const orderRef = db.doc(`academies/${academyId}/storeOrders/${docId}`);
@@ -2044,7 +2197,7 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
     await orderRef.update({
       status: 'paid',
       paidAt: admin.firestore.FieldValue.serverTimestamp(),
-      paymentMethod: 'pix',
+      paymentMethod: method,
       paymentGateway: 'mercadopago',
       gatewayPaymentId: chargeId,
       externalPaymentId: chargeId,
@@ -2065,7 +2218,7 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
     }
     const code = docId.slice(-6).toUpperCase();
     await notifyAdminCF(academyId, 'order_paid', 'Pedido Pago',
-      `Pedido #${code} pago - R$ ${amtFmt} via PIX.`, { orderId: docId });
+      `Pedido #${code} pago - R$ ${amtFmt} ${viaLabel}.`, { orderId: docId });
     return;
   }
 
@@ -2076,11 +2229,11 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
   await finRef.update({
     status: 'paid',
     paymentDate: admin.firestore.FieldValue.serverTimestamp(),
-    method: 'pix',
+    method: method,
     paymentGateway: 'mercadopago',
     gatewayPaymentId: chargeId,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   await notifyAdminCF(academyId, 'payment_received', 'Pagamento Recebido',
-    `Pagamento de R$ ${amtFmt} recebido via PIX.`, { financialId: docId });
+    `Pagamento de R$ ${amtFmt} recebido ${viaLabel}.`, { financialId: docId });
 }

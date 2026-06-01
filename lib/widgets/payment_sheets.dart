@@ -825,16 +825,6 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
     final academyId = FirebaseService.academyId;
 
     try {
-      // Mercado Pago is PIX-only: card is unavailable for MP academies.
-      if (await MercadoPagoService(academyId).isEnabled()) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage =
-              'Pagamento com cartão indisponível. Pague via PIX.';
-        });
-        return;
-      }
-
       final expParts = _expirationController.text.split('/');
       final cardData = CardData(
         cardNumber: _cardNumberController.text,
@@ -845,14 +835,24 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
         cpf: _cpfController.text,
       );
 
-      // Check which provider is active
+      // Gateway precedence: Mercado Pago (connected) > Asaas > AbacatePay.
+      final mp = MercadoPagoService(academyId);
       final asaasService = AsaasPaymentService(academyId);
-      final isAsaas = await asaasService.isEnabled();
+      final useMp = await mp.isEnabled();
+      final isAsaas = !useMp && await asaasService.isEnabled();
 
       CardPaymentResult result;
-
       if (widget.orderId != null) {
-        if (isAsaas) {
+        if (useMp) {
+          result = await mp.createStoreOrderCardPayment(
+            amount: widget.amount,
+            orderId: widget.orderId!,
+            studentId: widget.studentId,
+            studentName: widget.studentName,
+            cardData: cardData,
+            description: widget.description,
+          );
+        } else if (isAsaas) {
           result = await asaasService.createStoreOrderCardPayment(
             amount: widget.amount,
             orderId: widget.orderId!,
@@ -862,8 +862,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             description: widget.description,
           );
         } else {
-          final service = AbacatePayService(academyId);
-          result = await service.createStoreOrderCardPayment(
+          result = await AbacatePayService(academyId).createStoreOrderCardPayment(
             amount: widget.amount,
             orderId: widget.orderId!,
             studentId: widget.studentId,
@@ -873,7 +872,16 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
           );
         }
       } else if (widget.financialId != null) {
-        if (isAsaas) {
+        if (useMp) {
+          result = await mp.createCardPayment(
+            amount: widget.amount,
+            financialId: widget.financialId!,
+            studentId: widget.studentId,
+            studentName: widget.studentName,
+            cardData: cardData,
+            description: widget.description,
+          );
+        } else if (isAsaas) {
           result = await asaasService.createCardPayment(
             amount: widget.amount,
             financialId: widget.financialId!,
@@ -883,8 +891,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             description: widget.description,
           );
         } else {
-          final service = AbacatePayService(academyId);
-          result = await service.createCardPayment(
+          result = await AbacatePayService(academyId).createCardPayment(
             amount: widget.amount,
             financialId: widget.financialId!,
             studentId: widget.studentId,
