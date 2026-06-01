@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/sports.dart';
 import '../models/academy_event.dart';
 import '../services/services.dart';
 import 'auth_provider.dart';
@@ -244,6 +245,20 @@ final beltEligibilityProvider = FutureProvider<EligibilityResult?>((ref) async {
     currentBelt: student.currentBelt,
     currentStripes: student.currentStripes,
     totalClasses: student.totalAttendanceCount,
+  );
+});
+
+/// Per-sport eligibility for a student (sport-filtered count + per-belt
+/// threshold + since-last-promotion baseline). Used by the portal progress
+/// card to show one progress per sport the student trains.
+final studentSportEligibilityProvider = FutureProvider.family<EligibilityResult?,
+    ({String studentId, SportId sport})>((ref, args) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+  if (currentUser?.academyId == null) return null;
+  final service = BeltProgressionService(currentUser!.academyId!);
+  return service.checkEligibilityForStudent(
+    args.studentId,
+    sportId: args.sport,
   );
 });
 

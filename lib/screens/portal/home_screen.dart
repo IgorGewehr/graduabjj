@@ -1301,36 +1301,63 @@ class _GraduationProgressCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final settingsAsync = ref.watch(academySettingsProvider);
-    final settings = settingsAsync.valueOrNull;
+    final settings = ref.watch(academySettingsProvider).valueOrNull;
     if (settings == null) return const SizedBox.shrink();
     if (!settings.autoGraduationEnabled) return const SizedBox.shrink();
     if (!settings.graduationProgressVisibleToStudents) {
       return const SizedBox.shrink();
     }
-    // Sports without a graduation system (e.g. musculação) never graduate.
-    final primarySport = student.getPrimarySport() as SportId;
-    if (sports[primarySport]?.gradeSystem == GradeSystem.none) {
-      return const SizedBox.shrink();
-    }
 
-    final attendanceAsync = ref.watch(
-      studentAttendanceCountProvider(student.id as String),
+    // One progress per sport the student trains (skip sports with no
+    // graduation system, e.g. musculação/boxe).
+    final gradedSports = (student.getSports() as List<SportId>)
+        .where((s) => sports[s]?.gradeSystem != GradeSystem.none)
+        .toList();
+    if (gradedSports.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      children: gradedSports
+          .map(
+            (sport) => _SportProgressCard(
+              studentId: student.id as String,
+              sport: sport,
+              graduationMode: settings.graduationMode,
+            ),
+          )
+          .toList(),
     );
-    final count = attendanceAsync.valueOrNull ?? 0;
-    final initial = (student.initialAttendanceCount as int?) ?? 0;
-    // Resolve threshold for the student's current belt in their primary sport,
-    // falling back to the academy-wide default, then the historical 70.
-    final grade = student.getGrade(primarySport);
-    final beltId = grade?.currentGrade as String?;
-    final perBelt = beltId != null
-        ? settings.graduationRequirementFor(primarySport.value, beltId)
-        : null;
-    final threshold = perBelt ?? settings.autoGraduationAttendances ?? 70;
-    final total = count + initial;
-    final progress = threshold == 0 ? 1.0 : (total / threshold).clamp(0.0, 1.0);
-    final remaining = (threshold - total).clamp(0, threshold);
-    final eligible = total >= threshold;
+  }
+}
+
+/// Progress card for a single sport, fed by the sport-filtered eligibility.
+class _SportProgressCard extends ConsumerWidget {
+  final String studentId;
+  final SportId sport;
+  final String graduationMode;
+  const _SportProgressCard({
+    required this.studentId,
+    required this.sport,
+    required this.graduationMode,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final e = ref
+        .watch(studentSportEligibilityProvider(
+          (studentId: studentId, sport: sport),
+        ))
+        .valueOrNull;
+    // No configured requirement for this sport → nothing meaningful to show.
+    if (e == null || e.requiredClasses <= 0) return const SizedBox.shrink();
+
+    final eligible = e.eligible;
+    final total = e.currentClasses;
+    final threshold = e.requiredClasses;
+    final remaining = e.missingClasses;
+    final progress =
+        threshold == 0 ? 1.0 : (total / threshold).clamp(0.0, 1.0);
+    final sportLabel = getSport(sport).label;
+    final unit = e.weighted ? 'pts' : 'aulas';
 
     return Padding(
       padding: const EdgeInsets.only(top: 16),
@@ -1366,8 +1393,8 @@ class _GraduationProgressCard extends ConsumerWidget {
                 Expanded(
                   child: Text(
                     eligible
-                        ? 'Você atingiu a meta de graduação!'
-                        : 'Progresso para próxima graduação',
+                        ? 'Meta atingida — $sportLabel!'
+                        : 'Próxima graduação — $sportLabel',
                     style: AppTheme.titleMedium.copyWith(
                       color: eligible ? Colors.white : AppTheme.textPrimary,
                       fontWeight: FontWeight.w700,
@@ -1394,7 +1421,7 @@ class _GraduationProgressCard extends ConsumerWidget {
             Row(
               children: [
                 Text(
-                  '$total / $threshold aulas',
+                  '$total / $threshold $unit',
                   style: AppTheme.bodyMedium.copyWith(
                     color: eligible ? Colors.white : AppTheme.textPrimary,
                     fontWeight: FontWeight.w600,
@@ -1403,7 +1430,7 @@ class _GraduationProgressCard extends ConsumerWidget {
                 const Spacer(),
                 Text(
                   eligible
-                      ? settings.graduationMode == 'auto'
+                      ? graduationMode == 'auto'
                           ? 'Graduação automática'
                           : 'Aguarde aprovação do mestre'
                       : 'Faltam $remaining',

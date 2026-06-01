@@ -45,7 +45,8 @@ class _AdminStudentDetailScreenState
   List<Assessment> _assessments = [];
   List<Plan> _studentPlans = [];
   bool _isLoading = true;
-  EligibilityResult? _eligibility;
+  // One eligibility result per graded sport the student trains (multi-sport).
+  List<({SportId sport, EligibilityResult result})> _eligibilityBySport = [];
   bool _autoGradEnabled = false;
 
   @override
@@ -103,12 +104,22 @@ class _AdminStudentDetailScreenState
       // the feature on (cheap settings doc read first, then the actual math).
       final settings = ref.read(academySettingsProvider).valueOrNull;
       final autoGradOn = settings?.autoGraduationEnabled == true;
-      EligibilityResult? eligibility;
+      final eligibilityBySport =
+          <({SportId sport, EligibilityResult result})>[];
       if (autoGradOn && student != null) {
-        eligibility = await beltService.checkEligibilityForStudent(
-          student.id,
-          sportId: student.getPrimarySport(),
-        );
+        // One progress per sport the student trains (skip sports with no
+        // graduation system, e.g. musculacao/boxe).
+        final gradedSports = student
+            .getSports()
+            .where((s) => getSport(s).gradeSystem != GradeSystem.none)
+            .toList();
+        for (final sp in gradedSports) {
+          final r = await beltService.checkEligibilityForStudent(
+            student.id,
+            sportId: sp,
+          );
+          eligibilityBySport.add((sport: sp, result: r));
+        }
       }
 
       setState(() {
@@ -121,7 +132,7 @@ class _AdminStudentDetailScreenState
         _assessments = assessments;
         _studentPlans = studentPlans;
         _autoGradEnabled = autoGradOn;
-        _eligibility = eligibility;
+        _eligibilityBySport = eligibilityBySport;
         _isLoading = false;
       });
     } catch (e) {
@@ -515,7 +526,7 @@ class _AdminStudentDetailScreenState
     );
   }
 
-  Widget _buildEligibilityBanner(EligibilityResult e) {
+  Widget _buildEligibilityBanner(SportId sport, EligibilityResult e) {
     final eligible = e.eligible;
     final color = eligible ? AppTheme.warning : AppTheme.info;
     final lightColor = eligible ? AppTheme.warningLight : AppTheme.infoLight;
@@ -538,6 +549,8 @@ class _AdminStudentDetailScreenState
           Row(
             children: [
               Icon(icon, size: 18, color: color),
+              const SizedBox(width: 8),
+              SportChip(sportId: sport, size: SportChipSize.xs),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -595,10 +608,15 @@ class _AdminStudentDetailScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Auto-graduation banner (only when feature is enabled)
-          if (_autoGradEnabled && _eligibility != null) ...[
-            _buildEligibilityBanner(_eligibility!),
-            const SizedBox(height: 16),
+          // Auto-graduation banners — one per sport the student trains.
+          if (_autoGradEnabled && _eligibilityBySport.isNotEmpty) ...[
+            ..._eligibilityBySport.map(
+              (e) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _buildEligibilityBanner(e.sport, e.result),
+              ),
+            ),
+            const SizedBox(height: 4),
           ],
 
           // Quick stats
