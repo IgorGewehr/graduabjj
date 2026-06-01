@@ -418,8 +418,10 @@ class _JourneyCardState extends State<_JourneyCard> {
     }
   }
 
-  Color _getBeltDisplayColor(String belt, {SportId sportId = SportId.bjj}) =>
-      getGradeColor(sportId, belt);
+  Color _getBeltDisplayColor(String belt, {SportId sportId = SportId.bjj}) {
+    final c = getGradeColor(sportId, belt);
+    return c.computeLuminance() > 0.85 ? const Color(0xFF9CA3AF) : c;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -671,8 +673,12 @@ class _TimelineItem extends StatelessWidget {
 
   const _TimelineItem({required this.event, required this.isLast});
 
-  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) =>
-      getGradeColor(sportId, belt);
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) {
+    final c = getGradeColor(sportId, belt);
+    // Faixas muito claras (branca em qualquer esporte) somem no timeline claro;
+    // usa um cinza visível só no indicador, preservando a cor canônica das demais.
+    return c.computeLuminance() > 0.85 ? const Color(0xFF9CA3AF) : c;
+  }
 
   _EventConfig _getEventConfig(TimelineEventType type, String? belt) {
     switch (type) {
@@ -936,8 +942,12 @@ class _BeltIndicator extends StatelessWidget {
 
   const _BeltIndicator({required this.belt, this.sportId = SportId.bjj});
 
-  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) =>
-      getGradeColor(sportId, belt);
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) {
+    final c = getGradeColor(sportId, belt);
+    // Faixas muito claras (branca em qualquer esporte) somem no timeline claro;
+    // usa um cinza visível só no indicador, preservando a cor canônica das demais.
+    return c.computeLuminance() > 0.85 ? const Color(0xFF9CA3AF) : c;
+  }
 
   @override
   Widget build(BuildContext context) {
