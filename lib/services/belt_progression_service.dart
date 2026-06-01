@@ -863,8 +863,28 @@ class BeltProgressionService {
 
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final currentBelt = data['currentBelt'] ?? 'white';
-      final currentStripes = data['currentStripes'] ?? 0;
+      // Modalidade primária + faixa NAQUELE esporte (mesma regra do
+      // Student.getGrade): pra não-BJJ a faixa vive em sportData; senão é a
+      // legada currentBelt. Antes a elegibilidade era checada sempre como BJJ.
+      final sportVal = (data['primarySport'] as String?) ??
+          ((data['sports'] is List && (data['sports'] as List).isNotEmpty)
+              ? (data['sports'] as List).first.toString()
+              : 'bjj');
+      final sportId = SportId.fromString(sportVal);
+      final category = (data['category'] as String?) ?? 'adult';
+      final sportData = (data['sportData'] as Map?)?[sportVal] as Map?;
+      final useSportData = !(sportId == SportId.bjj && sportData == null);
+      final beltFromSport =
+          sportData == null ? null : sportData['currentGrade'];
+      final stripesFromSport =
+          sportData == null ? null : sportData['currentStripes'];
+      final currentBelt = (useSportData ? beltFromSport : data['currentBelt']) ??
+          data['currentBelt'] ??
+          'white';
+      final currentStripes =
+          (useSportData ? stripesFromSport : data['currentStripes']) ??
+              data['currentStripes'] ??
+              0;
       final totalClasses = (data['initialAttendanceCount'] ?? 0) +
           (data['attendanceCount'] ?? 0);
 
@@ -872,6 +892,8 @@ class BeltProgressionService {
         currentBelt: currentBelt,
         currentStripes: currentStripes,
         totalClasses: totalClasses,
+        sportId: sportId,
+        category: category,
       );
 
       if (eligibility.eligible) {
@@ -882,6 +904,7 @@ class BeltProgressionService {
           'currentStripes': currentStripes,
           'totalClasses': totalClasses,
           'eligibility': eligibility,
+          'sportId': sportVal,
         });
       }
     }

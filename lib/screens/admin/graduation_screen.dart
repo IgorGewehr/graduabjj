@@ -378,6 +378,7 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
     final eligibility = studentData['eligibility'] as EligibilityResult;
     final currentBelt = studentData['currentBelt'] as String;
     final currentStripes = studentData['currentStripes'] as int;
+    final sportId = SportId.fromString(studentData['sportId'] as String? ?? 'bjj');
     final studentId = studentData['id'] as String;
     final studentName = studentData['fullName'] as String;
 
@@ -452,7 +453,7 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                           width: 50,
                           height: 50,
                           decoration: BoxDecoration(
-                            color: _getBeltColor(currentBelt),
+                            color: _getBeltColor(currentBelt, sportId: sportId),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Center(
@@ -851,6 +852,7 @@ class _EligibleStudentCard extends StatelessWidget {
     final currentBelt = data['currentBelt'] as String;
     final currentStripes = data['currentStripes'] as int;
     final totalClasses = data['totalClasses'] as int;
+    final sportId = SportId.fromString(data['sportId'] as String? ?? 'bjj');
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -868,7 +870,7 @@ class _EligibleStudentCard extends StatelessWidget {
                 width: 50,
                 height: 50,
                 decoration: BoxDecoration(
-                  color: _getBeltColor(currentBelt),
+                  color: _getBeltColor(currentBelt, sportId: sportId),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
@@ -894,7 +896,7 @@ class _EligibleStudentCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        _buildBeltIndicator(currentBelt, currentStripes),
+                        _buildBeltIndicator(currentBelt, currentStripes, sportId),
                         const SizedBox(width: 8),
                         Icon(LucideIcons.clipboardCheck, size: 14, color: AppTheme.textSecondary),
                         const SizedBox(width: 4),
@@ -957,18 +959,18 @@ class _EligibleStudentCard extends StatelessWidget {
     );
   }
 
-  Widget _buildBeltIndicator(String belt, int stripes) {
+  Widget _buildBeltIndicator(String belt, int stripes, SportId sportId) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: _getBeltColor(belt),
+        color: _getBeltColor(belt, sportId: sportId),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            _getBeltShortLabel(belt),
+            _getBeltShortLabel(belt, sportId: sportId),
             style: TextStyle(
               fontSize: 10,
               color: belt == 'white' ? Colors.black : Colors.white,
@@ -990,12 +992,12 @@ class _EligibleStudentCard extends StatelessWidget {
     );
   }
 
-  Color _getBeltColor(String belt) {
-    return getGradeColor(SportId.bjj, belt);
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) {
+    return getGradeColor(sportId, belt);
   }
 
-  String _getBeltShortLabel(String belt) {
-    final label = getGradeLabel(SportId.bjj, belt);
+  String _getBeltShortLabel(String belt, {SportId sportId = SportId.bjj}) {
+    final label = getGradeLabel(sportId, belt);
     return label.length >= 2 ? label.substring(0, 2).toUpperCase() : label.toUpperCase();
   }
 }
