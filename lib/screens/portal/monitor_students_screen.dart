@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -631,7 +632,7 @@ class _StudentCard extends StatelessWidget {
         width: 48,
         height: 48,
         decoration: BoxDecoration(
-          color: _getBeltColor(student.currentBelt),
+          color: _getBeltColor(student.currentBelt, sportId: student.getPrimarySport()),
           borderRadius: BorderRadius.circular(12),
         ),
         child: student.photoUrl != null
@@ -690,21 +691,8 @@ class _StudentCard extends StatelessWidget {
     );
   }
 
-  Color _getBeltColor(String belt) {
-    const colors = {
-      'white': Color(0xFFF5F5F5),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-      'grey': Color(0xFF6B7280),
-      'yellow': Color(0xFFF59E0B),
-      'orange': Color(0xFFF97316),
-      'green': Color(0xFF22C55E),
-    };
-    final baseBelt = belt.split('-').first;
-    return colors[baseBelt] ?? Colors.grey;
-  }
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) =>
+      getGradeColor(sportId, belt);
 }
 
 /// Filter Bottom Sheet

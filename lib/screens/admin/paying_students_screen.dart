@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/plan_service.dart';
@@ -306,7 +307,8 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                       final hasCustomValue = studentPlans.any(
                         (plan) => plan.customValues.containsKey(student.id),
                       );
-                      final beltColor = AppTheme.getBeltColor(
+                      final beltColor = getGradeColor(
+                        student.getPrimarySport(),
                         student.currentBelt,
                       );
 
@@ -437,7 +439,7 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
   void _showStudentPlansSheet(Student student) {
     final studentPlans = _getPlansForStudent(student.id);
     final totalMonthly = _getTotalMonthlyValue(student.id);
-    final beltColor = AppTheme.getBeltColor(student.currentBelt);
+    final beltColor = getGradeColor(student.getPrimarySport(), student.currentBelt);
 
     showModalBottomSheet(
       context: context,

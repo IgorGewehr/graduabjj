@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/checkin.dart';
 import '../../models/student.dart';
@@ -1431,7 +1432,7 @@ class _AttendanceStudentCard extends StatelessWidget {
   }
 
   Widget _buildBeltIndicator() {
-    final beltColor = _getBeltColor(student.currentBelt);
+    final beltColor = _getBeltColor(student.currentBelt, sportId: student.getPrimarySport());
     final stripes = student.currentStripes.clamp(0, 4);
 
     return Row(
@@ -1472,21 +1473,8 @@ class _AttendanceStudentCard extends StatelessWidget {
     );
   }
 
-  Color _getBeltColor(String belt) {
-    const colors = {
-      'white': Color(0xFFF5F5F5),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-      'grey': Color(0xFF6B7280),
-      'yellow': Color(0xFFF59E0B),
-      'orange': Color(0xFFF97316),
-      'green': Color(0xFF22C55E),
-    };
-    final baseBelt = belt.split('-').first;
-    return colors[baseBelt] ?? Colors.grey;
-  }
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) =>
+      getGradeColor(sportId, belt);
 }
 
 /// Result of the add-student picker: either an existing student to enroll,

@@ -2156,6 +2156,10 @@ class _AdminStudentDetailScreenState
                       toStripes: selectedType == AchievementType.stripe
                           ? selectedStripes
                           : null,
+                      sport: (selectedType == AchievementType.graduation ||
+                              selectedType == AchievementType.stripe)
+                          ? selectedSport.value
+                          : null,
                       createdBy: 'admin',
                     );
 
