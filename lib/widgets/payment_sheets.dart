@@ -258,23 +258,37 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
                   const SizedBox(height: 24),
 
                   // Amount Card
-                  _buildAmountCard(),
+                  _buildAmountCard()
+                      .animate()
+                      .fadeIn(delay: 60.ms, duration: 300.ms)
+                      .slideY(begin: 0.08, curve: Curves.easeOut),
                   const SizedBox(height: 24),
 
                   // QR Code with glow effect
-                  _buildQRCode(),
+                  _buildQRCode()
+                      .animate()
+                      .fadeIn(delay: 140.ms, duration: 300.ms)
+                      .slideY(begin: 0.08, curve: Curves.easeOut),
                   const SizedBox(height: 20),
 
                   // Copy Code Button
-                  _buildCopyButton(),
+                  _buildCopyButton()
+                      .animate()
+                      .fadeIn(delay: 220.ms, duration: 300.ms)
+                      .slideY(begin: 0.08, curve: Curves.easeOut),
                   const SizedBox(height: 20),
 
                   // Instructions
-                  _buildInstructions(),
+                  _buildInstructions()
+                      .animate()
+                      .fadeIn(delay: 300.ms, duration: 300.ms)
+                      .slideY(begin: 0.08, curve: Curves.easeOut),
                   const SizedBox(height: 20),
 
                   // Status Indicator
-                  _buildStatusIndicator(),
+                  _buildStatusIndicator()
+                      .animate()
+                      .fadeIn(delay: 380.ms, duration: 300.ms),
                   const SizedBox(height: 16),
                 ],
               ),
