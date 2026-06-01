@@ -83,6 +83,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _autoGraduationAttendancesController = TextEditingController(
     text: '70',
   );
+  // Per-sport, per-belt requirements: sportValue → {gradeId → classes}.
+  // Empty → uses the global "Presencas para graduar" field.
+  Map<String, Map<String, int>> _graduationRequirementsBySport = {};
 
 
   // KYC
@@ -238,6 +241,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 .autoGraduationAttendances
                 .toString();
           }
+          _graduationRequirementsBySport = {
+            for (final e in settings.graduationRequirementsBySport.entries)
+              e.key: Map<String, int>.of(e.value),
+          };
         });
       }
 
@@ -320,6 +327,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           attendances: attendancesValue,
           mode: _graduationMode,
           progressVisibleToStudents: _graduationProgressVisibleToStudents,
+          requirementsBySport: _graduationRequirementsBySport,
         ),
         service.updateUseClassWeights(_useClassWeights),
       ];
@@ -1196,6 +1204,80 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     );
   }
 
+  /// Per-sport, per-belt graduation requirements editor. Optional — a sport
+  /// left empty uses the global "Presencas para graduar" value.
+  Widget _buildPerBeltRequirements() {
+    final gradedSports = sportOptions
+        .where((s) => getSport(s).gradeSystem != GradeSystem.none)
+        .toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Requisitos por faixa (opcional)',
+          style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Defina, por esporte, quantas presencas cada faixa exige. O valor '
+          'vale para cada grau da faixa. Esportes sem configuracao usam o '
+          'padrao acima.',
+          style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+        ),
+        const SizedBox(height: 8),
+        ...gradedSports.map((sportId) {
+          final configured =
+              _graduationRequirementsBySport[sportId.value] ?? const {};
+          final count = configured.values.where((v) => v > 0).length;
+          return Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              leading: Icon(
+                getSport(sportId).icon,
+                color: sportChipColors[sportId],
+              ),
+              title: Text(getSport(sportId).label),
+              subtitle: Text(
+                count > 0 ? '$count faixa(s) configurada(s)' : 'Usando padrao',
+              ),
+              trailing: const Icon(LucideIcons.chevronRight, size: 18),
+              onTap: () => _editSportRequirements(sportId),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Future<void> _editSportRequirements(SportId sportId) async {
+    // Full ladder, including the honorary belts above black (BJJ coral/vermelha
+    // etc.). Attendance auto-graduation never reaches these, but admins can see
+    // and note the requirement for the complete belt list.
+    final grades = getGradesForSport(
+      sportId,
+      muaythaiVariant: _muaythaiGradeSystem,
+    ).toList();
+
+    final result = await showDialog<Map<String, int>>(
+      context: context,
+      builder: (ctx) => _GraduationRequirementsDialog(
+        sportLabel: getSport(sportId).label,
+        grades: grades,
+        initial: _graduationRequirementsBySport[sportId.value] ?? const {},
+      ),
+    );
+
+    if (result == null) return; // cancelled — no change
+    setState(() {
+      if (result.isEmpty) {
+        _graduationRequirementsBySport.remove(sportId.value);
+      } else {
+        _graduationRequirementsBySport[sportId.value] = result;
+      }
+    });
+  }
+
   Widget _buildFeaturesTab() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -1226,11 +1308,13 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                   const SizedBox(height: 16),
                   _ModernTextField(
                     controller: _autoGraduationAttendancesController,
-                    label: 'Presencas para graduar',
+                    label: 'Presencas para graduar (padrao)',
                     hint: '70',
                     icon: LucideIcons.target,
                     keyboardType: TextInputType.number,
                   ),
+                  const SizedBox(height: 16),
+                  _buildPerBeltRequirements(),
                   const SizedBox(height: 16),
                   // Mode selector — auto vs manual approval
                   _GraduationModeSelector(
@@ -2371,6 +2455,116 @@ class _OperatingHoursEditor extends StatelessWidget {
         ),
         child: Text(hhmm, style: AppTheme.bodyMedium),
       ),
+    );
+  }
+}
+
+/// Dialog to edit the per-belt graduation requirements of one sport. Returns
+/// the {gradeId: classes} map on save (empty = use the academy default), or
+/// null if cancelled.
+class _GraduationRequirementsDialog extends StatefulWidget {
+  const _GraduationRequirementsDialog({
+    required this.sportLabel,
+    required this.grades,
+    required this.initial,
+  });
+
+  final String sportLabel;
+  final List<GradeDefinition> grades;
+  final Map<String, int> initial;
+
+  @override
+  State<_GraduationRequirementsDialog> createState() =>
+      _GraduationRequirementsDialogState();
+}
+
+class _GraduationRequirementsDialogState
+    extends State<_GraduationRequirementsDialog> {
+  late final Map<String, TextEditingController> _controllers;
+
+  @override
+  void initState() {
+    super.initState();
+    _controllers = {
+      for (final g in widget.grades)
+        g.id: TextEditingController(
+          text: (widget.initial[g.id] ?? 0) > 0
+              ? widget.initial[g.id].toString()
+              : '',
+        ),
+    };
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Requisitos — ${widget.sportLabel}'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Text(
+              'Presencas por faixa. Em branco = usa o padrao da academia.',
+              style:
+                  AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            ...widget.grades.map(
+              (g) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Expanded(child: Text(g.label)),
+                    SizedBox(
+                      width: 90,
+                      child: TextField(
+                        controller: _controllers[g.id],
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        decoration: const InputDecoration(
+                          hintText: 'padrao',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, <String, int>{}),
+          child: const Text('Limpar tudo'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final out = <String, int>{};
+            _controllers.forEach((id, c) {
+              final n = int.tryParse(c.text.trim());
+              if (n != null && n > 0) out[id] = n;
+            });
+            Navigator.pop(context, out);
+          },
+          child: const Text('Salvar'),
+        ),
+      ],
     );
   }
 }

@@ -498,7 +498,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
             textCapitalization: TextCapitalization.characters,
             textInputAction: TextInputAction.done,
             onFieldSubmitted: (_) => _validateCode(),
-            maxLength: 6,
+            maxLength: 8,
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 24,
@@ -507,7 +507,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
             ),
             decoration: const InputDecoration(
               labelText: 'Codigo',
-              hintText: 'ABC123',
+              hintText: 'ABC123 ou ABCD2345',
               counterText: '',
               prefixIcon: Icon(LucideIcons.key, size: 20),
             ),
@@ -515,8 +515,9 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
               if (value == null || value.isEmpty) {
                 return 'Informe o codigo';
               }
-              if (value.length != 6) {
-                return 'O codigo deve ter 6 caracteres';
+              // 6 = codigo de aluno, 8 = convite de professor.
+              if (value.length != 6 && value.length != 8) {
+                return 'O codigo deve ter 6 (aluno) ou 8 (professor) caracteres';
               }
               return null;
             },

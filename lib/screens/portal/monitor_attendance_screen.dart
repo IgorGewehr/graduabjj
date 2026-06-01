@@ -273,6 +273,8 @@ class _MonitorAttendanceScreenState
           verifiedBy: 'monitor',
           verifiedByName: monitorName,
           date: _selectedDate,
+          weight: _selectedClass!.effectiveWeight(),
+          sport: _selectedClass!.sport,
         );
         setState(() {
           _presentStudentIds.add(student.id);
@@ -338,6 +340,8 @@ class _MonitorAttendanceScreenState
             verifiedBy: 'monitor',
             verifiedByName: monitorName,
             date: _selectedDate,
+            weight: _selectedClass!.effectiveWeight(),
+            sport: _selectedClass!.sport,
           );
           _presentStudentIds.add(student.id);
         }

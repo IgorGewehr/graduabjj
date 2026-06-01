@@ -31,20 +31,6 @@ final abacatePayEnabledProvider = FutureProvider<bool>((ref) async {
   return settingsService.isAsaasEnabled();
 });
 
-/// Dependents (kids) whose responsible is the logged-in user. Lets a parent
-/// who also trains (adult student) see and pay their kids' charges.
-final dependentsProvider =
-    StreamProvider.autoDispose<List<Student>>((ref) async* {
-  final user = await ref.watch(currentUserProvider.future);
-  final academyId = user?.academyId;
-  final uid = user?.id;
-  if (academyId == null || uid == null) {
-    yield <Student>[];
-    return;
-  }
-  yield* StudentService(academyId).streamDependents(uid);
-});
-
 /// One section per dependent: their OPEN charges with a pay button. Hidden when
 /// the dependent has no open charges.
 class _DependentSection extends ConsumerWidget {
@@ -220,45 +206,57 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Alert if has open payments
-                  if (openPayments.isNotEmpty) ...[
-                    _DebtAlertCard(
-                      totalOpen: totalOpen,
-                      openCount: openPayments.length,
-                      overdueCount: overdueCount,
-                      pixKey: pixKey,
-                      onCopyPix: () => _copyPixKey(pixKey),
-                      formatCurrency: _formatCurrency,
+                  // When this student is managed by a financial responsible,
+                  // their OPEN charges live in the responsible's login — hide
+                  // them here (historico stays visible) and show a short notice.
+                  if (student.hasResponsible) ...[
+                    _ManagedByResponsibleNotice(
+                      responsibleName: student.responsibleName,
                     ),
                     const SizedBox(height: 24),
-                  ],
+                  ] else ...[
+                    // Alert if has open payments
+                    if (openPayments.isNotEmpty) ...[
+                      _DebtAlertCard(
+                        totalOpen: totalOpen,
+                        openCount: openPayments.length,
+                        overdueCount: overdueCount,
+                        pixKey: pixKey,
+                        onCopyPix: () => _copyPixKey(pixKey),
+                        formatCurrency: _formatCurrency,
+                      ),
+                      const SizedBox(height: 24),
+                    ],
 
-                  // Open Payments Section
-                  if (openPayments.isNotEmpty) ...[
-                    _SectionHeader(
-                      title: 'Em Aberto',
-                      count: openPayments.length,
-                    ),
-                    const SizedBox(height: 12),
-                    ...openPayments.map(
-                      (payment) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _PaymentCard(
-                          payment: payment,
-                          formatCurrency: _formatCurrency,
-                          showPayButton: abacatePayEnabled,
-                          onPayPix: () =>
-                              _showPixPaymentDialog(payment, student.fullName),
+                    // Open Payments Section
+                    if (openPayments.isNotEmpty) ...[
+                      _SectionHeader(
+                        title: 'Em Aberto',
+                        count: openPayments.length,
+                      ),
+                      const SizedBox(height: 12),
+                      ...openPayments.map(
+                        (payment) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _PaymentCard(
+                            payment: payment,
+                            formatCurrency: _formatCurrency,
+                            showPayButton: abacatePayEnabled,
+                            onPayPix: () => _showPixPaymentDialog(
+                              payment,
+                              student.fullName,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                  ],
+                      const SizedBox(height: 24),
+                    ],
 
-                  // All paid message
-                  if (openPayments.isEmpty) ...[
-                    _AllPaidCard(),
-                    const SizedBox(height: 24),
+                    // All paid message
+                    if (openPayments.isEmpty) ...[
+                      _AllPaidCard(),
+                      const SizedBox(height: 24),
+                    ],
                   ],
 
                   // Dependentes — cobrancas de alunos kids sob este responsavel
@@ -590,6 +588,62 @@ class _AllPaidCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   'Voce nao possui pagamentos pendentes',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shown in a managed kid's own login: their open charges are handled by the
+/// financial responsible, so they don't appear here.
+class _ManagedByResponsibleNotice extends StatelessWidget {
+  final String? responsibleName;
+  const _ManagedByResponsibleNotice({this.responsibleName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.info.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.info.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: AppTheme.info.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(LucideIcons.users, size: 24, color: AppTheme.info),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Cobrancas com o responsavel',
+                  style: AppTheme.titleMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.info,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  responsibleName != null && responsibleName!.isNotEmpty
+                      ? 'Suas cobrancas sao gerenciadas e pagas por $responsibleName.'
+                      : 'Suas cobrancas sao gerenciadas e pagas pelo seu responsavel.',
                   style: AppTheme.bodySmall.copyWith(
                     color: AppTheme.textSecondary,
                   ),

@@ -297,6 +297,10 @@ class Student {
   final String? responsibleUserId;
   final String? responsibleStudentId;
   final String? responsibleName;
+  /// Admin-set intent flag: the responsible adult also trains at this academy.
+  /// UI gate for the responsible picker; the actual billing/visibility routing
+  /// still keys off `responsibleUserId` / `hasResponsible`.
+  final bool responsibleTrainsHere;
 
   // Metadata
   final DateTime createdAt;
@@ -344,6 +348,7 @@ class Student {
     this.responsibleUserId,
     this.responsibleStudentId,
     this.responsibleName,
+    this.responsibleTrainsHere = false,
     required this.createdAt,
     required this.updatedAt,
     this.createdBy,
@@ -409,6 +414,7 @@ class Student {
       responsibleUserId: data['responsibleUserId'],
       responsibleStudentId: data['responsibleStudentId'],
       responsibleName: data['responsibleName'],
+      responsibleTrainsHere: data['responsibleTrainsHere'] ?? false,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       createdBy: data['createdBy'],
@@ -459,6 +465,7 @@ class Student {
       'responsibleUserId': responsibleUserId,
       'responsibleStudentId': responsibleStudentId,
       'responsibleName': responsibleName,
+      'responsibleTrainsHere': responsibleTrainsHere,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(DateTime.now()),
       'createdBy': createdBy,
@@ -573,6 +580,7 @@ class Student {
     String? responsibleUserId,
     String? responsibleStudentId,
     String? responsibleName,
+    bool? responsibleTrainsHere,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? createdBy,
@@ -618,6 +626,8 @@ class Student {
       responsibleUserId: responsibleUserId ?? this.responsibleUserId,
       responsibleStudentId: responsibleStudentId ?? this.responsibleStudentId,
       responsibleName: responsibleName ?? this.responsibleName,
+      responsibleTrainsHere:
+          responsibleTrainsHere ?? this.responsibleTrainsHere,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       createdBy: createdBy ?? this.createdBy,

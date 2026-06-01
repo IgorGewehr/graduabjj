@@ -30,6 +30,20 @@ final currentStudentProvider = FutureProvider<Student?>((ref) async {
   return null;
 });
 
+/// Dependents (kids) whose responsible is the logged-in user. Lets a parent
+/// who also trains (adult student) see their kids' charges and behavior.
+final dependentsProvider =
+    StreamProvider.autoDispose<List<Student>>((ref) async* {
+  final user = await ref.watch(currentUserProvider.future);
+  final academyId = user?.academyId;
+  final uid = user?.id;
+  if (academyId == null || uid == null) {
+    yield <Student>[];
+    return;
+  }
+  yield* StudentService(academyId).streamDependents(uid);
+});
+
 /// Student service provider
 final studentServiceProvider = Provider<StudentService?>((ref) {
   final currentUser = ref.watch(currentUserProvider).valueOrNull;

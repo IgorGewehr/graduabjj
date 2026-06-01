@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
+import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 
@@ -78,68 +79,82 @@ class BehaviorScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Latest Assessment Card
-                    if (latest != null)
-                      _LatestAssessmentCard(
-                        assessment: latest,
-                        categories: _categories,
+                    // A managed kid's own behavior lives in the responsible's
+                    // login; show a notice here instead of their assessments.
+                    if (student.hasResponsible)
+                      _ManagedBehaviorNotice(
+                        responsibleName: student.responsibleName,
                       )
-                    else
-                      _buildNoAssessmentCard(),
-                    const SizedBox(height: 24),
-
-                    // Stats
-                    if (overallAverage != null) ...[
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _StatCard(
-                              icon: LucideIcons.trendingUp,
-                              iconColor: AppTheme.info,
-                              iconBgColor: AppTheme.infoLight,
-                              label: 'Media Geral',
-                              value: overallAverage.toStringAsFixed(1),
-                              valueColor: _getPerformanceLevel(
-                                overallAverage,
-                              ).color,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _StatCard(
-                              icon: LucideIcons.star,
-                              iconColor: AppTheme.warning,
-                              iconBgColor: AppTheme.warningLight,
-                              label: 'Avaliacoes',
-                              value: assessments.length.toString(),
-                            ),
-                          ),
-                        ],
-                      ),
+                    else ...[
+                      // Latest Assessment Card
+                      if (latest != null)
+                        _LatestAssessmentCard(
+                          assessment: latest,
+                          categories: _categories,
+                        )
+                      else
+                        _buildNoAssessmentCard(),
                       const SizedBox(height: 24),
-                    ],
 
-                    // History
-                    if (assessments.isNotEmpty) ...[
-                      Text(
-                        'HISTORICO DE AVALIACOES',
-                        style: AppTheme.labelSmall.copyWith(
-                          color: AppTheme.textSecondary,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.5,
+                      // Stats
+                      if (overallAverage != null) ...[
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _StatCard(
+                                icon: LucideIcons.trendingUp,
+                                iconColor: AppTheme.info,
+                                iconBgColor: AppTheme.infoLight,
+                                label: 'Media Geral',
+                                value: overallAverage.toStringAsFixed(1),
+                                valueColor: _getPerformanceLevel(
+                                  overallAverage,
+                                ).color,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _StatCard(
+                                icon: LucideIcons.star,
+                                iconColor: AppTheme.warning,
+                                iconBgColor: AppTheme.warningLight,
+                                label: 'Avaliacoes',
+                                value: assessments.length.toString(),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      ...assessments.map(
-                        (assessment) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: _AssessmentHistoryCard(
-                            assessment: assessment,
-                            categories: _categories,
+                        const SizedBox(height: 24),
+                      ],
+
+                      // History
+                      if (assessments.isNotEmpty) ...[
+                        Text(
+                          'HISTORICO DE AVALIACOES',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
                           ),
                         ),
-                      ),
+                        const SizedBox(height: 12),
+                        ...assessments.map(
+                          (assessment) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _AssessmentHistoryCard(
+                              assessment: assessment,
+                              categories: _categories,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
+
+                    // Dependents' behavior — surfaced to the responsible adult.
+                    _DependentsBehaviorList(
+                      currentStudentId: student.id,
+                      categories: _categories,
+                    ),
 
                     const SizedBox(height: 80),
                   ],
@@ -650,6 +665,146 @@ class _AssessmentHistoryCard extends StatelessWidget {
               style: AppTheme.bodySmall.copyWith(
                 color: AppTheme.textSecondary,
                 fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Shown in a managed kid's own login: their behavior is visible to the
+/// responsible, not here.
+class _ManagedBehaviorNotice extends StatelessWidget {
+  final String? responsibleName;
+  const _ManagedBehaviorNotice({this.responsibleName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.info.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.info.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(LucideIcons.users, size: 24, color: AppTheme.info),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              responsibleName != null && responsibleName!.isNotEmpty
+                  ? 'Seu acompanhamento de comportamento fica no app de $responsibleName.'
+                  : 'Seu acompanhamento de comportamento fica no app do seu responsavel.',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Lists the behavior of each dependent (kids) the logged-in adult is
+/// responsible for. Empty (renders nothing) when there are no dependents.
+class _DependentsBehaviorList extends ConsumerWidget {
+  final String currentStudentId;
+  final List<_AssessmentCategoryData> categories;
+  const _DependentsBehaviorList({
+    required this.currentStudentId,
+    required this.categories,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final deps = ref.watch(dependentsProvider).valueOrNull ?? const [];
+    final others = deps.where((d) => d.id != currentStudentId).toList();
+    if (others.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+        Text(
+          'COMPORTAMENTO DOS DEPENDENTES',
+          style: AppTheme.labelSmall.copyWith(
+            color: AppTheme.textSecondary,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.5,
+          ),
+        ),
+        const SizedBox(height: 12),
+        ...others.map(
+          (dep) => _DependentBehaviorSection(
+            dependent: dep,
+            categories: categories,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One dependent's behavior: name header + latest assessment + history.
+class _DependentBehaviorSection extends ConsumerWidget {
+  final Student dependent;
+  final List<_AssessmentCategoryData> categories;
+  const _DependentBehaviorSection({
+    required this.dependent,
+    required this.categories,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final assessments =
+        ref.watch(studentAssessmentsProvider(dependent.id)).valueOrNull ??
+            const [];
+    final latest =
+        ref.watch(latestAssessmentProvider(dependent.id)).valueOrNull;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceVariant.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(LucideIcons.user, size: 16, color: AppTheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  dependent.fullName,
+                  style: AppTheme.titleSmall
+                      .copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (latest != null)
+            _LatestAssessmentCard(assessment: latest, categories: categories)
+          else
+            Text(
+              'Nenhuma avaliacao registrada ainda.',
+              style:
+                  AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+          if (assessments.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            ...assessments.map(
+              (a) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _AssessmentHistoryCard(
+                  assessment: a,
+                  categories: categories,
+                ),
               ),
             ),
           ],

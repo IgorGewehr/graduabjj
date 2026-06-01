@@ -1319,7 +1319,14 @@ class _GraduationProgressCard extends ConsumerWidget {
     );
     final count = attendanceAsync.valueOrNull ?? 0;
     final initial = (student.initialAttendanceCount as int?) ?? 0;
-    final threshold = settings.autoGraduationAttendances ?? 70;
+    // Resolve threshold for the student's current belt in their primary sport,
+    // falling back to the academy-wide default, then the historical 70.
+    final grade = student.getGrade(primarySport);
+    final beltId = grade?.currentGrade as String?;
+    final perBelt = beltId != null
+        ? settings.graduationRequirementFor(primarySport.value, beltId)
+        : null;
+    final threshold = perBelt ?? settings.autoGraduationAttendances ?? 70;
     final total = count + initial;
     final progress = threshold == 0 ? 1.0 : (total / threshold).clamp(0.0, 1.0);
     final remaining = (threshold - total).clamp(0, threshold);

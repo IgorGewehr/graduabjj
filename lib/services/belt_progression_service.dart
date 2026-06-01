@@ -23,10 +23,15 @@ const Map<String, List<int>> stripeRequirements = {
 class AcademyGraduationConfig {
   final int? threshold;        // `autoGraduationAttendances` if set
   final bool useClassWeights;  // `useClassWeights`
+  /// Per-sport, per-belt requirements: sportValue → {gradeId → classes}.
+  /// Takes precedence over [threshold] when an entry exists for the
+  /// student's sport + current belt.
+  final Map<String, Map<String, int>> requirementsBySport;
 
   const AcademyGraduationConfig({
     this.threshold,
     this.useClassWeights = false,
+    this.requirementsBySport = const {},
   });
 }
 
@@ -246,8 +251,13 @@ class BeltProgressionService {
     }
 
     int requiredClasses;
-    if (cfg.threshold != null && cfg.threshold! > 0) {
-      // Single configurable threshold for any belt/stripe transition.
+    final perBelt = cfg.requirementsBySport[sportId.value]?[currentBelt];
+    if (perBelt != null && perBelt > 0) {
+      // Per-sport, per-belt configured requirement (applies to every degree
+      // within the belt).
+      requiredClasses = perBelt;
+    } else if (cfg.threshold != null && cfg.threshold! > 0) {
+      // Single global threshold for any belt/stripe transition.
       requiredClasses = cfg.threshold!;
     } else {
       // Legacy fallback: per-belt requirements (BJJ only — other sports always eligible).
@@ -306,10 +316,29 @@ class BeltProgressionService {
       return AcademyGraduationConfig(
         threshold: threshold,
         useClassWeights: data['useClassWeights'] == true,
+        requirementsBySport:
+            _parseRequirementsBySport(data['graduationRequirementsBySport']),
       );
     } catch (_) {
       return const AcademyGraduationConfig();
     }
+  }
+
+  /// Parses the nested {sportValue: {gradeId: classes}} map, dropping
+  /// non-positive entries. Mirrors AcademySettings._parseRequirementsBySport.
+  static Map<String, Map<String, int>> _parseRequirementsBySport(dynamic raw) {
+    if (raw is! Map) return const {};
+    final out = <String, Map<String, int>>{};
+    raw.forEach((sport, belts) {
+      if (belts is Map) {
+        final byBelt = <String, int>{};
+        belts.forEach((belt, n) {
+          if (n is num && n > 0) byBelt[belt.toString()] = n.toInt();
+        });
+        if (byBelt.isNotEmpty) out[sport.toString()] = byBelt;
+      }
+    });
+    return out;
   }
 
   /// Returns the baseline count to subtract when computing "attendances since

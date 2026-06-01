@@ -243,6 +243,88 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
     }
   }
 
+  /// Opens a picker to add a student to the current class roll-call.
+  /// Lists active students not yet in the class; the chosen one is enrolled
+  /// in the class (and its sport) and immediately marked present. Also offers
+  /// registering a brand-new student.
+  Future<void> _showAddStudentDialog() async {
+    if (_selectedClass == null) return;
+
+    final outsiders = _students
+        .where((s) => !_selectedClass!.studentIds.contains(s.id))
+        .toList()
+      ..sort((a, b) => a.fullName.compareTo(b.fullName));
+
+    final result = await showModalBottomSheet<_AddStudentResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _AddStudentSheet(outsiders: outsiders),
+    );
+
+    if (result == null || !mounted) return;
+
+    if (result.createNew) {
+      await context.push('/admin/alunos/novo');
+      if (mounted) await _loadData();
+      return;
+    }
+
+    if (result.student != null) {
+      await _addExistingStudentToSession(result.student!);
+    }
+  }
+
+  Future<void> _addExistingStudentToSession(Student student) async {
+    if (_selectedClass == null || _isSaving) return;
+
+    setState(() => _isSaving = true);
+    try {
+      final currentUser = ref.read(currentUserProvider).valueOrNull;
+      if (currentUser?.academyId == null) return;
+
+      final academyId = currentUser!.academyId!;
+      final classService = ClassService(academyId);
+
+      // Enroll in the class (adds to studentIds + seeds the sport's grade),
+      // so the student becomes part of the roster and can graduate in it.
+      final updated = await classService.addStudent(_selectedClass!.id, student.id);
+
+      // Mark present for this session right away.
+      if (!_presentStudentIds.contains(student.id)) {
+        final attendanceService = AttendanceService(academyId);
+        await attendanceService.markPresent(
+          studentId: student.id,
+          studentName: student.fullName,
+          classId: _selectedClass!.id,
+          className: _selectedClass!.name,
+          verifiedBy: 'admin',
+          verifiedByName: 'Administrador',
+          date: _selectedDate,
+          weight: _selectedClass!.effectiveWeight(),
+          sport: _selectedClass!.sport,
+        );
+      }
+
+      setState(() {
+        final idx = _classes.indexWhere((c) => c.id == updated.id);
+        if (idx != -1) _classes[idx] = updated;
+        _selectedClass = updated;
+        _presentStudentIds.add(student.id);
+      });
+
+      if (mounted) {
+        context.showSuccess('${student.fullName} adicionado(a) e presente!');
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showError('Erro: ${e.toString().replaceAll('Exception: ', '')}');
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   Future<void> _toggleAttendance(Student student) async {
     if (_selectedClass == null || _isSaving) return;
 
@@ -274,6 +356,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           verifiedByName: 'Administrador',
           date: _selectedDate,
           weight: _selectedClass!.effectiveWeight(),
+          sport: _selectedClass!.sport,
         );
         setState(() {
           _presentStudentIds.add(student.id);
@@ -351,6 +434,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
         verifiedByName: 'Administrador',
         date: _selectedDate,
         weight: _selectedClass!.effectiveWeight(),
+        sport: _selectedClass!.sport,
       );
 
       // Update local state
@@ -801,9 +885,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
             if (!(_checkinEnabled && _pendingCheckins.isNotEmpty))
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () {
-                    // TODO: Add student to class
-                  },
+                  onPressed: (_selectedClass == null || _isSaving)
+                      ? null
+                      : _showAddStudentDialog,
                   icon: const Icon(LucideIcons.userPlus, size: 18),
                   label: const Text('Adicionar'),
                   style: ElevatedButton.styleFrom(
@@ -1402,5 +1486,144 @@ class _AttendanceStudentCard extends StatelessWidget {
     };
     final baseBelt = belt.split('-').first;
     return colors[baseBelt] ?? Colors.grey;
+  }
+}
+
+/// Result of the add-student picker: either an existing student to enroll,
+/// or a request to register a brand-new student.
+class _AddStudentResult {
+  final Student? student;
+  final bool createNew;
+  const _AddStudentResult.existing(this.student) : createNew = false;
+  const _AddStudentResult.create()
+      : student = null,
+        createNew = true;
+}
+
+/// Bottom sheet that lists active students not yet in the selected class,
+/// with search, plus a "register new student" shortcut.
+class _AddStudentSheet extends StatefulWidget {
+  const _AddStudentSheet({required this.outsiders});
+
+  final List<Student> outsiders;
+
+  @override
+  State<_AddStudentSheet> createState() => _AddStudentSheetState();
+}
+
+class _AddStudentSheetState extends State<_AddStudentSheet> {
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _query.isEmpty
+        ? widget.outsiders
+        : widget.outsiders
+            .where(
+              (s) =>
+                  s.fullName.toLowerCase().contains(_query) ||
+                  (s.nickname?.toLowerCase().contains(_query) ?? false),
+            )
+            .toList();
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.7,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Adicionar aluno',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _searchController,
+                onChanged: (v) =>
+                    setState(() => _query = v.toLowerCase().trim()),
+                decoration: InputDecoration(
+                  hintText: 'Buscar aluno...',
+                  prefixIcon: const Icon(LucideIcons.search, size: 18),
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () =>
+                      Navigator.pop(context, const _AddStudentResult.create()),
+                  icon: const Icon(LucideIcons.userPlus, size: 18),
+                  label: const Text('Cadastrar novo aluno'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: filtered.isEmpty
+                    ? const Center(
+                        child: Text('Nenhum aluno fora da turma.'),
+                      )
+                    : ListView.builder(
+                        controller: scrollController,
+                        itemCount: filtered.length,
+                        itemBuilder: (context, i) {
+                          final s = filtered[i];
+                          return ListTile(
+                            leading: CircleAvatar(
+                              child: Text(
+                                s.fullName.isNotEmpty
+                                    ? s.fullName[0].toUpperCase()
+                                    : '?',
+                              ),
+                            ),
+                            title: Text(s.fullName),
+                            subtitle:
+                                (s.nickname != null && s.nickname!.isNotEmpty)
+                                    ? Text(s.nickname!)
+                                    : null,
+                            trailing: const Icon(LucideIcons.plus, size: 18),
+                            onTap: () => Navigator.pop(
+                              context,
+                              _AddStudentResult.existing(s),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }

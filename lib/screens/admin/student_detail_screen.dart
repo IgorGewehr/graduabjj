@@ -36,6 +36,8 @@ class _AdminStudentDetailScreenState
   late TabController _tabController;
   Student? _student;
   List<Attendance> _attendances = [];
+  // Attendance tab: optional per-sport filter (null = all sports).
+  SportId? _attendanceSportFilter;
   List<Payment> _payments = [];
   List<StoreOrder> _storeOrders = [];
   List<BeltProgression> _progressions = [];
@@ -767,38 +769,74 @@ class _AdminStudentDetailScreenState
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Text(
-              hasResp
-                  ? 'As cobrancas deste aluno aparecem para ${_student!.responsibleName} no app, que pode paga-las.'
-                  : 'Nenhum responsavel definido. Escolha um aluno adulto (com conta) para receber e pagar as cobrancas deste aluno.',
-              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            const SizedBox(height: 4),
+            // Intent flag: only when ON do we reveal the adult-students picker.
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('O pai/responsavel tambem treina na academia'),
+              subtitle: Text(
+                'Ative para vincular um aluno adulto (com conta) como '
+                'responsavel financeiro deste aluno.',
+                style: AppTheme.bodySmall
+                    .copyWith(color: AppTheme.textSecondary),
+              ),
+              value: _student!.responsibleTrainsHere || hasResp,
+              onChanged: _toggleResponsibleTrainsHere,
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _showManageResponsibleDialog,
-                    icon: const Icon(LucideIcons.userPlus, size: 16),
-                    label: Text(hasResp ? 'Trocar responsavel' : 'Definir responsavel'),
+            if (_student!.responsibleTrainsHere || hasResp) ...[
+              const SizedBox(height: 8),
+              Text(
+                hasResp
+                    ? 'As cobrancas deste aluno aparecem para ${_student!.responsibleName} no app, que pode paga-las.'
+                    : 'Escolha um aluno adulto (com conta) para receber e pagar as cobrancas deste aluno.',
+                style:
+                    AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _showManageResponsibleDialog,
+                      icon: const Icon(LucideIcons.userPlus, size: 16),
+                      label: Text(
+                        hasResp ? 'Trocar responsavel' : 'Definir responsavel',
+                      ),
+                    ),
                   ),
-                ),
-                if (hasResp) ...[
-                  const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: _removeResponsible,
-                    icon: const Icon(LucideIcons.userMinus, size: 18),
-                    color: AppTheme.error,
-                    tooltip: 'Remover responsavel',
-                  ),
+                  if (hasResp) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: _removeResponsible,
+                      icon: const Icon(LucideIcons.userMinus, size: 18),
+                      color: AppTheme.error,
+                      tooltip: 'Remover responsavel',
+                    ),
+                  ],
                 ],
-              ],
-            ),
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  /// Toggles the "responsible trains here" flag. Turning it OFF while a
+  /// responsible is set clears the whole link (kid regains its own view).
+  Future<void> _toggleResponsibleTrainsHere(bool value) async {
+    try {
+      final service = StudentService(FirebaseService.academyId);
+      if (!value && _student!.hasResponsible) {
+        await service.removeResponsible(_student!.id);
+      } else {
+        await service.setResponsibleTrainsHere(_student!.id, value);
+      }
+      if (!mounted) return;
+      _loadData();
+    } catch (e) {
+      if (mounted) context.showError('Erro ao atualizar');
+    }
   }
 
   Future<void> _showManageResponsibleDialog() async {
@@ -1111,16 +1149,33 @@ class _AdminStudentDetailScreenState
       );
     }
 
+    // Per-sport filter (only meaningful for multi-sport students). A doc with
+    // no sport is legacy data and counts as BJJ — matches graduation logic.
+    final sports = _student?.getSports() ?? const [SportId.bjj];
+    final showSportFilter = sports.length > 1;
+    final filtered = _attendanceSportFilter == null
+        ? _attendances
+        : _attendances
+            .where((a) => (a.sport ?? 'bjj') == _attendanceSportFilter!.value)
+            .toList();
+
     // Group by month
     final grouped = <String, List<Attendance>>{};
-    for (final a in _attendances) {
+    for (final a in filtered) {
       final key = DateFormat('MMMM yyyy', 'pt_BR').format(a.date);
       grouped.putIfAbsent(key, () => []).add(a);
     }
 
     return ListView(
       padding: const EdgeInsets.all(16),
-      children: grouped.entries.map((entry) {
+      children: [
+        if (showSportFilter) _buildAttendanceSportFilter(sports),
+        if (grouped.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: Text('Nenhuma presença neste esporte.')),
+          ),
+        ...grouped.entries.map((entry) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1174,7 +1229,37 @@ class _AdminStudentDetailScreenState
             const SizedBox(height: 8),
           ],
         );
-      }).toList(),
+        }),
+      ],
+    );
+  }
+
+  /// Sport filter chips for the attendance tab (multi-sport students only).
+  Widget _buildAttendanceSportFilter(List<SportId> sports) {
+    Widget chip(String label, SportId? value) {
+      final selected = _attendanceSportFilter == value;
+      return Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: ChoiceChip(
+          label: Text(label),
+          selected: selected,
+          onSelected: (_) =>
+              setState(() => _attendanceSportFilter = value),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            chip('Todos', null),
+            ...sports.map((s) => chip(getSport(s).labelShort, s)),
+          ],
+        ),
+      ),
     );
   }
 

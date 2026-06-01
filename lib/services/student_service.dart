@@ -52,16 +52,28 @@ class StudentService {
       'responsibleUserId': responsible.linkedUserId,
       'responsibleStudentId': responsible.id,
       'responsibleName': responsible.fullName,
+      'responsibleTrainsHere': true,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
-  /// Clears the responsible link from a kids student.
+  /// Clears the responsible link from a kids student. Field-based, so any
+  /// rule/UI keyed off `responsibleUserId` self-heals (kid regains its own view).
   Future<void> removeResponsible(String kidId) async {
     await _collections.student(kidId).update({
       'responsibleUserId': FieldValue.delete(),
       'responsibleStudentId': FieldValue.delete(),
       'responsibleName': FieldValue.delete(),
+      'responsibleTrainsHere': FieldValue.delete(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Toggles the "responsible also trains here" intent flag without touching
+  /// the link itself. Used to reveal the responsible picker in the admin UI.
+  Future<void> setResponsibleTrainsHere(String kidId, bool value) async {
+    await _collections.student(kidId).update({
+      'responsibleTrainsHere': value,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }

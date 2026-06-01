@@ -156,6 +156,10 @@ class AcademySettings {
   /// graduationMode). Existing data is preserved when the flag is flipped off.
   final bool autoGraduationEnabled;
   final int? autoGraduationAttendances;
+  /// Per-sport, per-belt graduation requirements: sportValue → {gradeId → classes}.
+  /// The configured number applies to every degree/stripe within that belt.
+  /// Falls back to [autoGraduationAttendances] (global), then legacy defaults.
+  final Map<String, Map<String, int>> graduationRequirementsBySport;
   /// When true, attendance counts use Class.weight instead of 1 per doc.
   final bool useClassWeights;
   /// 'manual' → mestre confirma promoção a partir da tela de Graduação.
@@ -223,6 +227,7 @@ class AcademySettings {
     this.asaasKycOnboardingUrl,
     this.autoGraduationEnabled = false,
     this.autoGraduationAttendances,
+    this.graduationRequirementsBySport = const {},
     this.useClassWeights = false,
     this.graduationMode = 'manual',
     this.graduationProgressVisibleToStudents = false,
@@ -238,6 +243,23 @@ class AcademySettings {
     this.monitorIds = const [],
     this.updatedAt,
   });
+
+  /// Parses the nested {sportValue: {gradeId: classes}} map from Firestore,
+  /// dropping non-positive entries.
+  static Map<String, Map<String, int>> _parseRequirementsBySport(dynamic raw) {
+    if (raw is! Map) return const {};
+    final out = <String, Map<String, int>>{};
+    raw.forEach((sport, belts) {
+      if (belts is Map) {
+        final byBelt = <String, int>{};
+        belts.forEach((belt, n) {
+          if (n is num && n > 0) byBelt[belt.toString()] = n.toInt();
+        });
+        if (byBelt.isNotEmpty) out[sport.toString()] = byBelt;
+      }
+    });
+    return out;
+  }
 
   factory AcademySettings.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -269,6 +291,8 @@ class AcademySettings {
       asaasKycOnboardingUrl: data['asaasKycOnboardingUrl'],
       autoGraduationEnabled: data['autoGraduationEnabled'] ?? false,
       autoGraduationAttendances: data['autoGraduationAttendances'],
+      graduationRequirementsBySport:
+          _parseRequirementsBySport(data['graduationRequirementsBySport']),
       useClassWeights: data['useClassWeights'] ?? false,
       graduationMode: (data['graduationMode'] as String?) ?? 'manual',
       graduationProgressVisibleToStudents:
@@ -302,6 +326,14 @@ class AcademySettings {
   }
 
   bool get hasPixKey => pixKey != null && pixKey!.isNotEmpty;
+
+  /// Classes required to advance within [beltId] of [sportValue], or null when
+  /// not configured per-belt for that sport (caller falls back to the global
+  /// [autoGraduationAttendances] / legacy defaults).
+  int? graduationRequirementFor(String sportValue, String beltId) {
+    final n = graduationRequirementsBySport[sportValue]?[beltId];
+    return (n != null && n > 0) ? n : null;
+  }
 
   /// Whether any payment provider is enabled (AbacatePay or Asaas)
   bool get isPaymentEnabled => abacatePayEnabled || asaasEnabled;
@@ -469,6 +501,7 @@ class SettingsService {
     int? attendances,
     String? mode,
     bool? progressVisibleToStudents,
+    Map<String, Map<String, int>>? requirementsBySport,
   }) async {
     final data = <String, dynamic>{
       'autoGraduationEnabled': enabled,
@@ -482,6 +515,9 @@ class SettingsService {
     }
     if (progressVisibleToStudents != null) {
       data['graduationProgressVisibleToStudents'] = progressVisibleToStudents;
+    }
+    if (requirementsBySport != null) {
+      data['graduationRequirementsBySport'] = requirementsBySport;
     }
     await _academyRef.update(data);
   }

@@ -795,6 +795,9 @@ service cloud.firestore {
       match /assessments/{assessmentId} {
         allow read: if isAcademyStaff(academyId);
         allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        // Responsible adult can read their dependents' assessments (kids -> adult),
+        // mirroring the financials grant above.
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
         allow write: if isAcademyStaff(academyId);
       }
 
