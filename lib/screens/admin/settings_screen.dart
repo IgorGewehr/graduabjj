@@ -23,6 +23,7 @@ import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/delete_account_helper.dart';
+import 'mercado_pago_connect_screen.dart';
 import 'team_tab_content.dart';
 
 /// Admin Settings Screen - Fintech style matching webapp
@@ -1057,39 +1058,20 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   }
 
   Future<void> _connectMercadoPago() async {
-    setState(() => _mpBusy = true);
-    try {
-      final service = MercadoPagoService(FirebaseService.academyId);
-      final url = await service.startConnect();
-      if (url == null || url.isEmpty) {
-        if (mounted) context.showError('Nao foi possivel iniciar a conexao.');
-        return;
-      }
-      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-
-      // Poll the academy doc for ~90s waiting for the OAuth callback to land.
-      final settingsService = SettingsService(FirebaseService.academyId);
-      for (var i = 0; i < 30; i++) {
-        await Future.delayed(const Duration(seconds: 3));
-        if (!mounted) return;
-        final s = await settingsService.getAcademySettings();
-        if (s != null && s.mpConnected) {
-          setState(() {
-            _mpConnected = true;
-            _abacatePayEnabled = false;
-            _asaasEnabled = false;
-          });
-          context.showSuccess('Mercado Pago conectado!');
-          return;
-        }
-      }
-      if (mounted) {
-        context.showInfo('Conclua a conexao no navegador e volte ao app.');
-      }
-    } catch (e) {
-      if (mounted) context.showError('Erro ao conectar: $e');
-    } finally {
-      if (mounted) setState(() => _mpBusy = false);
+    // Dedicated full-screen flow (deep-link + backoff polling + states).
+    final connected = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => MercadoPagoConnectScreen(
+          academyId: FirebaseService.academyId,
+        ),
+      ),
+    );
+    if (connected == true && mounted) {
+      setState(() {
+        _mpConnected = true;
+        _abacatePayEnabled = false;
+        _asaasEnabled = false;
+      });
     }
   }
 

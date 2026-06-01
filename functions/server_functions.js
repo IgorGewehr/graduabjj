@@ -1814,15 +1814,37 @@ exports.mercadoPagoOAuthCallback = onRequest({ secrets: MP_MKT_SECRETS }, async 
       asaasEnabled: false,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    return res.status(200).send(
-      '<html><body style="font-family:sans-serif;text-align:center;padding:40px">' +
-      '<h2>Mercado Pago conectado!</h2>' +
-      '<p>Pode fechar esta janela e voltar ao app.</p></body></html>');
+    return res.status(200).send(mpCallbackHtml(
+      'Mercado Pago conectado!',
+      'Sua conta foi conectada. Volte ao app para continuar.', false));
   } catch (e) {
     console.error('[mpOAuthCallback] erro', e.message, e.data);
-    return res.status(500).send('Falha ao conectar o Mercado Pago. Tente novamente.');
+    return res.status(500).send(mpCallbackHtml(
+      'Falha ao conectar',
+      'Ocorreu um erro. Volte ao app e tente novamente.', true));
   }
 });
+
+/**
+ * Mobile-friendly callback page that also deep-links back into the app
+ * (graduabjj://mp-oauth-callback?status=...) so the connect screen reacts
+ * instantly; the visible page is the fallback if the deep link doesn't fire.
+ */
+function mpCallbackHtml(title, message, isError) {
+  const color = isError ? '#E53935' : '#00A650';
+  const icon = isError ? '&#10007;' : '&#10003;';
+  const status = isError ? 'error' : 'success';
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">` +
+    `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+    `<title>${title}</title><style>body{font-family:-apple-system,Roboto,sans-serif;` +
+    `text-align:center;padding:60px 24px;background:#fafafa;margin:0}.i{font-size:64px;` +
+    `color:${color}}h1{font-size:22px;color:#1a1a1a;margin:16px 0 8px}p{font-size:16px;` +
+    `color:#666;max-width:320px;margin:0 auto}</style></head><body>` +
+    `<div class="i">${icon}</div><h1>${title}</h1><p>${message}</p>` +
+    `<p class="hint" style="margin-top:32px;color:#999">Voce pode fechar esta janela.</p>` +
+    `<script>window.location.href="graduabjj://mp-oauth-callback?status=${status}";</script>` +
+    `</body></html>`;
+}
 
 // ---- OAuth: disconnect (admin) -------------------------------------------
 exports.disconnectMercadoPago = onCall(async (request) => {

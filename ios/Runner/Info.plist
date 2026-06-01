@@ -6,6 +6,17 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.tensorroot.graduabjj.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>graduabjj</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>BJJEasy</string>
 	<key>CFBundleExecutable</key>
