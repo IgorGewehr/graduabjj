@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
-import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/formatters.dart';
@@ -1874,9 +1873,13 @@ class _AdminStudentDetailScreenState
     String? selectedBelt;
     int selectedStripes = 1;
 
-    final beltOptions = _student?.category == StudentCategory.kids
-        ? BeltConstants.kidsBelts
-        : BeltConstants.adultBelts;
+    // Sport-aware: graduação/grau é por modalidade. Default = esporte primário;
+    // se o aluno tem mais de uma modalidade, um seletor aparece no diálogo.
+    final sports = _student?.getSports() ?? const [SportId.bjj];
+    SportId selectedSport = _student?.getPrimarySport() ?? SportId.bjj;
+    String muaythaiVariant = resolveMuaythaiVariant(
+      _student?.getGrade(SportId.muaythai)?.currentGrade ?? '',
+    );
 
     // Store parent context before dialog
     final parentContext = context;
@@ -1885,6 +1888,19 @@ class _AdminStudentDetailScreenState
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
+          final grades = getGradesForSport(
+            selectedSport,
+            category: _student?.category.value ?? 'adult',
+            muaythaiVariant:
+                selectedSport == SportId.muaythai ? muaythaiVariant : null,
+          );
+          final maxStripesForSport = grades.fold<int>(
+              0, (m, g) => g.maxStripes > m ? g.maxStripes : m);
+          final stripeMax = maxStripesForSport > 0 ? maxStripesForSport : 4;
+          if (selectedBelt != null &&
+              !grades.any((g) => g.id == selectedBelt)) {
+            selectedBelt = null;
+          }
           return AlertDialog(
             title: const Text('Adicionar Conquista'),
             content: SingleChildScrollView(
@@ -1924,12 +1940,56 @@ class _AdminStudentDetailScreenState
                   ),
                   const SizedBox(height: 16),
 
+                  // Modalidade — só quando o aluno tem mais de uma; define
+                  // quais faixas/graus o seletor abaixo mostra.
+                  if ((selectedType == AchievementType.graduation ||
+                          selectedType == AchievementType.stripe) &&
+                      sports.length > 1) ...[
+                    Text('Modalidade', style: AppTheme.labelMedium),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<SportId>(
+                      value: selectedSport,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      ),
+                      items: sports
+                          .map(
+                            (s) => DropdownMenuItem(
+                              value: s,
+                              child: Text(getSport(s).label),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setDialogState(() {
+                          selectedSport = value;
+                          selectedBelt = null;
+                          if (value == SportId.muaythai) {
+                            muaythaiVariant = resolveMuaythaiVariant(
+                              _student
+                                      ?.getGrade(SportId.muaythai)
+                                      ?.currentGrade ??
+                                  '',
+                            );
+                          }
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
                   // Belt selection for graduation type
                   if (selectedType == AchievementType.graduation) ...[
                     Text('Faixa Recebida', style: AppTheme.labelMedium),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
                       value: selectedBelt,
+                      isExpanded: true,
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
                         contentPadding: EdgeInsets.symmetric(
@@ -1938,13 +1998,11 @@ class _AdminStudentDetailScreenState
                         ),
                         hintText: 'Selecione a faixa',
                       ),
-                      items: beltOptions
+                      items: grades
                           .map(
-                            (belt) => DropdownMenuItem(
-                              value: belt,
-                              child: Text(
-                                BeltConstants.beltLabels[belt] ?? belt,
-                              ),
+                            (grade) => DropdownMenuItem(
+                              value: grade.id,
+                              child: Text(grade.label),
                             ),
                           )
                           .toList(),
@@ -1960,7 +2018,7 @@ class _AdminStudentDetailScreenState
                     Text('Graus Recebidos', style: AppTheme.labelMedium),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<int>(
-                      value: selectedStripes,
+                      value: selectedStripes.clamp(1, stripeMax),
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
                         contentPadding: EdgeInsets.symmetric(
@@ -1968,7 +2026,7 @@ class _AdminStudentDetailScreenState
                           vertical: 8,
                         ),
                       ),
-                      items: [1, 2, 3, 4]
+                      items: List.generate(stripeMax, (i) => i + 1)
                           .map(
                             (s) => DropdownMenuItem(
                               value: s,
@@ -2076,7 +2134,7 @@ class _AdminStudentDetailScreenState
                     String title;
                     if (selectedType == AchievementType.graduation) {
                       title =
-                          'Graduação para Faixa ${getBeltName(selectedBelt!)}';
+                          'Graduação para Faixa ${getGradeLabel(selectedSport, selectedBelt!)}';
                     } else if (selectedType == AchievementType.stripe) {
                       title = 'Recebeu $selectedStripes grau(s)';
                     } else {

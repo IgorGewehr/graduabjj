@@ -4,9 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
-import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/formatters.dart';
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -47,6 +47,10 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
   String _belt = 'white';
   int _stripes = 0;
   StudentStatus _status = StudentStatus.active;
+  // Esporte primário do aluno: define quais faixas/graus o seletor mostra.
+  // Novos alunos por esta tela são BJJ; ao editar, vem de getPrimarySport().
+  SportId _sport = SportId.bjj;
+  String _muaythaiVariant = muaythaiVariantCbmt;
 
   bool get isEditing => widget.studentId != null;
 
@@ -106,8 +110,15 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
     _birthDate = student.birthDate;
     _startDate = student.startDate;
     _category = student.category;
-    _belt = student.currentBelt;
-    _stripes = student.currentStripes;
+    // Faixa do esporte PRIMÁRIO (não BJJ fixo). getGrade cai em currentBelt
+    // pra BJJ legado; pra outros esportes lê de sportData.
+    _sport = student.getPrimarySport();
+    final grade = student.getGrade(_sport);
+    _belt = grade?.currentGrade ?? student.currentBelt;
+    _stripes = grade?.currentStripes ?? student.currentStripes;
+    if (_sport == SportId.muaythai) {
+      _muaythaiVariant = resolveMuaythaiVariant(_belt);
+    }
     _status = student.status;
   }
 
@@ -159,6 +170,17 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
         studentData['emergencyContact'] = {
           'name': _emergencyContactNameController.text.trim(),
           'phone': onlyDigits(_emergencyContactPhoneController.text),
+        };
+      }
+
+      // Multi-esporte: a faixa autoritativa de um esporte não-BJJ vive em
+      // sportData[esporte]; currentBelt/currentStripes seguem sincronizados ao
+      // primário (mesma convenção do student_form_screen). Atualiza só a entrada
+      // do esporte via dot-path pra não apagar os outros esportes do aluno.
+      if (isEditing && _sport != SportId.bjj) {
+        studentData['sportData.${_sport.value}'] = {
+          'currentGrade': _belt,
+          'currentStripes': _stripes,
         };
       }
 
@@ -339,7 +361,16 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
                   if (value != null) {
                     setState(() {
                       _category = value;
-                      _belt = 'white';
+                      // Volta pra primeira faixa válida do esporte na nova
+                      // categoria (kids/adulto mudam a lista no BJJ).
+                      final list = getGradesForSport(
+                        _sport,
+                        category: value.value,
+                        muaythaiVariant: _sport == SportId.muaythai
+                            ? _muaythaiVariant
+                            : null,
+                      );
+                      _belt = list.isNotEmpty ? list.first.id : 'white';
                       _stripes = 0;
                     });
                   }
@@ -498,90 +529,109 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
           ],
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                value: (_category == StudentCategory.kids
-                        ? BeltConstants.kidsBelts
-                        : BeltConstants.adultBelts)
-                    .contains(_belt)
-                    ? _belt
-                    : 'white',
-                decoration: InputDecoration(
-                  labelText: 'Faixa',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                items: (_category == StudentCategory.kids
-                        ? BeltConstants.kidsBelts
-                        : BeltConstants.adultBelts)
-                    .map((beltKey) {
-                  final label = BeltConstants.beltLabels[beltKey] ?? beltKey;
-                  final color = AppTheme.getBeltColor(beltKey);
-                  final hasStripe = beltKey.contains('-');
-                  final isWhiteStripe = beltKey.endsWith('-white');
+        _buildBeltAndStripesRow(),
+      ],
+    );
+  }
 
-                  return DropdownMenuItem(
-                    value: beltKey,
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 20,
-                          height: 8,
-                          child: Stack(
-                            children: [
-                              Container(
-                                decoration: BoxDecoration(
-                                  color: color,
-                                  borderRadius: BorderRadius.circular(2),
-                                  border: beltKey == 'white'
-                                      ? Border.all(color: AppTheme.divider)
-                                      : null,
-                                ),
-                              ),
-                              if (hasStripe)
-                                Positioned(
-                                  top: 3,
-                                  left: 0,
-                                  right: 0,
-                                  child: Container(
-                                    height: 2,
-                                    color: isWhiteStripe
-                                        ? Colors.white
-                                        : Colors.black,
-                                  ),
-                                ),
-                            ],
+  /// Seletor de faixa + graus do esporte PRIMÁRIO do aluno (sport-aware).
+  /// Mostra os graus daquele esporte (não BJJ fixo) e limita os graus ao
+  /// maxStripes da faixa escolhida. Para Muay Thai usa a variante resolvida da
+  /// faixa atual. Substitui o seletor legado preso ao BeltConstants (BJJ-only).
+  Widget _buildBeltAndStripesRow() {
+    final grades = getGradesForSport(
+      _sport,
+      category: (_category ?? StudentCategory.adult).value,
+      muaythaiVariant: _sport == SportId.muaythai ? _muaythaiVariant : null,
+    );
+    if (grades.isEmpty) return const SizedBox.shrink();
+    final gradeIds = grades.map((g) => g.id).toList();
+    final beltValue = gradeIds.contains(_belt) ? _belt : grades.first.id;
+    final maxStripes = grades.firstWhere((g) => g.id == beltValue).maxStripes;
+    final stripeValue = _stripes.clamp(0, maxStripes);
+
+    return Row(
+      children: [
+        Expanded(
+          child: DropdownButtonFormField<String>(
+            value: beltValue,
+            isExpanded: true,
+            decoration: InputDecoration(
+              labelText: 'Faixa',
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            items: grades.map((grade) {
+              final hasStripe = grade.id.contains('-');
+              final isWhiteStripe = grade.id.endsWith('-white');
+              return DropdownMenuItem(
+                value: grade.id,
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      height: 8,
+                      child: Stack(
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              color: grade.color,
+                              borderRadius: BorderRadius.circular(2),
+                              border: grade.id == 'white'
+                                  ? Border.all(color: AppTheme.divider)
+                                  : null,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(label),
-                      ],
+                          if (hasStripe)
+                            Positioned(
+                              top: 3,
+                              left: 0,
+                              right: 0,
+                              child: Container(
+                                height: 2,
+                                color:
+                                    isWhiteStripe ? Colors.white : Colors.black,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  if (value != null) setState(() => _belt = value);
-                },
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: DropdownButtonFormField<int>(
-                value: _stripes,
-                decoration: InputDecoration(
-                  labelText: 'Graus',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child:
+                          Text(grade.label, overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
                 ),
-                items: List.generate(5, (i) => i).map((s) {
-                  return DropdownMenuItem(value: s, child: Text('$s grau(s)'));
-                }).toList(),
-                onChanged: (value) {
-                  if (value != null) setState(() => _stripes = value);
-                },
-              ),
+              );
+            }).toList(),
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() {
+                _belt = value;
+                // Reajusta os graus ao teto da nova faixa.
+                final m = grades.firstWhere((g) => g.id == value).maxStripes;
+                if (_stripes > m) _stripes = 0;
+              });
+            },
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: DropdownButtonFormField<int>(
+            value: stripeValue,
+            decoration: InputDecoration(
+              labelText: 'Graus',
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
-          ],
+            items: List.generate(maxStripes + 1, (i) => i).map((s) {
+              return DropdownMenuItem(value: s, child: Text('$s grau(s)'));
+            }).toList(),
+            onChanged: (value) {
+              if (value != null) setState(() => _stripes = value);
+            },
+          ),
         ),
       ],
     );
