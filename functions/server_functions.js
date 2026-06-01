@@ -16,8 +16,9 @@
  */
 
 const functions = require('firebase-functions/v1');
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 
 const db = admin.firestore();
 const messaging = admin.messaging();
@@ -1615,3 +1616,471 @@ exports.checkPixStatus = onCall(async (request) => {
     status: statusData.status || 'PENDING',
   };
 });
+
+// ============================================================
+// Mercado Pago — Marketplace / Split (student -> admin receivables)
+//
+// Each academy connects its OWN Mercado Pago account via OAuth. Charges are
+// created on the admin's access_token with application_fee=0, so money settles
+// DIRECTLY into the admin's MP account (0% platform fee, no wallet/float).
+//
+// DISTINCT from the platform paywall MP integration in index.js
+// (createMercadoPagoCheckout / mercadoPagoWebhook = academy -> platform). Do
+// not mix the secrets or webhook names.
+//
+// Required secrets (firebase functions:secrets:set ...):
+//   MP_OAUTH_CLIENT_ID      — the marketplace app's client id (App ID)
+//   MP_OAUTH_CLIENT_SECRET  — the marketplace app's client secret
+//   MP_MKT_WEBHOOK_SECRET   — webhook signature secret for the marketplace app
+// Optional env: MP_OAUTH_REDIRECT — must match the redirect registered in MP
+//   and the deployed mercadoPagoOAuthCallback URL.
+// ============================================================
+const MP_API_BASE = 'https://api.mercadopago.com';
+const MP_MKT_SECRETS = ['MP_OAUTH_CLIENT_ID', 'MP_OAUTH_CLIENT_SECRET'];
+
+function mpOAuthRedirect() {
+  return process.env.MP_OAUTH_REDIRECT ||
+    'https://us-central1-arpjj-76350.cloudfunctions.net/mercadoPagoOAuthCallback';
+}
+
+function mpMktWebhookUrl() {
+  return process.env.MP_MKT_WEBHOOK_URL ||
+    'https://us-central1-arpjj-76350.cloudfunctions.net/mercadoPagoMarketplaceWebhook';
+}
+
+/** HTTP helper for the MP REST API. Throws with .status/.data on non-2xx. */
+async function mpRequest(method, path, { body, token, idempotencyKey } = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (idempotencyKey) headers['X-Idempotency-Key'] = idempotencyKey;
+  const r = await fetch(`${MP_API_BASE}${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const e = new Error(`MP ${method} ${path} -> ${r.status}`);
+    e.status = r.status;
+    e.data = json;
+    throw e;
+  }
+  return json;
+}
+
+/**
+ * Returns a valid access_token for the academy's connected MP account,
+ * refreshing (and PERSISTING the rotated refresh_token — MP rotates it on every
+ * refresh) when the current token is within 5 min of expiry.
+ */
+async function getMpAccessToken(academyId) {
+  const ref = db.doc(`academies/${academyId}/private/mpAuth`);
+  const snap = await ref.get();
+  if (!snap.exists || !snap.data().refreshToken) {
+    throw new HttpsError('failed-precondition', 'Academia não conectou o Mercado Pago.');
+  }
+  const d = snap.data();
+  const expiresAt = d.expiresAt && typeof d.expiresAt.toMillis === 'function'
+    ? d.expiresAt.toMillis() : 0;
+  if (d.accessToken && Date.now() < expiresAt - 5 * 60 * 1000) {
+    return d.accessToken;
+  }
+  const tok = await mpRequest('POST', '/oauth/token', {
+    body: {
+      client_id: process.env.MP_OAUTH_CLIENT_ID,
+      client_secret: process.env.MP_OAUTH_CLIENT_SECRET,
+      grant_type: 'refresh_token',
+      refresh_token: d.refreshToken,
+    },
+  });
+  await ref.set({
+    accessToken: tok.access_token,
+    refreshToken: tok.refresh_token || d.refreshToken,
+    expiresAt: admin.firestore.Timestamp.fromMillis(
+      Date.now() + (Number(tok.expires_in) || 0) * 1000),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return tok.access_token;
+}
+
+/** Ensures the caller is the admin of academyId. Returns userInfo. */
+async function requireAdminOf(request, academyId) {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'User must be authenticated');
+  }
+  const info = await getUserAcademyInfo(request.auth.uid);
+  if (info.academyId !== academyId || info.role !== 'admin') {
+    throw new HttpsError('permission-denied', 'Apenas o admin da academia pode conectar.');
+  }
+  return info;
+}
+
+// ---- OAuth: start connect (admin) ----------------------------------------
+exports.startMercadoPagoConnect = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
+  const academyId = String(request.data?.academyId || '');
+  if (!academyId) throw new HttpsError('invalid-argument', 'academyId é obrigatório.');
+  await requireAdminOf(request, academyId);
+
+  const nonce = crypto.randomBytes(8).toString('hex');
+  await db.doc(`academies/${academyId}/private/mpAuth`).set({
+    oauthNonce: nonce,
+    oauthStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const state = `${academyId}:${nonce}`;
+  const url = 'https://auth.mercadopago.com/authorization' +
+    `?client_id=${encodeURIComponent(process.env.MP_OAUTH_CLIENT_ID)}` +
+    '&response_type=code&platform_id=mp' +
+    `&state=${encodeURIComponent(state)}` +
+    `&redirect_uri=${encodeURIComponent(mpOAuthRedirect())}`;
+  return { url };
+});
+
+// ---- OAuth: callback (exchanges code, stores tokens server-side) ----------
+exports.mercadoPagoOAuthCallback = onRequest({ secrets: MP_MKT_SECRETS }, async (req, res) => {
+  const code = req.query.code;
+  const state = String(req.query.state || '');
+  const [academyId, nonce] = state.split(':');
+  if (!code || !academyId || !nonce) {
+    return res.status(400).send('Parâmetros de conexão inválidos.');
+  }
+  const ref = db.doc(`academies/${academyId}/private/mpAuth`);
+  const snap = await ref.get();
+  if (!snap.exists || snap.data().oauthNonce !== nonce) {
+    return res.status(403).send('Sessão de conexão inválida ou expirada.');
+  }
+  try {
+    const tok = await mpRequest('POST', '/oauth/token', {
+      body: {
+        client_id: process.env.MP_OAUTH_CLIENT_ID,
+        client_secret: process.env.MP_OAUTH_CLIENT_SECRET,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: mpOAuthRedirect(),
+      },
+    });
+    await ref.set({
+      accessToken: tok.access_token,
+      refreshToken: tok.refresh_token,
+      mpUserId: String(tok.user_id || ''),
+      publicKey: tok.public_key || '',
+      liveMode: tok.live_mode === true,
+      expiresAt: admin.firestore.Timestamp.fromMillis(
+        Date.now() + (Number(tok.expires_in) || 0) * 1000),
+      connectedAt: admin.firestore.FieldValue.serverTimestamp(),
+      oauthNonce: admin.firestore.FieldValue.delete(),
+    }, { merge: true });
+    // Public flags on the academy doc + per-academy opt-in: switch off the
+    // legacy gateways so NEW charges route to MP.
+    await db.doc(`academies/${academyId}`).update({
+      mpConnected: true,
+      mpUserId: String(tok.user_id || ''),
+      mpPublicKey: tok.public_key || '',
+      mpLiveMode: tok.live_mode === true,
+      mpConnectedAt: admin.firestore.FieldValue.serverTimestamp(),
+      abacatePayEnabled: false,
+      asaasEnabled: false,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return res.status(200).send(
+      '<html><body style="font-family:sans-serif;text-align:center;padding:40px">' +
+      '<h2>Mercado Pago conectado!</h2>' +
+      '<p>Pode fechar esta janela e voltar ao app.</p></body></html>');
+  } catch (e) {
+    console.error('[mpOAuthCallback] erro', e.message, e.data);
+    return res.status(500).send('Falha ao conectar o Mercado Pago. Tente novamente.');
+  }
+});
+
+// ---- OAuth: disconnect (admin) -------------------------------------------
+exports.disconnectMercadoPago = onCall(async (request) => {
+  const academyId = String(request.data?.academyId || '');
+  if (!academyId) throw new HttpsError('invalid-argument', 'academyId é obrigatório.');
+  await requireAdminOf(request, academyId);
+
+  await db.doc(`academies/${academyId}/private/mpAuth`).delete().catch(() => {});
+  await db.doc(`academies/${academyId}`).update({
+    mpConnected: false,
+    mpUserId: admin.firestore.FieldValue.delete(),
+    mpPublicKey: admin.firestore.FieldValue.delete(),
+    mpLiveMode: admin.firestore.FieldValue.delete(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return { success: true };
+});
+
+/** Shared payer-permission check (self / staff / responsible adult). */
+async function assertCanPayFor(request, academyId, studentId) {
+  const userInfo = await getUserAcademyInfo(request.auth.uid);
+  if (userInfo.academyId !== academyId) {
+    throw new HttpsError('permission-denied', 'Access denied: Invalid academy');
+  }
+  const isStaff = userInfo.role === 'admin' || userInfo.role === 'instructor';
+  if (!isStaff && userInfo.studentId !== studentId) {
+    const stuSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
+    if (!stuSnap.exists || stuSnap.data()?.responsibleUserId !== request.auth.uid) {
+      throw new HttpsError('permission-denied', 'Access denied: Cannot pay for another student');
+    }
+  }
+}
+
+/** Creates a PIX payment on the academy's MP account. transactionAmount is in REAIS. */
+async function createMpPix({ academyId, transactionAmount, description, externalReference, payerEmail }) {
+  const token = await getMpAccessToken(academyId);
+  const payment = await mpRequest('POST', '/v1/payments', {
+    token,
+    idempotencyKey: externalReference,
+    body: {
+      transaction_amount: Number(transactionAmount.toFixed(2)),
+      description: description || 'Pagamento',
+      payment_method_id: 'pix',
+      external_reference: externalReference,
+      notification_url: `${mpMktWebhookUrl()}?acad=${encodeURIComponent(academyId)}`,
+      application_fee: 0,
+      payer: { email: payerEmail || 'sememail@bjjeasy.com.br' },
+    },
+  });
+  const tx = payment.point_of_interaction &&
+    payment.point_of_interaction.transaction_data;
+  return {
+    paymentId: String(payment.id),
+    pixCode: (tx && tx.qr_code) || '',
+    qrCodeBase64: (tx && tx.qr_code_base64) || '',
+  };
+}
+
+// ---- PIX: mensalidade (amount in CENTAVOS, matching createPixPayment) -----
+exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
+  const { academyId, amount, description, financialId, studentId } = request.data || {};
+  if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
+  if (!academyId || !amount || !financialId || !studentId) {
+    throw new HttpsError('invalid-argument', 'Missing required fields');
+  }
+  await assertCanPayFor(request, academyId, studentId);
+  const amountValidation = validateAmount(amount);
+  if (!amountValidation.valid) {
+    throw new HttpsError('invalid-argument', amountValidation.error || 'Invalid amount');
+  }
+
+  const finRef = db.doc(`academies/${academyId}/financials/${financialId}`);
+  const finSnap = await finRef.get();
+  if (!finSnap.exists) throw new HttpsError('not-found', 'Financial record not found');
+  const fin = finSnap.data();
+  if (fin.studentId !== studentId) {
+    throw new HttpsError('permission-denied', 'Financial record does not belong to this student');
+  }
+  if (fin.status === 'paid') {
+    throw new HttpsError('already-exists', 'This payment has already been completed');
+  }
+
+  // Idempotency: reuse a still-valid PIX so the kid and the responsible adult
+  // opening the same charge get the SAME code (no double charge).
+  const existingExpiry = fin.pixExpiresAt && typeof fin.pixExpiresAt.toMillis === 'function'
+    ? fin.pixExpiresAt.toMillis() : 0;
+  if (fin.gatewayPaymentId && fin.pixCode && existingExpiry > Date.now()) {
+    return {
+      pixCode: fin.pixCode,
+      qrCodeUrl: fin.pixQrCode || '',
+      paymentId: fin.gatewayPaymentId,
+      expiresAt: fin.pixExpiresAt.toDate().toISOString(),
+    };
+  }
+
+  const pix = await createMpPix({
+    academyId,
+    transactionAmount: amount / 100, // centavos -> reais
+    description: sanitizeString(description) || 'Mensalidade',
+    externalReference: `${academyId}:fin:${financialId}`,
+  });
+
+  const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000);
+  await finRef.update({
+    pixCode: pix.pixCode || null,
+    pixQrCode: pix.qrCodeBase64 || null,
+    gatewayPaymentId: pix.paymentId,
+    paymentGateway: 'mercadopago',
+    pixExpiresAt: expiresAt,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return {
+    pixCode: pix.pixCode,
+    qrCodeUrl: pix.qrCodeBase64,
+    paymentId: pix.paymentId,
+    expiresAt: expiresAt.toDate().toISOString(),
+  };
+});
+
+// ---- PIX: loja (amount in REAIS, matching createOrderPixPayment) ----------
+exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
+  const { academyId, amount, description, orderId, studentId } = request.data || {};
+  if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
+  if (!academyId || !amount || !orderId || !studentId) {
+    throw new HttpsError('invalid-argument', 'Missing required fields');
+  }
+  await assertCanPayFor(request, academyId, studentId);
+  const amountValidation = validateAmount(amount);
+  if (!amountValidation.valid) {
+    throw new HttpsError('invalid-argument', amountValidation.error || 'Invalid amount');
+  }
+
+  const orderRef = db.doc(`academies/${academyId}/storeOrders/${orderId}`);
+  const orderSnap = await orderRef.get();
+  if (!orderSnap.exists) throw new HttpsError('not-found', 'Order not found');
+  const order = orderSnap.data();
+  if (order.status === 'paid') {
+    throw new HttpsError('already-exists', 'This order has already been paid');
+  }
+
+  const existingExpiry = order.pixExpiresAt && typeof order.pixExpiresAt.toMillis === 'function'
+    ? order.pixExpiresAt.toMillis() : 0;
+  if (order.gatewayPaymentId && order.pixCode && existingExpiry > Date.now()) {
+    return {
+      pixCode: order.pixCode,
+      qrCodeUrl: order.pixQrCode || '',
+      paymentId: order.gatewayPaymentId,
+      expiresAt: order.pixExpiresAt.toDate().toISOString(),
+    };
+  }
+
+  const pix = await createMpPix({
+    academyId,
+    transactionAmount: Number(amount), // already in reais
+    description: sanitizeString(description) || 'Pedido da Loja',
+    externalReference: `${academyId}:order:${orderId}`,
+  });
+
+  const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000);
+  await orderRef.update({
+    pixCode: pix.pixCode || null,
+    pixQrCode: pix.qrCodeBase64 || null,
+    gatewayPaymentId: pix.paymentId,
+    paymentGateway: 'mercadopago',
+    pixExpiresAt: expiresAt,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return {
+    pixCode: pix.pixCode,
+    qrCodeUrl: pix.qrCodeBase64,
+    paymentId: pix.paymentId,
+    expiresAt: expiresAt.toDate().toISOString(),
+  };
+});
+
+/** Parses `${academyId}:fin:${id}` / `${academyId}:order:${id}`. */
+function mpMktParseRef(ref) {
+  const parts = String(ref || '').split(':');
+  if (parts.length < 3) return null;
+  return { academyId: parts[0], type: parts[1], docId: parts.slice(2).join(':') };
+}
+
+// ---- Marketplace webhook (flips financials/storeOrders to paid) -----------
+exports.mercadoPagoMarketplaceWebhook = onRequest(
+  { cors: false, secrets: ['MP_MKT_WEBHOOK_SECRET'] },
+  async (req, res) => {
+    if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+
+    const acad = String(req.query.acad || '');
+    const dataId = String(
+      req.query['data.id'] || (req.query.data && req.query.data.id) ||
+      req.query.id || (req.body && req.body.data && req.body.data.id) || '',
+    );
+
+    // x-signature HMAC validation (same scheme as the paywall webhook).
+    const secret = process.env.MP_MKT_WEBHOOK_SECRET;
+    if (secret) {
+      const xSignature = req.header('x-signature') || '';
+      const xRequestId = req.header('x-request-id') || '';
+      let ts = ''; let v1 = '';
+      for (const part of xSignature.split(',')) {
+        const [k, val] = part.split('=').map((s) => (s || '').trim());
+        if (k === 'ts') ts = val;
+        if (k === 'v1') v1 = val;
+      }
+      const manifest = `id:${dataId.toLowerCase()};request-id:${xRequestId};ts:${ts};`;
+      const expected = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
+      const valid = v1.length === expected.length &&
+        crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(expected));
+      if (!valid) {
+        console.warn('[mpMktWebhook] assinatura inválida');
+        return res.status(401).json({ error: 'invalid signature' });
+      }
+    }
+
+    const type = String(req.query.type || req.query.topic ||
+      (req.body && req.body.type) || '');
+    if (!dataId || !acad || (type && type !== 'payment')) {
+      return res.status(200).json({ received: true, skipped: type || 'no_id' });
+    }
+
+    try {
+      const token = await getMpAccessToken(acad);
+      const payment = await mpRequest('GET', `/v1/payments/${dataId}`, { token });
+      const parsed = mpMktParseRef(payment.external_reference);
+      if (!parsed || parsed.academyId !== acad) {
+        return res.status(200).json({ received: true, skipped: 'ref_mismatch' });
+      }
+      if (payment.status !== 'approved') {
+        return res.status(200).json({ received: true, status: payment.status });
+      }
+      await mpMktSettle(parsed, payment);
+      return res.status(200).json({ success: true });
+    } catch (e) {
+      console.error('[mpMktWebhook] erro', e.message);
+      return res.status(500).json({ error: e.message }); // 500 => MP retries
+    }
+  });
+
+/** Flips the financial/order to paid (idempotent) + stock + admin notify. */
+async function mpMktSettle({ academyId, type, docId }, payment) {
+  const chargeId = String(payment.id);
+  const amtFmt = (Number(payment.transaction_amount) || 0).toFixed(2);
+
+  if (type === 'order') {
+    const orderRef = db.doc(`academies/${academyId}/storeOrders/${docId}`);
+    const snap = await orderRef.get();
+    if (!snap.exists || snap.data().status === 'paid') return; // idempotent
+    await orderRef.update({
+      status: 'paid',
+      paidAt: admin.firestore.FieldValue.serverTimestamp(),
+      paymentMethod: 'pix',
+      paymentGateway: 'mercadopago',
+      gatewayPaymentId: chargeId,
+      externalPaymentId: chargeId,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    const items = snap.data().items;
+    if (Array.isArray(items)) {
+      for (const item of items) {
+        const productRef = db.doc(`academies/${academyId}/storeProducts/${item.productId}`);
+        const p = await productRef.get();
+        if (p.exists && p.data()?.stockType === 'in_stock') {
+          await productRef.update({
+            stockQuantity: admin.firestore.FieldValue.increment(-item.quantity),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    }
+    const code = docId.slice(-6).toUpperCase();
+    await notifyAdminCF(academyId, 'order_paid', 'Pedido Pago',
+      `Pedido #${code} pago - R$ ${amtFmt} via PIX.`, { orderId: docId });
+    return;
+  }
+
+  // mensalidade / financial
+  const finRef = db.doc(`academies/${academyId}/financials/${docId}`);
+  const snap = await finRef.get();
+  if (!snap.exists || snap.data().status === 'paid') return; // idempotent
+  await finRef.update({
+    status: 'paid',
+    paymentDate: admin.firestore.FieldValue.serverTimestamp(),
+    method: 'pix',
+    paymentGateway: 'mercadopago',
+    gatewayPaymentId: chargeId,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  await notifyAdminCF(academyId, 'payment_received', 'Pagamento Recebido',
+    `Pagamento de R$ ${amtFmt} recebido via PIX.`, { financialId: docId });
+}

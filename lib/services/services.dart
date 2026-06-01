@@ -22,6 +22,7 @@ export 'push_notification_service.dart';
 export 'store_service.dart';
 export 'abacate_pay_service.dart';
 export 'asaas_payment_service.dart';
+export 'mercado_pago_service.dart';
 export 'totp_service.dart';
 export 'cross_academy_service.dart';
 export 'billing_reminder_service.dart';

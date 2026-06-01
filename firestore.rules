@@ -585,6 +585,16 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Private server-only store (Mercado Pago OAuth tokens, etc.)
+      // CRITICAL: holds the admin's MP access/refresh tokens — clients must
+      // NEVER read or write. Only Cloud Functions (Admin SDK) touch it.
+      // ============================================
+      match /private/{docId} {
+        allow read: if false;
+        allow write: if false;
+      }
+
+      // ============================================
       // Wallet Transactions (CRITICAL - Money)
       // ============================================
       match /walletTransactions/{transactionId} {

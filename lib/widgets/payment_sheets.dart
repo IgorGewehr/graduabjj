@@ -10,6 +10,7 @@ import '../core/theme.dart';
 import '../services/firebase_service.dart';
 import '../services/abacate_pay_service.dart';
 import '../services/asaas_payment_service.dart';
+import '../services/mercado_pago_service.dart';
 
 // ============================================
 // Modern PIX Payment Bottom Sheet
@@ -824,6 +825,16 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
     final academyId = FirebaseService.academyId;
 
     try {
+      // Mercado Pago is PIX-only: card is unavailable for MP academies.
+      if (await MercadoPagoService(academyId).isEnabled()) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage =
+              'Pagamento com cartão indisponível. Pague via PIX.';
+        });
+        return;
+      }
+
       final expParts = _expirationController.text.split('/');
       final cardData = CardData(
         cardNumber: _cardNumberController.text,

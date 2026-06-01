@@ -63,6 +63,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   PixKeyType? _pixKeyType;
   bool _abacatePayEnabled = false;
   bool _asaasEnabled = false;
+  bool _mpConnected = false;
+  bool _mpBusy = false;
   bool _storeEnabled = false;
   bool _storePublished = false;
   bool _storeCreditCardEnabled = false;
@@ -222,6 +224,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _pixKeyType = settings.pixKeyType;
           _abacatePayEnabled = settings.abacatePayEnabled;
           _asaasEnabled = settings.asaasEnabled;
+          _mpConnected = settings.mpConnected;
           _storeEnabled = settings.storeEnabled;
           _storePublished = settings.storePublished;
           _storeCreditCardEnabled = settings.storeCreditCardEnabled;
@@ -974,44 +977,155 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           const SizedBox(height: 16),
 
-          // AbacatePay Integration
-          _SettingsCard(
-            title: 'Integracoes',
-            icon: LucideIcons.plug,
-            child: Column(
-              children: [
-                _ModernSwitch(
-                  title: 'AbacatePay',
-                  subtitle: 'Cobranca automatica via PIX',
-                  value: _abacatePayEnabled,
-                  onChanged: (value) {
-                    setState(() => _abacatePayEnabled = value);
-                  },
-                  icon: LucideIcons.zap,
-                  iconColor: Colors.green,
-                ),
-                const SizedBox(height: 12),
-                _ModernSwitch(
-                  title: 'Asaas',
-                  subtitle: 'Pagamentos via PIX e cartao (subconta)',
-                  value: false,
-                  onChanged: null,
-                  icon: LucideIcons.creditCard,
-                  iconColor: Colors.grey,
-                  disabled: true,
-                ),
-              ],
-            ),
-          ),
+          // Mercado Pago (recebimentos do admin via PIX, direto na conta dele)
+          _buildMercadoPagoCard(),
 
-          // KYC Section - only when Asaas is enabled
-          if (_asaasEnabled) ...[
+          // AbacatePay legado — só enquanto a academia não conectou o MP.
+          if (!_mpConnected) ...[
             const SizedBox(height: 16),
-            _buildKycSection(),
+            _SettingsCard(
+              title: 'AbacatePay (legado)',
+              icon: LucideIcons.plug,
+              child: _ModernSwitch(
+                title: 'AbacatePay',
+                subtitle: 'Cobranca via PIX (sera substituido pelo Mercado Pago)',
+                value: _abacatePayEnabled,
+                onChanged: (value) {
+                  setState(() => _abacatePayEnabled = value);
+                },
+                icon: LucideIcons.zap,
+                iconColor: Colors.green,
+              ),
+            ),
           ],
         ],
       ),
     );
+  }
+
+  Widget _buildMercadoPagoCard() {
+    return _SettingsCard(
+      title: 'Mercado Pago',
+      icon: LucideIcons.creditCard,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _mpConnected
+                ? 'Conta conectada. Os pagamentos PIX dos alunos caem direto na sua conta do Mercado Pago (sem taxa da plataforma).'
+                : 'Conecte sua conta do Mercado Pago para receber as mensalidades e pedidos da loja via PIX, direto na sua conta (sem taxa da plataforma).',
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 16),
+          if (_mpConnected)
+            Row(
+              children: [
+                Icon(LucideIcons.checkCircle, size: 18, color: AppTheme.success),
+                const SizedBox(width: 8),
+                Text(
+                  'Conectado',
+                  style: AppTheme.titleSmall.copyWith(
+                    color: AppTheme.success,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: _mpBusy ? null : _disconnectMercadoPago,
+                  child: const Text('Desconectar'),
+                ),
+              ],
+            )
+          else
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _mpBusy ? null : _connectMercadoPago,
+                icon: _mpBusy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(LucideIcons.link, size: 18),
+                label: Text(_mpBusy ? 'Conectando...' : 'Conectar Mercado Pago'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _connectMercadoPago() async {
+    setState(() => _mpBusy = true);
+    try {
+      final service = MercadoPagoService(FirebaseService.academyId);
+      final url = await service.startConnect();
+      if (url == null || url.isEmpty) {
+        if (mounted) context.showError('Nao foi possivel iniciar a conexao.');
+        return;
+      }
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+
+      // Poll the academy doc for ~90s waiting for the OAuth callback to land.
+      final settingsService = SettingsService(FirebaseService.academyId);
+      for (var i = 0; i < 30; i++) {
+        await Future.delayed(const Duration(seconds: 3));
+        if (!mounted) return;
+        final s = await settingsService.getAcademySettings();
+        if (s != null && s.mpConnected) {
+          setState(() {
+            _mpConnected = true;
+            _abacatePayEnabled = false;
+            _asaasEnabled = false;
+          });
+          context.showSuccess('Mercado Pago conectado!');
+          return;
+        }
+      }
+      if (mounted) {
+        context.showInfo('Conclua a conexao no navegador e volte ao app.');
+      }
+    } catch (e) {
+      if (mounted) context.showError('Erro ao conectar: $e');
+    } finally {
+      if (mounted) setState(() => _mpBusy = false);
+    }
+  }
+
+  Future<void> _disconnectMercadoPago() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Desconectar Mercado Pago'),
+        content: const Text(
+          'Os alunos nao poderao mais pagar via Mercado Pago ate reconectar. Continuar?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Desconectar'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    setState(() => _mpBusy = true);
+    try {
+      final ok = await MercadoPagoService(FirebaseService.academyId).disconnect();
+      if (mounted && ok) {
+        setState(() => _mpConnected = false);
+        context.showSuccess('Mercado Pago desconectado.');
+      } else if (mounted) {
+        context.showError('Falha ao desconectar.');
+      }
+    } finally {
+      if (mounted) setState(() => _mpBusy = false);
+    }
   }
 
   Widget _buildKycSection() {

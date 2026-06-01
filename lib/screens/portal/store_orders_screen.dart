@@ -14,6 +14,7 @@ import '../../core/theme.dart';
 import '../../services/store_service.dart';
 import '../../services/abacate_pay_service.dart';
 import '../../services/asaas_payment_service.dart';
+import '../../services/mercado_pago_service.dart';
 import '../../services/firebase_service.dart';
 import '../../providers/store_provider.dart';
 import '../../providers/auth_provider.dart';
@@ -624,29 +625,38 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
     setState(() => _isLoadingPayment = true);
 
     try {
-      // Check which provider is active
+      final desc =
+          'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}';
+      final studentId = currentUser.studentId ?? '';
+
+      // Gateway precedence: Mercado Pago (connected) > Asaas > AbacatePay.
+      final mp = MercadoPagoService(academyId);
       final asaasService = AsaasPaymentService(academyId);
-      final isAsaas = await asaasService.isEnabled();
 
       PaymentLink? paymentLink;
-      if (isAsaas) {
+      if (await mp.isEnabled()) {
+        paymentLink = await mp.createStoreOrderPayment(
+          amount: widget.order.total,
+          orderId: widget.order.id,
+          studentId: studentId,
+          studentName: currentUser.displayName,
+          description: desc,
+        );
+      } else if (await asaasService.isEnabled()) {
         paymentLink = await asaasService.createStoreOrderPayment(
           amount: widget.order.total,
           orderId: widget.order.id,
-          studentId: currentUser.studentId ?? '',
+          studentId: studentId,
           studentName: currentUser.displayName,
-          description:
-              'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}',
+          description: desc,
         );
       } else {
-        final service = AbacatePayService(academyId);
-        paymentLink = await service.createStoreOrderPayment(
+        paymentLink = await AbacatePayService(academyId).createStoreOrderPayment(
           amount: widget.order.total,
           orderId: widget.order.id,
-          studentId: currentUser.studentId ?? '',
+          studentId: studentId,
           studentName: currentUser.displayName,
-          description:
-              'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}',
+          description: desc,
         );
       }
 
@@ -1768,6 +1778,15 @@ class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
         cvv: _cvvController.text,
         cpf: _cpfController.text,
       );
+
+      // Mercado Pago is PIX-only: card is unavailable for MP academies.
+      if (await MercadoPagoService(academyId).isEnabled()) {
+        if (mounted) {
+          context.showError(
+              'Pagamento com cartão indisponível. Pague via PIX.');
+        }
+        return;
+      }
 
       // Check which provider is active
       final asaasService = AsaasPaymentService(academyId);

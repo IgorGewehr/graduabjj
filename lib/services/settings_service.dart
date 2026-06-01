@@ -149,6 +149,10 @@ class AcademySettings {
   final String? asaasKycStatus; // 'not_checked', 'pending_upload', 'pending_review', 'approved', 'rejected', 'onboarding_url'
   final String? asaasKycOnboardingUrl;
 
+  // Mercado Pago marketplace/split — admin's own connected MP account.
+  final bool mpConnected;
+  final String? mpPublicKey;
+
   // Auto-graduation Settings
   /// Master toggle for the entire attendance-based graduation feature.
   /// When false: the Graduation tab disappears from admin nav, the student
@@ -225,6 +229,8 @@ class AcademySettings {
     this.asaasOnboardingStatus,
     this.asaasKycStatus,
     this.asaasKycOnboardingUrl,
+    this.mpConnected = false,
+    this.mpPublicKey,
     this.autoGraduationEnabled = false,
     this.autoGraduationAttendances,
     this.graduationRequirementsBySport = const {},
@@ -289,6 +295,8 @@ class AcademySettings {
       asaasOnboardingStatus: data['asaasOnboardingStatus'],
       asaasKycStatus: data['asaasKycStatus'],
       asaasKycOnboardingUrl: data['asaasKycOnboardingUrl'],
+      mpConnected: data['mpConnected'] ?? false,
+      mpPublicKey: data['mpPublicKey'],
       autoGraduationEnabled: data['autoGraduationEnabled'] ?? false,
       autoGraduationAttendances: data['autoGraduationAttendances'],
       graduationRequirementsBySport:
@@ -335,8 +343,8 @@ class AcademySettings {
     return (n != null && n > 0) ? n : null;
   }
 
-  /// Whether any payment provider is enabled (AbacatePay or Asaas)
-  bool get isPaymentEnabled => abacatePayEnabled || asaasEnabled;
+  /// Whether any payment provider is enabled (Mercado Pago, AbacatePay or Asaas)
+  bool get isPaymentEnabled => mpConnected || abacatePayEnabled || asaasEnabled;
 
   /// Whether musculação students record their own attendance (vs. staff doing
   /// it manually). Both 'qr' and 'button' modes go through the selfCheckin

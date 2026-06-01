@@ -290,6 +290,14 @@ class Academy {
   final bool asaasEnabled;
   final String? asaasOnboardingStatus; // 'pending', 'approved', 'rejected'
 
+  // Mercado Pago marketplace/split — admin connects their OWN MP account via
+  // OAuth; charges settle directly into it (0% platform fee). Secret tokens
+  // live server-side in academies/{id}/private/mpAuth (never client-readable).
+  final bool mpConnected;
+  final String? mpUserId;
+  final String? mpPublicKey;
+  final DateTime? mpConnectedAt;
+
   // Auto-graduation Settings
   final bool autoGraduationEnabled;
   final int? autoGraduationAttendances;
@@ -338,6 +346,10 @@ class Academy {
     this.abacatePayEnabled = false,
     this.asaasEnabled = false,
     this.asaasOnboardingStatus,
+    this.mpConnected = false,
+    this.mpUserId,
+    this.mpPublicKey,
+    this.mpConnectedAt,
     this.autoGraduationEnabled = false,
     this.autoGraduationAttendances,
     this.storeEnabled = false,
@@ -384,6 +396,10 @@ class Academy {
       abacatePayEnabled: data['abacatePayEnabled'] ?? false,
       asaasEnabled: data['asaasEnabled'] ?? false,
       asaasOnboardingStatus: data['asaasOnboardingStatus'],
+      mpConnected: data['mpConnected'] ?? false,
+      mpUserId: data['mpUserId'],
+      mpPublicKey: data['mpPublicKey'],
+      mpConnectedAt: (data['mpConnectedAt'] as Timestamp?)?.toDate(),
       autoGraduationEnabled: data['autoGraduationEnabled'] ?? false,
       autoGraduationAttendances: data['autoGraduationAttendances'],
       storeEnabled: data['storeEnabled'] ?? false,
@@ -429,6 +445,10 @@ class Academy {
       'abacatePayEnabled': abacatePayEnabled,
       'asaasEnabled': asaasEnabled,
       'asaasOnboardingStatus': asaasOnboardingStatus,
+      'mpConnected': mpConnected,
+      'mpUserId': mpUserId,
+      'mpPublicKey': mpPublicKey,
+      'mpConnectedAt': mpConnectedAt,
       'autoGraduationEnabled': autoGraduationEnabled,
       'autoGraduationAttendances': autoGraduationAttendances,
       'storeEnabled': storeEnabled,
@@ -476,6 +496,10 @@ class Academy {
     bool? abacatePayEnabled,
     bool? asaasEnabled,
     String? asaasOnboardingStatus,
+    bool? mpConnected,
+    String? mpUserId,
+    String? mpPublicKey,
+    DateTime? mpConnectedAt,
     bool? autoGraduationEnabled,
     int? autoGraduationAttendances,
     bool? storeEnabled,
@@ -511,6 +535,10 @@ class Academy {
       abacatePayEnabled: abacatePayEnabled ?? this.abacatePayEnabled,
       asaasEnabled: asaasEnabled ?? this.asaasEnabled,
       asaasOnboardingStatus: asaasOnboardingStatus ?? this.asaasOnboardingStatus,
+      mpConnected: mpConnected ?? this.mpConnected,
+      mpUserId: mpUserId ?? this.mpUserId,
+      mpPublicKey: mpPublicKey ?? this.mpPublicKey,
+      mpConnectedAt: mpConnectedAt ?? this.mpConnectedAt,
       autoGraduationEnabled: autoGraduationEnabled ?? this.autoGraduationEnabled,
       autoGraduationAttendances: autoGraduationAttendances ?? this.autoGraduationAttendances,
       storeEnabled: storeEnabled ?? this.storeEnabled,

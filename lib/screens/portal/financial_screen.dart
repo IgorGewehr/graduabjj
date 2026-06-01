@@ -16,12 +16,15 @@ import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import '../../services/abacate_pay_service.dart';
 import '../../services/asaas_payment_service.dart';
+import '../../services/mercado_pago_service.dart';
 import '../../models/student.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
-/// Payment enabled provider (either AbacatePay or Asaas)
+/// PIX payment enabled provider (Mercado Pago, AbacatePay or Asaas).
 final abacatePayEnabledProvider = FutureProvider<bool>((ref) async {
   final academyId = FirebaseService.academyId;
+
+  if (await MercadoPagoService(academyId).isEnabled()) return true;
 
   final service = AbacatePayService(academyId);
   final abacateEnabled = await service.isEnabled();
@@ -1074,31 +1077,37 @@ class _PixPaymentBottomSheetState
     final academyId = FirebaseService.academyId;
 
     try {
-      // Check which provider is active
+      final description = widget.payment.description ??
+          'Mensalidade - ${widget.payment.referenceMonth ?? ''}';
+
+      // Gateway precedence: Mercado Pago (connected) > Asaas > AbacatePay.
+      final mp = MercadoPagoService(academyId);
       final asaasService = AsaasPaymentService(academyId);
-      final isAsaas = await asaasService.isEnabled();
 
       PaymentLink? link;
-      if (isAsaas) {
+      if (await mp.isEnabled()) {
+        link = await mp.createPixPayment(
+          amount: widget.payment.value,
+          financialId: widget.payment.id,
+          studentId: widget.payment.studentId,
+          studentName: widget.studentName,
+          description: description,
+        );
+      } else if (await asaasService.isEnabled()) {
         link = await asaasService.createPixPayment(
           amount: widget.payment.value,
           financialId: widget.payment.id,
           studentId: widget.payment.studentId,
           studentName: widget.studentName,
-          description:
-              widget.payment.description ??
-              'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
+          description: description,
         );
       } else {
-        final service = AbacatePayService(academyId);
-        link = await service.createPixPayment(
+        link = await AbacatePayService(academyId).createPixPayment(
           amount: widget.payment.value,
           financialId: widget.payment.id,
           studentId: widget.payment.studentId,
           studentName: widget.studentName,
-          description:
-              widget.payment.description ??
-              'Mensalidade - ${widget.payment.referenceMonth ?? ''}',
+          description: description,
         );
       }
 
