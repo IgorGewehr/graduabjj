@@ -1021,7 +1021,7 @@ class _PromotionHistoryCard extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: _getBeltColor(promotion.newBelt),
+              color: _getBeltColor(promotion.newBelt, sportId: promotion.getSport()),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
@@ -1037,7 +1037,7 @@ class _PromotionHistoryCard extends StatelessWidget {
               children: [
                 Text(
                   promotion.isBeltChange
-                      ? 'Faixa ${_getBeltLabel(promotion.newBelt)}'
+                      ? 'Faixa ${_getBeltLabel(promotion.newBelt, sportId: promotion.getSport())}'
                       : '${promotion.newStripes}° Grau',
                   style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
                 ),
@@ -1064,12 +1064,12 @@ class _PromotionHistoryCard extends StatelessWidget {
     );
   }
 
-  String _getBeltLabel(String belt) {
-    return getGradeLabel(SportId.bjj, belt);
+  String _getBeltLabel(String belt, {SportId sportId = SportId.bjj}) {
+    return getGradeLabel(sportId, belt);
   }
 
-  Color _getBeltColor(String belt) {
-    return getGradeColor(SportId.bjj, belt);
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) {
+    return getGradeColor(sportId, belt);
   }
 }
 

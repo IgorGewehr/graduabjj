@@ -26,6 +26,8 @@ class _TimelineEvent {
   final String? belt;
   final int? stripes;
   final String? academyName;
+  /// Modalidade do evento (define cor/label da faixa). Default BJJ.
+  final SportId sportId;
 
   _TimelineEvent({
     required this.id,
@@ -37,6 +39,7 @@ class _TimelineEvent {
     this.belt,
     this.stripes,
     this.academyName,
+    this.sportId = SportId.bjj,
   });
 }
 
@@ -170,6 +173,7 @@ class TimelineScreen extends ConsumerWidget {
         description: 'Primeiro treino na academia',
         belt: 'white',
         academyName: academyName,
+        sportId: student.getPrimarySport(),
       ),
     );
 
@@ -189,6 +193,7 @@ class TimelineScreen extends ConsumerWidget {
           belt: p.newBelt,
           stripes: p.newStripes,
           academyName: academyName,
+          sportId: p.getSport(),
         ),
       );
     }
@@ -413,21 +418,8 @@ class _JourneyCardState extends State<_JourneyCard> {
     }
   }
 
-  Color _getBeltDisplayColor(String belt) {
-    const colors = {
-      'white': Color(0xFF6B7280),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-      'grey': Color(0xFF6B7280),
-      'yellow': Color(0xFFF59E0B),
-      'orange': Color(0xFFF97316),
-      'green': Color(0xFF22C55E),
-    };
-    final baseBelt = belt.split('-').first;
-    return colors[baseBelt] ?? const Color(0xFF6B7280);
-  }
+  Color _getBeltDisplayColor(String belt, {SportId sportId = SportId.bjj}) =>
+      getGradeColor(sportId, belt);
 
   @override
   Widget build(BuildContext context) {
@@ -436,7 +428,7 @@ class _JourneyCardState extends State<_JourneyCard> {
         widget.medalCountAsync.valueOrNull ??
         {'gold': 0, 'silver': 0, 'bronze': 0, 'total': 0};
     final competitions = widget.competitionsAsync.valueOrNull ?? [];
-    final beltColor = _getBeltDisplayColor(widget.student.currentBelt);
+    final beltColor = _getBeltDisplayColor(widget.student.currentBelt, sportId: widget.student.getPrimarySport());
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -679,26 +671,13 @@ class _TimelineItem extends StatelessWidget {
 
   const _TimelineItem({required this.event, required this.isLast});
 
-  Color _getBeltColor(String belt) {
-    const colors = {
-      'white': Color(0xFF6B7280),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-      'grey': Color(0xFF6B7280),
-      'yellow': Color(0xFFF59E0B),
-      'orange': Color(0xFFF97316),
-      'green': Color(0xFF22C55E),
-    };
-    final baseBelt = belt.split('-').first;
-    return colors[baseBelt] ?? const Color(0xFF6B7280);
-  }
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) =>
+      getGradeColor(sportId, belt);
 
   _EventConfig _getEventConfig(TimelineEventType type, String? belt) {
     switch (type) {
       case TimelineEventType.graduation:
-        final beltColor = _getBeltColor(belt ?? 'white');
+        final beltColor = _getBeltColor(belt ?? 'white', sportId: event.sportId);
         return _EventConfig(
           icon: LucideIcons.award,
           color: beltColor,
@@ -830,7 +809,7 @@ class _TimelineItem extends StatelessWidget {
                   if (event.type == TimelineEventType.graduation &&
                       event.belt != null) ...[
                     const SizedBox(height: 12),
-                    _BeltIndicator(belt: event.belt!),
+                    _BeltIndicator(belt: event.belt!, sportId: event.sportId),
                   ],
 
                   // Position badge for competitions
@@ -953,29 +932,17 @@ class _TypeChip extends StatelessWidget {
 /// Belt Indicator
 class _BeltIndicator extends StatelessWidget {
   final String belt;
+  final SportId sportId;
 
-  const _BeltIndicator({required this.belt});
+  const _BeltIndicator({required this.belt, this.sportId = SportId.bjj});
 
-  Color _getBeltColor(String belt) {
-    const colors = {
-      'white': Color(0xFF9CA3AF),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-      'grey': Color(0xFF6B7280),
-      'yellow': Color(0xFFF59E0B),
-      'orange': Color(0xFFF97316),
-      'green': Color(0xFF22C55E),
-    };
-    final baseBelt = belt.split('-').first;
-    return colors[baseBelt] ?? const Color(0xFF6B7280);
-  }
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) =>
+      getGradeColor(sportId, belt);
 
   @override
   Widget build(BuildContext context) {
-    final beltColor = _getBeltColor(belt);
-    final beltLabel = getGradeLabel(SportId.bjj, belt);
+    final beltColor = _getBeltColor(belt, sportId: sportId);
+    final beltLabel = getGradeLabel(sportId, belt);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
