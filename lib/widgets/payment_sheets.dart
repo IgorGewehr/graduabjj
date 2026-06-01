@@ -6,7 +6,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import 'package:confetti/confetti.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+
 import '../core/theme.dart';
+import '../core/validators.dart';
 import '../services/firebase_service.dart';
 import '../services/abacate_pay_service.dart';
 import '../services/asaas_payment_service.dart';
@@ -620,15 +624,63 @@ class _InstructionStep extends StatelessWidget {
 // ============================================
 // Success Dialog
 // ============================================
-class _SuccessDialog extends StatelessWidget {
+class _SuccessDialog extends StatefulWidget {
   final VoidCallback onClose;
 
   const _SuccessDialog({required this.onClose});
 
   @override
+  State<_SuccessDialog> createState() => _SuccessDialogState();
+}
+
+class _SuccessDialogState extends State<_SuccessDialog> {
+  late final ConfettiController _confetti;
+
+  @override
+  void initState() {
+    super.initState();
+    _confetti =
+        ConfettiController(duration: const Duration(seconds: 3))..play();
+  }
+
+  @override
+  void dispose() {
+    _confetti.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Container(
+    return Stack(
+      alignment: Alignment.topCenter,
+      children: [
+        Center(
+          child: _buildCard(context),
+        ),
+        ConfettiWidget(
+          confettiController: _confetti,
+          blastDirectionality: BlastDirectionality.explosive,
+          shouldLoop: false,
+          maxBlastForce: 20,
+          minBlastForce: 8,
+          emissionFrequency: 0.05,
+          numberOfParticles: 28,
+          gravity: 0.15,
+          colors: const [
+            AppTheme.primary,
+            AppTheme.success,
+            AppTheme.warning,
+            Color(0xFF7C3AED),
+            Color(0xFFEC4899),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCard(BuildContext context) {
+    final onClose = widget.onClose;
+    return Container(
         margin: const EdgeInsets.all(32),
         padding: const EdgeInsets.all(32),
         decoration: BoxDecoration(
@@ -720,8 +772,7 @@ class _SuccessDialog extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
+      );
   }
 }
 
@@ -774,6 +825,43 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
     _cvvController.dispose();
     _cpfController.dispose();
     super.dispose();
+  }
+
+  /// Colored brand pill shown as the card-number field suffix.
+  Widget _brandPill(String brand) {
+    const colors = {
+      'visa': Color(0xFF1A1F71),
+      'mastercard': Color(0xFFEB001B),
+      'amex': Color(0xFF2E77BC),
+      'elo': Color(0xFF111111),
+    };
+    final label = {
+      'visa': 'VISA',
+      'mastercard': 'MASTER',
+      'amex': 'AMEX',
+      'elo': 'ELO',
+    }[brand] ?? brand.toUpperCase();
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: colors[brand] ?? AppTheme.textSecondary,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ),
+    ).animate(key: ValueKey(brand)).fadeIn(duration: 200.ms).scaleXY(begin: 0.7);
   }
 
   String _detectCardBrand(String number) {
@@ -1095,12 +1183,8 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                     }
                     setState(() => _cardBrand = _detectCardBrand(formatted));
                   },
-                  validator: (value) {
-                    if (value == null || value.replaceAll(' ', '').length < 16) {
-                      return 'Numero invalido';
-                    }
-                    return null;
-                  },
+                  validator: Validators.cardNumber,
+                  suffix: _cardBrand.isEmpty ? null : _brandPill(_cardBrand),
                 ),
                 const SizedBox(height: 16),
 
@@ -1139,12 +1223,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                             );
                           }
                         },
-                        validator: (value) {
-                          if (value == null || !value.contains('/') || value.length < 5) {
-                            return 'Invalido';
-                          }
-                          return null;
-                        },
+                        validator: Validators.cardExpiration,
                       ),
                     ),
                     const SizedBox(width: 16),
@@ -1157,12 +1236,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                         keyboardType: TextInputType.number,
                         obscureText: true,
                         maxLength: 4,
-                        validator: (value) {
-                          if (value == null || value.length < 3) {
-                            return 'Invalido';
-                          }
-                          return null;
-                        },
+                        validator: Validators.cvv,
                       ),
                     ),
                   ],
@@ -1185,12 +1259,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                       );
                     }
                   },
-                  validator: (value) {
-                    if (value == null || value.replaceAll(RegExp(r'\D'), '').length < 11) {
-                      return 'CPF invalido';
-                    }
-                    return null;
-                  },
+                  validator: Validators.cpf,
                 ),
                 const SizedBox(height: 28),
 
@@ -1372,6 +1441,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
     TextCapitalization textCapitalization = TextCapitalization.none,
     void Function(String)? onChanged,
     String? Function(String?)? validator,
+    Widget? suffix,
   }) {
     return TextFormField(
       controller: controller,
@@ -1379,6 +1449,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
         labelText: label,
         hintText: hint,
         prefixIcon: Icon(icon, size: 20),
+        suffixIcon: suffix,
         filled: true,
         fillColor: AppTheme.surfaceVariant,
         border: OutlineInputBorder(
