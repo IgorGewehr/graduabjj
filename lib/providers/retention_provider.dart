@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/student.dart';
 import '../services/firebase_service.dart';
 import '../services/retention_service.dart';
 import '../services/student_service.dart';

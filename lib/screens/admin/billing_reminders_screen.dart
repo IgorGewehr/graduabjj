@@ -671,8 +671,6 @@ class _AdminBillingRemindersScreenState
     final amount = (financialItem['amount'] as num?)?.toDouble() ?? 0;
     final dueDate = financialItem['dueDate'] as DateTime;
     final daysOverdue = financialItem['daysOverdue'] as int? ?? 0;
-    final financialId = financialItem['id'] as String? ?? '';
-    final studentId = financialItem['studentId'] as String? ?? '';
 
     String message;
     String subject = '';
