@@ -11,6 +11,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 
 import '../core/theme.dart';
 import '../core/validators.dart';
+import 'card_formatters.dart';
 import '../services/firebase_service.dart';
 import '../services/abacate_pay_service.dart';
 import '../services/asaas_payment_service.dart';
@@ -816,6 +817,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
   bool _isLoading = false;
   String? _errorMessage;
   String _cardBrand = '';
+  int _installments = 1;
 
   @override
   void dispose() {
@@ -825,6 +827,40 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
     _cvvController.dispose();
     _cpfController.dispose();
     super.dispose();
+  }
+
+  /// Installments chips (1x–6x). Applied to the Mercado Pago card charge.
+  Widget _buildInstallmentsSelector() {
+    final perInstallment = widget.amount / _installments;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Parcelas',
+          style: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: List.generate(6, (i) {
+            final n = i + 1;
+            final selected = _installments == n;
+            return ChoiceChip(
+              label: Text(n == 1 ? 'A vista' : '${n}x'),
+              selected: selected,
+              onSelected: (_) => setState(() => _installments = n),
+            );
+          }),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _installments == 1
+              ? 'Pagamento a vista'
+              : '$_installments x de R\$ ${perInstallment.toStringAsFixed(2)}',
+          style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+        ),
+      ],
+    );
   }
 
   /// Colored brand pill shown as the card-number field suffix.
@@ -873,34 +909,6 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
     return '';
   }
 
-  String _formatCardNumber(String value) {
-    final digitsOnly = value.replaceAll(RegExp(r'\D'), '');
-    final buffer = StringBuffer();
-    for (int i = 0; i < digitsOnly.length && i < 16; i++) {
-      if (i > 0 && i % 4 == 0) buffer.write(' ');
-      buffer.write(digitsOnly[i]);
-    }
-    return buffer.toString();
-  }
-
-  String _formatExpiration(String value) {
-    final digitsOnly = value.replaceAll(RegExp(r'\D'), '');
-    if (digitsOnly.length >= 2) {
-      return '${digitsOnly.substring(0, 2)}/${digitsOnly.substring(2, digitsOnly.length.clamp(2, 4))}';
-    }
-    return digitsOnly;
-  }
-
-  String _formatCpf(String value) {
-    final digitsOnly = value.replaceAll(RegExp(r'\D'), '');
-    final buffer = StringBuffer();
-    for (int i = 0; i < digitsOnly.length && i < 11; i++) {
-      if (i == 3 || i == 6) buffer.write('.');
-      if (i == 9) buffer.write('-');
-      buffer.write(digitsOnly[i]);
-    }
-    return buffer.toString();
-  }
 
   Future<void> _handlePayment() async {
     if (!_formKey.currentState!.validate()) return;
@@ -939,6 +947,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             studentName: widget.studentName,
             cardData: cardData,
             description: widget.description,
+            installments: _installments,
           );
         } else if (isAsaas) {
           result = await asaasService.createStoreOrderCardPayment(
@@ -968,6 +977,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             studentName: widget.studentName,
             cardData: cardData,
             description: widget.description,
+            installments: _installments,
           );
         } else if (isAsaas) {
           result = await asaasService.createCardPayment(
@@ -1173,16 +1183,9 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                   hint: '0000 0000 0000 0000',
                   icon: LucideIcons.creditCard,
                   keyboardType: TextInputType.number,
-                  onChanged: (value) {
-                    final formatted = _formatCardNumber(value);
-                    if (formatted != value) {
-                      _cardNumberController.value = TextEditingValue(
-                        text: formatted,
-                        selection: TextSelection.collapsed(offset: formatted.length),
-                      );
-                    }
-                    setState(() => _cardBrand = _detectCardBrand(formatted));
-                  },
+                  inputFormatters: [CardNumberFormatter()],
+                  onChanged: (value) =>
+                      setState(() => _cardBrand = _detectCardBrand(value)),
                   validator: Validators.cardNumber,
                   suffix: _cardBrand.isEmpty ? null : _brandPill(_cardBrand),
                 ),
@@ -1214,15 +1217,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                         hint: 'MM/AA',
                         icon: LucideIcons.calendar,
                         keyboardType: TextInputType.number,
-                        onChanged: (value) {
-                          final formatted = _formatExpiration(value);
-                          if (formatted != value) {
-                            _expirationController.value = TextEditingValue(
-                              text: formatted,
-                              selection: TextSelection.collapsed(offset: formatted.length),
-                            );
-                          }
-                        },
+                        inputFormatters: [ExpiryFormatter()],
                         validator: Validators.cardExpiration,
                       ),
                     ),
@@ -1250,17 +1245,13 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                   hint: '000.000.000-00',
                   icon: LucideIcons.fileText,
                   keyboardType: TextInputType.number,
-                  onChanged: (value) {
-                    final formatted = _formatCpf(value);
-                    if (formatted != value) {
-                      _cpfController.value = TextEditingValue(
-                        text: formatted,
-                        selection: TextSelection.collapsed(offset: formatted.length),
-                      );
-                    }
-                  },
+                  inputFormatters: [CpfFormatter()],
                   validator: Validators.cpf,
                 ),
+                const SizedBox(height: 20),
+
+                // Installments selector (1x–6x).
+                _buildInstallmentsSelector(),
                 const SizedBox(height: 28),
 
                 // Submit Button
@@ -1442,9 +1433,11 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
     void Function(String)? onChanged,
     String? Function(String?)? validator,
     Widget? suffix,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
       controller: controller,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
