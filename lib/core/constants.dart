@@ -8,7 +8,7 @@ class AppConstants {
   // App Info
   // ===========================================
   static const String appName = 'BJJEasy';
-  static const String appVersion = '1.3.0';
+  static const String appVersion = '2.0.0';
 
   // ===========================================
   // URLs - configured via dart-define at build time
