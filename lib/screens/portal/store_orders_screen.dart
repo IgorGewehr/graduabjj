@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -140,14 +141,23 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                         padding: const EdgeInsets.only(bottom: 12),
                         child: _OrderCard(
                           order: orders[index],
-                          onTap: () => _showOrderDetails(
-                            context,
-                            orders[index],
-                            isAdminView: isAdminOrInstructor,
-                          ),
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            _showOrderDetails(
+                              context,
+                              orders[index],
+                              isAdminView: isAdminOrInstructor,
+                            );
+                          },
                           showStudentName: isAdminOrInstructor,
                         ),
-                      ),
+                      )
+                          .animate()
+                          .fadeIn(
+                            delay: (index % 12 * 50).ms,
+                            duration: 280.ms,
+                          )
+                          .slideY(begin: 0.06, curve: Curves.easeOut),
                       childCount: orders.length,
                     ),
                   ),
@@ -322,12 +332,26 @@ class _OrderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
     final statusColor = _getStatusColor();
+    // Highlight orders awaiting payment so they stand out in the list.
+    final isNew = order.status == StoreOrderStatus.pendingPayment;
 
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(
+          color: isNew ? statusColor.withValues(alpha: 0.5) : AppTheme.divider,
+          width: isNew ? 1.5 : 1,
+        ),
+        boxShadow: isNew
+            ? [
+                BoxShadow(
+                  color: statusColor.withValues(alpha: 0.12),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : null,
       ),
       child: InkWell(
         onTap: onTap,
