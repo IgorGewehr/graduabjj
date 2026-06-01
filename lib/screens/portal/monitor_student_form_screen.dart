@@ -173,15 +173,15 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
         };
       }
 
-      // Multi-esporte: a faixa autoritativa de um esporte não-BJJ vive em
-      // sportData[esporte]; currentBelt/currentStripes seguem sincronizados ao
-      // primário (mesma convenção do student_form_screen). Atualiza só a entrada
-      // do esporte via dot-path pra não apagar os outros esportes do aluno.
-      if (isEditing && _sport != SportId.bjj) {
-        studentData['sportData.${_sport.value}'] = {
-          'currentGrade': _belt,
-          'currentStripes': _stripes,
-        };
+      // Multi-esporte: a faixa autoritativa de QUALQUER esporte (inclusive BJJ)
+      // vive em sportData[esporte] quando existe — getGrade e a auto-graduação
+      // leem de lá e IGNORAM currentBelt. Por isso gravamos sempre o
+      // sportData[primário] (dot-path por campo, preserva os outros esportes),
+      // mesma convenção do belt_progression_service. currentBelt/currentStripes
+      // ficam sincronizados ao primário (como no student_form_screen).
+      if (isEditing) {
+        studentData['sportData.${_sport.value}.currentGrade'] = _belt;
+        studentData['sportData.${_sport.value}.currentStripes'] = _stripes;
       }
 
       if (isEditing) {
