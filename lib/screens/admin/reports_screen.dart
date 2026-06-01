@@ -2216,17 +2216,23 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
       );
     }
 
-    // Ordena pela escada do esporte (ids canônicos); faixas fora da escada
-    // (legado/órfão) ao final. Filtra faixas sem alunos.
-    final grades = getGradesForSport(
-      sportId,
-      category: category,
-      muaythaiVariant: sportId == SportId.muaythai ? muaythaiVariantCbmt : null,
-    );
+    // Ordem das faixas pela escada do esporte (ids canônicos). Muay Thai tem
+    // DOIS sistemas (CBMT e CBMTT) e a academia pode ter alunos em qualquer um,
+    // então concatenamos as duas escadas pra ordenar ambos. Faixas fora da
+    // escada (legado/órfão) vão ao final; faixas sem alunos são filtradas.
+    final orderIds = <String>[
+      if (sportId == SportId.muaythai) ...[
+        ...getGradesForSport(sportId, muaythaiVariant: muaythaiVariantCbmt)
+            .map((g) => g.id),
+        ...getGradesForSport(sportId, muaythaiVariant: muaythaiVariantCbmtt)
+            .map((g) => g.id),
+      ] else
+        ...getGradesForSport(sportId, category: category).map((g) => g.id),
+    ];
     final activeBelts = <String>[
-      ...grades.map((g) => g.id).where((id) => (distribution[id] ?? 0) > 0),
+      ...orderIds.where((id) => (distribution[id] ?? 0) > 0),
       ...distribution.keys.where(
-          (b) => (distribution[b] ?? 0) > 0 && !grades.any((g) => g.id == b)),
+          (b) => (distribution[b] ?? 0) > 0 && !orderIds.contains(b)),
     ];
 
     return Column(

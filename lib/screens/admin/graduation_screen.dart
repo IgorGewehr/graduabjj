@@ -292,15 +292,22 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
           final sportId = SportId.fromString(entry.key);
           final dist = entry.value;
           final sportTotal = dist.values.fold<int>(0, (a, b) => a + b);
-          final grades = getGradesForSport(
-            sportId,
-            muaythaiVariant:
-                sportId == SportId.muaythai ? muaythaiVariantCbmt : null,
-          );
-          // Ordena pela escada do esporte; faixas fora da escada (legado) ao fim.
+          // Ordem pela escada do esporte. Muay Thai tem dois sistemas (CBMT e
+          // CBMTT); concatena as duas escadas pra ordenar alunos de qualquer
+          // um. Faixas fora da escada (legado) vão ao fim.
+          final orderIds = <String>[
+            if (sportId == SportId.muaythai) ...[
+              ...getGradesForSport(sportId, muaythaiVariant: muaythaiVariantCbmt)
+                  .map((g) => g.id),
+              ...getGradesForSport(sportId,
+                      muaythaiVariant: muaythaiVariantCbmtt)
+                  .map((g) => g.id),
+            ] else
+              ...getGradesForSport(sportId).map((g) => g.id),
+          ];
           final orderedBelts = <String>[
-            ...grades.map((g) => g.id).where(dist.containsKey),
-            ...dist.keys.where((b) => !grades.any((g) => g.id == b)),
+            ...orderIds.where(dist.containsKey),
+            ...dist.keys.where((b) => !orderIds.contains(b)),
           ];
           return Container(
             margin: const EdgeInsets.only(bottom: 16),
