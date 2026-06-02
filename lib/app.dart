@@ -32,6 +32,7 @@ import 'screens/admin/training_videos_screen.dart';
 import 'screens/admin/import_students_screen.dart';
 import 'screens/portal/timeline_screen.dart';
 import 'screens/portal/evolution_screen.dart';
+import 'screens/portal/student_graduation_screen.dart';
 import 'screens/portal/financial_screen.dart';
 import 'screens/portal/notifications_screen.dart';
 import 'screens/portal/behavior_screen.dart';
@@ -637,6 +638,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const EvolutionScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/graduacao',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const StudentGraduationScreen(),
             ),
           ),
           GoRoute(

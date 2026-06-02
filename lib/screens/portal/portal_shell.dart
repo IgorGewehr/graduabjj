@@ -117,6 +117,13 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       section: 'Treinos',
     ),
     _PortalMenuEntry(
+      label: 'Graduação',
+      icon: LucideIcons.award,
+      path: '/portal/graduacao',
+      section: 'Treinos',
+      requiresGraduationVisible: true,
+    ),
+    _PortalMenuEntry(
       label: 'Treinos',
       icon: Icons.fitness_center,
       path: '/portal/treinos',
@@ -225,10 +232,14 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     final hasPlan = studentDocId != null &&
         ref.read(studentPlanProvider(studentDocId)).valueOrNull != null;
 
+    final graduationVisible =
+        settings?.graduationProgressVisibleToStudents ?? false;
+
     final entries = _menuCatalog.where((e) {
       if (e.requiresKidsCategory && !isKids) return false;
       if (e.requiresStorePublished && !isStorePublished) return false;
       if (e.requiresPlan && !hasPlan) return false;
+      if (e.requiresGraduationVisible && !graduationVisible) return false;
       if (e.hideWhen == _PortalGate.monitor && (isMonitor || hasAttendancePermMenu)) return false;
       return true;
     }).toList();
@@ -388,6 +399,7 @@ class _PortalMenuEntry {
   final bool requiresKidsCategory;
   final bool requiresStorePublished;
   final bool requiresPlan;
+  final bool requiresGraduationVisible;
   final _PortalGate? hideWhen;
 
   const _PortalMenuEntry({
@@ -396,6 +408,7 @@ class _PortalMenuEntry {
     required this.path,
     required this.section,
     this.requiresKidsCategory = false,
+    this.requiresGraduationVisible = false,
     this.requiresStorePublished = false,
     this.requiresPlan = false,
     this.hideWhen,
