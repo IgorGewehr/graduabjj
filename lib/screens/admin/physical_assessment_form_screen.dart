@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/measurement_input.dart';
 import '../../core/theme.dart';
 import '../../models/physical_assessment.dart';
 import '../../providers/auth_provider.dart';
@@ -66,6 +67,7 @@ class _PhysicalAssessmentFormScreenState
   late DateTime _date;
   String? _goal;
   bool _saving = false;
+  final _formKey = GlobalKey<FormState>();
 
   bool get _isEditing => widget.existing != null;
 
@@ -108,11 +110,7 @@ class _PhysicalAssessmentFormScreenState
   static String _fmt(double v) =>
       v == v.roundToDouble() ? v.toInt().toString() : v.toString();
 
-  double? _parse(TextEditingController c) {
-    final t = c.text.trim().replaceAll(',', '.');
-    if (t.isEmpty) return null;
-    return double.tryParse(t);
-  }
+  double? _parse(TextEditingController c) => parseDecimalInput(c.text);
 
   Map<String, double> _collect(Map<String, TextEditingController> src) {
     final out = <String, double>{};
@@ -131,6 +129,10 @@ class _PhysicalAssessmentFormScreenState
   }
 
   Future<void> _save() async {
+    if (!(_formKey.currentState?.validate() ?? true)) {
+      context.showWarning('Confira os campos destacados.');
+      return;
+    }
     final w = _parse(_weight);
     final h = _parse(_height);
     // Avaliação totalmente vazia não faz sentido salvar.
@@ -196,7 +198,9 @@ class _PhysicalAssessmentFormScreenState
         title: Text(_isEditing ? 'Editar avaliação' : 'Nova avaliação'),
       ),
       body: SafeArea(
-        child: ListView(
+        child: Form(
+          key: _formKey,
+          child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
           children: [
             // Aluno + data
@@ -232,12 +236,12 @@ class _PhysicalAssessmentFormScreenState
               child: Column(
                 children: [
                   FormRow(children: [
-                    _num(_weight, 'Peso', 'kg'),
-                    _num(_height, 'Altura', 'cm'),
+                    _num(_weight, 'Peso', 'kg', min: 20, max: 300),
+                    _num(_height, 'Altura', 'cm', min: 50, max: 250),
                   ]),
                   const SizedBox(height: 12),
                   FormRow(children: [
-                    _num(_bodyFat, '% Gordura', '%'),
+                    _num(_bodyFat, '% Gordura', '%', min: 1, max: 70),
                     _ImcBox(bmi: bmi),
                   ]),
                 ],
@@ -260,12 +264,13 @@ class _PhysicalAssessmentFormScreenState
                       padding: const EdgeInsets.only(bottom: 12),
                       child: FormRow(children: [
                         _num(_girths[PhysicalAssessment.girthKeys[i]]!,
-                            _girthLabels[PhysicalAssessment.girthKeys[i]]!, 'cm'),
+                            _girthLabels[PhysicalAssessment.girthKeys[i]]!, 'cm',
+                            min: 5, max: 250),
                         if (i + 1 < PhysicalAssessment.girthKeys.length)
                           _num(
                               _girths[PhysicalAssessment.girthKeys[i + 1]]!,
                               _girthLabels[PhysicalAssessment.girthKeys[i + 1]]!,
-                              'cm')
+                              'cm', min: 5, max: 250)
                         else
                           const SizedBox(),
                       ]),
@@ -288,7 +293,8 @@ class _PhysicalAssessmentFormScreenState
                   for (final k in _skinfoldLabels.keys)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: _num(_skinfolds[k]!, _skinfoldLabels[k]!, 'mm'),
+                      child: _num(_skinfolds[k]!, _skinfoldLabels[k]!, 'mm',
+                          min: 1, max: 100),
                     ),
                 ],
               ),
@@ -330,6 +336,7 @@ class _PhysicalAssessmentFormScreenState
             ),
           ],
         ),
+        ),
       ),
       bottomNavigationBar: SafeArea(
         child: Padding(
@@ -359,7 +366,8 @@ class _PhysicalAssessmentFormScreenState
     );
   }
 
-  Widget _num(TextEditingController c, String label, String unit) {
+  Widget _num(TextEditingController c, String label, String unit,
+      {double? min, double? max}) {
     return InputField(
       controller: c,
       label: label,
@@ -367,6 +375,9 @@ class _PhysicalAssessmentFormScreenState
       inputFormatters: [
         FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
       ],
+      validator: (v) =>
+          validateOptionalMeasure(v, label: label, min: min, max: max),
+      autovalidateMode: AutovalidateMode.onUserInteraction,
       suffix: Text(unit, style: AppTheme.labelSmall.copyWith(
         color: AppTheme.textSecondary,
       )),
