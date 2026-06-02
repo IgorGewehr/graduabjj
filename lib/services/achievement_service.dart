@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/sports.dart';
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
 import 'student_service.dart';
@@ -96,6 +97,9 @@ class Achievement {
   final String? toBelt;
   final int? fromStripes;
   final int? toStripes;
+  /// Modalidade da graduação/grau (valor de SportId, ex. 'bjj', 'muaythai').
+  /// Null = legado (assume BJJ na exibição).
+  final String? sport;
 
   // Competition fields
   final String? competitionId;
@@ -122,6 +126,7 @@ class Achievement {
     this.toBelt,
     this.fromStripes,
     this.toStripes,
+    this.sport,
     this.competitionId,
     this.competitionName,
     this.position,
@@ -146,6 +151,7 @@ class Achievement {
       toBelt: data['toBelt'],
       fromStripes: data['fromStripes'],
       toStripes: data['toStripes'],
+      sport: data['sport'],
       competitionId: data['competitionId'],
       competitionName: data['competitionName'],
       position: data['position'] != null
@@ -164,30 +170,6 @@ class Achievement {
 
   // Convenience getter (for backwards compatibility)
   DateTime get awardedAt => date;
-}
-
-/// Belt Name Helper
-String getBeltName(String belt) {
-  const names = {
-    'white': 'Branca',
-    'blue': 'Azul',
-    'purple': 'Roxa',
-    'brown': 'Marrom',
-    'black': 'Preta',
-    'grey': 'Cinza',
-    'grey-white': 'Cinza/Branca',
-    'grey-black': 'Cinza/Preta',
-    'yellow': 'Amarela',
-    'yellow-white': 'Amarela/Branca',
-    'yellow-black': 'Amarela/Preta',
-    'orange': 'Laranja',
-    'orange-white': 'Laranja/Branca',
-    'orange-black': 'Laranja/Preta',
-    'green': 'Verde',
-    'green-white': 'Verde/Branca',
-    'green-black': 'Verde/Preta',
-  };
-  return names[belt] ?? belt;
 }
 
 /// Achievement Service - Multi-tenant achievement management
@@ -365,6 +347,7 @@ class AchievementService {
     String? toBelt,
     int? fromStripes,
     int? toStripes,
+    String? sport,
     String? competitionId,
     String? competitionName,
     CompetitionPosition? position,
@@ -385,6 +368,7 @@ class AchievementService {
       'toBelt': toBelt,
       'fromStripes': fromStripes,
       'toStripes': toStripes,
+      'sport': sport,
       'competitionId': competitionId,
       'competitionName': competitionName,
       'position': position?.value,
@@ -428,9 +412,10 @@ class AchievementService {
     required String toBelt,
     required int fromStripes,
     required int toStripes,
+    SportId sportId = SportId.bjj,
     String? createdBy,
   }) async {
-    final title = 'Graduação para Faixa ${getBeltName(toBelt)}';
+    final title = 'Graduação para Faixa ${getGradeLabel(sportId, toBelt)}';
     return create(
       studentId: studentId,
       studentName: studentName,
@@ -440,6 +425,7 @@ class AchievementService {
       toBelt: toBelt,
       fromStripes: fromStripes,
       toStripes: toStripes,
+      sport: sportId.value,
       createdBy: createdBy,
     );
   }

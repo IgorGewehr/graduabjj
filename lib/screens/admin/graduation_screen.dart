@@ -19,7 +19,7 @@ class AdminGraduationScreen extends ConsumerStatefulWidget {
 class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
   List<Map<String, dynamic>> _eligibleStudents = [];
   List<BeltProgression> _recentPromotions = [];
-  Map<String, int> _beltDistribution = {};
+  Map<String, Map<String, int>> _beltDistribution = {};
   bool _isLoading = true;
   int _selectedTabIndex = 0;
 
@@ -46,7 +46,7 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
       setState(() {
         _eligibleStudents = results[0] as List<Map<String, dynamic>>;
         _recentPromotions = results[1] as List<BeltProgression>;
-        _beltDistribution = results[2] as Map<String, int>;
+        _beltDistribution = results[2] as Map<String, Map<String, int>>;
         _isLoading = false;
       });
     } catch (e) {
@@ -129,7 +129,8 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
   }
 
   Widget _buildStatsCards() {
-    final totalStudents = _beltDistribution.values.fold<int>(0, (a, b) => a + b);
+    final totalStudents = _beltDistribution.values
+        .fold<int>(0, (a, m) => a + m.values.fold<int>(0, (x, y) => x + y));
     final eligibleCount = _eligibleStudents.length;
     final recentCount = _recentPromotions.length;
 
@@ -271,15 +272,45 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
   }
 
   Widget _buildDistributionTab() {
-    final total = _beltDistribution.values.fold<int>(0, (a, b) => a + b);
+    final grandTotal = _beltDistribution.values
+        .fold<int>(0, (a, m) => a + m.values.fold<int>(0, (x, y) => x + y));
+    if (grandTotal == 0) {
+      return _buildEmptyState(
+        icon: LucideIcons.pieChart,
+        title: 'Sem dados de distribuicao',
+        subtitle: 'Cadastre alunos ativos para ver a distribuicao de faixas',
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
+      // Uma seção por modalidade — não mistura faixas de esportes diferentes.
       child: Column(
         key: const ValueKey('distribution'),
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
+        children: _beltDistribution.entries.map((entry) {
+          final sportId = SportId.fromString(entry.key);
+          final dist = entry.value;
+          final sportTotal = dist.values.fold<int>(0, (a, b) => a + b);
+          // Ordem pela escada do esporte. Muay Thai tem dois sistemas (CBMT e
+          // CBMTT); concatena as duas escadas pra ordenar alunos de qualquer
+          // um. Faixas fora da escada (legado) vão ao fim.
+          final orderIds = <String>[
+            if (sportId == SportId.muaythai) ...[
+              ...getGradesForSport(sportId, muaythaiVariant: muaythaiVariantCbmt)
+                  .map((g) => g.id),
+              ...getGradesForSport(sportId,
+                      muaythaiVariant: muaythaiVariantCbmtt)
+                  .map((g) => g.id),
+            ] else
+              ...getGradesForSport(sportId).map((g) => g.id),
+          ];
+          final orderedBelts = <String>[
+            ...orderIds.where(dist.containsKey),
+            ...dist.keys.where((b) => !orderIds.contains(b)),
+          ];
+          return Container(
+            margin: const EdgeInsets.only(bottom: 16),
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: AppTheme.surface,
@@ -298,41 +329,46 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                         color: AppTheme.primary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Icon(LucideIcons.pieChart, color: AppTheme.primary, size: 20),
+                      child: Icon(LucideIcons.pieChart,
+                          color: AppTheme.primary, size: 20),
                     ),
                     const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Distribuicao de Faixas',
-                          style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
+                          getSport(sportId).label,
+                          style: AppTheme.titleMedium
+                              .copyWith(fontWeight: FontWeight.w600),
                         ),
                         Text(
-                          'Total: $total alunos ativos',
-                          style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                          'Total: $sportTotal alunos ativos',
+                          style: AppTheme.bodySmall
+                              .copyWith(color: AppTheme.textSecondary),
                         ),
                       ],
                     ),
                   ],
                 ),
                 const SizedBox(height: 24),
-                ..._beltDistribution.keys.map((belt) {
-                  final count = _beltDistribution[belt] ?? 0;
-                  final percentage = total > 0 ? (count / total * 100) : 0.0;
+                ...orderedBelts.map((belt) {
+                  final count = dist[belt] ?? 0;
+                  final percentage =
+                      sportTotal > 0 ? (count / sportTotal * 100) : 0.0;
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 16),
                     child: _BeltDistributionBar(
                       belt: belt,
                       count: count,
                       percentage: percentage,
+                      sportId: sportId,
                     ),
                   );
                 }),
               ],
             ),
-          ),
-        ],
+          );
+        }).toList(),
       ),
     );
   }
@@ -378,6 +414,7 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
     final eligibility = studentData['eligibility'] as EligibilityResult;
     final currentBelt = studentData['currentBelt'] as String;
     final currentStripes = studentData['currentStripes'] as int;
+    final sportId = SportId.fromString(studentData['sportId'] as String? ?? 'bjj');
     final studentId = studentData['id'] as String;
     final studentName = studentData['fullName'] as String;
 
@@ -452,7 +489,7 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                           width: 50,
                           height: 50,
                           decoration: BoxDecoration(
-                            color: _getBeltColor(currentBelt),
+                            color: _getBeltColor(currentBelt, sportId: sportId),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Center(
@@ -851,6 +888,7 @@ class _EligibleStudentCard extends StatelessWidget {
     final currentBelt = data['currentBelt'] as String;
     final currentStripes = data['currentStripes'] as int;
     final totalClasses = data['totalClasses'] as int;
+    final sportId = SportId.fromString(data['sportId'] as String? ?? 'bjj');
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -868,7 +906,7 @@ class _EligibleStudentCard extends StatelessWidget {
                 width: 50,
                 height: 50,
                 decoration: BoxDecoration(
-                  color: _getBeltColor(currentBelt),
+                  color: _getBeltColor(currentBelt, sportId: sportId),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
@@ -894,7 +932,7 @@ class _EligibleStudentCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        _buildBeltIndicator(currentBelt, currentStripes),
+                        _buildBeltIndicator(currentBelt, currentStripes, sportId),
                         const SizedBox(width: 8),
                         Icon(LucideIcons.clipboardCheck, size: 14, color: AppTheme.textSecondary),
                         const SizedBox(width: 4),
@@ -957,18 +995,18 @@ class _EligibleStudentCard extends StatelessWidget {
     );
   }
 
-  Widget _buildBeltIndicator(String belt, int stripes) {
+  Widget _buildBeltIndicator(String belt, int stripes, SportId sportId) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: _getBeltColor(belt),
+        color: _getBeltColor(belt, sportId: sportId),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            _getBeltShortLabel(belt),
+            _getBeltShortLabel(belt, sportId: sportId),
             style: TextStyle(
               fontSize: 10,
               color: belt == 'white' ? Colors.black : Colors.white,
@@ -990,12 +1028,12 @@ class _EligibleStudentCard extends StatelessWidget {
     );
   }
 
-  Color _getBeltColor(String belt) {
-    return getGradeColor(SportId.bjj, belt);
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) {
+    return getGradeColor(sportId, belt);
   }
 
-  String _getBeltShortLabel(String belt) {
-    final label = getGradeLabel(SportId.bjj, belt);
+  String _getBeltShortLabel(String belt, {SportId sportId = SportId.bjj}) {
+    final label = getGradeLabel(sportId, belt);
     return label.length >= 2 ? label.substring(0, 2).toUpperCase() : label.toUpperCase();
   }
 }
@@ -1021,7 +1059,7 @@ class _PromotionHistoryCard extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: _getBeltColor(promotion.newBelt),
+              color: _getBeltColor(promotion.newBelt, sportId: promotion.getSport()),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
@@ -1037,7 +1075,7 @@ class _PromotionHistoryCard extends StatelessWidget {
               children: [
                 Text(
                   promotion.isBeltChange
-                      ? 'Faixa ${_getBeltLabel(promotion.newBelt)}'
+                      ? 'Faixa ${_getBeltLabel(promotion.newBelt, sportId: promotion.getSport())}'
                       : '${promotion.newStripes}° Grau',
                   style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
                 ),
@@ -1064,12 +1102,12 @@ class _PromotionHistoryCard extends StatelessWidget {
     );
   }
 
-  String _getBeltLabel(String belt) {
-    return getGradeLabel(SportId.bjj, belt);
+  String _getBeltLabel(String belt, {SportId sportId = SportId.bjj}) {
+    return getGradeLabel(sportId, belt);
   }
 
-  Color _getBeltColor(String belt) {
-    return getGradeColor(SportId.bjj, belt);
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) {
+    return getGradeColor(sportId, belt);
   }
 }
 
@@ -1078,11 +1116,13 @@ class _BeltDistributionBar extends StatelessWidget {
   final String belt;
   final int count;
   final double percentage;
+  final SportId sportId;
 
   const _BeltDistributionBar({
     required this.belt,
     required this.count,
     required this.percentage,
+    this.sportId = SportId.bjj,
   });
 
   @override
@@ -1132,17 +1172,17 @@ class _BeltDistributionBar extends StatelessWidget {
   }
 
   String _getBeltLabel(String belt) {
-    return getGradeLabel(SportId.bjj, belt);
+    return getGradeLabel(sportId, belt);
   }
 
   Color _getBeltColor(String belt) {
-    return getGradeColor(SportId.bjj, belt);
+    return getGradeColor(sportId, belt);
   }
 
   Color _getBeltDisplayColor(String belt) {
-    final color = getGradeColor(SportId.bjj, belt);
-    // White belt needs a visible color for the progress bar
-    if (belt == 'white') return const Color(0xFF9E9E9E);
+    final color = getGradeColor(sportId, belt);
+    // Faixas muito claras (branca) somem na barra clara → cinza visível.
+    if (color.computeLuminance() > 0.85) return const Color(0xFF9E9E9E);
     return color;
   }
 }

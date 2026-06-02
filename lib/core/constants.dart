@@ -165,9 +165,6 @@ class BeltConstants {
     'green-white': 'Verde/Branca',
     'green-black': 'Verde/Preta',
   };
-
-  // Max stripes per belt
-  static const int maxStripes = 4;
 }
 
 /// Status Labels (Portuguese)

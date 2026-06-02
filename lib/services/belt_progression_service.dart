@@ -863,8 +863,28 @@ class BeltProgressionService {
 
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final currentBelt = data['currentBelt'] ?? 'white';
-      final currentStripes = data['currentStripes'] ?? 0;
+      // Modalidade primária + faixa NAQUELE esporte (mesma regra do
+      // Student.getGrade): pra não-BJJ a faixa vive em sportData; senão é a
+      // legada currentBelt. Antes a elegibilidade era checada sempre como BJJ.
+      final sportVal = (data['primarySport'] as String?) ??
+          ((data['sports'] is List && (data['sports'] as List).isNotEmpty)
+              ? (data['sports'] as List).first.toString()
+              : 'bjj');
+      final sportId = SportId.fromString(sportVal);
+      final category = (data['category'] as String?) ?? 'adult';
+      final sportData = (data['sportData'] as Map?)?[sportVal] as Map?;
+      final useSportData = !(sportId == SportId.bjj && sportData == null);
+      final beltFromSport =
+          sportData == null ? null : sportData['currentGrade'];
+      final stripesFromSport =
+          sportData == null ? null : sportData['currentStripes'];
+      final currentBelt = (useSportData ? beltFromSport : data['currentBelt']) ??
+          data['currentBelt'] ??
+          'white';
+      final currentStripes =
+          (useSportData ? stripesFromSport : data['currentStripes']) ??
+              data['currentStripes'] ??
+              0;
       final totalClasses = (data['initialAttendanceCount'] ?? 0) +
           (data['attendanceCount'] ?? 0);
 
@@ -872,6 +892,8 @@ class BeltProgressionService {
         currentBelt: currentBelt,
         currentStripes: currentStripes,
         totalClasses: totalClasses,
+        sportId: sportId,
+        category: category,
       );
 
       if (eligibility.eligible) {
@@ -882,6 +904,7 @@ class BeltProgressionService {
           'currentStripes': currentStripes,
           'totalClasses': totalClasses,
           'eligibility': eligibility,
+          'sportId': sportVal,
         });
       }
     }
@@ -892,21 +915,32 @@ class BeltProgressionService {
   // ============================================
   // Get Belt Distribution
   // ============================================
-  Future<Map<String, int>> getBeltDistribution() async {
+  /// Distribuição de faixas SEGMENTADA por esporte: {sportValue: {beltId: count}}.
+  /// Cada aluno entra na sua modalidade primária, com a faixa daquele esporte
+  /// (sportData) — pra academia multi-esporte não misturar faixas de BJJ com
+  /// braçadeiras de Muay Thai etc. num histograma só.
+  Future<Map<String, Map<String, int>>> getBeltDistribution() async {
     final snapshot = await _studentsRef.where('status', isEqualTo: 'active').get();
-    final distribution = <String, int>{};
-
-    for (final belt in beltOrder) {
-      distribution[belt] = 0;
-    }
+    final bySport = <String, Map<String, int>>{};
 
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final belt = data['currentBelt'] ?? 'white';
-      distribution[belt] = (distribution[belt] ?? 0) + 1;
+      final sportVal = (data['primarySport'] as String?) ??
+          ((data['sports'] is List && (data['sports'] as List).isNotEmpty)
+              ? (data['sports'] as List).first.toString()
+              : 'bjj');
+      final sportData = (data['sportData'] as Map?)?[sportVal] as Map?;
+      final useSportData = !(sportVal == 'bjj' && sportData == null);
+      final beltFromSport =
+          sportData == null ? null : sportData['currentGrade'];
+      final belt = ((useSportData ? beltFromSport : data['currentBelt']) ??
+          data['currentBelt'] ??
+          'white') as String;
+      final m = bySport[sportVal] ??= <String, int>{};
+      m[belt] = (m[belt] ?? 0) + 1;
     }
 
-    return distribution;
+    return bySport;
   }
 
   // ============================================

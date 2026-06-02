@@ -308,39 +308,6 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     }
   }
 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              '${_students.length} alunos',
-              style: AppTheme.labelMedium.copyWith(
-                color: AppTheme.textSecondary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          const Spacer(),
-          IconButton(
-            onPressed: _loadStudents,
-            icon: const Icon(LucideIcons.refreshCw, size: 20),
-            style: IconButton.styleFrom(
-              backgroundColor: AppTheme.surface,
-              foregroundColor: AppTheme.textSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildSearchAndFilters() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),

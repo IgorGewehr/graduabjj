@@ -7,6 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/formatters.dart';
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
@@ -186,7 +187,7 @@ class _MonitorStudentDetailScreenState
     return SliverAppBar(
       expandedHeight: 200,
       pinned: true,
-      backgroundColor: _getBeltColor(_student!.currentBelt),
+      backgroundColor: _getBeltColor(_student!.currentBelt, sportId: _student!.getPrimarySport()),
       foregroundColor: _student!.currentBelt == 'white'
           ? Colors.black
           : Colors.white,
@@ -212,8 +213,8 @@ class _MonitorStudentDetailScreenState
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                _getBeltColor(_student!.currentBelt),
-                _getBeltColor(_student!.currentBelt).withValues(alpha: 0.7),
+                _getBeltColor(_student!.currentBelt, sportId: _student!.getPrimarySport()),
+                _getBeltColor(_student!.currentBelt, sportId: _student!.getPrimarySport()).withValues(alpha: 0.7),
               ],
             ),
           ),
@@ -787,7 +788,7 @@ class _MonitorStudentDetailScreenState
         _HistoryItem(
           date: p.date,
           title:
-              'Graduacao: ${_getBeltName(p.belt)} ${p.stripes > 0 ? "(${p.stripes} grau)" : ""}',
+              'Graduacao: ${_getBeltName(p.belt, sportId: SportId.fromString(p.sport ?? 'bjj'))} ${p.stripes > 0 ? "(${p.stripes} grau)" : ""}',
           icon: LucideIcons.award,
           color: AppTheme.primary,
         ),
@@ -968,7 +969,7 @@ class _MonitorStudentDetailScreenState
                       width: 32,
                       height: 32,
                       decoration: BoxDecoration(
-                        color: _getBeltColor(academy.currentBelt),
+                        color: _getBeltColor(academy.currentBelt, sportId: _student!.getPrimarySport()),
                         borderRadius: BorderRadius.circular(6),
                       ),
                     ),
@@ -1159,7 +1160,7 @@ class _MonitorStudentDetailScreenState
                           width: 24,
                           height: 24,
                           decoration: BoxDecoration(
-                            color: _getBeltColor(progression.newBelt),
+                            color: _getBeltColor(progression.newBelt, sportId: _student!.getPrimarySport()),
                             borderRadius: BorderRadius.circular(4),
                           ),
                         ),
@@ -1389,36 +1390,11 @@ class _MonitorStudentDetailScreenState
     );
   }
 
-  String _getBeltName(String belt) {
-    const names = {
-      'white': 'Branca',
-      'blue': 'Azul',
-      'purple': 'Roxa',
-      'brown': 'Marrom',
-      'black': 'Preta',
-      'grey': 'Cinza',
-      'yellow': 'Amarela',
-      'orange': 'Laranja',
-      'green': 'Verde',
-    };
-    return names[belt] ?? belt;
-  }
+  String _getBeltName(String belt, {SportId sportId = SportId.bjj}) =>
+      getGradeLabel(sportId, belt);
 
-  Color _getBeltColor(String belt) {
-    const colors = {
-      'white': Color(0xFFF5F5F5),
-      'blue': Color(0xFF2563EB),
-      'purple': Color(0xFF7C3AED),
-      'brown': Color(0xFF92400E),
-      'black': Color(0xFF171717),
-      'grey': Color(0xFF6B7280),
-      'yellow': Color(0xFFF59E0B),
-      'orange': Color(0xFFF97316),
-      'green': Color(0xFF22C55E),
-    };
-    final baseBelt = belt.split('-').first;
-    return colors[baseBelt] ?? Colors.grey;
-  }
+  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) =>
+      getGradeColor(sportId, belt);
 
   Future<void> _generateLinkCode() async {
     try {

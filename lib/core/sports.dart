@@ -134,39 +134,42 @@ const String muaythaiVariantCbmt = 'cbmt'; // azul system (default / legacy)
 const String muaythaiVariantCbmtt = 'cbmtt'; // tradicional (branca→ouro)
 
 /// System 1 — CBMT / CMTB (white → red → blue → black, with "ponta" steps).
+// Muay Thai progride por COR do prajied (braçadeira), não por graus dentro da
+// cor — por isso maxStripes: 0 em todos (igual ao judô). As etapas "ponta" já
+// são cores próprias na escada.
 const _muaythaiGradesCbmt = [
-  GradeDefinition(id: 'white', label: 'Branca', color: Color(0xFFF5F5F5), maxStripes: 1),
-  GradeDefinition(id: 'white-red', label: 'Branca ponta vermelha', color: Color(0xFFF5F5F5), tipColor: Color(0xFFDC2626), maxStripes: 1),
-  GradeDefinition(id: 'red', label: 'Vermelha', color: Color(0xFFDC2626), maxStripes: 1),
-  GradeDefinition(id: 'red-lightblue', label: 'Vermelha ponta azul clara', color: Color(0xFFDC2626), tipColor: Color(0xFF60A5FA), maxStripes: 1),
-  GradeDefinition(id: 'light-blue', label: 'Azul Clara', color: Color(0xFF60A5FA), maxStripes: 1),
-  GradeDefinition(id: 'lightblue-darkblue', label: 'Azul Clara ponta azul escura (Monitor)', color: Color(0xFF60A5FA), tipColor: Color(0xFF1E40AF), maxStripes: 1),
-  GradeDefinition(id: 'dark-blue', label: 'Azul Escura (Instrutor Auxiliar)', color: Color(0xFF1E40AF), maxStripes: 1),
-  GradeDefinition(id: 'darkblue-black', label: 'Azul Escura ponta preta (Instrutor)', color: Color(0xFF1E40AF), tipColor: Color(0xFF171717), maxStripes: 1),
-  GradeDefinition(id: 'black', label: 'Preta (Professor)', color: Color(0xFF171717), maxStripes: 2, isBlackBelt: true),
-  GradeDefinition(id: 'black-white', label: 'Preta ponta branca (Mestre)', color: Color(0xFF171717), tipColor: Color(0xFFF5F5F5), maxStripes: 2, isBlackBelt: true, aboveBlack: true),
-  GradeDefinition(id: 'black-white-red', label: 'Preta ponta branca e vermelha (Grão-Mestre)', color: Color(0xFF171717), tipColor: Color(0xFFDC2626), maxStripes: 2, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'white', label: 'Branca', color: Color(0xFFF5F5F5), maxStripes: 0),
+  GradeDefinition(id: 'white-red', label: 'Branca ponta vermelha', color: Color(0xFFF5F5F5), tipColor: Color(0xFFDC2626), maxStripes: 0),
+  GradeDefinition(id: 'red', label: 'Vermelha', color: Color(0xFFDC2626), maxStripes: 0),
+  GradeDefinition(id: 'red-lightblue', label: 'Vermelha ponta azul clara', color: Color(0xFFDC2626), tipColor: Color(0xFF60A5FA), maxStripes: 0),
+  GradeDefinition(id: 'light-blue', label: 'Azul Clara', color: Color(0xFF60A5FA), maxStripes: 0),
+  GradeDefinition(id: 'lightblue-darkblue', label: 'Azul Clara ponta azul escura (Monitor)', color: Color(0xFF60A5FA), tipColor: Color(0xFF1E40AF), maxStripes: 0),
+  GradeDefinition(id: 'dark-blue', label: 'Azul Escura (Instrutor Auxiliar)', color: Color(0xFF1E40AF), maxStripes: 0),
+  GradeDefinition(id: 'darkblue-black', label: 'Azul Escura ponta preta (Instrutor)', color: Color(0xFF1E40AF), tipColor: Color(0xFF171717), maxStripes: 0),
+  GradeDefinition(id: 'black', label: 'Preta (Professor)', color: Color(0xFF171717), maxStripes: 0, isBlackBelt: true),
+  GradeDefinition(id: 'black-white', label: 'Preta ponta branca (Mestre)', color: Color(0xFF171717), tipColor: Color(0xFFF5F5F5), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'black-white-red', label: 'Preta ponta branca e vermelha (Grão-Mestre)', color: Color(0xFF171717), tipColor: Color(0xFFDC2626), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
 ];
 
 /// System 2 — CBMT Tradicional / CBMTT (white → ... → gold). IDs prefixed
 /// `mt2-` to stay distinct from the CBMT system above.
 const _muaythaiGradesCbmtt = [
-  GradeDefinition(id: 'mt2-white', label: 'Branca', color: Color(0xFFF5F5F5), maxStripes: 1),
-  GradeDefinition(id: 'mt2-yellow', label: 'Amarela', color: Color(0xFFEAB308), maxStripes: 1),
-  GradeDefinition(id: 'mt2-yellow-white', label: 'Amarela e Branca', color: Color(0xFFEAB308), tipColor: Color(0xFFF5F5F5), maxStripes: 1),
-  GradeDefinition(id: 'mt2-green', label: 'Verde', color: Color(0xFF16A34A), maxStripes: 1),
-  GradeDefinition(id: 'mt2-green-white', label: 'Verde e Branca', color: Color(0xFF16A34A), tipColor: Color(0xFFF5F5F5), maxStripes: 1),
-  GradeDefinition(id: 'mt2-blue', label: 'Azul', color: Color(0xFF1E40AF), maxStripes: 1),
-  GradeDefinition(id: 'mt2-blue-white', label: 'Azul e Branca', color: Color(0xFF1E40AF), tipColor: Color(0xFFF5F5F5), maxStripes: 1),
-  GradeDefinition(id: 'mt2-brown', label: 'Marrom', color: Color(0xFF78350F), maxStripes: 1),
-  GradeDefinition(id: 'mt2-brown-white', label: 'Marrom e Branca', color: Color(0xFF78350F), tipColor: Color(0xFFF5F5F5), maxStripes: 1),
-  GradeDefinition(id: 'mt2-red', label: 'Vermelha', color: Color(0xFFDC2626), maxStripes: 1),
-  GradeDefinition(id: 'mt2-red-white', label: 'Vermelha e Branca', color: Color(0xFFDC2626), tipColor: Color(0xFFF5F5F5), maxStripes: 1),
-  GradeDefinition(id: 'mt2-black', label: 'Preta', color: Color(0xFF171717), maxStripes: 1, isBlackBelt: true),
-  GradeDefinition(id: 'mt2-black-white', label: 'Preta e Branca (Professor)', color: Color(0xFF171717), tipColor: Color(0xFFF5F5F5), maxStripes: 1, isBlackBelt: true),
-  GradeDefinition(id: 'mt2-silver', label: 'Prata', color: Color(0xFF94A3B8), maxStripes: 1, isBlackBelt: true, aboveBlack: true),
-  GradeDefinition(id: 'mt2-gold', label: 'Ouro', color: Color(0xFFD4AF37), maxStripes: 1, isBlackBelt: true, aboveBlack: true),
-  GradeDefinition(id: 'mt2-gold-silver', label: 'Ouro e Prata', color: Color(0xFFD4AF37), tipColor: Color(0xFF94A3B8), maxStripes: 1, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'mt2-white', label: 'Branca', color: Color(0xFFF5F5F5), maxStripes: 0),
+  GradeDefinition(id: 'mt2-yellow', label: 'Amarela', color: Color(0xFFEAB308), maxStripes: 0),
+  GradeDefinition(id: 'mt2-yellow-white', label: 'Amarela e Branca', color: Color(0xFFEAB308), tipColor: Color(0xFFF5F5F5), maxStripes: 0),
+  GradeDefinition(id: 'mt2-green', label: 'Verde', color: Color(0xFF16A34A), maxStripes: 0),
+  GradeDefinition(id: 'mt2-green-white', label: 'Verde e Branca', color: Color(0xFF16A34A), tipColor: Color(0xFFF5F5F5), maxStripes: 0),
+  GradeDefinition(id: 'mt2-blue', label: 'Azul', color: Color(0xFF1E40AF), maxStripes: 0),
+  GradeDefinition(id: 'mt2-blue-white', label: 'Azul e Branca', color: Color(0xFF1E40AF), tipColor: Color(0xFFF5F5F5), maxStripes: 0),
+  GradeDefinition(id: 'mt2-brown', label: 'Marrom', color: Color(0xFF78350F), maxStripes: 0),
+  GradeDefinition(id: 'mt2-brown-white', label: 'Marrom e Branca', color: Color(0xFF78350F), tipColor: Color(0xFFF5F5F5), maxStripes: 0),
+  GradeDefinition(id: 'mt2-red', label: 'Vermelha', color: Color(0xFFDC2626), maxStripes: 0),
+  GradeDefinition(id: 'mt2-red-white', label: 'Vermelha e Branca', color: Color(0xFFDC2626), tipColor: Color(0xFFF5F5F5), maxStripes: 0),
+  GradeDefinition(id: 'mt2-black', label: 'Preta', color: Color(0xFF171717), maxStripes: 0, isBlackBelt: true),
+  GradeDefinition(id: 'mt2-black-white', label: 'Preta e Branca (Professor)', color: Color(0xFF171717), tipColor: Color(0xFFF5F5F5), maxStripes: 0, isBlackBelt: true),
+  GradeDefinition(id: 'mt2-silver', label: 'Prata', color: Color(0xFF94A3B8), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'mt2-gold', label: 'Ouro', color: Color(0xFFD4AF37), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'mt2-gold-silver', label: 'Ouro e Prata', color: Color(0xFFD4AF37), tipColor: Color(0xFF94A3B8), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
 ];
 
 // ============================================
@@ -180,7 +183,7 @@ const _karateGrades = [
   GradeDefinition(id: 'blue', label: 'Azul', color: Color(0xFF1E40AF), maxStripes: 1),
   GradeDefinition(id: 'purple', label: 'Roxa', color: Color(0xFF7C3AED), maxStripes: 1),
   GradeDefinition(id: 'brown', label: 'Marrom', color: Color(0xFF78350F), maxStripes: 1),
-  GradeDefinition(id: 'black', label: 'Preta', color: Color(0xFF171717), maxStripes: 4, isBlackBelt: true),
+  GradeDefinition(id: 'black', label: 'Preta', color: Color(0xFF171717), maxStripes: 10, isBlackBelt: true),
 ];
 
 // ============================================
@@ -211,25 +214,22 @@ const _kickboxingGrades = [
   GradeDefinition(id: 'green', label: 'Verde', color: Color(0xFF16A34A), maxStripes: 1),
   GradeDefinition(id: 'blue', label: 'Azul', color: Color(0xFF1E40AF), maxStripes: 1),
   GradeDefinition(id: 'brown', label: 'Marrom', color: Color(0xFF78350F), maxStripes: 1),
-  GradeDefinition(id: 'black', label: 'Preta', color: Color(0xFF171717), maxStripes: 4, isBlackBelt: true),
+  GradeDefinition(id: 'black', label: 'Preta', color: Color(0xFF171717), maxStripes: 10, isBlackBelt: true),
 ];
 
 // ============================================
-// Luta Livre Grades (FNLL)
+// Luta Livre Grades (CBLLE — Confederação Brasileira de Luta Livre Esportiva)
+// Progressão por cor: Branca → Amarela → Laranja → Preta (Professor). Pós-preta
+// é DAN (manual, ~1 a cada 5 anos): preta ponta vermelha → vermelha e branca.
 // ============================================
 const _lutalivreGrades = [
-  GradeDefinition(id: 'white', label: 'Branca', color: Color(0xFFF5F5F5), maxStripes: 4),
-  GradeDefinition(id: 'yellow', label: 'Amarela', color: Color(0xFFFBBF24), maxStripes: 4),
-  GradeDefinition(id: 'orange', label: 'Laranja', color: Color(0xFFF97316), maxStripes: 4),
-  GradeDefinition(id: 'green', label: 'Verde', color: Color(0xFF16A34A), maxStripes: 4),
-  GradeDefinition(id: 'blue', label: 'Azul', color: Color(0xFF1E40AF), maxStripes: 4),
-  GradeDefinition(id: 'purple', label: 'Roxa', color: Color(0xFF7C3AED), maxStripes: 4),
-  GradeDefinition(id: 'brown', label: 'Marrom', color: Color(0xFF78350F), maxStripes: 4),
-  GradeDefinition(id: 'black', label: 'Preta', color: Color(0xFF171717), maxStripes: 4, isBlackBelt: true),
-  // Above black (manual only): coral (vermelha/preta) → vermelha/branca → vermelha.
-  GradeDefinition(id: 'red-black', label: 'Coral (vermelha/preta)', color: Color(0xFFDC2626), tipColor: Color(0xFF171717), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
+  GradeDefinition(id: 'white', label: 'Branca', color: Color(0xFFF5F5F5), maxStripes: 0),
+  GradeDefinition(id: 'yellow', label: 'Amarela', color: Color(0xFFFBBF24), maxStripes: 0),
+  GradeDefinition(id: 'orange', label: 'Laranja', color: Color(0xFFF97316), maxStripes: 0),
+  GradeDefinition(id: 'black', label: 'Preta (Professor)', color: Color(0xFF171717), maxStripes: 0, isBlackBelt: true),
+  // DAN (manual, ~5 em 5 anos): preta ponta vermelha → vermelha e branca.
+  GradeDefinition(id: 'black-red', label: 'Preta ponta vermelha (DAN)', color: Color(0xFF171717), tipColor: Color(0xFFDC2626), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
   GradeDefinition(id: 'red-white', label: 'Vermelha e Branca', color: Color(0xFFDC2626), tipColor: Color(0xFFF5F5F5), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
-  GradeDefinition(id: 'red', label: 'Vermelha', color: Color(0xFFDC2626), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
 ];
 
 // ============================================

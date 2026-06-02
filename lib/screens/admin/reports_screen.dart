@@ -5,36 +5,12 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../providers/portal_providers.dart';
-
-/// Kids belts order
-const List<String> kidsBeltOrder = [
-  'grey',
-  'grey_white',
-  'yellow',
-  'yellow_white',
-  'orange',
-  'orange_white',
-  'green',
-  'green_white',
-];
-
-/// Adult belts order
-const List<String> adultBeltOrder = [
-  'white',
-  'blue',
-  'purple',
-  'brown',
-  'black',
-  // Above black (master ranks)
-  'red-black',
-  'red-white',
-  'red',
-];
 
 /// Admin Reports Screen - Complete dashboard with separated stats
 class AdminReportsScreen extends ConsumerStatefulWidget {
@@ -95,6 +71,8 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   int _adultsCount = 0;
   Map<String, int> _kidsBeltDistribution = {};
   Map<String, int> _adultBeltDistribution = {};
+  // Distribuição por esporte (modalidades não-BJJ): {sportValue: {beltId: count}}.
+  Map<String, Map<String, int>> _otherSportDistribution = {};
 
   // Retention data
   List<StudentRiskScore> _atRiskStudents = [];
@@ -607,7 +585,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
 
     final students = await studentService.getAll();
 
-    // Separate by category
+    // Separate by category (contagem geral por categoria — todos os esportes)
     final kids = students
         .where((s) => s.category == StudentCategory.kids)
         .toList();
@@ -615,26 +593,27 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
         .where((s) => s.category == StudentCategory.adult)
         .toList();
 
-    // Kids belt distribution
+    // Distribuição de faixas SEGMENTADA por esporte. BJJ mantém o recorte
+    // kids/adulto (faixas distintas); demais esportes entram cada um na sua
+    // própria seção. Cada aluno usa a faixa da modalidade primária (sportData).
     final kidsDistribution = <String, int>{};
-    for (final belt in kidsBeltOrder) {
-      kidsDistribution[belt] = 0;
-    }
-    for (final student in kids.where((s) => s.status == StudentStatus.active)) {
-      final belt = student.currentBelt;
-      kidsDistribution[belt] = (kidsDistribution[belt] ?? 0) + 1;
-    }
-
-    // Adults belt distribution
     final adultsDistribution = <String, int>{};
-    for (final belt in adultBeltOrder) {
-      adultsDistribution[belt] = 0;
-    }
-    for (final student in adults.where(
-      (s) => s.status == StudentStatus.active,
-    )) {
-      final belt = student.currentBelt;
-      adultsDistribution[belt] = (adultsDistribution[belt] ?? 0) + 1;
+    final otherSportDistribution = <String, Map<String, int>>{};
+    for (final student
+        in students.where((s) => s.status == StudentStatus.active)) {
+      final sport = student.getPrimarySport();
+      final grade = student.getGrade(sport);
+      final belt = grade?.currentGrade ?? student.currentBelt;
+      if (sport == SportId.bjj) {
+        if (student.category == StudentCategory.kids) {
+          kidsDistribution[belt] = (kidsDistribution[belt] ?? 0) + 1;
+        } else {
+          adultsDistribution[belt] = (adultsDistribution[belt] ?? 0) + 1;
+        }
+      } else {
+        final m = otherSportDistribution[sport.value] ??= <String, int>{};
+        m[belt] = (m[belt] ?? 0) + 1;
+      }
     }
 
     setState(() {
@@ -654,6 +633,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
           .length;
       _kidsBeltDistribution = kidsDistribution;
       _adultBeltDistribution = adultsDistribution;
+      _otherSportDistribution = otherSportDistribution;
     });
   }
 
@@ -2174,33 +2154,48 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
           ),
           const SizedBox(height: 24),
 
-          // Kids belt distribution
-          if (activeKids > 0) ...[
+          // Faixas — BJJ Infantil
+          if (_kidsBeltDistribution.values.fold<int>(0, (a, b) => a + b) >
+              0) ...[
             _ReportCard(
-              title: 'Faixas Infantil',
+              title: 'Faixas Infantil (BJJ)',
               icon: LucideIcons.award,
-              badge: '$activeKids alunos',
-              child: _buildBeltChart(
-                _kidsBeltDistribution,
-                kidsBeltOrder,
-                true,
-              ),
+              badge:
+                  '${_kidsBeltDistribution.values.fold<int>(0, (a, b) => a + b)} alunos',
+              child: _buildBeltChart(_kidsBeltDistribution, SportId.bjj, 'kids'),
             ),
             const SizedBox(height: 16),
           ],
 
-          // Adults belt distribution
-          if (activeAdults > 0)
+          // Faixas — BJJ Adulto
+          if (_adultBeltDistribution.values.fold<int>(0, (a, b) => a + b) >
+              0) ...[
             _ReportCard(
-              title: 'Faixas Adulto',
+              title: 'Faixas Adulto (BJJ)',
               icon: LucideIcons.award,
-              badge: '$activeAdults alunos',
-              child: _buildBeltChart(
-                _adultBeltDistribution,
-                adultBeltOrder,
-                false,
-              ),
+              badge:
+                  '${_adultBeltDistribution.values.fold<int>(0, (a, b) => a + b)} alunos',
+              child:
+                  _buildBeltChart(_adultBeltDistribution, SportId.bjj, 'adult'),
             ),
+            const SizedBox(height: 16),
+          ],
+
+          // Faixas — demais modalidades (uma seção por esporte)
+          ..._otherSportDistribution.entries.map((entry) {
+            final sportId = SportId.fromString(entry.key);
+            final dist = entry.value;
+            final t = dist.values.fold<int>(0, (a, b) => a + b);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: _ReportCard(
+                title: 'Faixas — ${getSport(sportId).label}',
+                icon: LucideIcons.award,
+                badge: '$t alunos',
+                child: _buildBeltChart(dist, sportId, 'adult'),
+              ),
+            );
+          }),
         ],
       ),
     );
@@ -2208,8 +2203,8 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
 
   Widget _buildBeltChart(
     Map<String, int> distribution,
-    List<String> order,
-    bool isKids,
+    SportId sportId,
+    String category,
   ) {
     final total = distribution.values.fold(0, (a, b) => a + b);
     if (total == 0) {
@@ -2221,15 +2216,32 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
       );
     }
 
-    // Filter out belts with 0 students
-    final activeBelts = order
-        .where((belt) => (distribution[belt] ?? 0) > 0)
-        .toList();
+    // Ordem das faixas pela escada do esporte (ids canônicos). Muay Thai tem
+    // DOIS sistemas (CBMT e CBMTT) e a academia pode ter alunos em qualquer um,
+    // então concatenamos as duas escadas pra ordenar ambos. Faixas fora da
+    // escada (legado/órfão) vão ao final; faixas sem alunos são filtradas.
+    final orderIds = <String>[
+      if (sportId == SportId.muaythai) ...[
+        ...getGradesForSport(sportId, muaythaiVariant: muaythaiVariantCbmt)
+            .map((g) => g.id),
+        ...getGradesForSport(sportId, muaythaiVariant: muaythaiVariantCbmtt)
+            .map((g) => g.id),
+      ] else
+        ...getGradesForSport(sportId, category: category).map((g) => g.id),
+    ];
+    final activeBelts = <String>[
+      ...orderIds.where((id) => (distribution[id] ?? 0) > 0),
+      ...distribution.keys.where(
+          (b) => (distribution[b] ?? 0) > 0 && !orderIds.contains(b)),
+    ];
 
     return Column(
       children: activeBelts.map((belt) {
         final count = distribution[belt] ?? 0;
         final percentage = total > 0 ? count / total : 0.0;
+        final color = getGradeColor(sportId, belt);
+        final light = color.computeLuminance() > 0.85;
+        final barColor = light ? const Color(0xFF9E9E9E) : color;
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
@@ -2240,17 +2252,10 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                 width: 28,
                 height: 28,
                 decoration: BoxDecoration(
-                  color: _getBeltColor(belt, isKids),
+                  color: color,
                   borderRadius: BorderRadius.circular(6),
-                  border: belt == 'white' || belt.contains('white')
+                  border: light
                       ? Border.all(color: AppTheme.divider, width: 1)
-                      : null,
-                  gradient: belt.contains('_')
-                      ? LinearGradient(
-                          colors: _getGradientColors(belt),
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                        )
                       : null,
                 ),
               ),
@@ -2258,10 +2263,11 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
               SizedBox(
                 width: 70,
                 child: Text(
-                  _getBeltLabel(belt, isKids),
+                  getGradeLabel(sportId, belt),
                   style: AppTheme.bodySmall.copyWith(
                     fontWeight: FontWeight.w500,
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               Expanded(
@@ -2279,7 +2285,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                       child: Container(
                         height: 24,
                         decoration: BoxDecoration(
-                          color: _getBeltDisplayColor(belt, isKids),
+                          color: barColor,
                           borderRadius: BorderRadius.circular(6),
                         ),
                       ),
@@ -2416,98 +2422,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
       'domingo': 'Dom',
     };
     return shortNames[fullName] ?? fullName;
-  }
-
-  String _getBeltLabel(String belt, bool isKids) {
-    if (isKids) {
-      const labels = {
-        'grey': 'Cinza',
-        'grey_white': 'Cinza/Br',
-        'yellow': 'Amarela',
-        'yellow_white': 'Amar/Br',
-        'orange': 'Laranja',
-        'orange_white': 'Larj/Br',
-        'green': 'Verde',
-        'green_white': 'Verde/Br',
-        'white': 'Branca',
-      };
-      return labels[belt] ?? belt;
-    } else {
-      const labels = {
-        'white': 'Branca',
-        'blue': 'Azul',
-        'purple': 'Roxa',
-        'brown': 'Marrom',
-        'black': 'Preta',
-      };
-      return labels[belt] ?? belt;
-    }
-  }
-
-  Color _getBeltColor(String belt, bool isKids) {
-    if (isKids) {
-      const colors = {
-        'grey': Color(0xFF9E9E9E),
-        'grey_white': Color(0xFFE0E0E0),
-        'yellow': Color(0xFFFFEB3B),
-        'yellow_white': Color(0xFFFFF9C4),
-        'orange': Color(0xFFFF9800),
-        'orange_white': Color(0xFFFFE0B2),
-        'green': Color(0xFF4CAF50),
-        'green_white': Color(0xFFC8E6C9),
-        'white': Color(0xFFF5F5F5),
-      };
-      return colors[belt] ?? Colors.grey;
-    } else {
-      const colors = {
-        'white': Color(0xFFF5F5F5),
-        'blue': Color(0xFF2563EB),
-        'purple': Color(0xFF7C3AED),
-        'brown': Color(0xFF92400E),
-        'black': Color(0xFF171717),
-        // Above black (master ranks)
-        'red-black': Color(0xFFDC2626),
-        'red-white': Color(0xFFDC2626),
-        'red': Color(0xFFDC2626),
-        'coral': Color(0xFFDC2626),
-      };
-      return colors[belt] ?? Colors.grey;
-    }
-  }
-
-  List<Color> _getGradientColors(String belt) {
-    // For combined belts like grey_white, yellow_white, etc.
-    if (belt.contains('_white')) {
-      final baseBelt = belt.replaceAll('_white', '');
-      return [_getBeltColor(baseBelt, true), const Color(0xFFF5F5F5)];
-    }
-    return [Colors.grey, Colors.grey];
-  }
-
-  Color _getBeltDisplayColor(String belt, bool isKids) {
-    if (isKids) {
-      const colors = {
-        'grey': Color(0xFF757575),
-        'grey_white': Color(0xFF9E9E9E),
-        'yellow': Color(0xFFFBC02D),
-        'yellow_white': Color(0xFFFFD54F),
-        'orange': Color(0xFFF57C00),
-        'orange_white': Color(0xFFFFB74D),
-        'green': Color(0xFF388E3C),
-        'green_white': Color(0xFF66BB6A),
-        'white': Color(0xFF9E9E9E),
-      };
-      return colors[belt] ?? Colors.grey;
-    } else {
-      const colors = {
-        'white': Color(0xFF9E9E9E),
-        'blue': Color(0xFF2563EB),
-        'purple': Color(0xFF7C3AED),
-        'brown': Color(0xFF92400E),
-        'black': Color(0xFF171717),
-      };
-      return colors[belt] ?? Colors.grey;
-    }
   }
 
   // ============================================

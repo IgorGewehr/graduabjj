@@ -293,10 +293,12 @@ service cloud.firestore {
       // Anyone who belongs to the academy can read academy info
       allow read: if belongsToAcademy(academyId);
 
-      // Owner or admin can update academy settings
+      // Owner or admin can update academy settings.
+      // `subscription` is server-only (written by the payment webhook via the
+      // Admin SDK) so a client can't self-grant access (paidUntil/freeOverride).
       allow update: if (isAcademyOwner(academyId) || isAcademyAdmin(academyId))
                     && !request.resource.data.diff(resource.data).affectedKeys()
-                        .hasAny(['ownerId', 'createdAt']);
+                        .hasAny(['ownerId', 'createdAt', 'subscription']);
 
       // Allow academy creation - user must be setting themselves as owner
       allow create: if isAuthenticated()

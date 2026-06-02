@@ -8,8 +8,6 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
-import '../../widgets/competitions/competition_gallery.dart';
-import '../../widgets/competitions/photo_upload_sheet.dart';
 import '../../widgets/competitions/team_gallery_view.dart';
 import '../portal/competition_detail_screen.dart';
 
@@ -935,40 +933,6 @@ class _AdminCompetitionsScreenState
         .then((_) => _loadCompetitions());
   }
 
-  void _showCompetitionGallery(Competition competition) async {
-    if (_academyId == null) return;
-
-    final enrollmentService = CompetitionEnrollmentService(_academyId!);
-    final enrollments = await enrollmentService.getByCompetition(
-      competition.id,
-    );
-
-    if (!mounted) return;
-
-    final enrolledStudents = enrollments
-        .map((e) => EnrolledStudent(id: e.studentId, name: e.studentName))
-        .toList();
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          appBar: AppBar(
-            title: Text(competition.name),
-            backgroundColor: AppTheme.surface,
-          ),
-          backgroundColor: AppTheme.background,
-          body: CompetitionGallery(
-            academyId: _academyId!,
-            competitionId: competition.id,
-            competitionName: competition.name,
-            isAdmin: true,
-            enrolledStudents: enrolledStudents,
-          ),
-        ),
-      ),
-    );
-  }
-
   void _showEnrollmentsSheet(Competition competition) async {
     if (_academyId == null) return;
     final enrollmentService = CompetitionEnrollmentService(_academyId!);
@@ -1669,39 +1633,6 @@ class _InfoBadge extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Detail Row Widget
-class _DetailRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _DetailRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: AppTheme.textSecondary),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            label,
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-          ),
-        ),
-        Text(
-          value,
-          style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
-        ),
-      ],
     );
   }
 }

@@ -1,16 +1,62 @@
-# Roadmap — Paywall / Assinatura (Cakto)
+# Roadmap — Paywall / Assinatura
 
 Status do paywall do GraduaBJJ e o que falta, organizado por fases pra ir
 implementando aos poucos. Modelo de negócio: SaaS B2B, **só o dono paga**,
 alunos usam grátis. Trial inicial de **7 dias** (`AppConstants.trialDays`,
-aplicado a academias **novas**). Provedor: **Cakto** (recorrente).
+ancorado em `createdAt + 7`, vale pra toda academia).
 
-Planos (produto "BJJEasy" no Cakto, 3 ofertas):
-- Mensal R$ 89,99 — `pay.cakto.com.br/eo9omtc_889968`
-- Trimestral R$ 224,99 — `pay.cakto.com.br/xisui3m`
-- Anual R$ 854,99 — `pay.cakto.com.br/38yfe5r`
+> ## 🔁 ATENÇÃO — provedor migrado: Cakto → **Mercado Pago** (WIP)
+>
+> A paywall foi migrada para o **Mercado Pago** (commit `cf4e679`). **O app já
+> usa MP**: `paywall_screen.dart` chama a callable `createMercadoPagoCheckout`
+> (`recurring=true` → assinatura `/preapproval`; `recurring=false` → avulso
+> `/checkout/preferences`, Pix/boleto/cartão à vista). As URLs da Cakto em
+> `constants.dart` estão **mortas** e o `caktoWebhook` ficou só como **legado**
+> dos assinantes antigos. **A maior parte do texto abaixo (Cakto) está
+> desatualizada** — vale como histórico; o fluxo vigente é o do MP.
+>
+> **Liberação por plano** (`mercadoPagoWebhook` → `subscription.paidUntil`,
+> `MP_GRACE_DAYS = 5`): Mensal **35d**, Trimestral **95d**, Anual **370d**.
+> Estende de `max(hoje, paidUntil)`, idempotente por `externalPaymentId`.
+> Período resolvido por: `external_reference` (`academyId:plano`) >
+> `metadata.period` > valor pago (`mpAmountToDays`).
+
+Planos (3 ofertas, R$): Mensal **89,99** · Trimestral **224,99** · Anual **854,99**.
 
 ---
+
+## ✅ Checklist — ligar o Mercado Pago em produção
+
+1. [ ] **Secrets no Firebase** (a conta precisa de IAM no Secret Manager):
+   - `firebase functions:secrets:set MERCADOPAGO_ACCESS_TOKEN` (token de **produção**)
+   - `firebase functions:secrets:set MP_WEBHOOK_SECRET` (segredo de assinatura do webhook)
+2. [ ] **Cadastrar a URL do `mercadoPagoWebhook`** no painel MP → sua aplicação →
+   Webhooks, marcando os tópicos `payment`, `subscription_preapproval` e
+   `subscription_authorized_payment`.
+3. [ ] **`APP_BASE_URL`** disponível no ambiente da function (usado no `back_url`
+   `/obrigado` do checkout) — default `https://bjjeasy.netlify.app`.
+4. [ ] **Deploy**: `firebase deploy --only functions:mercadoPagoWebhook,functions:createMercadoPagoCheckout`
+   (deploy **só pelo repo graduabjj** — deploy de outro repo apaga as functions).
+5. [ ] **Teste ponta a ponta**: compra real avulsa (Pix) + assinatura recorrente →
+   conferir que `purchase` aprovado grava `subscription.paidUntil`, `plan: pro`,
+   `status: active`, `gateway: mercadopago` e `externalPaymentId`.
+6. [ ] **Validar revogação/past_due**: refund/chargeback zera `paidUntil`;
+   `preapproval` paused → `past_due`; cancelado mantém acesso até `paidUntil`.
+7. [ ] **Pagantes externos** (PIX/manual) marcados (`paidUntil`/`freeOverride`) —
+   lista do Igor — senão caem na paywall ao ligar o gate.
+8. [ ] **(Opcional) `trialExpiryReminder`** está **comentada** em `functions/index.js`
+   — reativar + deployar se quiser e-mail de fim de trial (bloqueio IAM: conta é
+   `functions.developer`, precisa Owner).
+
+> Nota de segurança: o gate é **client-side** (`admin_shell.dart` +
+> `hasSubscriptionAccessProvider`). As `firestore.rules` **não** checam
+> assinatura. Default `true` em loading/error é anti-flicker (não é bypass por
+> offline — o cache do Firestore mantém o doc vencido em estado `data`). A única
+> fragilidade prática é atrasar o relógio do aparelho.
+
+---
+
+## 🗄️ Histórico (Cakto — provedor antigo, desativado no app)
 
 ## 📍 Onde paramos (sessão de 2026-05-27)
 
