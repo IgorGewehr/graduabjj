@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
@@ -8,16 +11,24 @@ import '../../core/measurement_input.dart';
 import '../../core/theme.dart';
 import '../../models/physical_assessment.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/photo_upload_service.dart';
 import '../../services/physical_assessment_service.dart';
+import '../../widgets/cached_image.dart';
 import '../../widgets/form/form_section.dart';
 import '../../widgets/form/input_field.dart';
 
-/// Form to create/edit a physical assessment (Fase 1 — measurements only;
-/// photos come in Fase 2). Pop returns `true` when an assessment was saved.
+/// Form to create/edit a physical assessment. Pop returns `true` when an
+/// assessment was saved. Evolution photos (Fase 2) are shown only when
+/// [allowPhotos] is true (adults only — minors are excluded to avoid
+/// app-store UGC/minor issues and LGPD concerns).
 class PhysicalAssessmentFormScreen extends ConsumerStatefulWidget {
   final String academyId;
   final String studentId;
   final String studentName;
+
+  /// Whether the evolution-photos section is shown. Pass `true` only for
+  /// adult students.
+  final bool allowPhotos;
 
   /// When set, the form edits this assessment instead of creating a new one.
   final PhysicalAssessment? existing;
@@ -27,6 +38,7 @@ class PhysicalAssessmentFormScreen extends ConsumerStatefulWidget {
     required this.academyId,
     required this.studentId,
     required this.studentName,
+    this.allowPhotos = false,
     this.existing,
   });
 
@@ -52,6 +64,21 @@ class _PhysicalAssessmentFormScreenState
     'hipertrofia': 'Hipertrofia', 'emagrecimento': 'Emagrecimento',
     'condicionamento': 'Condicionamento', 'manutencao': 'Manutenção',
   };
+
+  // Evolution photo angles (Fase 2). Order is the display order.
+  static const List<String> _photoAngles = ['front', 'side', 'back'];
+  static const Map<String, String> _photoLabels = {
+    'front': 'Frente', 'side': 'Lado', 'back': 'Costas',
+  };
+
+  final _picker = ImagePicker();
+  // Photos already saved on the assessment, keyed by angle.
+  final Map<String, AssessmentPhoto> _existingPhotos = {};
+  // Newly-picked photos pending upload on save, keyed by angle (override
+  // existing for the same angle).
+  final Map<String, File> _pendingPhotos = {};
+  // Storage paths of existing photos the user removed — deleted on save.
+  final Set<String> _photosToDelete = {};
 
   final _weight = TextEditingController();
   final _height = TextEditingController();
@@ -84,6 +111,9 @@ class _PhysicalAssessmentFormScreenState
       _notes.text = e.notes ?? '';
       e.measurements.forEach((k, v) => _girths[k]?.text = _fmt(v));
       e.skinfolds.forEach((k, v) => _skinfolds[k]?.text = _fmt(v));
+      for (final p in e.photos) {
+        _existingPhotos[p.angle] = p;
+      }
     }
     // IMC ao vivo conforme peso/altura mudam.
     _weight.addListener(_onChanged);
@@ -140,14 +170,17 @@ class _PhysicalAssessmentFormScreenState
         h == null &&
         _parse(_bodyFat) == null &&
         _collect(_girths).isEmpty &&
-        _collect(_skinfolds).isEmpty) {
-      context.showWarning('Preencha ao menos uma medida.');
+        _collect(_skinfolds).isEmpty &&
+        _existingPhotos.isEmpty &&
+        _pendingPhotos.isEmpty) {
+      context.showWarning('Preencha ao menos uma medida ou foto.');
       return;
     }
 
     setState(() => _saving = true);
     try {
       final user = ref.read(currentUserProvider).valueOrNull;
+      final photos = await _resolvePhotos();
       final assessment = PhysicalAssessment(
         id: widget.existing?.id ?? '',
         studentId: widget.studentId,
@@ -158,7 +191,7 @@ class _PhysicalAssessmentFormScreenState
         bodyFatPct: _parse(_bodyFat),
         measurements: _collect(_girths),
         skinfolds: _collect(_skinfolds),
-        photos: widget.existing?.photos ?? const [],
+        photos: photos,
         goal: _goal,
         notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
         // Preserva quem fez a avaliação original ao editar; no create usa o
@@ -185,6 +218,182 @@ class _PhysicalAssessmentFormScreenState
         context.showError('Não foi possível salvar: $e');
       }
     }
+  }
+
+  /// Uploads pending photos and assembles the final photo list. Existing
+  /// photos kept as-is unless replaced/removed. Orphaned storage objects
+  /// (replaced or removed) are deleted best-effort — failures never block save.
+  Future<List<AssessmentPhoto>> _resolvePhotos() async {
+    // Photos section hidden (non-adult) — never touch existing photos.
+    if (!widget.allowPhotos) return widget.existing?.photos ?? const [];
+
+    final uploadService = PhotoUploadService();
+    final result = <AssessmentPhoto>[];
+    final toDelete = <String>{..._photosToDelete};
+
+    for (final angle in _photoAngles) {
+      final pending = _pendingPhotos[angle];
+      if (pending != null) {
+        final old = _existingPhotos[angle];
+        if (old != null && old.storagePath.isNotEmpty) {
+          toDelete.add(old.storagePath);
+        }
+        final up = await uploadService.uploadAssessmentPhoto(
+          academyId: widget.academyId,
+          studentId: widget.studentId,
+          imageFile: pending,
+          angle: angle,
+        );
+        result.add(AssessmentPhoto(
+          url: up.url,
+          storagePath: up.storagePath,
+          angle: angle,
+          takenAt: _date,
+        ));
+      } else if (_existingPhotos.containsKey(angle)) {
+        result.add(_existingPhotos[angle]!);
+      }
+    }
+
+    // Best-effort cleanup of orphaned objects (don't fail the save on these).
+    for (final path in toDelete) {
+      try {
+        await uploadService.deleteAssessmentPhoto(storagePath: path);
+      } catch (_) {/* orphan cleanup is non-critical */}
+    }
+    return result;
+  }
+
+  Future<void> _pickPhoto(String angle) async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(LucideIcons.camera),
+              title: const Text('Tirar foto'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(LucideIcons.image),
+              title: const Text('Escolher da galeria'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    try {
+      final picked = await _picker.pickImage(
+        source: source,
+        imageQuality: 70,
+        maxWidth: 1080,
+      );
+      if (picked == null) return;
+      setState(() => _pendingPhotos[angle] = File(picked.path));
+    } catch (e) {
+      if (mounted) context.showError('Não foi possível obter a imagem: $e');
+    }
+  }
+
+  void _removePhoto(String angle) {
+    setState(() {
+      _pendingPhotos.remove(angle);
+      final old = _existingPhotos.remove(angle);
+      if (old != null && old.storagePath.isNotEmpty) {
+        _photosToDelete.add(old.storagePath);
+      }
+    });
+  }
+
+  Widget _buildPhotoSection() {
+    return FormSection(
+      title: 'Fotos de evolução',
+      subtitle: 'Frente, lado e costas — opcional, privadas',
+      icon: LucideIcons.camera,
+      badge: 'Opcional',
+      collapsible: true,
+      defaultCollapsed: true,
+      child: Row(
+        children: [
+          for (final angle in _photoAngles) ...[
+            Expanded(child: _photoSlot(angle)),
+            if (angle != _photoAngles.last) const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _photoSlot(String angle) {
+    final pending = _pendingPhotos[angle];
+    final existing = _existingPhotos[angle];
+    final hasPhoto = pending != null || existing != null;
+
+    Widget preview;
+    if (pending != null) {
+      preview = Image.file(pending, fit: BoxFit.cover);
+    } else if (existing != null) {
+      preview = AppCachedImage(imageUrl: existing.url, fit: BoxFit.cover);
+    } else {
+      preview = const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(_photoLabels[angle]!, style: AppTheme.labelSmall),
+        const SizedBox(height: 4),
+        AspectRatio(
+          aspectRatio: 3 / 4,
+          child: InkWell(
+            onTap: () => _pickPhoto(angle),
+            borderRadius: BorderRadius.circular(10),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceVariant,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppTheme.border),
+                    ),
+                    child: hasPhoto
+                        ? preview
+                        : const Center(
+                            child: Icon(LucideIcons.plus,
+                                color: AppTheme.textSecondary),
+                          ),
+                  ),
+                ),
+                if (hasPhoto)
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: GestureDetector(
+                      onTap: () => _removePhoto(angle),
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(LucideIcons.x,
+                            size: 14, color: Colors.white),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -300,6 +509,12 @@ class _PhysicalAssessmentFormScreenState
               ),
             ),
             const SizedBox(height: 12),
+
+            // Fotos de evolução (somente adultos)
+            if (widget.allowPhotos) ...[
+              _buildPhotoSection(),
+              const SizedBox(height: 12),
+            ],
 
             // Meta + notas
             FormSection(

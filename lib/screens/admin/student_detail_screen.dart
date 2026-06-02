@@ -683,6 +683,9 @@ class _AdminStudentDetailScreenState
           academyId: FirebaseService.academyId,
           studentId: _student!.id,
           studentName: _student!.fullName,
+          // Fotos de evolução só para adultos (evita problemas com UGC/menores
+          // nas lojas e questões de LGPD).
+          allowPhotos: _student!.category == StudentCategory.adult,
           existing: existing,
         ),
       ),

@@ -131,4 +131,52 @@ class PhotoUploadService {
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
+
+  /// Uploads a PRIVATE evolution photo for a physical assessment.
+  /// Path: academies/{id}/students/{sid}/assessments/{angle}_{ts}.jpg
+  /// (storage.rules restrict read to staff + the student). Returns the download
+  /// URL + the storage path (both stored on the assessment doc).
+  Future<({String url, String storagePath})> uploadAssessmentPhoto({
+    required String academyId,
+    required String studentId,
+    required File imageFile,
+    required String angle,
+  }) async {
+    if (!await imageFile.exists()) {
+      throw Exception('Arquivo de imagem não encontrado');
+    }
+    final fileSize = await imageFile.length();
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (fileSize > maxSize) {
+      throw Exception('Imagem muito grande. Tamanho máximo: 10MB.');
+    }
+
+    final ts = DateTime.now().microsecondsSinceEpoch;
+    final storagePath =
+        'academies/$academyId/students/$studentId/assessments/${angle}_$ts.jpg';
+    final ref = _storage.ref().child(storagePath);
+    final metadata = SettableMetadata(
+      contentType: 'image/jpeg',
+      cacheControl: 'private, max-age=3600',
+    );
+    try {
+      final snapshot = await ref.putFile(imageFile, metadata);
+      final url = await snapshot.ref.getDownloadURL();
+      return (url: url, storagePath: storagePath);
+    } on FirebaseException catch (e) {
+      if (e.code == 'unauthorized') {
+        throw Exception('Você não tem permissão para enviar esta foto.');
+      }
+      throw Exception('Erro ao enviar foto: ${e.message}');
+    }
+  }
+
+  /// Deletes an assessment photo by its storage path (best-effort).
+  Future<void> deleteAssessmentPhoto({required String storagePath}) async {
+    try {
+      await _storage.ref().child(storagePath).delete();
+    } on FirebaseException catch (e) {
+      if (e.code != 'object-not-found') rethrow;
+    }
+  }
 }
