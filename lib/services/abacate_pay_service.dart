@@ -11,12 +11,14 @@ class PaymentLink {
   final String? qrCodeUrl;
   final DateTime expiresAt;
   final String? abacatePayId;
+  final String? ticketUrl;
 
   PaymentLink({
     required this.pixCode,
     this.qrCodeUrl,
     required this.expiresAt,
     this.abacatePayId,
+    this.ticketUrl,
   });
 
   factory PaymentLink.fromMap(Map<String, dynamic> map) {
@@ -27,6 +29,7 @@ class PaymentLink {
           ? DateTime.parse(map['expiresAt'])
           : DateTime.now().add(const Duration(hours: 24)),
       abacatePayId: map['abacatePayId'],
+      ticketUrl: map['ticketUrl'],
     );
   }
 }
