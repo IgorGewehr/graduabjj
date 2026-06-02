@@ -95,6 +95,11 @@ class _PhysicalAssessmentFormScreenState
   final _height = TextEditingController();
   final _bodyFat = TextEditingController();
   final _notes = TextEditingController();
+  // Bioimpedance (manual entry; overrides the values derived from % gordura).
+  final _leanMass = TextEditingController();
+  final _fatMass = TextEditingController();
+  final _visceral = TextEditingController();
+  final _bmr = TextEditingController();
   final Map<String, TextEditingController> _girths = {
     for (final k in PhysicalAssessment.girthKeys) k: TextEditingController(),
   };
@@ -119,6 +124,10 @@ class _PhysicalAssessmentFormScreenState
       if (e.weightKg != null) _weight.text = _fmt(e.weightKg!);
       if (e.heightCm != null) _height.text = _fmt(e.heightCm!);
       if (e.bodyFatPct != null) _bodyFat.text = _fmt(e.bodyFatPct!);
+      if (e.leanMassKg != null) _leanMass.text = _fmt(e.leanMassKg!);
+      if (e.fatMassKg != null) _fatMass.text = _fmt(e.fatMassKg!);
+      if (e.visceralFatLevel != null) _visceral.text = _fmt(e.visceralFatLevel!);
+      if (e.bmrKcal != null) _bmr.text = _fmt(e.bmrKcal!);
       _notes.text = e.notes ?? '';
       e.measurements.forEach((k, v) => _girths[k]?.text = _fmt(v));
       e.skinfolds.forEach((k, v) => _skinfolds[k]?.text = _fmt(v));
@@ -143,6 +152,10 @@ class _PhysicalAssessmentFormScreenState
     _height.dispose();
     _bodyFat.dispose();
     _notes.dispose();
+    _leanMass.dispose();
+    _fatMass.dispose();
+    _visceral.dispose();
+    _bmr.dispose();
     for (final c in _girths.values) {
       c.dispose();
     }
@@ -197,6 +210,10 @@ class _PhysicalAssessmentFormScreenState
     if (w == null &&
         h == null &&
         _parse(_bodyFat) == null &&
+        _parse(_leanMass) == null &&
+        _parse(_fatMass) == null &&
+        _parse(_visceral) == null &&
+        _parse(_bmr) == null &&
         _collect(_girths).isEmpty &&
         _collect(_skinfolds).isEmpty &&
         _existingPhotos.isEmpty &&
@@ -213,11 +230,14 @@ class _PhysicalAssessmentFormScreenState
       // Firestore write succeeds (so a failed write never orphans the doc).
       final toDelete = <String>{};
       final photos = await _resolvePhotos(toDelete);
-      // Derive fat/lean mass when weight + % gordura are both known.
+      // Derive fat/lean mass from weight + % gordura, but let a manually-typed
+      // bioimpedance value (more accurate, from a device) take precedence.
       final bodyFat = _parse(_bodyFat);
       final split = (w != null && bodyFat != null)
           ? bodyMassSplit(weightKg: w, bodyFatPct: bodyFat)
           : null;
+      final leanMass = _parse(_leanMass) ?? split?.leanMassKg;
+      final fatMass = _parse(_fatMass) ?? split?.fatMassKg;
       final assessment = PhysicalAssessment(
         id: widget.existing?.id ?? '',
         studentId: widget.studentId,
@@ -226,8 +246,10 @@ class _PhysicalAssessmentFormScreenState
         weightKg: w,
         heightCm: h,
         bodyFatPct: bodyFat,
-        leanMassKg: split?.leanMassKg,
-        fatMassKg: split?.fatMassKg,
+        leanMassKg: leanMass,
+        fatMassKg: fatMass,
+        visceralFatLevel: _parse(_visceral),
+        bmrKcal: _parse(_bmr),
         measurements: _collect(_girths),
         skinfolds: _collect(_skinfolds),
         photos: photos,
@@ -552,6 +574,38 @@ class _PhysicalAssessmentFormScreenState
                           min: 1, max: 100),
                     ),
                   _pollockBox(),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Bioimpedância (opcional, recolhível) — entrada manual do aparelho
+            FormSection(
+              title: 'Bioimpedância',
+              subtitle: 'Valores do aparelho (InBody etc.) — opcional',
+              icon: LucideIcons.activity,
+              badge: 'Opcional',
+              collapsible: true,
+              defaultCollapsed: true,
+              child: Column(
+                children: [
+                  FormRow(children: [
+                    _num(_leanMass, 'Massa magra', 'kg', min: 5, max: 200),
+                    _num(_fatMass, 'Massa gorda', 'kg', min: 1, max: 200),
+                  ]),
+                  const SizedBox(height: 12),
+                  FormRow(children: [
+                    _num(_visceral, 'Gordura visceral', 'nível',
+                        min: 1, max: 60),
+                    _num(_bmr, 'TMB', 'kcal', min: 500, max: 5000),
+                  ]),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Massa magra/gorda digitadas aqui têm prioridade sobre o '
+                    'cálculo automático pelo % de gordura.',
+                    style: AppTheme.labelSmall
+                        .copyWith(color: AppTheme.textSecondary),
+                  ),
                 ],
               ),
             ),

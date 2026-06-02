@@ -63,6 +63,9 @@ class PhysicalAssessment {
   final double? bodyFatPct;
   final double? leanMassKg;
   final double? fatMassKg;
+  // Bioimpedance extras (optional; typed manually from a device like InBody).
+  final double? visceralFatLevel;
+  final double? bmrKcal; // basal metabolic rate
 
   // Girths (cm) and skinfolds (mm) — only filled keys present.
   final Map<String, double> measurements;
@@ -88,6 +91,8 @@ class PhysicalAssessment {
     this.bodyFatPct,
     this.leanMassKg,
     this.fatMassKg,
+    this.visceralFatLevel,
+    this.bmrKcal,
     this.measurements = const {},
     this.skinfolds = const {},
     this.photos = const [],
@@ -138,6 +143,8 @@ class PhysicalAssessment {
       bodyFatPct: _toD(data['bodyFatPct']),
       leanMassKg: _toD(data['leanMassKg']),
       fatMassKg: _toD(data['fatMassKg']),
+      visceralFatLevel: _toD(data['visceralFatLevel']),
+      bmrKcal: _toD(data['bmrKcal']),
       measurements: _toNumMap(data['measurements']),
       skinfolds: _toNumMap(data['skinfolds']),
       photos: ((data['photos'] as List?) ?? const [])
@@ -164,6 +171,8 @@ class PhysicalAssessment {
         'bodyFatPct': bodyFatPct,
         'leanMassKg': leanMassKg,
         'fatMassKg': fatMassKg,
+        'visceralFatLevel': visceralFatLevel,
+        'bmrKcal': bmrKcal,
         'measurements': measurements,
         'skinfolds': skinfolds,
         'photos': photos.map((p) => p.toMap()).toList(),

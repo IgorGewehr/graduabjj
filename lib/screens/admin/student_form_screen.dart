@@ -47,6 +47,9 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   final _tuitionDayController = TextEditingController();
   final _healthNotesController = TextEditingController();
   final _allergiesController = TextEditingController();
+  // Body-composition goal (optional)
+  final _targetWeightController = TextEditingController();
+  final _targetBodyFatController = TextEditingController();
 
   // Form values
   DateTime? _birthDate;
@@ -148,6 +151,8 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     _tuitionDayController.dispose();
     _healthNotesController.dispose();
     _allergiesController.dispose();
+    _targetWeightController.dispose();
+    _targetBodyFatController.dispose();
     super.dispose();
   }
 
@@ -200,6 +205,8 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     _tuitionValueController.text = student.tuitionValue.toStringAsFixed(2).replaceAll('.', ',');
     _tuitionDayController.text = student.tuitionDay.toString();
     _healthNotesController.text = student.healthNotes ?? '';
+    _targetWeightController.text = _numText(student.targetWeightKg);
+    _targetBodyFatController.text = _numText(student.targetBodyFatPct);
     _birthDate = student.birthDate;
     _sex = student.sex;
     _startDate = student.startDate;
@@ -604,6 +611,21 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     );
   }
 
+  /// Formats an optional number for a text field (pt-BR comma, trims `.0`).
+  static String _numText(double? v) {
+    if (v == null) return '';
+    return v == v.roundToDouble()
+        ? v.toInt().toString()
+        : v.toString().replaceAll('.', ',');
+  }
+
+  /// Parses a pt-BR/EN decimal from a text field. Empty/invalid → null.
+  double? _parseNum(String t) {
+    final s = t.trim().replaceAll(',', '.');
+    if (s.isEmpty) return null;
+    return double.tryParse(s);
+  }
+
   Widget _buildSexDropdown() {
     return Container(
       decoration: BoxDecoration(
@@ -834,6 +856,36 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
                 hintText: 'Lesões, condições médicas, restrições...',
                 prefixIcon: LucideIcons.clipboardList,
                 maxLines: 3,
+              ),
+            ],
+          ),
+        ),
+
+        FormSection(
+          title: 'Meta / Objetivo',
+          subtitle: 'Metas de composição corporal (mostradas na evolução)',
+          icon: LucideIcons.target,
+          badge: 'Opcional',
+          collapsible: true,
+          defaultCollapsed: _targetWeightController.text.isEmpty &&
+              _targetBodyFatController.text.isEmpty,
+          child: FormRow(
+            children: [
+              InputField(
+                controller: _targetWeightController,
+                label: 'Peso-alvo (kg)',
+                hintText: 'Ex.: 78',
+                prefixIcon: LucideIcons.scale,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+              ),
+              InputField(
+                controller: _targetBodyFatController,
+                label: '% Gordura-alvo',
+                hintText: 'Ex.: 15',
+                prefixIcon: LucideIcons.percent,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
               ),
             ],
           ),
@@ -1537,6 +1589,8 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
             : onlyDigits(_cpfController.text),
         'birthDate': _birthDate != null ? Timestamp.fromDate(_birthDate!) : null,
         'sex': _sex?.value,
+        'targetWeightKg': _parseNum(_targetWeightController.text),
+        'targetBodyFatPct': _parseNum(_targetBodyFatController.text),
         'category': _category.value,
         'startDate': Timestamp.fromDate(_startDate),
         // Legacy fields — kept synced to the primary sport so single-sport

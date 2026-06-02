@@ -8,6 +8,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
 import '../../models/physical_assessment.dart';
+import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../widgets/cached_image.dart';
 
@@ -69,9 +70,14 @@ class EvolutionScreen extends ConsumerWidget {
               );
             }
             return RefreshIndicator(
-              onRefresh: () => ref.refresh(
-                  studentPhysicalAssessmentsProvider(student.id).future),
-              child: _EvolutionContent(assessments: assessments),
+              onRefresh: () {
+                // Also refresh the student so a just-set goal/meta shows up.
+                ref.invalidate(currentStudentProvider);
+                return ref.refresh(
+                    studentPhysicalAssessmentsProvider(student.id).future);
+              },
+              child: _EvolutionContent(
+                  assessments: assessments, student: student),
             );
           },
         );
@@ -92,7 +98,8 @@ class _Metric {
 class _EvolutionContent extends StatefulWidget {
   /// Most-recent first (as returned by the service).
   final List<PhysicalAssessment> assessments;
-  const _EvolutionContent({required this.assessments});
+  final Student student;
+  const _EvolutionContent({required this.assessments, required this.student});
 
   @override
   State<_EvolutionContent> createState() => _EvolutionContentState();
@@ -105,6 +112,8 @@ class _EvolutionContentState extends State<_EvolutionContent> {
     _Metric('bodyFat', '% Gordura', '%', _bodyFat),
     _Metric('leanMass', 'Massa magra', 'kg', _leanMass),
     _Metric('fatMass', 'Massa gorda', 'kg', _fatMass),
+    _Metric('visceral', 'G. visceral', '', _visceral),
+    _Metric('bmr', 'TMB', 'kcal', _bmr),
     _Metric('waist', 'Cintura', 'cm', _waist),
     _Metric('hip', 'Quadril', 'cm', _hip),
   ];
@@ -114,6 +123,8 @@ class _EvolutionContentState extends State<_EvolutionContent> {
   static double? _bodyFat(PhysicalAssessment a) => a.bodyFatPct;
   static double? _leanMass(PhysicalAssessment a) => a.leanMassKg;
   static double? _fatMass(PhysicalAssessment a) => a.fatMassKg;
+  static double? _visceral(PhysicalAssessment a) => a.visceralFatLevel;
+  static double? _bmr(PhysicalAssessment a) => a.bmrKcal;
   static double? _waist(PhysicalAssessment a) => a.measurements['waist'];
   static double? _hip(PhysicalAssessment a) => a.measurements['hip'];
 
@@ -190,6 +201,7 @@ class _EvolutionContentState extends State<_EvolutionContent> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
         _snapshotCard(),
+        ..._metaSection(),
         if (_chartable.isNotEmpty) ...[
           const SizedBox(height: 16),
           _chartSection(),
@@ -300,6 +312,107 @@ class _EvolutionContentState extends State<_EvolutionContent> {
             const SizedBox(height: 16),
         ],
       ),
+    );
+  }
+
+  // -------------------------------------------------------------------- meta
+  /// Progress card toward the student's active goal (target weight / %fat).
+  /// Direction-agnostic: progress is measured from the first measurement to
+  /// the target, so it works for both losing and gaining.
+  List<Widget> _metaSection() {
+    final bars = <Widget>[];
+    final tw = widget.student.targetWeightKg;
+    final tbf = widget.student.targetBodyFatPct;
+    if (tw != null) {
+      final b = _goalBar(
+          label: 'Peso', unit: 'kg', target: tw, points: _series['weight']);
+      if (b != null) bars.add(b);
+    }
+    if (tbf != null) {
+      final b = _goalBar(
+          label: '% Gordura',
+          unit: '%',
+          target: tbf,
+          points: _series['bodyFat']);
+      if (b != null) bars.add(b);
+    }
+    if (bars.isEmpty) return const [];
+
+    return [
+      const SizedBox(height: 16),
+      _Card(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(LucideIcons.target,
+                    size: 18, color: AppTheme.primary),
+                const SizedBox(width: 8),
+                Text('Meta', style: AppTheme.titleSmall),
+              ],
+            ),
+            const SizedBox(height: 12),
+            for (var i = 0; i < bars.length; i++) ...[
+              if (i > 0) const SizedBox(height: 16),
+              bars[i],
+            ],
+          ],
+        ),
+      ),
+    ];
+  }
+
+  Widget? _goalBar({
+    required String label,
+    required String unit,
+    required double target,
+    required List<({DateTime date, double value})>? points,
+  }) {
+    if (points == null || points.isEmpty) return null;
+    final baseline = points.first.value;
+    final current = points.last.value;
+    final denom = target - baseline;
+    final reached = (current - target).abs() < 0.05;
+    final double progress = denom.abs() < 1e-9
+        ? (reached ? 1.0 : 0.0)
+        : ((current - baseline) / denom).clamp(0.0, 1.0);
+    final remaining = (target - current).abs();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(label,
+                style: AppTheme.bodySmall
+                    .copyWith(fontWeight: FontWeight.w600)),
+            const Spacer(),
+            Text(
+              '${_fmt(current)} → ${_fmt(target)} $unit',
+              style: AppTheme.labelSmall
+                  .copyWith(color: AppTheme.textSecondary),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 8,
+            backgroundColor: AppTheme.surfaceVariant,
+            valueColor: const AlwaysStoppedAnimation(AppTheme.primary),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          reached
+              ? 'Meta atingida! 🎉'
+              : 'Faltam ${_fmt(remaining)} $unit (${(progress * 100).round()}%)',
+          style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+        ),
+      ],
     );
   }
 

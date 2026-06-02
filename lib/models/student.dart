@@ -279,6 +279,12 @@ class Student {
   final String? teamId;
   final double? weight;
 
+  // Active body-composition goal (optional) — the student's current target,
+  // used by the portal "Minha Evolução" progress bars. Direction (gain/lose)
+  // is inferred from the first measurement → target.
+  final double? targetWeightKg;
+  final double? targetBodyFatPct;
+
   // Belt History
   final List<BeltHistoryEntry>? beltHistory;
 
@@ -349,6 +355,8 @@ class Student {
     required this.category,
     this.teamId,
     this.weight,
+    this.targetWeightKg,
+    this.targetBodyFatPct,
     this.beltHistory,
     this.initialAttendanceCount,
     this.attendanceCount,
@@ -405,6 +413,8 @@ class Student {
       category: StudentCategoryExtension.fromString(data['category'] ?? 'adult'),
       teamId: data['teamId'],
       weight: data['weight']?.toDouble(),
+      targetWeightKg: data['targetWeightKg']?.toDouble(),
+      targetBodyFatPct: data['targetBodyFatPct']?.toDouble(),
       beltHistory: data['beltHistory'] != null
           ? (data['beltHistory'] as List)
               .map((e) => BeltHistoryEntry.fromMap(e))
@@ -466,6 +476,8 @@ class Student {
       'category': category.value,
       'teamId': teamId,
       'weight': weight,
+      'targetWeightKg': targetWeightKg,
+      'targetBodyFatPct': targetBodyFatPct,
       'beltHistory': beltHistory?.map((e) => e.toMap()).toList(),
       'initialAttendanceCount': initialAttendanceCount,
       'attendanceCount': attendanceCount,
@@ -584,6 +596,8 @@ class Student {
     StudentCategory? category,
     String? teamId,
     double? weight,
+    double? targetWeightKg,
+    double? targetBodyFatPct,
     List<BeltHistoryEntry>? beltHistory,
     int? initialAttendanceCount,
     int? attendanceCount,
@@ -631,6 +645,8 @@ class Student {
       category: category ?? this.category,
       teamId: teamId ?? this.teamId,
       weight: weight ?? this.weight,
+      targetWeightKg: targetWeightKg ?? this.targetWeightKg,
+      targetBodyFatPct: targetBodyFatPct ?? this.targetBodyFatPct,
       beltHistory: beltHistory ?? this.beltHistory,
       initialAttendanceCount: initialAttendanceCount ?? this.initialAttendanceCount,
       attendanceCount: attendanceCount ?? this.attendanceCount,
