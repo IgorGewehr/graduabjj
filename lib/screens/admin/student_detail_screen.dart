@@ -10,6 +10,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/formatters.dart';
 import '../../core/theme.dart';
+import '../../models/physical_assessment.dart';
 import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
@@ -17,6 +18,7 @@ import '../../services/belt_progression_service.dart';
 import '../../services/services.dart';
 import '../../widgets/common/profile_photo_picker.dart';
 import '../../widgets/common/sport_chip.dart';
+import 'physical_assessment_form_screen.dart';
 
 /// Admin Student Detail Screen - View and manage student
 class AdminStudentDetailScreen extends ConsumerStatefulWidget {
@@ -42,6 +44,7 @@ class _AdminStudentDetailScreenState
   List<BeltProgression> _progressions = [];
   List<Achievement> _achievements = [];
   List<Assessment> _assessments = [];
+  List<PhysicalAssessment> _physicalAssessments = [];
   List<Plan> _studentPlans = [];
   bool _isLoading = true;
   // One eligibility result per graded sport the student trains (multi-sport).
@@ -51,7 +54,7 @@ class _AdminStudentDetailScreenState
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
     _loadData();
   }
 
@@ -88,6 +91,7 @@ class _AdminStudentDetailScreenState
         achievementService.getForStudent(widget.studentId),
         assessmentService.getByStudent(widget.studentId),
         planService.getPlansForStudent(widget.studentId),
+        PhysicalAssessmentService(academyId).getByStudent(widget.studentId),
       ]);
 
       final student = futures[0] as Student?;
@@ -98,6 +102,7 @@ class _AdminStudentDetailScreenState
       final achievements = futures[5] as List<Achievement>;
       final assessments = futures[6] as List<Assessment>;
       final studentPlans = futures[7] as List<Plan>;
+      final physicalAssessments = futures[8] as List<PhysicalAssessment>;
 
       // Auto-graduation eligibility — only computed when the academy has
       // the feature on (cheap settings doc read first, then the actual math).
@@ -130,6 +135,7 @@ class _AdminStudentDetailScreenState
         _achievements = achievements;
         _assessments = assessments;
         _studentPlans = studentPlans;
+        _physicalAssessments = physicalAssessments;
         _autoGradEnabled = autoGradOn;
         _eligibilityBySport = eligibilityBySport;
         _isLoading = false;
@@ -215,6 +221,13 @@ class _AdminStudentDetailScreenState
                             count: _progressions.length + _achievements.length,
                           ),
                         ),
+                        Tab(
+                          child: _TabWithBadge(
+                            icon: LucideIcons.scale,
+                            label: 'Av. Física',
+                            count: _physicalAssessments.length,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -228,6 +241,7 @@ class _AdminStudentDetailScreenState
                         _buildBehaviorTab(),
                         _buildAchievementsTab(),
                         _buildHistoryTab(),
+                        _buildPhysicalAssessmentTab(),
                       ],
                     ),
                   ),
@@ -597,6 +611,153 @@ class _AdminStudentDetailScreenState
             style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
           ),
         ],
+      ),
+    );
+  }
+
+  // ============================================
+  // Avaliação Física (aba)
+  // ============================================
+  Widget _buildPhysicalAssessmentTab() {
+    return Stack(
+      children: [
+        if (_physicalAssessments.isEmpty)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(40),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(LucideIcons.scale, size: 48, color: AppTheme.textDisabled),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Nenhuma avaliação física ainda',
+                    style: AppTheme.bodyMedium
+                        .copyWith(color: AppTheme.textSecondary),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Toque em "Nova avaliação" para registrar a primeira.',
+                    textAlign: TextAlign.center,
+                    style: AppTheme.labelSmall
+                        .copyWith(color: AppTheme.textDisabled),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+            itemCount: _physicalAssessments.length,
+            itemBuilder: (context, i) {
+              final a = _physicalAssessments[i];
+              // Lista é desc (mais recente primeiro) → o "anterior" é o próximo.
+              final prev = i + 1 < _physicalAssessments.length
+                  ? _physicalAssessments[i + 1]
+                  : null;
+              return _assessmentCard(a, prev);
+            },
+          ),
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: FloatingActionButton.extended(
+            heroTag: 'newPhysicalAssessment',
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+            onPressed: () => _openAssessmentForm(),
+            icon: const Icon(LucideIcons.plus, size: 18),
+            label: const Text('Nova avaliação'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _openAssessmentForm({PhysicalAssessment? existing}) async {
+    if (_student == null) return;
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => PhysicalAssessmentFormScreen(
+          academyId: FirebaseService.academyId,
+          studentId: _student!.id,
+          studentName: _student!.fullName,
+          existing: existing,
+        ),
+      ),
+    );
+    if (saved == true) _loadData();
+  }
+
+  String _n(double v) =>
+      v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+
+  Widget _assessmentCard(PhysicalAssessment a, PhysicalAssessment? prev) {
+    final bmi = a.bmi;
+    String? deltaW;
+    if (a.weightKg != null && prev?.weightKg != null) {
+      final d = a.weightKg! - prev!.weightKg!;
+      deltaW = '${d > 0 ? '+' : ''}${d.toStringAsFixed(1)} kg';
+    }
+    final parts = <String>[
+      if (a.weightKg != null) 'Peso ${_n(a.weightKg!)} kg',
+      if (bmi != null) 'IMC ${bmi.toStringAsFixed(1)}',
+      if (a.bodyFatPct != null) '%G ${_n(a.bodyFatPct!)}%',
+    ];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _openAssessmentForm(existing: a),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      DateFormat('dd/MM/yyyy').format(a.date),
+                      style: AppTheme.bodyMedium
+                          .copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      parts.isEmpty ? 'Sem medidas' : parts.join('  ·  '),
+                      style: AppTheme.labelSmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              if (deltaW != null) ...[
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    deltaW,
+                    style: AppTheme.labelSmall
+                        .copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Icon(LucideIcons.chevronRight,
+                  size: 16, color: AppTheme.textSecondary),
+            ],
+          ),
+        ),
       ),
     );
   }
