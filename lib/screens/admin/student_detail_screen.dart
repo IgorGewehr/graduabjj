@@ -9,6 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/formatters.dart';
+import '../../core/number_format.dart';
 import '../../core/theme.dart';
 import '../../models/physical_assessment.dart';
 import '../../models/student.dart';
@@ -647,18 +648,24 @@ class _AdminStudentDetailScreenState
             ),
           )
         else
-          ListView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-            itemCount: _physicalAssessments.length,
-            itemBuilder: (context, i) {
-              final a = _physicalAssessments[i];
-              // Lista é desc (mais recente primeiro) → o "anterior" é o próximo.
-              final prev = i + 1 < _physicalAssessments.length
-                  ? _physicalAssessments[i + 1]
-                  : null;
-              return _assessmentCard(a, prev);
-            },
-          ),
+          Builder(builder: (context) {
+            final overdue = _reassessmentOverdue();
+            final offset = overdue ? 1 : 0;
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+              itemCount: _physicalAssessments.length + offset,
+              itemBuilder: (context, index) {
+                if (overdue && index == 0) return _reassessmentBanner();
+                final i = index - offset;
+                final a = _physicalAssessments[i];
+                // Lista é desc (mais recente primeiro) → "anterior" é o próximo.
+                final prev = i + 1 < _physicalAssessments.length
+                    ? _physicalAssessments[i + 1]
+                    : null;
+                return _assessmentCard(a, prev);
+              },
+            );
+          }),
         Positioned(
           right: 16,
           bottom: 16,
@@ -672,6 +679,46 @@ class _AdminStudentDetailScreenState
           ),
         ),
       ],
+    );
+  }
+
+  // Dias após a última avaliação a partir dos quais sugerimos reavaliar.
+  static const int _reassessmentDays = 90;
+
+  int? _daysSinceLastAssessment() {
+    if (_physicalAssessments.isEmpty) return null;
+    // Lista é desc → a primeira é a mais recente.
+    return DateTime.now().difference(_physicalAssessments.first.date).inDays;
+  }
+
+  bool _reassessmentOverdue() {
+    final d = _daysSinceLastAssessment();
+    return d != null && d >= _reassessmentDays;
+  }
+
+  Widget _reassessmentBanner() {
+    final days = _daysSinceLastAssessment() ?? 0;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.warning.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.warning.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(LucideIcons.clock, size: 18, color: AppTheme.warning),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Última avaliação há $days dias. Considere registrar uma '
+              'reavaliação.',
+              style: AppTheme.labelSmall.copyWith(color: AppTheme.textPrimary),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -692,6 +739,8 @@ class _AdminStudentDetailScreenState
           // Meta atual do aluno (editável pelo atalho no form).
           studentTargetWeightKg: _student!.targetWeightKg,
           studentTargetBodyFatPct: _student!.targetBodyFatPct,
+          // Para notificar o aluno quando uma nova avaliação for criada.
+          studentLinkedUserId: _student!.linkedUserId,
           existing: existing,
         ),
       ),
@@ -699,8 +748,7 @@ class _AdminStudentDetailScreenState
     if (saved == true) _loadData();
   }
 
-  String _n(double v) =>
-      v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+  String _n(double v) => fmtNum(v);
 
   Widget _assessmentCard(PhysicalAssessment a, PhysicalAssessment? prev) {
     final bmi = a.bmi;

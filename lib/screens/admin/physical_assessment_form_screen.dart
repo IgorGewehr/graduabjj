@@ -13,6 +13,7 @@ import '../../core/theme.dart';
 // PhysicalAssessment/AssessmentPhoto come via the service barrel below.
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/notification_dispatcher.dart';
 import '../../services/photo_upload_service.dart';
 import '../../services/physical_assessment_service.dart';
 import '../../services/student_service.dart';
@@ -43,6 +44,10 @@ class PhysicalAssessmentFormScreen extends ConsumerStatefulWidget {
   final double? studentTargetWeightKg;
   final double? studentTargetBodyFatPct;
 
+  /// Linked app-account uid of the student — used to notify them when a new
+  /// assessment is created. Null when the student has no linked account.
+  final String? studentLinkedUserId;
+
   /// When set, the form edits this assessment instead of creating a new one.
   final PhysicalAssessment? existing;
 
@@ -56,6 +61,7 @@ class PhysicalAssessmentFormScreen extends ConsumerStatefulWidget {
     this.studentAge,
     this.studentTargetWeightKg,
     this.studentTargetBodyFatPct,
+    this.studentLinkedUserId,
     this.existing,
   });
 
@@ -283,6 +289,15 @@ class _PhysicalAssessmentFormScreenState
         await service.update(widget.existing!.id, assessment);
       } else {
         await service.create(assessment);
+        // Notify the student (best-effort; never block the save).
+        final uid = widget.studentLinkedUserId;
+        if (uid != null && uid.isNotEmpty) {
+          try {
+            await NotificationDispatcher(widget.academyId)
+                .notifyNewPhysicalAssessment(
+                    userId: uid, studentId: widget.studentId);
+          } catch (_) {/* notifications are best-effort */}
+        }
       }
       // Doc saved — now safe to delete orphaned storage objects (best-effort;
       // a leaked object is harmless, a deleted-but-still-referenced one is not).

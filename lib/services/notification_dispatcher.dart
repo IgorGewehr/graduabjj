@@ -129,6 +129,25 @@ class NotificationDispatcher {
     );
   }
 
+  /// Notify student that a new physical assessment was recorded.
+  Future<AppNotification> notifyNewPhysicalAssessment({
+    required String userId,
+    String? studentId,
+  }) async {
+    return _notificationService.create(
+      userId: userId,
+      type: NotificationType.studentMilestone,
+      priority: NotificationPriority.normal,
+      title: 'Nova avaliação física',
+      message:
+          'Seu professor registrou uma nova avaliação física. Acompanhe sua evolução!',
+      actionUrl: '/portal/evolucao',
+      actionLabel: 'Ver evolução',
+      studentId: studentId,
+      expiresInDays: 30,
+    );
+  }
+
   // ============================================
   // NOTIFICATIONS FOR ADMINS
   // ============================================

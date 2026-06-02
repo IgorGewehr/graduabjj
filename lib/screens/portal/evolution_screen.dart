@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/body_composition.dart';
+import '../../core/number_format.dart';
 import '../../core/theme.dart';
 import '../../models/physical_assessment.dart';
 import '../../models/student.dart';
@@ -31,6 +32,7 @@ class EvolutionScreen extends ConsumerWidget {
         icon: LucideIcons.alertTriangle,
         title: 'Erro ao carregar',
         subtitle: '$e',
+        onRetry: () => ref.invalidate(currentStudentProvider),
       ),
       data: (student) {
         if (student == null) {
@@ -48,6 +50,8 @@ class EvolutionScreen extends ConsumerWidget {
             icon: LucideIcons.alertTriangle,
             title: 'Erro ao carregar',
             subtitle: '$e',
+            onRetry: () =>
+                ref.invalidate(studentPhysicalAssessmentsProvider(student.id)),
           ),
           data: (assessments) {
             if (assessments.isEmpty) {
@@ -638,10 +642,7 @@ class _EvolutionContentState extends State<_EvolutionContent> {
                 AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
       );
 
-  static String _fmt(double v) {
-    final r = (v * 10).roundToDouble() / 10; // 1 decimal
-    return r == r.roundToDouble() ? r.toInt().toString() : r.toString();
-  }
+  static String _fmt(double v) => fmtNum(v);
 }
 
 /// fl_chart line view for one ascending series.
@@ -698,7 +699,7 @@ class _LineChartView extends StatelessWidget {
               getTitlesWidget: (value, meta) => Padding(
                 padding: const EdgeInsets.only(right: 4),
                 child: Text(
-                  value.toStringAsFixed(dec),
+                  fmtNum(value, maxDecimals: dec),
                   style: AppTheme.labelSmall
                       .copyWith(color: AppTheme.textSecondary, fontSize: 10),
                 ),
@@ -764,10 +765,7 @@ class _LineChartView extends StatelessWidget {
     );
   }
 
-  static String _fmtV(double v) {
-    final r = (v * 10).roundToDouble() / 10;
-    return r == r.roundToDouble() ? r.toInt().toString() : r.toString();
-  }
+  static String _fmtV(double v) => fmtNum(v);
 }
 
 /// Simple rounded surface card used across the screen.
@@ -795,8 +793,12 @@ class _Message extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
+  final VoidCallback? onRetry;
   const _Message(
-      {required this.icon, required this.title, required this.subtitle});
+      {required this.icon,
+      required this.title,
+      required this.subtitle,
+      this.onRetry});
 
   @override
   Widget build(BuildContext context) {
@@ -815,6 +817,14 @@ class _Message extends StatelessWidget {
                 style: AppTheme.bodySmall
                     .copyWith(color: AppTheme.textSecondary),
                 textAlign: TextAlign.center),
+            if (onRetry != null) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(LucideIcons.refreshCw, size: 16),
+                label: const Text('Tentar novamente'),
+              ),
+            ],
           ],
         ),
       ),
