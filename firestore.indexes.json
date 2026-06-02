@@ -10,6 +10,14 @@
       ]
     },
     {
+      "collectionGroup": "syllabus",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "order", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "attendance",
       "queryScope": "COLLECTION",
       "fields": [

@@ -826,6 +826,26 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Syllabus / curriculo de tecnicas por faixa (graduacao pedagogica).
+      // Nao e sensivel: qualquer membro da academia le; staff escreve.
+      // ============================================
+      match /syllabus/{techniqueId} {
+        allow read: if belongsToAcademy(academyId);
+        allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
+      // Skill progress: dominio/feedback por tecnica de cada aluno.
+      // Staff escreve; aluno le o seu; responsavel le o dos dependentes.
+      // ============================================
+      match /skillProgress/{progressId} {
+        allow read: if isAcademyStaff(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
+        allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
       // Notifications
       // ============================================
       match /notifications/{notificationId} {

@@ -35,3 +35,5 @@ export 'student_import_service.dart';
 export 'student_export_service.dart';
 export 'physical_assessment_service.dart';
 export 'assessment_pdf_service.dart';
+export 'syllabus_service.dart';
+export 'skill_progress_service.dart';

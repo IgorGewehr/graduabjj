@@ -59,6 +59,8 @@ class Collections {
   CollectionReference get content => academy.collection('content');
   CollectionReference get workoutLogs => academy.collection('workoutLogs');
   CollectionReference get physicalAssessments => academy.collection('physicalAssessments');
+  CollectionReference get syllabus => academy.collection('syllabus');
+  CollectionReference get skillProgress => academy.collection('skillProgress');
 
   // Individual document references
   DocumentReference student(String id) => students.doc(id);
@@ -72,6 +74,8 @@ class Collections {
   DocumentReference competitionEnrollment(String id) => competitionEnrollments.doc(id);
   DocumentReference assessment(String id) => assessments.doc(id);
   DocumentReference physicalAssessment(String id) => physicalAssessments.doc(id);
+  DocumentReference syllabusTechnique(String id) => syllabus.doc(id);
+  DocumentReference skillProgressDoc(String id) => skillProgress.doc(id);
   DocumentReference linkCode(String code) => linkCodes.doc(code);
   DocumentReference checkin(String id) => checkins.doc(id);
 

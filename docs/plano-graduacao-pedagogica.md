@@ -39,26 +39,20 @@ skill por aluno), **telas** (montar currículo, marcar domínio, ver progresso) 
 
 ---
 
-## 2. Decisões a confirmar (antes de codar)
+## 2. Decisões (CONFIRMADAS 2026-06)
 
-0. **Branch:** seguir em `feat/evolucao-modulos` ou abrir `feat/graduacao-pedagogica`?
-1. **Dono do currículo:** cada **academia** monta o seu currículo de técnicas por
-   faixa (customizável) — com **templates default** opcionais que a gente semeia
-   (ex.: BJJ básico) pra não começar do zero? _(recomendação: por-academia + seed
-   opcional)_
-2. **Rigidez dos requisitos compostos (B2):** técnicas dominadas **bloqueiam** a
-   promoção (requisito duro) ou só **informam** ao lado da presença? _(recomendação:
-   **configurável por academia**, default **informativo** — não quebra a auto-promoção
-   atual; academia pode exigir “≥X% das técnicas” depois)_
-3. **Granularidade do domínio por técnica:** booleano **dominado/não** ou uma escala
-   (ex.: aprendendo / praticando / dominado)? _(recomendação: escala de 3 níveis —
-   mais pedagógico, e o "dominado" conta pro progresso)_
-4. **Exame/banca (B3):** registrar evento formal de exame (data, banca, resultado) já
-   nesta rodada ou só usar a promoção existente + lembrete? _(recomendação: MVP usa a
-   promoção atual; evento de exame formal fica pra um extra opcional)_
-5. **Vídeo por técnica:** apenas um `videoUrl` opcional (link/Youtube/Storage) ou
-   integrar com a biblioteca `content` existente? _(recomendação: `videoUrl` opcional
-   no MVP; integração com a biblioteca depois)_
+0. **Branch:** seguir em **`feat/evolucao-modulos`** (mesma da avaliação física).
+1. **Dono do currículo:** **por academia** (customizável) **+ template BJJ básico
+   opcional** que semeamos pra não começar do zero.
+2. **Rigidez dos requisitos compostos (B2):** **configurável por academia**, default
+   **informativo** (não quebra a auto-promoção por presença atual); academia pode
+   ativar “exigir ≥X% das técnicas” depois.
+3. **Granularidade do domínio:** **escala de 3 níveis** — `aprendendo / praticando /
+   dominado`. Só `dominado` conta pro progresso.
+4. **Exame/banca (B3):** MVP usa a **promoção existente + lembrete**; evento formal de
+   exame fica como extra opcional depois.
+5. **Vídeo por técnica:** **`videoUrl` opcional** (link/Storage) no MVP; integração com
+   a biblioteca `content` fica pra depois.
 
 ---
 
