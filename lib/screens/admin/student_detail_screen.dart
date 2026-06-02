@@ -53,10 +53,19 @@ class _AdminStudentDetailScreenState
   List<({SportId sport, EligibilityResult result})> _eligibilityBySport = [];
   bool _autoGradEnabled = false;
 
+  // Aba "Currículo" (índice 7) é construída só na 1ª visita — evita ler
+  // currículo+progresso ao abrir o aluno sem nunca abrir a aba.
+  bool _syllabusVisited = false;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 8, vsync: this);
+    _tabController.addListener(() {
+      if (_tabController.index == 7 && !_syllabusVisited) {
+        setState(() => _syllabusVisited = true);
+      }
+    });
     _loadData();
   }
 
@@ -254,7 +263,7 @@ class _AdminStudentDetailScreenState
                         _buildAchievementsTab(),
                         _buildHistoryTab(),
                         _buildPhysicalAssessmentTab(),
-                        _student == null
+                        (_student == null || !_syllabusVisited)
                             ? const SizedBox()
                             : StudentSyllabusTab(student: _student!),
                       ],
