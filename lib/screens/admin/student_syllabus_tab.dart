@@ -122,15 +122,25 @@ class _StudentSyllabusTabState extends ConsumerState<StudentSyllabusTab> {
 
   Future<void> _setLevel(SyllabusTechnique t, SkillLevel level) async {
     final existing = _progress[t.id];
-    final service = SkillProgressService(_academyId);
+    if (existing?.level == level) return; // já está nesse nível (no-op)
+    final r = _rater();
     try {
-      if (existing?.level == level) {
-        // Toca no nível atual → limpa (volta para "não iniciado").
-        await service.clear(widget.student.id, t.id);
-        setState(() => _progress.remove(t.id));
-      } else {
-        final r = _rater();
-        await service.setLevel(
+      // Single-select: troca o nível preservando a nota. (Não há "desmarcar"
+      // por toque — evita apagar a nota sem querer.)
+      await SkillProgressService(_academyId).setLevel(
+        studentId: widget.student.id,
+        sport: _sport.value,
+        gradeId: t.gradeId,
+        techniqueId: t.id,
+        level: level,
+        notes: existing?.notes,
+        ratedBy: r.uid,
+        ratedByName: r.name,
+      );
+      if (!mounted) return;
+      setState(() {
+        _progress[t.id] = SkillProgress(
+          id: SkillProgress.docId(widget.student.id, t.id),
           studentId: widget.student.id,
           sport: _sport.value,
           gradeId: t.gradeId,
@@ -139,22 +149,9 @@ class _StudentSyllabusTabState extends ConsumerState<StudentSyllabusTab> {
           notes: existing?.notes,
           ratedBy: r.uid,
           ratedByName: r.name,
+          updatedAt: DateTime.now(),
         );
-        setState(() {
-          _progress[t.id] = SkillProgress(
-            id: SkillProgress.docId(widget.student.id, t.id),
-            studentId: widget.student.id,
-            sport: _sport.value,
-            gradeId: t.gradeId,
-            techniqueId: t.id,
-            level: level,
-            notes: existing?.notes,
-            ratedBy: r.uid,
-            ratedByName: r.name,
-            updatedAt: DateTime.now(),
-          );
-        });
-      }
+      });
     } catch (e) {
       if (mounted) context.showError('Não foi possível salvar: $e');
     }
@@ -188,6 +185,8 @@ class _StudentSyllabusTabState extends ConsumerState<StudentSyllabusTab> {
     final notes = ctrl.text.trim().isEmpty ? null : ctrl.text.trim();
     ctrl.dispose();
     if (ok != true) return;
+    // Nada a salvar: sem nível anterior e sem nota → não cria entrada fantasma.
+    if (existing == null && notes == null) return;
     final r = _rater();
     // Mantém o nível existente; se ainda não há nível, começa em "aprendendo".
     final level = existing?.level ?? SkillLevel.aprendendo;
