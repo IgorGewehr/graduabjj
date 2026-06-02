@@ -427,6 +427,8 @@ class BillingReminderService {
         email: data['email'] as String?,
         guardianPhone: guardian?['phone'] as String?,
         guardianEmail: guardian?['email'] as String?,
+        cpf: data['cpf'] as String?,
+        guardianCpf: guardian?['cpf'] as String?,
         category: data['category'] as String? ?? 'adult',
         photoUrl: data['photoUrl'] as String?,
       );
@@ -494,6 +496,8 @@ class StudentContact {
   final String? email;
   final String? guardianPhone;
   final String? guardianEmail;
+  final String? cpf;
+  final String? guardianCpf;
   final String category;
   final String? photoUrl;
 
@@ -504,6 +508,8 @@ class StudentContact {
     this.email,
     this.guardianPhone,
     this.guardianEmail,
+    this.cpf,
+    this.guardianCpf,
     this.category = 'adult',
     this.photoUrl,
   });
@@ -513,6 +519,9 @@ class StudentContact {
 
   String? get effectiveEmail =>
       category == 'kids' ? guardianEmail : email;
+
+  String? get effectiveCpf =>
+      category == 'kids' ? guardianCpf : cpf;
 }
 
 // ============================================
