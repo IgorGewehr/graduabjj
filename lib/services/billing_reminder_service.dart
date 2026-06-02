@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 import 'firebase_service.dart';
+import 'mercado_pago_service.dart';
 
 /// Contact type for billing reminders
 enum ContactType { whatsapp, phone, email, inPerson, other }
@@ -617,13 +618,17 @@ class BillingNotificationService {
 
   // Default templates with placeholders: {nome}, {valor}, {vencimento}, {dias}, {academia}.
   // Mirrors marcusjj/src/services/billingNotificationService.ts DEFAULT_*_TEMPLATES.
+  // The [[PIX]]..[[/PIX]] block is resolved by [injectPaymentInfo]: when a PIX
+  // is generated, {pix}/{link} are substituted and the markers removed; when
+  // there is no PIX (e.g. MP disconnected, or template preview), the whole
+  // block is stripped so the message stays clean.
   static const defaultWhatsAppTemplates = {
-    'D+0': 'Oi {nome}! Passando rapidinho para lembrar que hoje, dia {vencimento}, vence sua mensalidade de {valor} com a {academia}. Contamos com voce! Qualquer duvida, estamos a disposicao.',
-    'D+1': 'Ola {nome}! Aqui e a {academia}. Identificamos que sua mensalidade de {valor} venceu em {vencimento}. Caso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem. Caso contrario, solicitamos a regularizacao. Obrigado!',
-    'D+3': 'Ola {nome}! Sua mensalidade de {valor} da {academia} esta com 3 dias de atraso (vencimento: {vencimento}). Por favor, regularize sua situacao o mais breve possivel. Em caso de duvidas, estamos a disposicao!',
-    'D+7': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Precisamos que regularize sua situacao para manter seus treinos em dia. Entre em contato conosco para combinar o pagamento.',
-    'D+15': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Sua situacao precisa ser regularizada com urgencia para evitar a suspensao do acesso aos treinos. Por favor, entre em contato.',
-    'D+30': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com mais de 30 dias de atraso. Caso a situacao nao seja regularizada, infelizmente precisaremos suspender seu acesso. Entre em contato urgente para negociarmos.',
+    'D+0': 'Oi {nome}! Passando rapidinho para lembrar que hoje, dia {vencimento}, vence sua mensalidade de {valor} com a {academia}. Contamos com voce! Qualquer duvida, estamos a disposicao.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'D+1': 'Ola {nome}! Aqui e a {academia}. Identificamos que sua mensalidade de {valor} venceu em {vencimento}. Caso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem. Caso contrario, solicitamos a regularizacao. Obrigado![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'D+3': 'Ola {nome}! Sua mensalidade de {valor} da {academia} esta com 3 dias de atraso (vencimento: {vencimento}). Por favor, regularize sua situacao o mais breve possivel. Em caso de duvidas, estamos a disposicao![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'D+7': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Precisamos que regularize sua situacao para manter seus treinos em dia. Entre em contato conosco para combinar o pagamento.[[PIX]]\n\nPara facilitar, pague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'D+15': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Sua situacao precisa ser regularizada com urgencia para evitar a suspensao do acesso aos treinos. Por favor, entre em contato.[[PIX]]\n\nRegularize agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'D+30': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com mais de 30 dias de atraso. Caso a situacao nao seja regularizada, infelizmente precisaremos suspender seu acesso. Entre em contato urgente para negociarmos.[[PIX]]\n\nRegularize agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
   };
 
   static const defaultEmailSubjectTemplates = {
@@ -660,6 +665,69 @@ class BillingNotificationService {
   }
 
   // ============================================
+  // Resolve / strip the optional PIX payment block
+  // ============================================
+  /// Resolves the optional [[PIX]]..[[/PIX]] payment block in a message.
+  /// If pixCode is present: substitutes {pix} (copia-e-cola) and {link}
+  /// (checkout) and removes the [[PIX]]/[[/PIX]] markers. If absent: removes
+  /// the whole block. Always strips any leftover markers/placeholders as a
+  /// safety net.
+  String injectPaymentInfo(String text, {String? pixCode, String? ticketUrl}) {
+    final has = pixCode != null && pixCode.isNotEmpty;
+    var out = text;
+    if (has) {
+      out = out
+          .replaceAll('{pix}', pixCode)
+          .replaceAll('{link}', ticketUrl ?? '')
+          .replaceAll('[[PIX]]', '')
+          .replaceAll('[[/PIX]]', '');
+    } else {
+      // Remove the whole block (DOTALL) including markers.
+      out = out.replaceAll(RegExp(r'\[\[PIX\]\][\s\S]*?\[\[/PIX\]\]'), '');
+    }
+    // Safety net: never leak raw markers/placeholders.
+    out = out
+        .replaceAll('[[PIX]]', '')
+        .replaceAll('[[/PIX]]', '')
+        .replaceAll('{pix}', '')
+        .replaceAll('{link}', '');
+    // Tidy excess blank lines left by a removed block.
+    out = out.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+    return out;
+  }
+
+  // ============================================
+  // Ensure a valid PIX for a financial record (graceful degradation)
+  // ============================================
+  /// Best-effort PIX generation for a tuition record. NEVER throws: on any
+  /// failure (MP disconnected, CF error, network) returns empty strings so the
+  /// caller falls back to a PIX-less message.
+  Future<({String pixCode, String ticketUrl})> ensureValidPixForFinancial({
+    required String academyId,
+    required String financialId,
+    required double amount,
+    required String studentId,
+    required String studentName,
+    String? payerCpf,
+  }) async {
+    try {
+      final mp = MercadoPagoService(academyId);
+      if (!await mp.isEnabled()) return (pixCode: '', ticketUrl: '');
+      final link = await mp.createPixPayment(
+        amount: amount,
+        financialId: financialId,
+        studentId: studentId,
+        studentName: studentName,
+        cpf: payerCpf,
+      );
+      if (link == null) return (pixCode: '', ticketUrl: '');
+      return (pixCode: link.pixCode, ticketUrl: link.ticketUrl ?? '');
+    } catch (_) {
+      return (pixCode: '', ticketUrl: '');
+    }
+  }
+
+  // ============================================
   // Generate WhatsApp message per stage
   // ============================================
   String generateWhatsAppMessage({
@@ -668,6 +736,8 @@ class BillingNotificationService {
     required double amount,
     required DateTime dueDate,
     required int daysOverdue,
+    String? pixCode,
+    String? ticketUrl,
   }) {
     final amountStr = _currencyFormat.format(amount);
     final dateStr = _dateFormat.format(dueDate);
@@ -677,7 +747,8 @@ class BillingNotificationService {
         ?? defaultWhatsAppTemplates[stageKey]
         ?? defaultWhatsAppTemplates['D+1']!;
 
-    return _applyTemplate(template, studentName, amountStr, dateStr, daysOverdue);
+    final result = _applyTemplate(template, studentName, amountStr, dateStr, daysOverdue);
+    return injectPaymentInfo(result, pixCode: pixCode, ticketUrl: ticketUrl);
   }
 
   // ============================================
@@ -1021,11 +1092,14 @@ class BillingNotificationService {
     String studentName,
     double amount,
     DateTime dueDate,
-    int daysOverdue,
-  ) {
+    int daysOverdue, {
+    String? pixCode,
+    String? ticketUrl,
+  }) {
     final amountStr = _currencyFormat.format(amount);
     final dateStr = _dateFormat.format(dueDate);
-    return _applyTemplate(template, studentName, amountStr, dateStr, daysOverdue);
+    final result = _applyTemplate(template, studentName, amountStr, dateStr, daysOverdue);
+    return injectPaymentInfo(result, pixCode: pixCode, ticketUrl: ticketUrl);
   }
 
   // ============================================
