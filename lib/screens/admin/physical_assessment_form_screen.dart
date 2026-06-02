@@ -9,6 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/body_composition.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/measurement_input.dart';
+import '../../core/number_format.dart';
 import '../../core/theme.dart';
 // PhysicalAssessment/AssessmentPhoto come via the service barrel below.
 import '../../models/student.dart';
@@ -187,8 +188,11 @@ class _PhysicalAssessmentFormScreenState
     super.dispose();
   }
 
-  static String _fmt(double v) =>
-      v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+  // pt-BR comma for prefilled inputs, preserving FULL precision (so editing a
+  // stored 82.53 doesn't silently round to 82,5). Fields accept both separators.
+  static String _fmt(double v) => v == v.roundToDouble()
+      ? v.toInt().toString()
+      : v.toString().replaceAll('.', ',');
 
   double? _parse(TextEditingController c) => parseDecimalInput(c.text);
 
@@ -795,14 +799,13 @@ class _PhysicalAssessmentFormScreenState
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '% gordura estimada (Pollock 3 dobras): '
-              '${_fmt(double.parse(fat.toStringAsFixed(1)))}%',
+              '% gordura estimada (Pollock 3 dobras): ${fmtNum(fat)}%',
               style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
           TextButton(
             onPressed: () {
-              _bodyFat.text = _fmt(double.parse(fat.toStringAsFixed(1)));
+              _bodyFat.text = fmtNum(fat);
               setState(() {});
               context.showSuccess('% Gordura preenchida com a estimativa.');
             },
@@ -975,7 +978,7 @@ class _ImcBox extends StatelessWidget {
         border: OutlineInputBorder(),
       ),
       child: Text(
-        b == null ? '—' : b.toStringAsFixed(1),
+        b == null ? '—' : fmtNum(b),
         style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
       ),
     );
