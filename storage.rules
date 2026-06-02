@@ -93,6 +93,17 @@ service firebase.storage {
     }
 
     // ============================================================
+    // Physical assessment evolution photos — PRIVATE (staff + the student
+    // only; NOT public). Body photos are sensitive (LGPD). Only staff upload.
+    // The fallback below grants NO read, so read is governed solely here.
+    // ============================================================
+    match /academies/{academyId}/students/{studentId}/assessments/{file=**} {
+      allow read: if isStaff(academyId) || isOwnStudent(academyId, studentId);
+      allow write: if isStaff(academyId) && isImage() && sizeUnderMb(10);
+      allow delete: if isStaff(academyId);
+    }
+
+    // ============================================================
     // Competition photos — any academy member uploads (Firestore rules
     // enforce own/staff on the matching doc). Public read for the gallery.
     // ============================================================
@@ -138,13 +149,15 @@ service firebase.storage {
       allow write, delete: if isStaff(academyId) && sizeUnderMb(300);
     }
 
-    // Fallback: any other file under an academy (backgrounds, sidebar logos,
-    // misc assets) — admin writes, public read. Storage evaluates rules as a
-    // UNION, so the more specific rules above already grant their narrower
-    // cases (e.g. a student writing their own photo); this only ADDS admin
-    // write to everything else under the academy.
+    // Fallback: any other file under an academy — admin writes; NO blanket read.
+    // Storage evaluates rules as a UNION, so a broad `read: if true` here would
+    // OVERRIDE the private blocks above (e.g. assessment photos) and expose them
+    // publicly. Public assets (profile, logo, branding, news, events, products,
+    // content) each declare their own `read: if true`, so read stays governed
+    // per-path. (Web backgrounds/sidebar live under top-level `academy/...`, not
+    // here, and render via tokenized download URLs — unaffected by this.)
     match /academies/{academyId}/{allPaths=**} {
-      allow read: if true;
+      allow read: if false;
       allow write, delete: if isAdmin(academyId);
     }
 
