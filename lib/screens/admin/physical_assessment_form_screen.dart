@@ -159,8 +159,11 @@ class _PhysicalAssessmentFormScreenState
         photos: widget.existing?.photos ?? const [],
         goal: _goal,
         notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
-        assessedBy: user?.id ?? '',
-        assessedByName: user?.displayName ?? '',
+        // Preserva quem fez a avaliação original ao editar; no create usa o
+        // usuário logado.
+        assessedBy: widget.existing?.assessedBy ?? (user?.id ?? ''),
+        assessedByName:
+            widget.existing?.assessedByName ?? (user?.displayName ?? ''),
         createdAt: widget.existing?.createdAt ?? DateTime.now(),
       );
 
