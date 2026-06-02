@@ -1564,6 +1564,7 @@ class _AdminBillingRemindersScreenState
   void _showSettingsDialog() {
     bool whatsappEnabled = _notificationSettings?.whatsappEnabled ?? false;
     bool emailEnabled = _notificationSettings?.emailEnabled ?? false;
+    bool includePaymentLink = _notificationSettings?.includePaymentLink ?? true;
     // Clone current templates or start empty
     final waTemplates = Map<String, String>.from(
       _notificationSettings?.messageTemplates?.whatsapp ?? {},
@@ -1658,6 +1659,27 @@ class _AdminBillingRemindersScreenState
                           setDialogState(() => emailEnabled = value);
                         },
                       ),
+                      SwitchListTile(
+                        title: const Text('Incluir link de pagamento (PIX)'),
+                        subtitle: Text(
+                          'Anexa o copia-e-cola e o link de checkout do Mercado Pago nas cobrancas do WhatsApp',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        secondary: Icon(
+                          LucideIcons.creditCard,
+                          color: includePaymentLink
+                              ? AppTheme.success
+                              : AppTheme.textSecondary,
+                        ),
+                        value: includePaymentLink,
+                        activeColor: AppTheme.success,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) {
+                          setDialogState(() => includePaymentLink = value);
+                        },
+                      ),
 
                       const Divider(height: 24),
 
@@ -1680,7 +1702,9 @@ class _AdminBillingRemindersScreenState
                         ],
                       ),
                       Text(
-                        'Variaveis: {nome}, {valor}, {vencimento}, {dias}, {academia}',
+                        includePaymentLink
+                            ? 'Variaveis: {nome}, {valor}, {vencimento}, {dias}, {academia}, {pix} (copia-e-cola), {link} (checkout)'
+                            : 'Variaveis: {nome}, {valor}, {vencimento}, {dias}, {academia}',
                         style: AppTheme.labelSmall.copyWith(
                           color: AppTheme.textSecondary,
                         ),
@@ -1835,6 +1859,7 @@ class _AdminBillingRemindersScreenState
                       final newSettings = BillingNotificationSettings(
                         whatsappEnabled: whatsappEnabled,
                         emailEnabled: emailEnabled,
+                        includePaymentLink: includePaymentLink,
                         messageTemplates: templates,
                       );
 

@@ -460,6 +460,7 @@ class BillingReminderService {
     return BillingNotificationSettings(
       whatsappEnabled: data['whatsappEnabled'] as bool? ?? false,
       emailEnabled: data['emailEnabled'] as bool? ?? false,
+      includePaymentLink: data['includePaymentLink'] as bool? ?? true,
       messageTemplates: BillingMessageTemplates.fromMap(
         data['messageTemplates'] as Map<String, dynamic>?,
       ),
@@ -473,6 +474,7 @@ class BillingReminderService {
     final data = <String, dynamic>{
       'whatsappEnabled': settings.whatsappEnabled,
       'emailEnabled': settings.emailEnabled,
+      'includePaymentLink': settings.includePaymentLink,
       'updatedAt': Timestamp.fromDate(DateTime.now()),
     };
     if (settings.messageTemplates != null) {
@@ -558,11 +560,13 @@ class BillingMessageTemplates {
 class BillingNotificationSettings {
   final bool whatsappEnabled;
   final bool emailEnabled;
+  final bool includePaymentLink;
   final BillingMessageTemplates? messageTemplates;
 
   BillingNotificationSettings({
     this.whatsappEnabled = false,
     this.emailEnabled = false,
+    this.includePaymentLink = true,
     this.messageTemplates,
   });
 

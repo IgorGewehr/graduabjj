@@ -73,4 +73,21 @@ void main() {
       });
     }
   });
+
+  group('BillingNotificationSettings.includePaymentLink', () {
+    test('defaults to true (back-compat for existing academies)', () {
+      final settings = BillingNotificationSettings(
+        whatsappEnabled: true,
+        emailEnabled: false,
+      );
+      expect(settings.includePaymentLink, isTrue);
+    });
+
+    test('honors explicit false', () {
+      final settings = BillingNotificationSettings(
+        includePaymentLink: false,
+      );
+      expect(settings.includePaymentLink, isFalse);
+    });
+  });
 }
