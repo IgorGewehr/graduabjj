@@ -135,3 +135,38 @@
 
 > Cada item acima merece seu próprio mini-plano (modelo de dados + telas + fases +
 > regras Firestore), no formato de `docs/plano-musculacao.md`, na hora de executar.
+
+---
+
+## Z. Backlog — engajamento (NÃO priorizado)
+
+> Ideias capturadas pra não perder, **abaixo** dos módulos (A–F). São apostas de
+> engajamento, não dor latente.
+
+### Z1. Mural da Academia (feed enxuto) — aposta
+Decisão (2026-06): **NÃO** fazer feed social estilo Facebook com **post de aluno
+/ curtidas / comentários** — motivos: risco de *feed morto* (público pequeno por
+academia), compete com WhatsApp/Instagram já adotados, e post de aluno gera
+imposto de UGC (moderação + exigências Apple/Google). Se for fazer, só a versão
+enxuta:
+
+- [ ] Tela "Mural" no portal, cronológica, agregando:
+  - Avisos do mestre (post simples: texto + imagem opcional, **só instrutor**) —
+    único pedaço realmente novo (hoje não há canal de aviso livre no app).
+  - **Auto-posts** do que já existe: graduações/vitórias (conquistas),
+    campeonatos/aulas especiais (eventos `academy_event`), resultado de competição.
+- [ ] Push quando sai post novo.
+- **Pulo do gato:** os auto-posts mantêm o mural vivo mesmo se o mestre nunca
+  escrever → elimina o risco de feed morto (que é o que mataria a ideia).
+- Evolução só com tração: reações 1-toque (👏/🔥) → comentários → post de aluno
+  (provavelmente nunca / só com aprovação do mestre).
+
+### Z2. Atalho pra testar o apetite ANTES do mural (mínimo esforço)
+- [ ] "Enviar comunicado" pro mestre → gera notificação/push (reusa
+  `sendAcademyNotification`) + opcionalmente um Evento.
+- [ ] Destacar conquistas/eventos recentes na home do portal.
+- Entrega ~80% do valor com fração do esforço; só vira mural (Z1) se houver uso.
+
+> Já cobre parte disso: **Eventos** (`academy_event`/`event_service`),
+> **Conquistas + linha do tempo**, **Notificações/push**. O que falta é só o
+> **canal de aviso livre** do mestre.
