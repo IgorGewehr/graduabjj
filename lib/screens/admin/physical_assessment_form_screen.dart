@@ -246,14 +246,13 @@ class _PhysicalAssessmentFormScreenState
       // Firestore write succeeds (so a failed write never orphans the doc).
       final toDelete = <String>{};
       final photos = await _resolvePhotos(toDelete);
-      // Derive fat/lean mass from weight + % gordura, but let a manually-typed
-      // bioimpedance value (more accurate, from a device) take precedence.
       final bodyFat = _parse(_bodyFat);
-      final split = (w != null && bodyFat != null)
-          ? bodyMassSplit(weightKg: w, bodyFatPct: bodyFat)
-          : null;
-      final leanMass = _parse(_leanMass) ?? split?.leanMassKg;
-      final fatMass = _parse(_fatMass) ?? split?.fatMassKg;
+      // Stored lean/fat = MANUAL (bioimpedance) only. The value derived from
+      // weight + % gordura is computed on display (portal), so editing
+      // weight/%fat always reflects fresh numbers instead of a stale stored
+      // derive — and we never confuse a derived value for a manual one.
+      final leanMass = _parse(_leanMass);
+      final fatMass = _parse(_fatMass);
       final assessment = PhysicalAssessment(
         id: widget.existing?.id ?? '',
         studentId: widget.studentId,

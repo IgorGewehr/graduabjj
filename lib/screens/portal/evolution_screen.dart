@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/body_composition.dart';
 import '../../core/theme.dart';
 import '../../models/physical_assessment.dart';
 import '../../models/student.dart';
@@ -121,8 +122,19 @@ class _EvolutionContentState extends State<_EvolutionContent> {
   static double? _weight(PhysicalAssessment a) => a.weightKg;
   static double? _bmi(PhysicalAssessment a) => a.bmi;
   static double? _bodyFat(PhysicalAssessment a) => a.bodyFatPct;
-  static double? _leanMass(PhysicalAssessment a) => a.leanMassKg;
-  static double? _fatMass(PhysicalAssessment a) => a.fatMassKg;
+  // Lean/fat mass: prefer the stored (manual/bioimpedance) value, else derive
+  // from weight + % gordura so charts work even without a device reading.
+  static double? _leanMass(PhysicalAssessment a) =>
+      a.leanMassKg ?? _derivedSplit(a)?.leanMassKg;
+  static double? _fatMass(PhysicalAssessment a) =>
+      a.fatMassKg ?? _derivedSplit(a)?.fatMassKg;
+
+  static ({double fatMassKg, double leanMassKg})? _derivedSplit(
+      PhysicalAssessment a) {
+    final w = a.weightKg, bf = a.bodyFatPct;
+    if (w == null || bf == null) return null;
+    return bodyMassSplit(weightKg: w, bodyFatPct: bf);
+  }
   static double? _visceral(PhysicalAssessment a) => a.visceralFatLevel;
   static double? _bmr(PhysicalAssessment a) => a.bmrKcal;
   static double? _waist(PhysicalAssessment a) => a.measurements['waist'];
@@ -373,10 +385,15 @@ class _EvolutionContentState extends State<_EvolutionContent> {
     final baseline = points.first.value;
     final current = points.last.value;
     final denom = target - baseline;
-    final reached = (current - target).abs() < 0.05;
-    final double progress = denom.abs() < 1e-9
-        ? (reached ? 1.0 : 0.0)
-        : ((current - baseline) / denom).clamp(0.0, 1.0);
+    final atTarget = (current - target).abs() < 0.05;
+    final double progress = atTarget
+        ? 1.0
+        : denom.abs() < 1e-9
+            ? 0.0
+            : ((current - baseline) / denom).clamp(0.0, 1.0);
+    // Reached covers overshoot too (e.g. lost more weight than the target),
+    // so we never show "faltam X" once the goal is met or passed.
+    final reached = atTarget || progress >= 1.0;
     final remaining = (target - current).abs();
 
     return Column(
