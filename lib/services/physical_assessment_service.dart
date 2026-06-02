@@ -3,6 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/physical_assessment.dart';
 import 'firebase_service.dart';
 
+// Re-export so callers using the services barrel get the model type too
+// (mirrors how Assessment ships inline with assessment_service.dart).
+export '../models/physical_assessment.dart';
+
 /// CRUD + queries for physical/anthropometric assessments
 /// (`academies/{id}/physicalAssessments`). Staff writes; the student reads their
 /// own (enforced by Firestore rules). Mirrors the shape of `AssessmentService`.

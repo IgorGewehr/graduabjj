@@ -58,6 +58,9 @@ dependencies:
   in_app_update: ^4.2.3
   package_info_plus: ^8.0.0
 
+  # Charts (evolução física)
+  fl_chart: ^0.69.2
+
   # Animations
   flutter_animate: ^4.5.2
   confetti: ^0.8.0

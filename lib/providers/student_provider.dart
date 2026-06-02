@@ -171,6 +171,21 @@ final studentAssessmentsProvider =
       return await service.getByStudent(studentId);
     });
 
+/// Physical (anthropometric) assessments of a student, most recent first.
+/// Drives the portal "Minha Evolução" screen and its menu gate.
+final studentPhysicalAssessmentsProvider =
+    FutureProvider.family<List<PhysicalAssessment>, String>((
+      ref,
+      studentId,
+    ) async {
+      final currentUser = await ref.watch(currentUserProvider.future);
+
+      if (currentUser?.academyId == null) return [];
+
+      final service = PhysicalAssessmentService(currentUser!.academyId!);
+      return await service.getByStudent(studentId);
+    });
+
 /// Latest assessment provider
 final latestAssessmentProvider = FutureProvider.family<Assessment?, String>((
   ref,

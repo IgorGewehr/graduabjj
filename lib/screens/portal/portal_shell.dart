@@ -111,6 +111,12 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       section: 'Treinos',
     ),
     _PortalMenuEntry(
+      label: 'Evolução',
+      icon: LucideIcons.trendingUp,
+      path: '/portal/evolucao',
+      section: 'Treinos',
+    ),
+    _PortalMenuEntry(
       label: 'Treinos',
       icon: Icons.fitness_center,
       path: '/portal/treinos',
