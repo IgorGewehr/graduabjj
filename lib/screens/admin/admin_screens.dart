@@ -7,6 +7,7 @@ export 'qr_session_screen.dart';
 export 'team_tab_content.dart';
 export 'financial_screen.dart';
 export 'graduation_screen.dart';
+export 'syllabus_screen.dart';
 export 'settings_screen.dart';
 export 'classes_screen.dart';
 export 'competitions_screen.dart';

@@ -929,6 +929,14 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
+            path: '/admin/graduacao/curriculo',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const SyllabusScreen(),
+            ),
+          ),
+          GoRoute(
             path: '/admin/relatorios',
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,

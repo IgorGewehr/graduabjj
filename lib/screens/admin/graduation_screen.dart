@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
@@ -115,13 +116,28 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
               ),
             ],
           ),
-          IconButton(
-            onPressed: _loadData,
-            icon: const Icon(LucideIcons.refreshCw),
-            style: IconButton.styleFrom(
-              backgroundColor: AppTheme.surface,
-              foregroundColor: AppTheme.textSecondary,
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Currículo de técnicas',
+                onPressed: () => context.push('/admin/graduacao/curriculo'),
+                icon: const Icon(LucideIcons.bookOpen),
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.surface,
+                  foregroundColor: AppTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: _loadData,
+                icon: const Icon(LucideIcons.refreshCw),
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.surface,
+                  foregroundColor: AppTheme.textSecondary,
+                ),
+              ),
+            ],
           ),
         ],
       ),
