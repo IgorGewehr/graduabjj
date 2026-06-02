@@ -19,68 +19,63 @@ class EvolutionScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // The portal shell (portal_shell.dart) already provides the Scaffold,
+    // AppBar and bottom nav, so this screen returns body content directly —
+    // adding our own Scaffold/AppBar here would stack a second app bar.
     final studentAsync = ref.watch(currentStudentProvider);
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        backgroundColor: AppTheme.surface,
-        elevation: 0,
-        title: const Text('Minha Evolução'),
+    return studentAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => _Message(
+        icon: LucideIcons.alertTriangle,
+        title: 'Erro ao carregar',
+        subtitle: '$e',
       ),
-      body: studentAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => _Message(
-          icon: LucideIcons.alertTriangle,
-          title: 'Erro ao carregar',
-          subtitle: '$e',
-        ),
-        data: (student) {
-          if (student == null) {
-            return const _Message(
-              icon: LucideIcons.userX,
-              title: 'Perfil não vinculado',
-              subtitle: 'Sua conta ainda não está vinculada a um aluno.',
-            );
-          }
-          final listAsync =
-              ref.watch(studentPhysicalAssessmentsProvider(student.id));
-          return listAsync.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => _Message(
-              icon: LucideIcons.alertTriangle,
-              title: 'Erro ao carregar',
-              subtitle: '$e',
-            ),
-            data: (assessments) {
-              if (assessments.isEmpty) {
-                return RefreshIndicator(
-                  onRefresh: () => ref
-                      .refresh(studentPhysicalAssessmentsProvider(student.id)
-                          .future),
-                  child: ListView(
-                    children: const [
-                      SizedBox(height: 80),
-                      _Message(
-                        icon: LucideIcons.lineChart,
-                        title: 'Nenhuma avaliação ainda',
-                        subtitle:
-                            'As avaliações físicas registradas pelo seu '
-                            'instrutor aparecerão aqui — com gráficos de '
-                            'evolução e comparação de fotos.',
-                      ),
-                    ],
-                  ),
-                );
-              }
+      data: (student) {
+        if (student == null) {
+          return const _Message(
+            icon: LucideIcons.userX,
+            title: 'Perfil não vinculado',
+            subtitle: 'Sua conta ainda não está vinculada a um aluno.',
+          );
+        }
+        final listAsync =
+            ref.watch(studentPhysicalAssessmentsProvider(student.id));
+        return listAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => _Message(
+            icon: LucideIcons.alertTriangle,
+            title: 'Erro ao carregar',
+            subtitle: '$e',
+          ),
+          data: (assessments) {
+            if (assessments.isEmpty) {
               return RefreshIndicator(
                 onRefresh: () => ref.refresh(
                     studentPhysicalAssessmentsProvider(student.id).future),
-                child: _EvolutionContent(assessments: assessments),
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: const [
+                    SizedBox(height: 80),
+                    _Message(
+                      icon: LucideIcons.lineChart,
+                      title: 'Nenhuma avaliação ainda',
+                      subtitle:
+                          'As avaliações físicas registradas pelo seu '
+                          'instrutor aparecerão aqui — com gráficos de '
+                          'evolução e comparação de fotos.',
+                    ),
+                  ],
+                ),
               );
-            },
-          );
-        },
-      ),
+            }
+            return RefreshIndicator(
+              onRefresh: () => ref.refresh(
+                  studentPhysicalAssessmentsProvider(student.id).future),
+              child: _EvolutionContent(assessments: assessments),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -122,23 +117,39 @@ class _EvolutionContentState extends State<_EvolutionContent> {
     'front': 'Frente', 'side': 'Lado', 'back': 'Costas',
   };
 
-  late final List<PhysicalAssessment> _desc; // most-recent first
-  late final List<PhysicalAssessment> _asc; // oldest first
+  late List<PhysicalAssessment> _desc; // most-recent first
+  late List<PhysicalAssessment> _asc; // oldest first
 
   // Pre-computed ascending series per metric.
   final Map<String, List<({DateTime date, double value})>> _series = {};
-  late final List<_Metric> _chartable;
+  late List<_Metric> _chartable;
   String _metricKey = '';
 
-  late final List<String> _anglesWithPhotos;
+  late List<String> _anglesWithPhotos;
   String _angle = '';
 
   @override
   void initState() {
     super.initState();
+    _recompute();
+  }
+
+  @override
+  void didUpdateWidget(covariant _EvolutionContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The provider hands a NEW list instance on refresh; the State is reused,
+    // so recompute the derived data instead of showing stale values.
+    if (!identical(oldWidget.assessments, widget.assessments)) _recompute();
+  }
+
+  /// (Re)derives series, chartable metrics and photo angles from
+  /// [widget.assessments]. Keeps the current metric/angle selection when it is
+  /// still valid; otherwise falls back to the first available.
+  void _recompute() {
     _desc = widget.assessments;
     _asc = widget.assessments.reversed.toList();
 
+    _series.clear();
     for (final m in _allMetrics) {
       final pts = <({DateTime date, double value})>[];
       for (final a in _asc) {
@@ -150,18 +161,23 @@ class _EvolutionContentState extends State<_EvolutionContent> {
     // Only metrics with ≥2 points can form a line.
     _chartable =
         _allMetrics.where((m) => (_series[m.key]?.length ?? 0) >= 2).toList();
-    if (_chartable.isNotEmpty) _metricKey = _chartable.first.key;
+    if (_chartable.every((m) => m.key != _metricKey)) {
+      _metricKey = _chartable.isNotEmpty ? _chartable.first.key : '';
+    }
 
     _anglesWithPhotos = ['front', 'side', 'back']
         .where((angle) =>
             _asc.any((a) => a.photos.any((p) => p.angle == angle)))
         .toList();
-    if (_anglesWithPhotos.isNotEmpty) _angle = _anglesWithPhotos.first;
+    if (!_anglesWithPhotos.contains(_angle)) {
+      _angle = _anglesWithPhotos.isNotEmpty ? _anglesWithPhotos.first : '';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
         _snapshotCard(),
