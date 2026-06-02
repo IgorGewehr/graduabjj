@@ -1,9 +1,9 @@
-/// Pure body-composition math (no Flutter/model deps → unit-testable).
-///
-/// Body fat % via the **Jackson & Pollock 3-site** skinfold protocol + the
-/// **Siri** equation. Sex is passed as [isMale] so this stays model-free; the
-/// caller maps its own `Sex` enum. Skinfold values are in millimetres and keyed
-/// to match the physical-assessment form's skinfold map.
+// Pure body-composition math (no Flutter/model deps → unit-testable).
+//
+// Body fat % via the Jackson & Pollock 3-site skinfold protocol + the Siri
+// equation. Sex is passed as `isMale` so this stays model-free; the caller maps
+// its own `Sex` enum. Skinfold values are in millimetres and keyed to match the
+// physical-assessment form's skinfold map.
 
 /// The 3 skinfold sites required by JP3 for each sex (form keys).
 /// Men: chest + abdomen + thigh. Women: triceps + suprailiac + thigh.

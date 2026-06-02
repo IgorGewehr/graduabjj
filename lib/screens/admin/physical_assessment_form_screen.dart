@@ -10,7 +10,7 @@ import '../../core/body_composition.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/measurement_input.dart';
 import '../../core/theme.dart';
-import '../../models/physical_assessment.dart';
+// PhysicalAssessment/AssessmentPhoto come via the service barrel below.
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/photo_upload_service.dart';
@@ -493,7 +493,10 @@ class _PhysicalAssessmentFormScreenState
                   ]),
                   const SizedBox(height: 12),
                   FormRow(children: [
-                    _num(_bodyFat, '% Gordura', '%', min: 1, max: 70),
+                    // max alinhado ao teto sanitário do cálculo de Pollock (75)
+                    // para a estimativa nunca preencher um valor que o campo
+                    // depois rejeita.
+                    _num(_bodyFat, '% Gordura', '%', min: 1, max: 75),
                     _ImcBox(bmi: bmi),
                   ]),
                 ],
