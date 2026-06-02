@@ -61,6 +61,10 @@ dependencies:
   # Charts (evolução física)
   fl_chart: ^0.69.2
 
+  # PDF export (avaliação física)
+  pdf: ^3.11.1
+  printing: ^5.13.4
+
   # Animations
   flutter_animate: ^4.5.2
   confetti: ^0.8.0

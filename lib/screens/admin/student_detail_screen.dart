@@ -750,16 +750,29 @@ class _AdminStudentDetailScreenState
 
   String _n(double v) => fmtNum(v);
 
+  Future<void> _exportAssessmentPdf(PhysicalAssessment a) async {
+    try {
+      await AssessmentPdfService().printOrShare(
+        a: a,
+        studentName: _student?.fullName ?? a.studentName,
+        sexLabel: _student?.sex?.label,
+        age: _student?.age,
+      );
+    } catch (e) {
+      if (mounted) context.showError('Não foi possível gerar o PDF: $e');
+    }
+  }
+
   Widget _assessmentCard(PhysicalAssessment a, PhysicalAssessment? prev) {
     final bmi = a.bmi;
     String? deltaW;
     if (a.weightKg != null && prev?.weightKg != null) {
       final d = a.weightKg! - prev!.weightKg!;
-      deltaW = '${d > 0 ? '+' : ''}${d.toStringAsFixed(1)} kg';
+      deltaW = '${d > 0 ? '+' : ''}${_n(d)} kg';
     }
     final parts = <String>[
       if (a.weightKg != null) 'Peso ${_n(a.weightKg!)} kg',
-      if (bmi != null) 'IMC ${bmi.toStringAsFixed(1)}',
+      if (bmi != null) 'IMC ${_n(bmi)}',
       if (a.bodyFatPct != null) '%G ${_n(a.bodyFatPct!)}%',
     ];
     return Container(
@@ -810,6 +823,13 @@ class _AdminStudentDetailScreenState
                 ),
                 const SizedBox(width: 8),
               ],
+              IconButton(
+                tooltip: 'Exportar PDF',
+                icon: const Icon(LucideIcons.fileText, size: 18),
+                color: AppTheme.textSecondary,
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _exportAssessmentPdf(a),
+              ),
               Icon(LucideIcons.chevronRight,
                   size: 16, color: AppTheme.textSecondary),
             ],
