@@ -6,6 +6,7 @@ import '../../core/sports.dart';
 import '../../core/syllabus_templates.dart';
 import '../../core/theme.dart';
 import '../../services/firebase_service.dart';
+import '../../services/settings_service.dart';
 import '../../services/syllabus_service.dart';
 import '../../widgets/form/input_field.dart';
 
@@ -23,6 +24,8 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   List<SyllabusTechnique> _techniques = [];
   bool _loading = true;
   bool _seeding = false;
+  // Variante de Muay Thai da academia (CBMT/CBMTT) p/ escolher a escada certa.
+  String _muaythaiVariant = muaythaiVariantCbmt;
 
   SyllabusService get _service => SyllabusService(FirebaseService.academyId);
 
@@ -34,8 +37,25 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
         .toList();
     _sport =
         _gradedSports.contains(SportId.bjj) ? SportId.bjj : _gradedSports.first;
+    _loadMuaythaiVariant();
     _load();
   }
+
+  Future<void> _loadMuaythaiVariant() async {
+    try {
+      final settings =
+          await SettingsService(FirebaseService.academyId).getAcademySettings();
+      if (!mounted) return;
+      setState(() => _muaythaiVariant =
+          settings?.muaythaiGradeSystem ?? muaythaiVariantCbmt);
+    } catch (_) {/* mantém o default CBMT */}
+  }
+
+  /// Escada de faixas da modalidade atual (variante MT da academia).
+  List<GradeDefinition> _grades() => getGradesForSport(
+        _sport,
+        muaythaiVariant: _sport == SportId.muaythai ? _muaythaiVariant : null,
+      );
 
   Future<void> _load() async {
     setState(() => _loading = true);
@@ -59,7 +79,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   }
 
   Future<void> _openForm({SyllabusTechnique? existing}) async {
-    final grades = getGradesForSport(_sport);
+    final grades = _grades();
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -115,10 +135,11 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       final uid = FirebaseService.currentUserId ?? '';
       // Ordem incremental por faixa.
       final perGrade = <String, int>{};
+      final items = <SyllabusTechnique>[];
       for (final item in bjjStarterTemplate) {
-        final order = perGrade.update(item.gradeId, (v) => v + 1,
-            ifAbsent: () => 0);
-        await _service.create(SyllabusTechnique(
+        final order =
+            perGrade.update(item.gradeId, (v) => v + 1, ifAbsent: () => 0);
+        items.add(SyllabusTechnique(
           id: '',
           sport: SportId.bjj.value,
           gradeId: item.gradeId,
@@ -129,6 +150,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           createdAt: DateTime.now(),
         ));
       }
+      await _service.createMany(items);
       if (!mounted) return;
       context.showSuccess('Template BJJ adicionado! Edite à vontade.');
       _load();
@@ -240,7 +262,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       );
     }
 
-    final grades = getGradesForSport(_sport);
+    final grades = _grades();
     final byGrade = <String, List<SyllabusTechnique>>{};
     for (final t in _techniques) {
       byGrade.putIfAbsent(t.gradeId, () => []).add(t);
