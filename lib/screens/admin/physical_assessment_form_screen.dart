@@ -180,7 +180,11 @@ class _PhysicalAssessmentFormScreenState
     setState(() => _saving = true);
     try {
       final user = ref.read(currentUserProvider).valueOrNull;
-      final photos = await _resolvePhotos();
+      // Upload pending photos and assemble the list; `toDelete` collects the
+      // storage paths of replaced/removed objects to clean up ONLY after the
+      // Firestore write succeeds (so a failed write never orphans the doc).
+      final toDelete = <String>{};
+      final photos = await _resolvePhotos(toDelete);
       final assessment = PhysicalAssessment(
         id: widget.existing?.id ?? '',
         studentId: widget.studentId,
@@ -208,6 +212,16 @@ class _PhysicalAssessmentFormScreenState
       } else {
         await service.create(assessment);
       }
+      // Doc saved — now safe to delete orphaned storage objects (best-effort;
+      // a leaked object is harmless, a deleted-but-still-referenced one is not).
+      if (toDelete.isNotEmpty) {
+        final uploadService = PhotoUploadService();
+        for (final path in toDelete) {
+          try {
+            await uploadService.deleteAssessmentPhoto(storagePath: path);
+          } catch (_) {/* orphan cleanup is non-critical */}
+        }
+      }
       if (!mounted) return;
       context.showSuccess(
           _isEditing ? 'Avaliação atualizada!' : 'Avaliação registrada!');
@@ -221,22 +235,23 @@ class _PhysicalAssessmentFormScreenState
   }
 
   /// Uploads pending photos and assembles the final photo list. Existing
-  /// photos kept as-is unless replaced/removed. Orphaned storage objects
-  /// (replaced or removed) are deleted best-effort — failures never block save.
-  Future<List<AssessmentPhoto>> _resolvePhotos() async {
+  /// photos are kept as-is unless replaced/removed. Storage paths of
+  /// replaced/removed objects are added to [outToDelete]; the caller deletes
+  /// them only after the Firestore write succeeds.
+  Future<List<AssessmentPhoto>> _resolvePhotos(Set<String> outToDelete) async {
     // Photos section hidden (non-adult) — never touch existing photos.
     if (!widget.allowPhotos) return widget.existing?.photos ?? const [];
 
+    outToDelete.addAll(_photosToDelete);
     final uploadService = PhotoUploadService();
     final result = <AssessmentPhoto>[];
-    final toDelete = <String>{..._photosToDelete};
 
     for (final angle in _photoAngles) {
       final pending = _pendingPhotos[angle];
       if (pending != null) {
         final old = _existingPhotos[angle];
         if (old != null && old.storagePath.isNotEmpty) {
-          toDelete.add(old.storagePath);
+          outToDelete.add(old.storagePath);
         }
         final up = await uploadService.uploadAssessmentPhoto(
           academyId: widget.academyId,
@@ -253,13 +268,6 @@ class _PhysicalAssessmentFormScreenState
       } else if (_existingPhotos.containsKey(angle)) {
         result.add(_existingPhotos[angle]!);
       }
-    }
-
-    // Best-effort cleanup of orphaned objects (don't fail the save on these).
-    for (final path in toDelete) {
-      try {
-        await uploadService.deleteAssessmentPhoto(storagePath: path);
-      } catch (_) {/* orphan cleanup is non-critical */}
     }
     return result;
   }
