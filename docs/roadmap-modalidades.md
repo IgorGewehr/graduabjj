@@ -38,10 +38,13 @@
 - [ ] **A2. Push notifications reais** — hoje é stub (sem tokens/APNs). Habilita
       lembrete de aula/treino, "nova planilha/vídeo", "você faltou esta semana",
       lembrete de graduação. _(todas)_ — depende de **F2**.
-- [ ] **A3. Avaliação física / antropometria** — peso, altura, IMC, % gordura,
-      perimetria, dobras, bioimpedância, **fotos de evolução** + gráficos no tempo.
-      Hoje só há avaliação 1-5 subjetiva. _(todas; essencial p/ musculação, útil p/
-      controle de peso de combate — ver D1)_
+- [x] **A3. Avaliação física / antropometria** ✅ **CONCLUÍDA (5 fases)** em
+      `feat/evolucao-modulos` — peso/altura/IMC, % gordura (manual + Pollock 3 dobras),
+      perimetria, dobras, bioimpedância manual, **fotos de evolução privadas**,
+      portal "Minha Evolução" (gráficos fl_chart + comparação de fotos), meta numérica
+      + progresso, notificação, lembrete de reavaliação e export PDF. Ver
+      `docs/plano-avaliacao-fisica.md` e `docs/roteiro-teste-avaliacao-fisica.md`.
+      _Pendente: teste manual + merge p/ produção._
 - [ ] **A4. Gamificação/engajamento** — streaks, metas de frequência mensal,
       badges. Já há base em conquistas/timeline. _(todas)_
 - [ ] **A5. Biblioteca de exercícios com vídeo demonstrativo** — catálogo curado
@@ -85,9 +88,9 @@
 
 ## D. Controle de peso / categoria
 
-- [ ] **D1. Registro de peso + meta de categoria + histórico/gráfico** — útil em
-      corte de peso e acompanhamento. _(esportes de categoria de peso)_ — pode ser
-      um recorte de **A3** (antropometria).
+- [x] **D1. Registro de peso + meta + histórico/gráfico** ✅ **coberto por A3**
+      (peso no tempo + meta de peso-alvo + gráfico). Falta específico de corte de peso
+      (ex.: alerta de categoria/janela de pesagem) se quiser aprofundar depois.
 
 ---
 
@@ -96,8 +99,9 @@
 **🏋️ Musculação**
 - [ ] **E1. Periodização / mesociclos** — progressão planejada por semanas.
 - [ ] **E2. Calculadora de 1RM e metas de carga.**
-- [ ] **E3. Metas de objetivo** (hipertrofia/emagrecimento/condicionamento) +
-      acompanhamento contra a avaliação física (A3).
+- [x] **E3. Metas de objetivo** ✅ **coberto por A3** — meta numérica (peso-alvo /
+      %gordura-alvo) no aluno + barra de progresso no portal, e objetivo categórico
+      (hipertrofia/emagrecimento/condicionamento/manutenção) na avaliação.
 
 **🥋 Karatê**
 - [ ] **E4. Biblioteca de katas** — recorte do currículo B1, com vídeo por kata e
@@ -111,20 +115,22 @@
 
 ## F. Habilitadores técnicos (infra)
 
-- [ ] **F1. `storage.rules`** — não existe hoje (gap de segurança). Necessário
-      antes de qualquer upload novo (fotos de evolução A3, vídeos de técnica B1/A5).
+- [x] **F1. `storage.rules`** ✅ — criado e endurecido na A3 (fotos de avaliação
+      **privadas**: staff + próprio aluno; fallback sem `read` público). Base pronta
+      para uploads futuros (vídeos de técnica B1/A5).
 - [ ] **F2. Push/FCM real** — cliente + tokens + APNs (iOS). Habilita **A2**.
-- [ ] **F3. Índices Firestore** novos conforme cada feature (conteúdo por sport,
-      reservas por turma/data, medidas por aluno/data).
+- [~] **F3. Índices Firestore** — adicionado o índice `physicalAssessments`
+      (studentId ASC + date DESC) na A3. Novos conforme cada feature futura
+      (conteúdo por sport, reservas por turma/data).
 
 ---
 
 ## Sequenciamento sugerido (por ROI e dependência)
 
-1. **A3 — Avaliação física/antropometria** (+ F1 storage.rules) → maior expectativa
-   não atendida; encaixa na infra atual; serve todas as modalidades.
+1. ~~**A3 — Avaliação física/antropometria** (+ F1 storage.rules)~~ ✅ **FEITO**
+   (5 fases; falta teste manual + merge). Também fechou D1 e E3.
 2. **A6 + A5 — Registro de treino + biblioteca de exercícios** → engajamento diário
-   (musculação e condicionamento).
+   (musculação e condicionamento). **← PRÓXIMO sugerido.**
 3. **B1→B4 — Currículo + requisitos de graduação** → transforma a graduação de
    "só presença" em pedagógica; beneficia 6 modalidades de uma vez.
 4. **A1 — Reserva de aula com vaga/waitlist** → operação (turmas lotando).
