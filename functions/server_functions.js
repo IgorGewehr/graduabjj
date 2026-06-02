@@ -1967,6 +1967,7 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
     return {
       pixCode: fin.pixCode,
       qrCodeUrl: fin.pixQrCode || '',
+      ticketUrl: fin.pixTicketUrl || '',
       paymentId: fin.gatewayPaymentId,
       expiresAt: fin.pixExpiresAt.toDate().toISOString(),
     };
@@ -1994,6 +1995,7 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
   return {
     pixCode: pix.pixCode,
     qrCodeUrl: pix.qrCodeBase64,
+    ticketUrl: pix.ticketUrl || '',
     paymentId: pix.paymentId,
     expiresAt: expiresAt.toDate().toISOString(),
   };
@@ -2027,6 +2029,7 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
     return {
       pixCode: order.pixCode,
       qrCodeUrl: order.pixQrCode || '',
+      ticketUrl: order.pixTicketUrl || '',
       paymentId: order.gatewayPaymentId,
       expiresAt: order.pixExpiresAt.toDate().toISOString(),
     };
@@ -2054,6 +2057,7 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
   return {
     pixCode: pix.pixCode,
     qrCodeUrl: pix.qrCodeBase64,
+    ticketUrl: pix.ticketUrl || '',
     paymentId: pix.paymentId,
     expiresAt: expiresAt.toDate().toISOString(),
   };
@@ -2223,6 +2227,10 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
       paymentGateway: 'mercadopago',
       gatewayPaymentId: chargeId,
       externalPaymentId: chargeId,
+      pixCode: admin.firestore.FieldValue.delete(),
+      pixQrCode: admin.firestore.FieldValue.delete(),
+      pixTicketUrl: admin.firestore.FieldValue.delete(),
+      pixExpiresAt: admin.firestore.FieldValue.delete(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     const items = snap.data().items;
@@ -2254,6 +2262,10 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
     method: method,
     paymentGateway: 'mercadopago',
     gatewayPaymentId: chargeId,
+    pixCode: admin.firestore.FieldValue.delete(),
+    pixQrCode: admin.firestore.FieldValue.delete(),
+    pixTicketUrl: admin.firestore.FieldValue.delete(),
+    pixExpiresAt: admin.firestore.FieldValue.delete(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   await notifyAdminCF(academyId, 'payment_received', 'Pagamento Recebido',
