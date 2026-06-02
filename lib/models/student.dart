@@ -75,6 +75,26 @@ extension StudentCategoryExtension on StudentCategory {
   }
 }
 
+/// Biological sex — optional, used by body-composition formulas (skinfold %fat
+/// via Jackson-Pollock). Nullable everywhere: absent = unknown.
+enum Sex { male, female }
+
+extension SexExtension on Sex {
+  String get value => this == Sex.male ? 'male' : 'female';
+  String get label => this == Sex.male ? 'Masculino' : 'Feminino';
+
+  static Sex? fromString(String? value) {
+    switch (value) {
+      case 'male':
+        return Sex.male;
+      case 'female':
+        return Sex.female;
+      default:
+        return null;
+    }
+  }
+}
+
 /// Address Model
 class Address {
   final String street;
@@ -236,6 +256,8 @@ class Student {
   final String fullName;
   final String? nickname;
   final DateTime? birthDate;
+  /// Biological sex (optional) — feeds body-composition formulas.
+  final Sex? sex;
   final String? cpf;
   final String? rg;
   final String? phone;
@@ -312,6 +334,7 @@ class Student {
     required this.fullName,
     this.nickname,
     this.birthDate,
+    this.sex,
     this.cpf,
     this.rg,
     this.phone,
@@ -363,6 +386,7 @@ class Student {
       birthDate: data['birthDate'] != null
           ? (data['birthDate'] as Timestamp).toDate()
           : null,
+      sex: SexExtension.fromString(data['sex'] as String?),
       cpf: data['cpf'],
       rg: data['rg'],
       phone: data['phone'],
@@ -426,6 +450,7 @@ class Student {
       'fullName': fullName,
       'nickname': nickname,
       'birthDate': birthDate != null ? Timestamp.fromDate(birthDate!) : null,
+      'sex': sex?.value,
       'cpf': cpf,
       'rg': rg,
       'phone': phone,
@@ -544,6 +569,7 @@ class Student {
     String? fullName,
     String? nickname,
     DateTime? birthDate,
+    Sex? sex,
     String? cpf,
     String? rg,
     String? phone,
@@ -590,6 +616,7 @@ class Student {
       fullName: fullName ?? this.fullName,
       nickname: nickname ?? this.nickname,
       birthDate: birthDate ?? this.birthDate,
+      sex: sex ?? this.sex,
       cpf: cpf ?? this.cpf,
       rg: rg ?? this.rg,
       phone: phone ?? this.phone,

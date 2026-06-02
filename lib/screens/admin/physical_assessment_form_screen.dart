@@ -6,10 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/body_composition.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/measurement_input.dart';
 import '../../core/theme.dart';
 import '../../models/physical_assessment.dart';
+import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/photo_upload_service.dart';
 import '../../services/physical_assessment_service.dart';
@@ -30,6 +32,11 @@ class PhysicalAssessmentFormScreen extends ConsumerStatefulWidget {
   /// adult students.
   final bool allowPhotos;
 
+  /// Student sex/age — used to estimate body fat % from skinfolds (Pollock).
+  /// Null when unknown; the estimate is simply hidden.
+  final Sex? studentSex;
+  final int? studentAge;
+
   /// When set, the form edits this assessment instead of creating a new one.
   final PhysicalAssessment? existing;
 
@@ -39,6 +46,8 @@ class PhysicalAssessmentFormScreen extends ConsumerStatefulWidget {
     required this.studentId,
     required this.studentName,
     this.allowPhotos = false,
+    this.studentSex,
+    this.studentAge,
     this.existing,
   });
 
@@ -56,9 +65,11 @@ class _PhysicalAssessmentFormScreenState
     'forearmR': 'Antebraço D', 'forearmL': 'Antebraço E', 'thighR': 'Coxa D',
     'thighL': 'Coxa E', 'calfR': 'Panturrilha D', 'calfL': 'Panturrilha E',
   };
+  // Skinfold sites (mm). Includes the Jackson-Pollock 3-site sets for both
+  // sexes: men = chest+abdominal+thigh, women = triceps+suprailiac+thigh.
   static const Map<String, String> _skinfoldLabels = {
-    'triceps': 'Tríceps', 'subscapular': 'Subescapular', 'suprailiac': 'Supra-ilíaca',
-    'abdominal': 'Abdominal', 'thigh': 'Coxa',
+    'triceps': 'Tríceps', 'chest': 'Peitoral', 'subscapular': 'Subescapular',
+    'suprailiac': 'Supra-ilíaca', 'abdominal': 'Abdominal', 'thigh': 'Coxa',
   };
   static const Map<String, String> _goals = {
     'hipertrofia': 'Hipertrofia', 'emagrecimento': 'Emagrecimento',
@@ -118,6 +129,10 @@ class _PhysicalAssessmentFormScreenState
     // IMC ao vivo conforme peso/altura mudam.
     _weight.addListener(_onChanged);
     _height.addListener(_onChanged);
+    // % gordura estimada (Pollock) ao vivo conforme as dobras mudam.
+    for (final c in _skinfolds.values) {
+      c.addListener(_onChanged);
+    }
   }
 
   void _onChanged() => setState(() {});
@@ -158,6 +173,19 @@ class _PhysicalAssessmentFormScreenState
     return w / (m * m);
   }
 
+  /// % gordura estimada pelas dobras (Jackson-Pollock 3 dobras). Null quando
+  /// faltam sexo, idade ou alguma das 3 dobras do protocolo.
+  double? get _pollockFat {
+    final sex = widget.studentSex;
+    final age = widget.studentAge;
+    if (sex == null || age == null) return null;
+    return pollockBodyFatPct(
+      isMale: sex == Sex.male,
+      age: age,
+      skinfolds: _collect(_skinfolds),
+    );
+  }
+
   Future<void> _save() async {
     if (!(_formKey.currentState?.validate() ?? true)) {
       context.showWarning('Confira os campos destacados.');
@@ -185,6 +213,11 @@ class _PhysicalAssessmentFormScreenState
       // Firestore write succeeds (so a failed write never orphans the doc).
       final toDelete = <String>{};
       final photos = await _resolvePhotos(toDelete);
+      // Derive fat/lean mass when weight + % gordura are both known.
+      final bodyFat = _parse(_bodyFat);
+      final split = (w != null && bodyFat != null)
+          ? bodyMassSplit(weightKg: w, bodyFatPct: bodyFat)
+          : null;
       final assessment = PhysicalAssessment(
         id: widget.existing?.id ?? '',
         studentId: widget.studentId,
@@ -192,7 +225,9 @@ class _PhysicalAssessmentFormScreenState
         date: _date,
         weightKg: w,
         heightCm: h,
-        bodyFatPct: _parse(_bodyFat),
+        bodyFatPct: bodyFat,
+        leanMassKg: split?.leanMassKg,
+        fatMassKg: split?.fatMassKg,
         measurements: _collect(_girths),
         skinfolds: _collect(_skinfolds),
         photos: photos,
@@ -513,6 +548,7 @@ class _PhysicalAssessmentFormScreenState
                       child: _num(_skinfolds[k]!, _skinfoldLabels[k]!, 'mm',
                           min: 1, max: 100),
                     ),
+                  _pollockBox(),
                 ],
               ),
             ),
@@ -585,6 +621,97 @@ class _PhysicalAssessmentFormScreenState
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Live "% gordura estimada (Pollock)" helper shown under the skinfolds.
+  /// Guides the user when sex/age/sites are missing, and offers to copy the
+  /// estimate into the % Gordura field.
+  Widget _pollockBox() {
+    final sex = widget.studentSex;
+    final age = widget.studentAge;
+
+    Widget shell(Widget child, {Color? bg}) => Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 4),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: bg ?? AppTheme.surfaceVariant,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: child,
+        );
+
+    final hintStyle =
+        AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary);
+
+    if (sex == null) {
+      return shell(Row(children: [
+        const Icon(LucideIcons.info, size: 14, color: AppTheme.textSecondary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'Defina o sexo do aluno no cadastro para estimar a % de gordura '
+            'pelas dobras.',
+            style: hintStyle,
+          ),
+        ),
+      ]));
+    }
+    if (age == null) {
+      return shell(Row(children: [
+        const Icon(LucideIcons.info, size: 14, color: AppTheme.textSecondary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'Informe a data de nascimento do aluno para estimar a % de '
+            'gordura pelas dobras.',
+            style: hintStyle,
+          ),
+        ),
+      ]));
+    }
+
+    final fat = _pollockFat;
+    if (fat == null) {
+      final sites = pollock3Sites(isMale: sex == Sex.male)
+          .map((k) => _skinfoldLabels[k] ?? k)
+          .join(', ');
+      return shell(Row(children: [
+        const Icon(LucideIcons.info, size: 14, color: AppTheme.textSecondary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'Preencha as 3 dobras do protocolo (${sex.label}): $sites.',
+            style: hintStyle,
+          ),
+        ),
+      ]));
+    }
+
+    return shell(
+      bg: AppTheme.primary.withValues(alpha: 0.08),
+      Row(
+        children: [
+          const Icon(LucideIcons.calculator, size: 16, color: AppTheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '% gordura estimada (Pollock 3 dobras): '
+              '${_fmt(double.parse(fat.toStringAsFixed(1)))}%',
+              style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              _bodyFat.text = _fmt(double.parse(fat.toStringAsFixed(1)));
+              setState(() {});
+              context.showSuccess('% Gordura preenchida com a estimativa.');
+            },
+            child: const Text('Usar'),
+          ),
+        ],
       ),
     );
   }

@@ -103,6 +103,8 @@ class _EvolutionContentState extends State<_EvolutionContent> {
     _Metric('weight', 'Peso', 'kg', _weight),
     _Metric('bmi', 'IMC', '', _bmi),
     _Metric('bodyFat', '% Gordura', '%', _bodyFat),
+    _Metric('leanMass', 'Massa magra', 'kg', _leanMass),
+    _Metric('fatMass', 'Massa gorda', 'kg', _fatMass),
     _Metric('waist', 'Cintura', 'cm', _waist),
     _Metric('hip', 'Quadril', 'cm', _hip),
   ];
@@ -110,11 +112,18 @@ class _EvolutionContentState extends State<_EvolutionContent> {
   static double? _weight(PhysicalAssessment a) => a.weightKg;
   static double? _bmi(PhysicalAssessment a) => a.bmi;
   static double? _bodyFat(PhysicalAssessment a) => a.bodyFatPct;
+  static double? _leanMass(PhysicalAssessment a) => a.leanMassKg;
+  static double? _fatMass(PhysicalAssessment a) => a.fatMassKg;
   static double? _waist(PhysicalAssessment a) => a.measurements['waist'];
   static double? _hip(PhysicalAssessment a) => a.measurements['hip'];
 
   static const _photoLabels = {
     'front': 'Frente', 'side': 'Lado', 'back': 'Costas',
+  };
+
+  static const _goalLabels = {
+    'hipertrofia': 'Hipertrofia', 'emagrecimento': 'Emagrecimento',
+    'condicionamento': 'Condicionamento', 'manutencao': 'Manutenção',
   };
 
   late List<PhysicalAssessment> _desc; // most-recent first
@@ -226,18 +235,18 @@ class _EvolutionContentState extends State<_EvolutionContent> {
                   delta: _delta(latest.bodyFatPct, prev?.bodyFatPct)),
             ],
           ),
-          if (latest.bmiClass != null) ...[
+          if (latest.bmiClass != null || latest.goal != null) ...[
             const SizedBox(height: 12),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text('IMC: ${latest.bmiClass}',
-                  style: AppTheme.labelSmall
-                      .copyWith(color: AppTheme.textSecondary)),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (latest.bmiClass != null)
+                  _tag('IMC: ${latest.bmiClass}'),
+                if (latest.goal != null)
+                  _tag('Meta: ${_goalLabels[latest.goal] ?? latest.goal}',
+                      icon: LucideIcons.target),
+              ],
             ),
           ],
           if (prev != null) ...[
@@ -467,6 +476,26 @@ class _EvolutionContentState extends State<_EvolutionContent> {
       ),
     );
   }
+
+  Widget _tag(String text, {IconData? icon}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 12, color: AppTheme.textSecondary),
+              const SizedBox(width: 4),
+            ],
+            Text(text,
+                style: AppTheme.labelSmall
+                    .copyWith(color: AppTheme.textSecondary)),
+          ],
+        ),
+      );
 
   Widget _pill(String text) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

@@ -50,6 +50,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
 
   // Form values
   DateTime? _birthDate;
+  Sex? _sex;
   DateTime _startDate = DateTime.now();
   StudentCategory _category = StudentCategory.adult;
   StudentStatus _status = StudentStatus.active;
@@ -200,6 +201,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     _tuitionDayController.text = student.tuitionDay.toString();
     _healthNotesController.text = student.healthNotes ?? '';
     _birthDate = student.birthDate;
+    _sex = student.sex;
     _startDate = student.startDate;
     _category = student.category;
     _status = student.status;
@@ -489,6 +491,13 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
                   _buildCategoryDropdown(),
                 ],
               ),
+              const SizedBox(height: 16),
+              FormRow(
+                children: [
+                  _buildSexDropdown(),
+                  const SizedBox(),
+                ],
+              ),
             ],
           ),
         ),
@@ -590,6 +599,42 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
             });
           }
         },
+        dropdownColor: AppTheme.surface,
+      ),
+    );
+  }
+
+  Widget _buildSexDropdown() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: DropdownButtonFormField<Sex?>(
+        value: _sex,
+        isExpanded: true,
+        icon: Icon(LucideIcons.chevronDown,
+            color: AppTheme.textSecondary, size: 20),
+        decoration: InputDecoration(
+          labelText: 'Sexo (opcional)',
+          prefixIcon:
+              Icon(LucideIcons.userCheck, size: 20, color: AppTheme.textSecondary),
+          border: InputBorder.none,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        ),
+        items: [
+          DropdownMenuItem<Sex?>(
+            value: null,
+            child: Text('Não informado', style: AppTheme.bodyMedium),
+          ),
+          ...Sex.values.map((s) => DropdownMenuItem<Sex?>(
+                value: s,
+                child: Text(s.label, style: AppTheme.bodyMedium),
+              )),
+        ],
+        onChanged: (value) => setState(() => _sex = value),
         dropdownColor: AppTheme.surface,
       ),
     );
@@ -1491,6 +1536,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
             ? null
             : onlyDigits(_cpfController.text),
         'birthDate': _birthDate != null ? Timestamp.fromDate(_birthDate!) : null,
+        'sex': _sex?.value,
         'category': _category.value,
         'startDate': Timestamp.fromDate(_startDate),
         // Legacy fields — kept synced to the primary sport so single-sport

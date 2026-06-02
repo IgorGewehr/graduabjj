@@ -686,6 +686,9 @@ class _AdminStudentDetailScreenState
           // Fotos de evolução só para adultos (evita problemas com UGC/menores
           // nas lojas e questões de LGPD).
           allowPhotos: _student!.category == StudentCategory.adult,
+          // Sexo/idade alimentam a estimativa de % de gordura (Pollock).
+          studentSex: _student!.sex,
+          studentAge: _student!.age,
           existing: existing,
         ),
       ),
