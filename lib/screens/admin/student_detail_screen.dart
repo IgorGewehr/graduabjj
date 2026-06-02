@@ -689,6 +689,9 @@ class _AdminStudentDetailScreenState
           // Sexo/idade alimentam a estimativa de % de gordura (Pollock).
           studentSex: _student!.sex,
           studentAge: _student!.age,
+          // Meta atual do aluno (editável pelo atalho no form).
+          studentTargetWeightKg: _student!.targetWeightKg,
+          studentTargetBodyFatPct: _student!.targetBodyFatPct,
           existing: existing,
         ),
       ),

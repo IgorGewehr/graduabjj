@@ -15,6 +15,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/photo_upload_service.dart';
 import '../../services/physical_assessment_service.dart';
+import '../../services/student_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/form/form_section.dart';
 import '../../widgets/form/input_field.dart';
@@ -37,6 +38,11 @@ class PhysicalAssessmentFormScreen extends ConsumerStatefulWidget {
   final Sex? studentSex;
   final int? studentAge;
 
+  /// Current goal/meta of the student (lives on the student doc). Editable via
+  /// a shortcut in this form so the instructor can set it during an assessment.
+  final double? studentTargetWeightKg;
+  final double? studentTargetBodyFatPct;
+
   /// When set, the form edits this assessment instead of creating a new one.
   final PhysicalAssessment? existing;
 
@@ -48,6 +54,8 @@ class PhysicalAssessmentFormScreen extends ConsumerStatefulWidget {
     this.allowPhotos = false,
     this.studentSex,
     this.studentAge,
+    this.studentTargetWeightKg,
+    this.studentTargetBodyFatPct,
     this.existing,
   });
 
@@ -109,6 +117,12 @@ class _PhysicalAssessmentFormScreenState
 
   late DateTime _date;
   String? _goal;
+  // Student-level meta (mirrors the student doc; edited via the shortcut).
+  double? _targetWeightKg;
+  double? _targetBodyFatPct;
+  // Set when the meta was edited so we can tell the caller to reload even if
+  // no assessment was saved.
+  bool _metaChanged = false;
   bool _saving = false;
   final _formKey = GlobalKey<FormState>();
 
@@ -120,6 +134,8 @@ class _PhysicalAssessmentFormScreenState
     final e = widget.existing;
     _date = e?.date ?? DateTime.now();
     _goal = e?.goal;
+    _targetWeightKg = widget.studentTargetWeightKg;
+    _targetBodyFatPct = widget.studentTargetBodyFatPct;
     if (e != null) {
       if (e.weightKg != null) _weight.text = _fmt(e.weightKg!);
       if (e.heightCm != null) _height.text = _fmt(e.heightCm!);
@@ -464,7 +480,15 @@ class _PhysicalAssessmentFormScreenState
   @override
   Widget build(BuildContext context) {
     final bmi = _bmiPreview;
-    return Scaffold(
+    // canPop:false so back/system-back routes through us — we pop with
+    // `_metaChanged` so the caller reloads when only the meta was edited.
+    // The save button pops `true` explicitly (not gated by PopScope).
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) Navigator.of(context).pop(_metaChanged);
+      },
+      child: Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         backgroundColor: AppTheme.surface,
@@ -640,6 +664,7 @@ class _PhysicalAssessmentFormScreenState
                     ],
                     onChanged: (v) => setState(() => _goal = v),
                   ),
+                  _metaRow(),
                   const SizedBox(height: 12),
                   InputField(
                     controller: _notes,
@@ -678,6 +703,7 @@ class _PhysicalAssessmentFormScreenState
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -771,6 +797,124 @@ class _PhysicalAssessmentFormScreenState
         ],
       ),
     );
+  }
+
+  /// Compact "Meta do aluno" row with a shortcut to edit it. The meta lives on
+  /// the student doc; this writes a PARTIAL update (only the two target keys).
+  Widget _metaRow() {
+    final tw = _targetWeightKg;
+    final tbf = _targetBodyFatPct;
+    final parts = <String>[
+      if (tw != null) 'Peso ${_fmt(tw)} kg',
+      if (tbf != null) '% Gordura ${_fmt(tbf)}%',
+    ];
+    final hasMeta = parts.isNotEmpty;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          const Icon(LucideIcons.target, size: 16, color: AppTheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              hasMeta ? 'Meta: ${parts.join(' • ')}' : 'Sem meta definida',
+              style: AppTheme.labelSmall.copyWith(
+                color: hasMeta ? AppTheme.textPrimary : AppTheme.textSecondary,
+                fontWeight: hasMeta ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _editMeta,
+            child: Text(hasMeta ? 'Editar' : 'Definir'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editMeta() async {
+    final wCtrl = TextEditingController(
+        text: _targetWeightKg != null ? _fmt(_targetWeightKg!) : '');
+    final fCtrl = TextEditingController(
+        text: _targetBodyFatPct != null ? _fmt(_targetBodyFatPct!) : '');
+    InputDecoration dec(String label, String suffix) => InputDecoration(
+          labelText: label,
+          suffixText: suffix,
+          border: const OutlineInputBorder(),
+        );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Meta do aluno'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Deixe em branco para remover. Mostrada na evolução do aluno.',
+              style:
+                  AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: wCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+              ],
+              decoration: dec('Peso-alvo', 'kg'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: fCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+              ],
+              decoration: dec('% Gordura-alvo', '%'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+    final tw = parseDecimalInput(wCtrl.text);
+    final tbf = parseDecimalInput(fCtrl.text);
+    wCtrl.dispose();
+    fCtrl.dispose();
+    if (ok != true) return;
+
+    try {
+      await StudentService(widget.academyId).update(widget.studentId, {
+        'targetWeightKg': tw,
+        'targetBodyFatPct': tbf,
+      });
+      if (!mounted) return;
+      setState(() {
+        _targetWeightKg = tw;
+        _targetBodyFatPct = tbf;
+        _metaChanged = true;
+      });
+      context.showSuccess('Meta atualizada!');
+    } catch (e) {
+      if (mounted) context.showError('Não foi possível salvar a meta: $e');
+    }
   }
 
   Widget _num(TextEditingController c, String label, String unit,
