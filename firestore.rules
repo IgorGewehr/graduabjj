@@ -814,6 +814,18 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Physical / anthropometric assessments (medidas, % gordura, fotos).
+      // Distinta da avaliacao tecnica 1-5 acima. Staff escreve; aluno le a sua;
+      // responsavel le a dos dependentes.
+      // ============================================
+      match /physicalAssessments/{assessmentId} {
+        allow read: if isAcademyStaff(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
+        allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
       // Notifications
       // ============================================
       match /notifications/{notificationId} {
