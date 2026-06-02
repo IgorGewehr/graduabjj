@@ -20,6 +20,7 @@ import '../../services/services.dart';
 import '../../widgets/common/profile_photo_picker.dart';
 import '../../widgets/common/sport_chip.dart';
 import 'physical_assessment_form_screen.dart';
+import 'student_syllabus_tab.dart';
 
 /// Admin Student Detail Screen - View and manage student
 class AdminStudentDetailScreen extends ConsumerStatefulWidget {
@@ -55,7 +56,7 @@ class _AdminStudentDetailScreenState
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 7, vsync: this);
+    _tabController = TabController(length: 8, vsync: this);
     _loadData();
   }
 
@@ -229,6 +230,16 @@ class _AdminStudentDetailScreenState
                             count: _physicalAssessments.length,
                           ),
                         ),
+                        Tab(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: const [
+                              Icon(LucideIcons.bookOpen, size: 16),
+                              SizedBox(width: 6),
+                              Text('Currículo'),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -243,6 +254,9 @@ class _AdminStudentDetailScreenState
                         _buildAchievementsTab(),
                         _buildHistoryTab(),
                         _buildPhysicalAssessmentTab(),
+                        _student == null
+                            ? const SizedBox()
+                            : StudentSyllabusTab(student: _student!),
                       ],
                     ),
                   ),
