@@ -53,8 +53,12 @@ final studentRankProvider = FutureProvider.family<int?,
 final publicStudentProfileProvider = FutureProvider.family<
     PublicStudentProfile?, ({String academyId, String studentId})>(
         (ref, args) async {
+  // Read the privacy-correct mirror (publicProfiles) instead of the PII-laden
+  // student doc, so a member viewing a peer never hits sensitive data. If the
+  // mirror is missing (legacy/not-yet-synced student), the profile is not
+  // available → return null.
   final student =
-      await StudentService(args.academyId).getById(args.studentId);
+      await StudentService(args.academyId).getPublicProfile(args.studentId);
   if (student == null) return null;
 
   final achievements = await AchievementService(args.academyId)

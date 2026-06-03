@@ -1,4 +1,5 @@
 import '../models/ranking_entry.dart';
+import '../models/student.dart';
 import 'attendance_service.dart';
 import 'student_service.dart';
 
@@ -43,15 +44,36 @@ class RankingService {
     );
     if (ranked.isEmpty) return const [];
 
-    // Hydrate name/photo only for students that appear in the ranking.
+    // Denormalized name fallback carried on each attendance record. Used when
+    // the public-profile mirror is missing (legacy / not-yet-synced student) so
+    // the ranking still shows a name instead of always degrading to "Aluno".
+    final fallbackNames = <String, String>{};
+    for (final a in attendance) {
+      if (a.studentName.isNotEmpty) {
+        fallbackNames[a.studentId] = a.studentName;
+      }
+    }
+
+    // Hydrate name/photo only for students that appear in the ranking. Read the
+    // privacy-correct mirror (publicProfiles) — NEVER the PII-laden student doc.
+    // A missing/denied mirror must never break the ranking: degrade to the
+    // attendance-record name, else "Aluno", with a null photo.
     final studentService = StudentService(academyId);
     final hydrated = await Future.wait(
       ranked.take(limit).map((r) async {
-        final student = await studentService.getById(r.studentId);
+        Student? profile;
+        try {
+          profile = await studentService.getPublicProfile(r.studentId);
+        } catch (_) {
+          // Missing/denied mirror — degrade gracefully (see fallback below).
+          profile = null;
+        }
         return RankingEntry(
           studentId: r.studentId,
-          studentName: student?.displayName ?? 'Aluno',
-          photoUrl: student?.photoUrl,
+          studentName: profile?.displayName ??
+              fallbackNames[r.studentId] ??
+              'Aluno',
+          photoUrl: profile?.photoUrl,
           attendanceCount: r.attendanceCount,
           rank: r.rank,
           mostRecentAttendance: r.mostRecentAttendance,

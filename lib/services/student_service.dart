@@ -25,6 +25,24 @@ class StudentService {
   }
 
   // ============================================
+  // Get Public Profile (privacy-correct mirror) — Sprint R
+  // ============================================
+  /// Reads the slim, PII-free mirror at
+  /// `academies/{academyId}/publicProfiles/{studentId}` (kept in sync by the
+  /// `mirrorStudentPublicProfile` Cloud Function) and parses it via
+  /// [Student.fromFirestore]. The mirror uses the SAME field names as the
+  /// student doc, so the parser works unchanged — PII fields are simply
+  /// absent/null. Use this for ALL peer/social reads (ranking, public profile)
+  /// so a member never hits the PII-laden student doc. Returns null when the
+  /// mirror does not exist (legacy/not-yet-synced student).
+  Future<Student?> getPublicProfile(String studentId) async {
+    final doc =
+        await _collections.academy.collection('publicProfiles').doc(studentId).get();
+    if (!doc.exists) return null;
+    return Student.fromFirestore(doc);
+  }
+
+  // ============================================
   // Get Student by Linked User ID
   // ============================================
   Future<Student?> getByLinkedUserId(String userId) async {

@@ -1339,4 +1339,16 @@ exports.trialExpiryReminder = onSchedule(
 // app. Callables are gen2; Firestore triggers and scheduled jobs are gen1.
 // They coexist with the gen2 functions above (no name collisions).
 // ============================================================
-Object.assign(exports, require('./server_functions'));
+// NOTE: buildPublicProfileProjection (a plain helper) and
+// PUBLIC_PROFILE_SAFE_FIELDS (a plain array) are exported by server_functions
+// for the backfill script's reuse, but they are NOT Cloud Functions — strip
+// them here so Firebase's endpoint discovery doesn't try to deploy them as
+// invalid functions. The backfill requires them directly from server_functions.
+{
+  const {
+    buildPublicProfileProjection: _bppHelper,
+    PUBLIC_PROFILE_SAFE_FIELDS: _ppSafeFields,
+    ...serverTriggers
+  } = require('./server_functions');
+  Object.assign(exports, serverTriggers);
+}

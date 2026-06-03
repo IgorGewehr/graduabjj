@@ -418,6 +418,21 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Public Profiles Mirror (Sprint R)
+      // ============================================
+      // Privacy-correct, slim projection of a student doc (NO PII) kept in sync
+      // by the mirrorStudentPublicProfile Cloud Function. Ranking + the public
+      // fighter profile read THIS instead of the PII-laden student doc.
+      // Any academy member may read peers' mirror; non-members (public site)
+      // only when the student opted in (isProfilePublic == true).
+      // Writable ONLY by the Admin SDK / Cloud Function (never the client).
+      match /publicProfiles/{studentId} {
+        allow read: if belongsToAcademy(academyId)
+                    || resource.data.isProfilePublic == true;
+        allow write: if false;
+      }
+
+      // ============================================
       // Classes Subcollection
       // ============================================
       match /classes/{classId} {
@@ -783,6 +798,10 @@ service cloud.firestore {
       match /achievements/{achievementId} {
         allow read: if isAcademyStaff(academyId);
         allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        // Sprint R: any academy member can read peers' achievements for the
+        // public-profile timeline. Achievements hold graduation + medal history
+        // (non-PII); financials/assessments/skillProgress stay locked.
+        allow read: if belongsToAcademy(academyId);
         allow write: if isAcademyStaff(academyId);
 
         // Students can create their own achievements (auto-created after competition results)

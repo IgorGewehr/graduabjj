@@ -728,6 +728,119 @@ exports.clearDependentsOnResponsibleGone = functions.firestore
   });
 
 // ============================================
+// Sprint R — public profile mirror (privacy-correct social layer)
+// ============================================
+//
+// The student doc bundles profile fields WITH sensitive PII (cpf, address,
+// phone, health, financials, ...), and Firestore rules cannot filter fields on
+// read. So peer/social reads (ranking, public fighter profile) must NOT read
+// the student doc directly. Instead a Cloud Function keeps a slim mirror at
+// academies/{academyId}/publicProfiles/{studentId} holding ONLY safe fields;
+// the rules allow members (and the public when isProfilePublic) to read it.
+//
+// SAFE allowlist — mirrored fields (same field names as the student doc so the
+// Flutter Student.fromFirestore parses the mirror unchanged; PII simply absent):
+//   id (studentId via doc id), fullName, nickname, photoUrl,
+//   currentBelt, currentStripes, sportData, sports, primarySport,
+//   initialAttendanceCount, attendanceCount (feed totalAttendanceCount),
+//   category (needed by getGrade kids/adult fallbacks; non-PII),
+//   isProfilePublic, status, mirrorUpdatedAt.
+//
+// DENYLIST — NEVER mirrored: cpf, rg, address, phone, email, birthDate, sex,
+// weight, targetWeightKg, targetBodyFatPct, bloodType, allergies, healthNotes,
+// medicalCertificateUrl, medicalCertificateExpiry, emergencyContact, guardian,
+// tuitionValue, tuitionDay, tuitionDueDay, planId, planIds, responsibleUserId,
+// responsibleStudentId, responsibleName, responsibleTrainsHere, guardianCpf,
+// linkedUserId, beltHistory, createdBy, and any payment/financial/health field.
+
+// Explicit allowlist of student fields that are safe to expose publicly.
+// Anything not in this list is treated as PII / sensitive and is dropped.
+const PUBLIC_PROFILE_SAFE_FIELDS = [
+  'fullName',
+  'nickname',
+  'photoUrl',
+  'currentBelt',
+  'currentStripes',
+  'sportData',
+  'sports',
+  'primarySport',
+  'initialAttendanceCount',
+  'attendanceCount',
+  'category',
+  'isProfilePublic',
+  'status',
+];
+
+/**
+ * Builds the SAFE projection of a student doc for the public mirror.
+ * Allowlist-based (never denylist) so a newly-added PII field on the student
+ * doc can NEVER leak into the mirror by default. Only keys present on the
+ * source are copied; missing keys are simply absent (Flutter parser tolerant).
+ *
+ * @param {Object} student raw student doc data
+ * @return {Object} safe projection (no PII), with mirrorUpdatedAt stamped
+ */
+function buildPublicProfileProjection(student) {
+  const src = student || {};
+  const out = {};
+  for (const key of PUBLIC_PROFILE_SAFE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(src, key) && src[key] !== undefined) {
+      out[key] = src[key];
+    }
+  }
+  // isProfilePublic must always be a concrete boolean — the mirror's read rule
+  // keys off it for public access, and a missing field would deny by default.
+  out.isProfilePublic = src.isProfilePublic === true;
+  out.mirrorUpdatedAt = admin.firestore.FieldValue.serverTimestamp();
+  return out;
+}
+
+/**
+ * Trigger: a student doc is written.
+ * Action: keep the privacy-correct mirror at
+ * academies/{academyId}/publicProfiles/{studentId} in sync.
+ *   - create/update → write the SAFE projection (merge)
+ *   - delete        → delete the mirror
+ *
+ * No infinite loop: this writes a DIFFERENT collection (publicProfiles), which
+ * is not watched by any students-collection trigger.
+ */
+exports.mirrorStudentPublicProfile = functions.firestore
+  .document('academies/{academyId}/students/{studentId}')
+  .onWrite(async (change, context) => {
+    const { academyId, studentId } = context.params;
+    const mirrorRef = db.doc(
+      `academies/${academyId}/publicProfiles/${studentId}`
+    );
+
+    // Deletion of the student → remove the mirror.
+    if (!change.after.exists) {
+      try {
+        await mirrorRef.delete();
+        console.log(`[mirror] deleted publicProfile ${academyId}/${studentId}`);
+      } catch (e) {
+        console.error('[mirror] delete failed', academyId, studentId, e && e.message);
+      }
+      return null;
+    }
+
+    // Create/update → write the SAFE projection (merge so we never clobber any
+    // future server-only fields on the mirror).
+    const projection = buildPublicProfileProjection(change.after.data());
+    try {
+      await mirrorRef.set(projection, { merge: true });
+      console.log(`[mirror] synced publicProfile ${academyId}/${studentId}`);
+    } catch (e) {
+      console.error('[mirror] sync failed', academyId, studentId, e && e.message);
+    }
+    return null;
+  });
+
+// Exported for reuse by the one-shot backfill script (scripts/).
+exports.buildPublicProfileProjection = buildPublicProfileProjection;
+exports.PUBLIC_PROFILE_SAFE_FIELDS = PUBLIC_PROFILE_SAFE_FIELDS;
+
+// ============================================
 // Cloud Functions - Scheduled (Cron Jobs)
 // ============================================
 
