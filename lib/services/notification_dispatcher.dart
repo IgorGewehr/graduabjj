@@ -148,6 +148,32 @@ class NotificationDispatcher {
     );
   }
 
+  /// Broadcast a generic academy-wide notification to a single recipient.
+  ///
+  /// Used by the Jornal (events / news / seminars) when a post is published.
+  /// [data] carries deep-link payload such as `{"route": "/portal/eventos/<id>"}`
+  /// which is mapped onto the in-app notification's `actionUrl`.
+  Future<AppNotification> sendAcademyNotification({
+    required String userId,
+    required String title,
+    required String message,
+    Map<String, String>? data,
+    NotificationPriority priority = NotificationPriority.normal,
+    String? actionLabel,
+    int expiresInDays = 30,
+  }) async {
+    return _notificationService.create(
+      userId: userId,
+      type: NotificationType.system,
+      priority: priority,
+      title: title,
+      message: message,
+      actionUrl: data?['route'],
+      actionLabel: actionLabel,
+      expiresInDays: expiresInDays,
+    );
+  }
+
   // ============================================
   // NOTIFICATIONS FOR ADMINS
   // ============================================
