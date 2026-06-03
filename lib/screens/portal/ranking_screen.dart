@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -11,6 +12,7 @@ import '../../providers/ranking_providers.dart';
 import '../../providers/student_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Student-facing class attendance leaderboard. Pick a turma + period and see
 /// who trained the most. Each row links to that student's public profile.
@@ -110,7 +112,10 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
     return RefreshIndicator(
       onRefresh: () async => ref.invalidate(classRankingProvider(key)),
       child: rankingAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          child: PolishSkeleton.list(count: 6, itemHeight: 68),
+        ),
         error: (_, _) => ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           children: const [
@@ -126,10 +131,11 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
             return ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               children: const [
-                SizedBox(height: 120),
-                _RankingMessageState(
+                SizedBox(height: 100),
+                PolishedEmptyState(
                   icon: LucideIcons.trophy,
-                  message: 'Nenhuma presenca registrada',
+                  title: 'Nenhuma presença registrada',
+                  subtitle: 'Treine nesta turma para aparecer no ranking.',
                 ),
               ],
             );
@@ -145,7 +151,7 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
                 entry: entry,
                 onTap: () =>
                     context.push('/portal/profile/${entry.studentId}'),
-              );
+              ).entrance(index: i);
             },
           );
         },
@@ -253,9 +259,8 @@ class _RankingTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -267,16 +272,19 @@ class _RankingTile extends StatelessWidget {
           children: [
             _RankBadge(rank: entry.rank),
             const SizedBox(width: 12),
-            AppCachedAvatar(
-              imageUrl: entry.photoUrl,
-              radius: 22,
-              backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
-              foregroundColor: AppTheme.primary,
-              child: Text(
-                _initials(entry.studentName),
-                style: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.primary,
-                  fontWeight: FontWeight.w700,
+            Hero(
+              tag: 'profile-avatar-${entry.studentId}',
+              child: AppCachedAvatar(
+                imageUrl: entry.photoUrl,
+                radius: 22,
+                backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
+                foregroundColor: AppTheme.primary,
+                child: Text(
+                  _initials(entry.studentName),
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ),
@@ -339,8 +347,9 @@ class _RankBadge extends StatelessWidget {
 
     final bg = medal?.withValues(alpha: 0.15) ?? AppTheme.surface;
     final fg = medal ?? AppTheme.textSecondary;
+    final isTopThree = medal != null;
 
-    return Container(
+    final badge = Container(
       width: 32,
       height: 32,
       alignment: Alignment.center,
@@ -351,6 +360,15 @@ class _RankBadge extends StatelessWidget {
           color: medal ?? AppTheme.divider,
           width: medal != null ? 2 : 1,
         ),
+        boxShadow: medal != null
+            ? [
+                BoxShadow(
+                  color: medal.withValues(alpha: 0.35),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
       child: Text(
         '$rank',
@@ -360,6 +378,16 @@ class _RankBadge extends StatelessWidget {
         ),
       ),
     );
+
+    // Top-3 medals get a restrained scale-in pop (easeOutBack) so the podium
+    // reads instantly; plain ranks stay static.
+    if (!isTopThree) return badge;
+    return badge.animate().scale(
+          begin: const Offset(0.7, 0.7),
+          end: const Offset(1, 1),
+          duration: PolishMotion.normal,
+          curve: Curves.easeOutBack,
+        );
   }
 }
 
@@ -370,9 +398,10 @@ class _RankingUnavailableState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const _RankingMessageState(
+    return const PolishedEmptyState(
       icon: LucideIcons.trophy,
-      message: 'O ranking nao esta disponivel no momento.',
+      title: 'Ranking indisponível',
+      subtitle: 'O ranking não está disponível no momento.',
     );
   }
 }

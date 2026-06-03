@@ -12,6 +12,7 @@ import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/sport_chip.dart';
+import '../../widgets/polish/polish.dart';
 
 // Helper to convert dayOfWeek int to label
 String _getDayLabel(int dayOfWeek) {
@@ -143,8 +144,11 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
 
             // Class List
             _isLoading
-                ? const SliverFillRemaining(
-                    child: Center(child: CircularProgressIndicator()),
+                ? SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: PolishSkeleton.list(count: 5, itemHeight: 120),
+                    ),
                   )
                 : _filteredClasses.isEmpty
                 ? SliverFillRemaining(child: _buildEmptyState())
@@ -160,7 +164,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                             onTap: () => _showClassDetails(cls),
                             onEdit: () => _showEditClassSheet(cls),
                             onDelete: () => _showDeleteConfirmation(cls),
-                          ),
+                          ).entrance(index: index),
                         );
                       }, childCount: _filteredClasses.length),
                     ),
@@ -367,31 +371,10 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Icon(LucideIcons.users, size: 40, color: AppTheme.primary),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Nenhuma turma encontrada',
-            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Crie uma nova turma para comecar',
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-          ),
-        ],
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.users,
+      title: 'Nenhuma turma encontrada',
+      subtitle: 'Crie uma nova turma para comecar.',
     );
   }
 
@@ -1687,12 +1670,19 @@ class _StatsCarouselCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: AppTheme.headlineSmall.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                int.tryParse(value) != null
+                    ? AnimatedCountUp(
+                        value: int.parse(value),
+                        style: AppTheme.headlineSmall.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )
+                    : Text(
+                        value,
+                        style: AppTheme.headlineSmall.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                 Text(
                   subtitle,
                   style: AppTheme.labelSmall.copyWith(
@@ -1762,7 +1752,7 @@ class _ClassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),
@@ -2297,17 +2287,13 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
           const SizedBox(height: 10),
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? PolishSkeleton.list(count: 6)
                 : _visibleStudents.isEmpty
-                ? Center(
-                    child: Text(
-                      _showOnlyEnrolled
-                          ? 'Nenhum aluno matriculado'
-                          : 'Nenhum aluno encontrado',
-                      style: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
+                ? PolishedEmptyState(
+                    icon: LucideIcons.userX,
+                    title: _showOnlyEnrolled
+                        ? 'Nenhum aluno matriculado'
+                        : 'Nenhum aluno encontrado',
                   )
                 : ListView.separated(
                     itemCount: _visibleStudents.length,
@@ -2326,7 +2312,7 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
                         practicesSport: practicesSport,
                         disabled: blockedByCap,
                         onTap: blockedByCap ? null : () => _toggle(s),
-                      );
+                      ).entrance(index: i);
                     },
                   ),
           ),
@@ -2399,7 +2385,7 @@ class _StudentRow extends StatelessWidget {
 
     return Opacity(
       opacity: disabled ? 0.5 : 1,
-      child: GestureDetector(
+      child: Pressable(
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),

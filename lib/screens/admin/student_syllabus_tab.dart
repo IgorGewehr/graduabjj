@@ -12,6 +12,7 @@ import '../../services/firebase_service.dart';
 import '../../services/settings_service.dart';
 import '../../services/skill_progress_service.dart';
 import '../../services/syllabus_service.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Aba "Currículo" no detalhe do aluno (B4 admin): checklist das técnicas da
 /// faixa, marcação de nível (aprendendo/praticando/dominado) e feedback por
@@ -232,11 +233,17 @@ class _StudentSyllabusTabState extends ConsumerState<StudentSyllabusTab> {
   @override
   Widget build(BuildContext context) {
     if (_sports.isEmpty) {
-      return _centerMsg(LucideIcons.award, 'Modalidade sem graduação',
-          'Esta modalidade não usa faixas/graus.');
+      return const PolishedEmptyState(
+        icon: LucideIcons.award,
+        title: 'Modalidade sem graduação',
+        subtitle: 'Esta modalidade não usa faixas/graus.',
+      );
     }
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: PolishSkeleton.list(count: 5, itemHeight: 96),
+      );
     }
     return Column(
       children: [
@@ -246,28 +253,6 @@ class _StudentSyllabusTabState extends ConsumerState<StudentSyllabusTab> {
       ],
     );
   }
-
-  Widget _centerMsg(IconData icon, String title, String sub) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 44, color: AppTheme.textDisabled),
-              const SizedBox(height: 12),
-              Text(title,
-                  textAlign: TextAlign.center,
-                  style: AppTheme.bodyMedium
-                      .copyWith(color: AppTheme.textSecondary)),
-              const SizedBox(height: 4),
-              Text(sub,
-                  textAlign: TextAlign.center,
-                  style: AppTheme.labelSmall
-                      .copyWith(color: AppTheme.textDisabled)),
-            ],
-          ),
-        ),
-      );
 
   Widget _sportSelector() {
     return SizedBox(
@@ -355,9 +340,18 @@ class _StudentSyllabusTabState extends ConsumerState<StudentSyllabusTab> {
             ),
           ),
           const SizedBox(height: 6),
-          Text('${m.done} de ${m.total} técnicas dominadas',
-              style: AppTheme.labelSmall
-                  .copyWith(color: AppTheme.textSecondary)),
+          Row(
+            children: [
+              AnimatedCountUp(
+                value: m.done,
+                style: AppTheme.labelSmall
+                    .copyWith(color: AppTheme.textSecondary),
+              ),
+              Text(' de ${m.total} técnicas dominadas',
+                  style: AppTheme.labelSmall
+                      .copyWith(color: AppTheme.textSecondary)),
+            ],
+          ),
         ],
       ),
     );
@@ -366,13 +360,16 @@ class _StudentSyllabusTabState extends ConsumerState<StudentSyllabusTab> {
   Widget _list() {
     final list = _gradeTechniques;
     if (list.isEmpty) {
-      return _centerMsg(LucideIcons.bookOpen, 'Sem técnicas nesta faixa',
-          'Cadastre o currículo em Graduação → Currículo.');
+      return const PolishedEmptyState(
+        icon: LucideIcons.bookOpen,
+        title: 'Sem técnicas nesta faixa',
+        subtitle: 'Cadastre o currículo em Graduação → Currículo.',
+      );
     }
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       itemCount: list.length,
-      itemBuilder: (_, i) => _techniqueCard(list[i]),
+      itemBuilder: (_, i) => _techniqueCard(list[i]).entrance(index: i),
     );
   }
 

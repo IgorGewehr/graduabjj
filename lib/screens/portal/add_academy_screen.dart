@@ -10,6 +10,7 @@ import '../../core/theme.dart';
 import '../../providers/providers.dart';
 import '../../services/firebase_service.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Add Academy Screen
 /// Allows user to link to a new academy using a 6-digit code
@@ -203,21 +204,7 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Success icon
-        Center(
-          child: Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: AppTheme.successLight,
-              borderRadius: BorderRadius.circular(32),
-            ),
-            child: const Icon(
-              LucideIcons.checkCircle,
-              size: 32,
-              color: AppTheme.success,
-            ),
-          ),
-        ),
+        const Center(child: SuccessCheck(size: 64)),
         const SizedBox(height: 16),
 
         Center(child: Text('Codigo Valido!', style: AppTheme.headlineSmall)),
@@ -492,6 +479,7 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
       await ref.read(selectedAcademyProvider.notifier).refreshAcademyCache();
 
       if (mounted) {
+        Celebration.confetti(context);
         FeedbackUtils.showSuccess(
           context,
           'Vinculado a $_academyName com sucesso!',

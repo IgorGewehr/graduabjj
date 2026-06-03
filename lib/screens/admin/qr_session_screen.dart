@@ -9,6 +9,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin Attendance QR Screen
 ///
@@ -131,16 +132,17 @@ class _AdminQrSessionScreenState extends ConsumerState<AdminQrSessionScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _IntroCard(weekdayLabel: _weekdayLabels[dayOfWeek]),
+                        _IntroCard(weekdayLabel: _weekdayLabels[dayOfWeek])
+                            .fadeInQuick(),
                         const SizedBox(height: 16),
                         if (_classes.isEmpty)
                           _EmptyState()
                         else
-                          ..._classes.map(
-                            (entry) => _ClassTile(
-                              entry: entry,
-                              onTap: () => _openQr(entry, academyId),
-                            ),
+                          ..._classes.asMap().entries.map(
+                            (e) => _ClassTile(
+                              entry: e.value,
+                              onTap: () => _openQr(e.value, academyId),
+                            ).entrance(index: e.key),
                           ),
                       ],
                     ),
@@ -201,24 +203,10 @@ class _IntroCard extends StatelessWidget {
 class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
-      decoration: BoxDecoration(
-        color: AppTheme.surfaceVariant,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          Icon(LucideIcons.calendarX, size: 40, color: AppTheme.textDisabled),
-          const SizedBox(height: 12),
-          Text(
-            'Nenhuma turma com aula hoje',
-            style: AppTheme.titleMedium.copyWith(color: AppTheme.textSecondary),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.calendarX,
+      title: 'Nenhuma turma com aula hoje',
+      subtitle: 'As turmas com horario para hoje aparecem aqui.',
     );
   }
 }
@@ -434,7 +422,7 @@ class _QrFullscreenPageState extends State<_QrFullscreenPage> {
                           color: Color(0xFF111111),
                         ),
                       ),
-                    ),
+                    ).entrance(),
                     const SizedBox(height: 20),
                     _RotationIndicator(
                       key: ValueKey(_payload.issuedAtSeconds),

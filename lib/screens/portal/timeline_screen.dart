@@ -11,6 +11,7 @@ import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
+import '../../widgets/polish/polish.dart';
 import '../../widgets/sport_tab_bar.dart';
 
 /// Timeline event types
@@ -272,13 +273,14 @@ class TimelineScreen extends ConsumerWidget {
         Text(
           'Sua Jornada',
           style: AppTheme.headlineMedium.copyWith(fontWeight: FontWeight.w700),
-        ),
+        ).fadeInQuick(),
         const SizedBox(height: 20),
         ...reversedEvents.asMap().entries.map((entry) {
           final index = entry.key;
           final event = entry.value;
           final isLast = index == reversedEvents.length - 1;
-          return _TimelineItem(event: event, isLast: isLast);
+          return _TimelineItem(event: event, isLast: isLast)
+              .entrance(index: index);
         }),
       ],
     );
@@ -287,7 +289,8 @@ class TimelineScreen extends ConsumerWidget {
   Widget _buildLoadingState() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
-      child: Column(
+      child: PolishSkeleton.shimmer(
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
@@ -351,6 +354,7 @@ class TimelineScreen extends ConsumerWidget {
             ),
           ),
         ],
+        ),
       ),
     );
   }
@@ -378,34 +382,10 @@ class TimelineScreen extends ConsumerWidget {
   }
 
   Widget _buildTimelineEmptyState() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.clock, size: 48, color: AppTheme.textDisabled),
-            const SizedBox(height: 16),
-            Text(
-              'Sua linha do tempo esta vazia',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Suas conquistas aparecerao aqui conforme voce progride',
-              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.clock,
+      title: 'Sua linha do tempo esta vazia',
+      subtitle: 'Suas conquistas aparecerao aqui conforme voce progride',
     );
   }
 }
@@ -684,8 +664,8 @@ class _MedalBadge extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                count.toString(),
+              AnimatedCountUp(
+                value: count,
                 style: AppTheme.titleMedium.copyWith(
                   fontWeight: FontWeight.w700,
                 ),

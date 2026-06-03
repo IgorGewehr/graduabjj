@@ -12,6 +12,7 @@ import '../../models/workout_plan.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/common/sport_chip.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin list of workout plans + entry point to the builder. Works for any
 /// modality; musculação is the primary use case.
@@ -78,7 +79,10 @@ class _WorkoutPlansScreenState extends ConsumerState<WorkoutPlansScreen> {
         label: const Text('Novo treino'),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: PolishSkeleton.list(count: 5, itemHeight: 80),
+            )
           : _plans.isEmpty
               ? _empty()
               : RefreshIndicator(
@@ -89,8 +93,7 @@ class _WorkoutPlansScreenState extends ConsumerState<WorkoutPlansScreen> {
                     separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (context, i) {
                       final p = _plans[i];
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(12),
+                      return Pressable(
                         onTap: () => _openBuilder(p),
                         child: Container(
                           padding: const EdgeInsets.all(14),
@@ -125,7 +128,7 @@ class _WorkoutPlansScreenState extends ConsumerState<WorkoutPlansScreen> {
                             ],
                           ),
                         ),
-                      );
+                      ).entrance(index: i);
                     },
                   ),
                 ),
@@ -133,27 +136,10 @@ class _WorkoutPlansScreenState extends ConsumerState<WorkoutPlansScreen> {
   }
 
   Widget _empty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.fitness_center, size: 48, color: AppTheme.textSecondary),
-            const SizedBox(height: 12),
-            Text(
-              'Nenhum treino criado ainda.',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Crie planos de treino e entregue aos alunos.',
-              style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: Icons.fitness_center,
+      title: 'Nenhum treino criado ainda',
+      subtitle: 'Crie planos de treino e entregue aos alunos.',
     );
   }
 }

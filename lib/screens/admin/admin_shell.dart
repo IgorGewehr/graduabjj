@@ -13,6 +13,7 @@ import '../../widgets/cached_image.dart';
 import '../../widgets/common/more_menu_sheet.dart';
 import '../../widgets/common/back_button_handler.dart';
 import '../../widgets/update_banner.dart';
+import '../../widgets/polish/polish.dart';
 import '../paywall_screen.dart';
 
 /// Admin Navigation Shell - Main navigation for admin screens
@@ -164,8 +165,18 @@ class AdminShell extends ConsumerWidget {
                   // Sidebar for larger screens
                   if (MediaQuery.of(context).size.width >= 768)
                     AdminSidebar(currentPath: location),
-                  // Main content
-                  Expanded(child: child),
+                  // Main content — gentle cross-fade on route change.
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: PolishMotion.normal,
+                      switchInCurve: PolishMotion.transition,
+                      switchOutCurve: PolishMotion.transition,
+                      child: KeyedSubtree(
+                        key: ValueKey(location),
+                        child: child,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -351,7 +362,7 @@ class AdminSidebar extends ConsumerWidget {
                 ),
               ],
             ),
-          ),
+          ).fadeInQuick(),
           const Divider(height: 1),
 
           // Navigation Items
@@ -914,9 +925,9 @@ class _AdminBottomNavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: GestureDetector(
+      child: Pressable(
         onTap: onTap,
-        behavior: HitTestBehavior.opaque,
+        scale: 0.92,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 6),

@@ -11,6 +11,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/event_service.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin management UI for the academy "Jornal" (events / news / seminars).
 ///
@@ -120,7 +121,10 @@ class _AdminEventsScreenState extends ConsumerState<AdminEventsScreen>
             ],
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: PolishSkeleton.list(count: 4, itemHeight: 120),
+        ),
         error: (e, _) => _ErrorState(
           message: 'Não foi possível carregar o jornal.',
           onRetry: () => ref.invalidate(journalAllProvider),
@@ -162,7 +166,7 @@ class _AdminEventsScreenState extends ConsumerState<AdminEventsScreen>
                     context.push('/admin/jornal/${items[i].id}/editar'),
                 onDelete: () => _delete(items[i]),
                 onPublish: () => _publish(items[i]),
-              ),
+              ).entrance(index: i),
             ),
     );
   }
@@ -304,9 +308,8 @@ class _RowAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return Pressable(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Row(

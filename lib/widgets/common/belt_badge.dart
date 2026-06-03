@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 import '../../core/theme.dart';
+import '../polish/polish.dart';
 
 // ============================================
 // Belt Labels
@@ -118,7 +120,8 @@ class BeltBadge extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Belt container
+        // Belt container — a restrained scale-in plus a single shimmer pass on
+        // first appearance gives the belt a subtle "earned" sheen.
         Container(
           width: config.width,
           height: config.height,
@@ -126,7 +129,7 @@ class BeltBadge extends StatelessWidget {
             borderRadius: BorderRadius.circular(2),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.2),
+                color: Colors.black.withValues(alpha: 0.2),
                 blurRadius: 3,
                 offset: const Offset(0, 1),
               ),
@@ -201,7 +204,19 @@ class BeltBadge extends StatelessWidget {
               ),
             ],
           ),
-        ),
+        )
+            .animate()
+            .scale(
+              begin: const Offset(0.92, 0.92),
+              end: const Offset(1, 1),
+              duration: PolishMotion.normal,
+              curve: Curves.easeOutBack,
+            )
+            .shimmer(
+              delay: PolishMotion.normal,
+              duration: const Duration(milliseconds: 900),
+              color: Colors.white.withValues(alpha: 0.35),
+            ),
 
         // Label below
         if (showLabel) ...[
@@ -322,7 +337,7 @@ class BeltChip extends StatelessWidget {
                     boxShadow: isWhiteBelt
                         ? [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.3),
+                              color: Colors.black.withValues(alpha: 0.3),
                               blurRadius: 1,
                             ),
                           ]

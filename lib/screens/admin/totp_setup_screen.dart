@@ -8,6 +8,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/totp_provider.dart';
+import '../../widgets/polish/polish.dart';
 
 /// TOTP 2FA Setup Screen
 /// 3-step flow: QR code → Verify code → Backup codes
@@ -81,6 +82,8 @@ class _TotpSetupScreenState extends ConsumerState<TotpSetupScreen> {
         _backupCodes = result.backupCodes;
         _currentStep = 2;
       });
+      // Genuine win: 2FA successfully enabled.
+      Celebration.confetti(context);
     } else {
       setState(() {
         _isVerifying = false;
@@ -172,9 +175,9 @@ class _TotpSetupScreenState extends ConsumerState<TotpSetupScreen> {
           const SizedBox(height: 32),
 
           // Step content
-          if (_currentStep == 0) _buildStep1QrCode(),
-          if (_currentStep == 1) _buildStep2Verify(),
-          if (_currentStep == 2) _buildStep3BackupCodes(),
+          if (_currentStep == 0) _buildStep1QrCode().entrance(),
+          if (_currentStep == 1) _buildStep2Verify().entrance(),
+          if (_currentStep == 2) _buildStep3BackupCodes().entrance(),
         ],
       ),
     );
@@ -445,6 +448,8 @@ class _TotpSetupScreenState extends ConsumerState<TotpSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Center(child: const SuccessCheck()),
+        const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(

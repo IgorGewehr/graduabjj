@@ -7,6 +7,7 @@ import '../../models/workout_plan.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 import '../../widgets/common/sport_chip.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Student-facing list of workout plans assigned to them (academy-wide,
 /// their-sport library, or personal). Tapping a plan opens a native detail
@@ -59,7 +60,7 @@ class _WorkoutsScreenState extends ConsumerState<WorkoutsScreen> {
         backgroundColor: AppTheme.surface,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? PolishSkeleton.list(count: 6)
           : _plans.isEmpty
               ? _empty()
               : RefreshIndicator(
@@ -70,8 +71,7 @@ class _WorkoutsScreenState extends ConsumerState<WorkoutsScreen> {
                     separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (context, i) {
                       final p = _plans[i];
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(12),
+                      return Pressable(
                         onTap: () => _open(p),
                         child: Container(
                           padding: const EdgeInsets.all(14),
@@ -122,7 +122,7 @@ class _WorkoutsScreenState extends ConsumerState<WorkoutsScreen> {
                             ],
                           ),
                         ),
-                      );
+                      ).entrance(index: i);
                     },
                   ),
                 ),
@@ -130,27 +130,10 @@ class _WorkoutsScreenState extends ConsumerState<WorkoutsScreen> {
   }
 
   Widget _empty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.fitness_center, size: 48, color: AppTheme.textSecondary),
-            const SizedBox(height: 12),
-            Text(
-              'Nenhum treino disponivel ainda.',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Quando seu professor liberar um treino, ele aparece aqui.',
-              style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: Icons.fitness_center,
+      title: 'Nenhum treino disponivel ainda.',
+      subtitle: 'Quando seu professor liberar um treino, ele aparece aqui.',
     );
   }
 }

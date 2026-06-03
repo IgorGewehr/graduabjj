@@ -18,6 +18,7 @@ import '../../widgets/cached_image.dart';
 import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/sport_chip.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Students List Screen - Fintech style matching webapp
 class StudentsListScreen extends ConsumerStatefulWidget {
@@ -261,8 +262,11 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
 
             // Student list
             _isLoading
-                ? const SliverFillRemaining(
-                    child: Center(child: CircularProgressIndicator()),
+                ? SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                    sliver: SliverToBoxAdapter(
+                      child: PolishSkeleton.list(count: 6, itemHeight: 88),
+                    ),
                   )
                 : _filteredStudents.isEmpty
                 ? SliverFillRemaining(child: _buildEmptyState())
@@ -483,7 +487,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
             student: student,
             eligibility: _eligibilityByStudent[student.id],
             onTap: () => context.go('/admin/alunos/${student.id}'),
-          );
+          ).entrance(index: index);
         }, childCount: _filteredStudents.length),
       ),
     );
@@ -542,6 +546,8 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
             ref.read(academySettingsProvider).valueOrNull?.muaythaiGradeSystem ??
                 muaythaiVariantCbmt,
         onCreated: (student) {
+          // Genuine win — a new student joined the academy.
+          if (mounted) Celebration.confetti(context);
           // Refresh list with the new student.
           _loadStudents();
         },
@@ -550,58 +556,17 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              LucideIcons.users,
-              size: 32,
-              color: AppTheme.textDisabled,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _hasActiveFilters()
-                ? 'Nenhum aluno encontrado'
-                : 'Nenhum aluno cadastrado',
-            style: AppTheme.titleMedium.copyWith(
-              color: AppTheme.textPrimary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _hasActiveFilters()
-                ? 'Tente ajustar os filtros'
-                : 'Adicione o primeiro aluno da academia',
-            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-          ),
-          if (!_hasActiveFilters()) ...[
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () => context.go('/admin/alunos/novo'),
-              icon: const Icon(LucideIcons.userPlus),
-              label: const Text('Cadastrar Aluno'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.textPrimary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
+    final hasFilters = _hasActiveFilters();
+    return PolishedEmptyState(
+      icon: LucideIcons.users,
+      title: hasFilters
+          ? 'Nenhum aluno encontrado'
+          : 'Nenhum aluno cadastrado',
+      subtitle: hasFilters
+          ? 'Tente ajustar os filtros'
+          : 'Adicione o primeiro aluno da academia',
+      actionLabel: hasFilters ? null : 'Cadastrar Aluno',
+      onAction: hasFilters ? null : () => context.go('/admin/alunos/novo'),
     );
   }
 }
@@ -660,7 +625,7 @@ class _StudentCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final showEligibility =
         eligibility != null && eligibility!.requiredClasses > 0;
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -816,7 +781,9 @@ class _StudentCard extends StatelessWidget {
     final avatarColor = _getGradeColor(primarySport, gradeId);
     final isLightAvatar = _isLightGrade(gradeId);
 
-    return Container(
+    return Hero(
+      tag: 'student-avatar-${student.id}',
+      child: Container(
       width: 48,
       height: 48,
       decoration: BoxDecoration(
@@ -842,6 +809,7 @@ class _StudentCard extends StatelessWidget {
                 ),
               ),
             ),
+      ),
     );
   }
 

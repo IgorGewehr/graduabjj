@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../polish/polish.dart';
 
 /// Stat Card - Displays a statistic with icon
 class StatCard extends StatelessWidget {
@@ -24,8 +25,18 @@ class StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final effectiveIconColor = iconColor ?? AppTheme.primary;
+    final valueStyle = AppTheme.headlineMedium.copyWith(
+      fontWeight: FontWeight.w700,
+    );
 
-    return Material(
+    // If the value is a plain integer, count it up; otherwise render as-is.
+    // Only treat strings that are purely an integer as numeric so that
+    // locale-formatted values like "1.200" (thousands separator) or "R$ 1,2"
+    // are shown verbatim instead of being mis-parsed by the count-up.
+    final isPlainInteger = RegExp(r'^\d+$').hasMatch(value);
+    final numericValue = isPlainInteger ? num.tryParse(value) : null;
+
+    final card = Material(
       color: AppTheme.surface,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
@@ -46,7 +57,7 @@ class StatCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: effectiveIconColor.withOpacity(0.1),
+                      color: effectiveIconColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Icon(
@@ -71,12 +82,14 @@ class StatCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
-                value,
-                style: AppTheme.headlineMedium.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              if (numericValue != null)
+                AnimatedCountUp(
+                  value: numericValue,
+                  decimals: 0,
+                  style: valueStyle,
+                )
+              else
+                Text(value, style: valueStyle),
               if (subtitle != null) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -91,5 +104,8 @@ class StatCard extends StatelessWidget {
         ),
       ),
     );
+
+    // The InkWell above owns the tap + ripple feedback; keep a gentle entrance.
+    return card.entrance();
   }
 }

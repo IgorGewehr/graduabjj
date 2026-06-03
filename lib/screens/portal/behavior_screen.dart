@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Behavior Screen - Meu Comportamento
 class BehaviorScreen extends ConsumerWidget {
@@ -91,7 +92,7 @@ class BehaviorScreen extends ConsumerWidget {
                         _LatestAssessmentCard(
                           assessment: latest,
                           categories: _categories,
-                        )
+                        ).entrance(index: 0)
                       else
                         _buildNoAssessmentCard(),
                       const SizedBox(height: 24),
@@ -107,6 +108,8 @@ class BehaviorScreen extends ConsumerWidget {
                                 iconBgColor: AppTheme.infoLight,
                                 label: 'Media Geral',
                                 value: overallAverage.toStringAsFixed(1),
+                                animatedValue: overallAverage,
+                                animatedDecimals: 1,
                                 valueColor: _getPerformanceLevel(
                                   overallAverage,
                                 ).color,
@@ -120,10 +123,11 @@ class BehaviorScreen extends ConsumerWidget {
                                 iconBgColor: AppTheme.warningLight,
                                 label: 'Avaliacoes',
                                 value: assessments.length.toString(),
+                                animatedValue: assessments.length.toDouble(),
                               ),
                             ),
                           ],
-                        ),
+                        ).entrance(index: 1),
                         const SizedBox(height: 24),
                       ],
 
@@ -136,17 +140,16 @@ class BehaviorScreen extends ConsumerWidget {
                             fontWeight: FontWeight.w600,
                             letterSpacing: 0.5,
                           ),
-                        ),
+                        ).fadeInQuick(),
                         const SizedBox(height: 12),
-                        ...assessments.map(
-                          (assessment) => Padding(
+                        for (var i = 0; i < assessments.length; i++)
+                          Padding(
                             padding: const EdgeInsets.only(bottom: 8),
                             child: _AssessmentHistoryCard(
-                              assessment: assessment,
+                              assessment: assessments[i],
                               categories: _categories,
-                            ),
+                            ).entrance(index: i + 2),
                           ),
-                        ),
                       ],
                     ],
 
@@ -190,119 +193,68 @@ class BehaviorScreen extends ConsumerWidget {
   }
 
   Widget _buildNoStudentState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(LucideIcons.star, size: 64, color: AppTheme.textDisabled),
-            const SizedBox(height: 16),
-            Text(
-              'Conta nao vinculada',
-              style: AppTheme.titleLarge.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Vincule sua conta a um aluno para ver as avaliacoes.',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.star,
+      title: 'Conta nao vinculada',
+      subtitle: 'Vincule sua conta a um aluno para ver as avaliacoes.',
     );
   }
 
   Widget _buildLoadingState() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 200,
-            height: 24,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(4),
+      child: PolishSkeleton.shimmer(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 200,
+              height: 24,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(4),
+              ),
             ),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            height: 200,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(8),
+            const SizedBox(height: 24),
+            Container(
+              height: 200,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-          ),
-          const SizedBox(height: 24),
-          ...List.generate(
-            2,
-            (index) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Container(
-                height: 100,
-                decoration: BoxDecoration(
-                  color: AppTheme.surfaceVariant,
-                  borderRadius: BorderRadius.circular(8),
+            const SizedBox(height: 24),
+            ...List.generate(
+              2,
+              (index) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Container(
+                  height: 100,
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(LucideIcons.alertCircle, size: 64, color: AppTheme.error),
-            const SizedBox(height: 16),
-            Text(
-              'Erro ao carregar dados',
-              style: AppTheme.titleLarge.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.alertCircle,
+      title: 'Erro ao carregar dados',
+      accent: AppTheme.error,
     );
   }
 
   Widget _buildNoAssessmentCard() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.star, size: 48, color: AppTheme.textDisabled),
-            const SizedBox(height: 16),
-            Text(
-              'Nenhuma avaliacao registrada ainda',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.star,
+      title: 'Nenhuma avaliacao registrada ainda',
     );
   }
 }
@@ -495,6 +447,11 @@ class _StatCard extends StatelessWidget {
   final String value;
   final Color? valueColor;
 
+  /// When set, the value counts up to this number instead of rendering [value]
+  /// statically. [animatedDecimals] controls the displayed precision.
+  final double? animatedValue;
+  final int animatedDecimals;
+
   const _StatCard({
     required this.icon,
     required this.iconColor,
@@ -502,6 +459,8 @@ class _StatCard extends StatelessWidget {
     required this.label,
     required this.value,
     this.valueColor,
+    this.animatedValue,
+    this.animatedDecimals = 0,
   });
 
   @override
@@ -529,13 +488,23 @@ class _StatCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            value,
-            style: AppTheme.displaySmall.copyWith(
-              fontWeight: FontWeight.w700,
-              color: valueColor ?? AppTheme.textPrimary,
+          if (animatedValue != null)
+            AnimatedCountUp(
+              value: animatedValue!,
+              decimals: animatedDecimals,
+              style: AppTheme.displaySmall.copyWith(
+                fontWeight: FontWeight.w700,
+                color: valueColor ?? AppTheme.textPrimary,
+              ),
+            )
+          else
+            Text(
+              value,
+              style: AppTheme.displaySmall.copyWith(
+                fontWeight: FontWeight.w700,
+                color: valueColor ?? AppTheme.textPrimary,
+              ),
             ),
-          ),
         ],
       ),
     );

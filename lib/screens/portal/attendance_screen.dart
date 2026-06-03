@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 import '../../widgets/sport_tab_bar.dart';
 
@@ -159,17 +160,17 @@ class AttendanceScreen extends ConsumerWidget {
                           : Column(
                               key: ValueKey('attendance-${records.length}'),
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: records
-                                  .take(15)
-                                  .map(
-                                    (record) => Padding(
-                                      padding: const EdgeInsets.only(bottom: 8),
-                                      child: _AttendanceListItem(
-                                        record: record,
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
+                              children: [
+                                for (var i = 0;
+                                    i < records.take(15).length;
+                                    i++)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: _AttendanceListItem(
+                                      record: records[i],
+                                    ).entrance(index: i),
+                                  ),
+                              ],
                             ),
                     ),
 
@@ -218,35 +219,10 @@ class AttendanceScreen extends ConsumerWidget {
   }
 
   Widget _buildNoStudentState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              LucideIcons.clipboardCheck,
-              size: 64,
-              color: AppTheme.textDisabled,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Conta nao vinculada',
-              style: AppTheme.titleLarge.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Vincule sua conta a um aluno para ver as presencas.',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.clipboardCheck,
+      title: 'Conta nao vinculada',
+      subtitle: 'Vincule sua conta a um aluno para ver as presencas.',
     );
   }
 
@@ -275,40 +251,17 @@ class AttendanceScreen extends ConsumerWidget {
   }
 
   Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(LucideIcons.alertCircle, size: 64, color: AppTheme.error),
-            const SizedBox(height: 16),
-            Text(
-              'Erro ao carregar dados',
-              style: AppTheme.titleLarge.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.alertCircle,
+      title: 'Erro ao carregar dados',
+      accent: AppTheme.error,
     );
   }
 
   Widget _buildEmptyState() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Center(
-        child: Text(
-          'Nenhuma presenca registrada ainda',
-          style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.clipboardCheck,
+      title: 'Nenhuma presenca registrada ainda',
     );
   }
 }
@@ -322,6 +275,7 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final numeric = int.tryParse(value);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -332,10 +286,18 @@ class _StatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            value,
-            style: AppTheme.displaySmall.copyWith(fontWeight: FontWeight.w700),
-          ),
+          if (numeric != null)
+            AnimatedCountUp(
+              value: numeric,
+              style:
+                  AppTheme.displaySmall.copyWith(fontWeight: FontWeight.w700),
+            )
+          else
+            Text(
+              value,
+              style:
+                  AppTheme.displaySmall.copyWith(fontWeight: FontWeight.w700),
+            ),
           const SizedBox(height: 4),
           Text(
             label,

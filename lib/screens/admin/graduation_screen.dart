@@ -8,6 +8,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../services/services.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin Graduation Screen - Fintech style matching webapp
 class AdminGraduationScreen extends ConsumerStatefulWidget {
@@ -74,8 +75,11 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
 
             // Content based on tab
             _isLoading
-                ? const SliverFillRemaining(
-                    child: Center(child: CircularProgressIndicator()),
+                ? SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: PolishSkeleton.list(count: 4, itemHeight: 140),
+                    ),
                   )
                 : SliverToBoxAdapter(
                     child: AnimatedSwitcher(
@@ -251,13 +255,13 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         key: const ValueKey('eligible'),
-        children: _eligibleStudents.map((data) {
+        children: _eligibleStudents.asMap().entries.map((e) {
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: _EligibleStudentCard(
-              data: data,
-              onPromote: () => _showPromotionSheet(data),
-            ),
+              data: e.value,
+              onPromote: () => _showPromotionSheet(e.value),
+            ).entrance(index: e.key),
           );
         }).toList(),
       ),
@@ -277,10 +281,10 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         key: const ValueKey('history'),
-        children: _recentPromotions.map((promotion) {
+        children: _recentPromotions.asMap().entries.map((e) {
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: _PromotionHistoryCard(promotion: promotion),
+            child: _PromotionHistoryCard(promotion: e.value).entrance(index: e.key),
           );
         }).toList(),
       ),
@@ -394,35 +398,11 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
     required String title,
     required String subtitle,
   }) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(40),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppTheme.success.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Icon(icon, size: 40, color: AppTheme.success),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-            ),
-          ],
-        ),
-      ),
+    return PolishedEmptyState(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      accent: AppTheme.success,
     );
   }
 
@@ -799,6 +779,8 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
       );
 
       if (mounted) {
+        // Genuine win: a student was promoted.
+        Celebration.confetti(context);
         context.showSuccess('$studentName foi graduado com sucesso!');
         _loadData();
       }
@@ -869,12 +851,19 @@ class _StatCard extends StatelessWidget {
             child: Icon(icon, color: color, size: 18),
           ),
           const SizedBox(height: 12),
-          Text(
-            value,
-            style: AppTheme.headlineSmall.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
+          int.tryParse(value) != null
+              ? AnimatedCountUp(
+                  value: int.parse(value),
+                  style: AppTheme.headlineSmall.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                )
+              : Text(
+                  value,
+                  style: AppTheme.headlineSmall.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
           const SizedBox(height: 2),
           Text(
             label,

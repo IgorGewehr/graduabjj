@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../models/academy_event.dart';
 import '../../providers/portal_providers.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Student-facing "Jornal da Academia" feed: every published post
 /// (events, news, seminars), newest-first, each tappable to its detail.
@@ -56,11 +57,14 @@ class JornalScreen extends ConsumerWidget {
                 return _JornalCard(
                   event: post,
                   onTap: () => context.push('/portal/eventos/${post.id}'),
-                );
+                ).entrance(index: i);
               },
             );
           },
-          loading: () => const Center(child: CircularProgressIndicator()),
+          loading: () => Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            child: PolishSkeleton.list(count: 5, itemHeight: 80),
+          ),
           error: (_, __) => ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             children: const [
@@ -101,7 +105,7 @@ class _JornalCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasCover = event.coverUrl != null && event.coverUrl!.isNotEmpty;
 
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
@@ -116,11 +120,14 @@ class _JornalCard extends StatelessWidget {
               borderRadius:
                   const BorderRadius.horizontal(left: Radius.circular(13)),
               child: hasCover
-                  ? AppCachedImage(
-                      imageUrl: event.coverUrl!,
-                      width: 88,
-                      height: 80,
-                      fit: BoxFit.cover,
+                  ? Hero(
+                      tag: 'event-cover-${event.id}',
+                      child: AppCachedImage(
+                        imageUrl: event.coverUrl!,
+                        width: 88,
+                        height: 80,
+                        fit: BoxFit.cover,
+                      ),
                     )
                   : Container(
                       width: 88,
@@ -233,26 +240,10 @@ class _JornalEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: const [
-            Icon(LucideIcons.newspaper, size: 48, color: AppTheme.textDisabled),
-            SizedBox(height: 16),
-            Text(
-              'Nenhuma postagem ainda',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.newspaper,
+      title: 'Nenhuma postagem ainda',
+      subtitle: 'Notícias, seminários e novidades aparecerão aqui.',
     );
   }
 }

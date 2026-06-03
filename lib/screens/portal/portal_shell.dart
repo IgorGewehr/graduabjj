@@ -11,6 +11,7 @@ import '../../widgets/common/more_menu_sheet.dart';
 import '../../widgets/common/back_button_handler.dart';
 import '../../widgets/academy_switcher.dart';
 import '../../widgets/update_banner.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Portal Shell - Main navigation structure for student portal
 class PortalShell extends ConsumerStatefulWidget {
@@ -449,9 +450,9 @@ class _BottomNavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: GestureDetector(
+      child: Pressable(
         onTap: onTap,
-        behavior: HitTestBehavior.opaque,
+        scale: 0.92,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 4),

@@ -10,6 +10,7 @@ import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/loading_button.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Portal Cart Screen
 class PortalCartScreen extends ConsumerStatefulWidget {
@@ -96,7 +97,7 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                               HapticFeedback.lightImpact();
                               cartNotifier.removeItem(index);
                             },
-                          ),
+                          ).entrance(index: index),
                         ),
                       ),
                       childCount: cart.length,
@@ -202,47 +203,12 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
   }
 
   Widget _buildEmptyCart() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                LucideIcons.shoppingCart,
-                size: 48,
-                color: AppTheme.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Carrinho vazio',
-              style: AppTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Adicione produtos para continuar',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () => context.pop(),
-              icon: const Icon(LucideIcons.arrowLeft),
-              label: const Text('Ver Produtos'),
-            ),
-          ],
-        ),
-      ),
+    return PolishedEmptyState(
+      icon: LucideIcons.shoppingCart,
+      title: 'Carrinho vazio',
+      subtitle: 'Adicione produtos para continuar',
+      actionLabel: 'Ver Produtos',
+      onAction: () => context.pop(),
     );
   }
 
@@ -283,6 +249,7 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
       // Show success and navigate to orders
       if (mounted) {
         HapticFeedback.heavyImpact();
+        Celebration.confetti(context);
         context.showSuccess('Pedido criado com sucesso!');
         context.push('/portal/loja/pedidos');
       }

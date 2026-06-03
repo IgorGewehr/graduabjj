@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../widgets/common/academy_page_header.dart';
+import '../../widgets/polish/polish.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
@@ -120,7 +121,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
       backgroundColor: AppTheme.background,
       floatingActionButton: _buildFAB(),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: PolishSkeleton.list(count: 5),
+            )
           : RefreshIndicator(
               onRefresh: _loadData,
               child: CustomScrollView(
@@ -281,7 +285,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   label: 'Recebido',
                   value: _formatCurrency(totalPaid),
                   subtitle: '$paidCount pagos',
-                ),
+                ).entrance(index: 0),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -291,7 +295,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   label: 'Pendente',
                   value: _formatCurrency(totalPending),
                   subtitle: '$pendingCount pend.',
-                ),
+                ).entrance(index: 1),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -301,7 +305,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   label: 'Atrasado',
                   value: _formatCurrency(totalOverdue),
                   subtitle: '$overdueCount atras.',
-                ),
+                ).entrance(index: 2),
               ),
             ],
           ),
@@ -322,8 +326,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   color: rate >= 70 ? AppTheme.success : rate >= 40 ? AppTheme.warning : AppTheme.error,
                 ),
                 const SizedBox(width: 10),
-                Text(
-                  'Taxa: ${rate.toStringAsFixed(0)}%',
+                AnimatedCountUp(
+                  value: rate,
+                  prefix: 'Taxa: ',
+                  suffix: '%',
                   style: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(width: 12),
@@ -450,43 +456,22 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
           const SizedBox(height: 20),
 
           // Plan Cards
-          ..._plans.map((plan) => Padding(
+          ..._plans.asMap().entries.map((entry) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: _PlanCard(
-                  plan: plan,
+                  plan: entry.value,
                   formatCurrency: _formatCurrency,
-                  onEdit: () => _showEditPlanDialog(plan),
-                  onDelete: () => _showDeletePlanDialog(plan),
-                  onManageStudents: () => _showManageStudentsDialog(plan),
-                ),
+                  onEdit: () => _showEditPlanDialog(entry.value),
+                  onDelete: () => _showDeletePlanDialog(entry.value),
+                  onManageStudents: () => _showManageStudentsDialog(entry.value),
+                ).entrance(index: entry.key),
               )),
 
           if (_plans.isEmpty)
-            Container(
-              padding: const EdgeInsets.all(32),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.divider),
-              ),
-              child: Center(
-                child: Column(
-                  children: [
-                    Icon(
-                      LucideIcons.package,
-                      size: 48,
-                      color: AppTheme.textDisabled,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Nenhum plano cadastrado',
-                      style: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            const PolishedEmptyState(
+              icon: LucideIcons.package,
+              title: 'Nenhum plano cadastrado',
+              subtitle: 'Crie um plano para começar a cobrar mensalidades.',
             ),
 
           const SizedBox(height: 80),
@@ -606,37 +591,13 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         // Payments list
         Expanded(
           child: filteredPayments.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 72,
-                        height: 72,
-                        decoration: BoxDecoration(
-                          color: AppTheme.surfaceVariant,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          LucideIcons.receipt,
-                          size: 32,
-                          color: AppTheme.textDisabled,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Nenhum pagamento',
-                        style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _paymentSearch.isNotEmpty 
-                            ? 'Nenhum resultado para "$_paymentSearch"'
-                            : 'Não há pagamentos nesta categoria',
-                        style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-                      ),
-                    ],
-                  ),
+              ? PolishedEmptyState(
+                  icon: LucideIcons.receipt,
+                  title: 'Nenhum pagamento',
+                  subtitle: _paymentSearch.isNotEmpty
+                      ? 'Nenhum resultado para "$_paymentSearch"'
+                      : 'Não há pagamentos nesta categoria',
+                  accent: AppTheme.textSecondary,
                 )
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
@@ -660,7 +621,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                         onReactivate: payment.status == PaymentStatus.cancelled
                             ? () => _reactivatePayment(payment)
                             : null,
-                      ),
+                      ).entrance(index: index),
                     );
                   },
                 ),
@@ -1436,6 +1397,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                               method: selectedMethod);
                           if (mounted) {
                             Navigator.pop(context);
+                            Celebration.confetti(this.context);
                             this.context.showSuccess('Pagamento confirmado!');
                             _loadData();
                           }
@@ -2344,7 +2306,7 @@ class _StudentToggleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: isLoading ? null : onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -3059,7 +3021,7 @@ class _QuickInsightCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),

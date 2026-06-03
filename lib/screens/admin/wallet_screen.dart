@@ -13,6 +13,7 @@ import '../../services/firebase_service.dart';
 import '../../services/abacate_pay_service.dart';
 import '../../services/totp_service.dart';
 import '../../providers/providers.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Wallet Transaction model
 class WalletTransaction {
@@ -293,6 +294,7 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
           Navigator.pop(context);
 
           if (result.success) {
+            Celebration.confetti(context);
             context.showSuccess('Saque solicitado com sucesso!');
           } else {
             context.showError(result.message ?? 'Erro ao solicitar saque');
@@ -354,49 +356,14 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
     if (!isPaymentEnabled) {
       return Scaffold(
         backgroundColor: AppTheme.background,
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    LucideIcons.alertCircle,
-                    size: 48,
-                    color: Colors.orange,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'Carteira Desativada',
-                  style: AppTheme.headlineMedium.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Ative os pagamentos pela plataforma nas configuracoes para acessar sua carteira.',
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  onPressed: () => context.go('/admin/configuracoes'),
-                  icon: const Icon(LucideIcons.settings),
-                  label: const Text('Ir para Configuracoes'),
-                ),
-              ],
-            ),
-          ),
+        body: PolishedEmptyState(
+          icon: LucideIcons.alertCircle,
+          accent: Colors.orange,
+          title: 'Carteira Desativada',
+          subtitle:
+              'Ative os pagamentos pela plataforma nas configuracoes para acessar sua carteira.',
+          actionLabel: 'Ir para Configuracoes',
+          onAction: () => context.go('/admin/configuracoes'),
         ),
       );
     }
@@ -441,9 +408,10 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                                 borderRadius: BorderRadius.circular(8),
                               ),
                             )
-                          : Text(
-                              currencyFormat
-                                  .format((_wallet?.availableBalance ?? 0) / 100),
+                          : AnimatedCountUp(
+                              value: (_wallet?.availableBalance ?? 0) / 100,
+                              decimals: 2,
+                              prefix: 'R\$ ',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 42,
@@ -660,11 +628,13 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                   delegate: SliverChildBuilderDelegate(
                     (context, index) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
-                      child: Container(
-                        height: 72,
-                        decoration: BoxDecoration(
-                          color: AppTheme.surfaceVariant,
-                          borderRadius: BorderRadius.circular(12),
+                      child: PolishSkeleton.shimmer(
+                        child: Container(
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: AppTheme.surfaceVariant,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                       ),
                     ),
@@ -673,46 +643,13 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                 ),
               )
             else if (_transactions.isEmpty)
-              SliverToBoxAdapter(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20),
-                  padding: const EdgeInsets.all(32),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.divider),
-                  ),
-                  child: Column(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppTheme.surfaceVariant,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          LucideIcons.inbox,
-                          size: 32,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Nenhuma transacao ainda',
-                        style: AppTheme.titleMedium.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'As transacoes aparecerao aqui quando seus alunos fizerem pagamentos pela plataforma',
-                        style: AppTheme.bodySmall.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
+              const SliverToBoxAdapter(
+                child: PolishedEmptyState(
+                  icon: LucideIcons.inbox,
+                  title: 'Nenhuma transacao ainda',
+                  subtitle:
+                      'As transacoes aparecerao aqui quando seus alunos fizerem pagamentos pela plataforma',
+                  accent: AppTheme.textSecondary,
                 ),
               )
             else
@@ -730,51 +667,18 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
                       }).toList();
 
                       if (filteredTransactions.isEmpty) {
-                        return Container(
-                          margin: const EdgeInsets.only(top: 20),
-                          padding: const EdgeInsets.all(32),
-                          decoration: BoxDecoration(
-                            color: AppTheme.surface,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: AppTheme.divider),
-                          ),
-                          child: Column(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.surfaceVariant,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  LucideIcons.inbox,
-                                  size: 32,
-                                  color: AppTheme.textSecondary,
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Nenhuma transacao encontrada',
-                                style: AppTheme.titleMedium.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Nao ha transacoes deste tipo',
-                                style: AppTheme.bodySmall.copyWith(
-                                  color: AppTheme.textSecondary,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                          ),
+                        return const PolishedEmptyState(
+                          icon: LucideIcons.inbox,
+                          title: 'Nenhuma transacao encontrada',
+                          subtitle: 'Nao ha transacoes deste tipo',
+                          accent: AppTheme.textSecondary,
                         );
                       }
 
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 8),
-                        child: _TransactionCard(transaction: filteredTransactions[index]),
+                        child: _TransactionCard(transaction: filteredTransactions[index])
+                            .entrance(index: index),
                       );
                     },
                     childCount: () {

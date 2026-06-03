@@ -19,6 +19,7 @@ import '../../services/belt_progression_service.dart';
 import '../../services/services.dart';
 import '../../widgets/common/profile_photo_picker.dart';
 import '../../widgets/common/sport_chip.dart';
+import '../../widgets/polish/polish.dart';
 import 'physical_assessment_form_screen.dart';
 import 'student_syllabus_tab.dart';
 
@@ -160,7 +161,10 @@ class _AdminStudentDetailScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+              child: PolishSkeleton.list(count: 5, itemHeight: 84),
+            )
           : _student == null
           ? const Center(child: Text('Aluno não encontrado'))
           : NestedScrollView(
@@ -381,7 +385,9 @@ class _AdminStudentDetailScreenState
                   Row(
                     children: [
                       // Avatar com borda colorida
-                      ProfilePhotoPicker(
+                      Hero(
+                        tag: 'student-avatar-${_student!.id}',
+                        child: ProfilePhotoPicker(
                         // Use the authoritative academy context (same source the
                         // rest of this screen uses to load the student). The
                         // selectedAcademyIdProvider can be null here, which made
@@ -396,6 +402,7 @@ class _AdminStudentDetailScreenState
                         onPhotoUpdated: () {
                           _loadData();
                         },
+                        ),
                       ),
                       const SizedBox(width: 20),
                       Expanded(
@@ -646,29 +653,10 @@ class _AdminStudentDetailScreenState
     return Stack(
       children: [
         if (_physicalAssessments.isEmpty)
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.all(40),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(LucideIcons.scale, size: 48, color: AppTheme.textDisabled),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Nenhuma avaliação física ainda',
-                    style: AppTheme.bodyMedium
-                        .copyWith(color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Toque em "Nova avaliação" para registrar a primeira.',
-                    textAlign: TextAlign.center,
-                    style: AppTheme.labelSmall
-                        .copyWith(color: AppTheme.textDisabled),
-                  ),
-                ],
-              ),
-            ),
+          const PolishedEmptyState(
+            icon: LucideIcons.scale,
+            title: 'Nenhuma avaliação física ainda',
+            subtitle: 'Toque em "Nova avaliação" para registrar a primeira.',
           )
         else
           Builder(builder: (context) {
@@ -913,7 +901,7 @@ class _AdminStudentDetailScreenState
                 ),
               ),
             ],
-          ),
+          ).entrance(),
           const SizedBox(height: 24),
 
           // Personal info
@@ -931,7 +919,7 @@ class _AdminStudentDetailScreenState
                 value: DateFormat('dd/MM/yyyy').format(_student!.birthDate!),
               ),
             _InfoRow(label: 'Categoria', value: _student!.category.label),
-          ]),
+          ]).entrance(index: 1),
           const SizedBox(height: 16),
 
           // Academy info
@@ -950,7 +938,7 @@ class _AdminStudentDetailScreenState
               label: 'Dia de vencimento',
               value: _student!.tuitionDay.toString(),
             ),
-          ]),
+          ]).entrance(index: 2),
           const SizedBox(height: 16),
 
           // Responsável financeiro (kids → adulto que paga as cobrancas)
@@ -1387,43 +1375,11 @@ class _AdminStudentDetailScreenState
 
   Widget _buildAttendanceTab() {
     if (_attendances.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  LucideIcons.clipboardX,
-                  size: 64,
-                  color: AppTheme.primary.withValues(alpha: 0.5),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'Nenhuma presença registrada',
-                style: AppTheme.titleMedium.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'As presenças do aluno aparecerão aqui\nassim que forem registradas',
-                style: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.textSecondary,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
+      return const PolishedEmptyState(
+        icon: LucideIcons.clipboardX,
+        title: 'Nenhuma presença registrada',
+        subtitle:
+            'As presenças do aluno aparecerão aqui assim que forem registradas',
       );
     }
 
@@ -1546,19 +1502,12 @@ class _AdminStudentDetailScreenState
     final avulsas = _payments.where((p) => p.type == 'avulsa').toList();
 
     if (_payments.isEmpty && _storeOrders.isEmpty && _studentPlans.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Nenhum pagamento registrado'),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              icon: const Icon(LucideIcons.plus, size: 16),
-              label: const Text('Cobrança Avulsa'),
-              onPressed: _showAvulsaPaymentDialog,
-            ),
-          ],
-        ),
+      return PolishedEmptyState(
+        icon: LucideIcons.dollarSign,
+        title: 'Nenhum pagamento registrado',
+        subtitle: 'Crie uma cobrança avulsa para começar.',
+        actionLabel: 'Cobrança Avulsa',
+        onAction: _showAvulsaPaymentDialog,
       );
     }
 
@@ -2049,51 +1998,12 @@ class _AdminStudentDetailScreenState
     return Stack(
       children: [
         _achievements.isEmpty
-            ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(24),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF59E0B).withValues(alpha: 0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          LucideIcons.trophy,
-                          size: 64,
-                          color: const Color(0xFFF59E0B).withValues(alpha: 0.5),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      Text(
-                        'Nenhuma conquista ainda',
-                        style: AppTheme.titleMedium.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Registre as conquistas e marcos\nimportantes do aluno',
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      Text(
-                        'Toque em + para adicionar',
-                        style: AppTheme.bodySmall.copyWith(
-                          color: AppTheme.textDisabled,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+            ? const PolishedEmptyState(
+                icon: LucideIcons.trophy,
+                title: 'Nenhuma conquista ainda',
+                subtitle:
+                    'Registre as conquistas e marcos importantes do aluno. Toque em + para adicionar.',
+                accent: Color(0xFFF59E0B),
               )
             : ListView.builder(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
@@ -2105,7 +2015,7 @@ class _AdminStudentDetailScreenState
                     onEdit: () => _showEditAchievementDialog(achievement),
                     onDelete: () =>
                         _showDeleteAchievementConfirmation(achievement),
-                  );
+                  ).entrance(index: index);
                 },
               ),
         // FAB to add achievement
@@ -2595,32 +2505,11 @@ class _AdminStudentDetailScreenState
     return Stack(
       children: [
         _assessments.isEmpty
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      LucideIcons.star,
-                      size: 64,
-                      color: AppTheme.textDisabled,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Nenhuma avaliação registrada',
-                      style: AppTheme.bodyLarge.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Adicione avaliações comportamentais\npara que os pais possam acompanhar',
-                      style: AppTheme.bodySmall.copyWith(
-                        color: AppTheme.textDisabled,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
+            ? const PolishedEmptyState(
+                icon: LucideIcons.star,
+                title: 'Nenhuma avaliação registrada',
+                subtitle:
+                    'Adicione avaliações comportamentais para que os pais possam acompanhar',
               )
             : ListView.builder(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
@@ -2632,7 +2521,7 @@ class _AdminStudentDetailScreenState
                     onEdit: () => _showEditAssessmentDialog(assessment),
                     onDelete: () =>
                         _showDeleteAssessmentConfirmation(assessment),
-                  );
+                  ).entrance(index: index);
                 },
               ),
         Positioned(
@@ -3126,7 +3015,11 @@ class _AdminStudentDetailScreenState
     allHistory.sort((a, b) => b.date.compareTo(a.date));
 
     if (allHistory.isEmpty) {
-      return const Center(child: Text('Nenhum histórico'));
+      return const PolishedEmptyState(
+        icon: LucideIcons.history,
+        title: 'Nenhum histórico',
+        subtitle: 'Graduações e conquistas do aluno aparecerão aqui.',
+      );
     }
 
     return ListView.builder(
@@ -3155,7 +3048,7 @@ class _AdminStudentDetailScreenState
               ],
             ),
           ),
-        );
+        ).entrance(index: index);
       },
     );
   }
@@ -3261,6 +3154,8 @@ class _AdminStudentDetailScreenState
 
                     if (mounted) {
                       Navigator.pop(context);
+                      // Genuine win — celebrate the promotion.
+                      Celebration.confetti(this.context);
                       this.context.showSuccess(
                         'Graduação realizada com sucesso!',
                       );
@@ -3516,13 +3411,19 @@ class _StatCard extends StatelessWidget {
               child: Icon(icon, color: iconColor, size: 24),
             ),
             const SizedBox(height: 12),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                height: 1.2,
-              ),
+            Builder(
+              builder: (_) {
+                const numStyle = TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  height: 1.2,
+                );
+                final asInt = int.tryParse(value);
+                // Count-up only for plain integer stats; otherwise show as-is.
+                return asInt != null
+                    ? AnimatedCountUp(value: asInt, style: numStyle)
+                    : Text(value, style: numStyle);
+              },
             ),
             const SizedBox(height: 4),
             Text(

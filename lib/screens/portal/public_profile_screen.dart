@@ -16,6 +16,7 @@ import '../../widgets/cached_image.dart';
 import '../../widgets/common/grade_badge.dart';
 import '../../widgets/competitions/photo_card.dart';
 import '../../widgets/competitions/photo_fullscreen_viewer.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Read-only public profile of a student, viewed from inside the portal.
 ///
@@ -103,7 +104,8 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen>
 
     return Column(
       children: [
-        _ProfileHeader(student: student, medalCount: results.length),
+        _ProfileHeader(student: student, medalCount: results.length)
+            .fadeInQuick(),
         Material(
           color: AppTheme.surface,
           child: TabBar(
@@ -192,16 +194,19 @@ class _ProfileHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
       child: Column(
         children: [
-          AppCachedAvatar(
-            imageUrl: student.photoUrl,
-            radius: 44,
-            backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
-            foregroundColor: AppTheme.primary,
-            child: Text(
-              _initials(student.fullName),
-              style: AppTheme.headlineSmall.copyWith(
-                color: AppTheme.primary,
-                fontWeight: FontWeight.w700,
+          Hero(
+            tag: 'profile-avatar-${student.id}',
+            child: AppCachedAvatar(
+              imageUrl: student.photoUrl,
+              radius: 44,
+              backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
+              foregroundColor: AppTheme.primary,
+              child: Text(
+                _initials(student.fullName),
+                style: AppTheme.headlineSmall.copyWith(
+                  color: AppTheme.primary,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
@@ -252,13 +257,13 @@ class _ProfileHeader extends StatelessWidget {
             children: [
               _StatItem(
                 icon: LucideIcons.dumbbell,
-                value: student.totalAttendanceCount.toString(),
+                value: student.totalAttendanceCount,
                 label: 'Treinos',
               ),
               _StatDivider(),
               _StatItem(
                 icon: LucideIcons.medal,
-                value: medalCount.toString(),
+                value: medalCount,
                 label: 'Medalhas',
               ),
             ],
@@ -271,7 +276,7 @@ class _ProfileHeader extends StatelessWidget {
 
 class _StatItem extends StatelessWidget {
   final IconData icon;
-  final String value;
+  final num value;
   final String label;
 
   const _StatItem({
@@ -286,8 +291,8 @@ class _StatItem extends StatelessWidget {
       children: [
         Icon(icon, size: 20, color: AppTheme.primary),
         const SizedBox(height: 6),
-        Text(
-          value,
+        AnimatedCountUp(
+          value: value,
           style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w700),
         ),
         Text(
@@ -351,7 +356,7 @@ class _TimelineTab extends StatelessWidget {
             ),
             ...items.map((a) => _AchievementTile(achievement: a)),
           ],
-        );
+        ).entrance(index: index);
       },
     );
   }
@@ -648,7 +653,8 @@ class _CompetitionsTab extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
       itemCount: sorted.length,
       separatorBuilder: (context, index) => const SizedBox(height: 12),
-      itemBuilder: (context, index) => _ResultTile(result: sorted[index]),
+      itemBuilder: (context, index) =>
+          _ResultTile(result: sorted[index]).entrance(index: index),
     );
   }
 }
@@ -769,7 +775,7 @@ class _PhotosTab extends StatelessWidget {
               ),
             );
           },
-        );
+        ).entrance(index: index);
       },
     );
   }
@@ -786,18 +792,6 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 48, color: AppTheme.textDisabled),
-          const SizedBox(height: 16),
-          Text(
-            message,
-            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-          ),
-        ],
-      ),
-    );
+    return PolishedEmptyState(icon: icon, title: message);
   }
 }

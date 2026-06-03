@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -19,6 +18,7 @@ import '../../services/mercado_pago_service.dart';
 import '../../services/firebase_service.dart';
 import '../../providers/store_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Portal Store Orders Screen - Student's Orders or All Orders for Admin/Instructor
 class PortalStoreOrdersScreen extends ConsumerWidget {
@@ -151,13 +151,7 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                           },
                           showStudentName: isAdminOrInstructor,
                         ),
-                      )
-                          .animate()
-                          .fadeIn(
-                            delay: (index % 12 * 50).ms,
-                            duration: 280.ms,
-                          )
-                          .slideY(begin: 0.06, curve: Curves.easeOut),
+                      ).entrance(index: index),
                       childCount: orders.length,
                     ),
                   ),
@@ -237,47 +231,12 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                LucideIcons.shoppingBag,
-                size: 48,
-                color: AppTheme.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Nenhum pedido ainda',
-              style: AppTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Seus pedidos aparecerao aqui',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () => context.go('/portal/loja'),
-              icon: const Icon(LucideIcons.store),
-              label: const Text('Ir para Loja'),
-            ),
-          ],
-        ),
-      ),
+    return PolishedEmptyState(
+      icon: LucideIcons.shoppingBag,
+      title: 'Nenhum pedido ainda',
+      subtitle: 'Seus pedidos aparecerao aqui',
+      actionLabel: 'Ir para Loja',
+      onAction: () => context.go('/portal/loja'),
     );
   }
 }
@@ -335,7 +294,9 @@ class _OrderCard extends StatelessWidget {
     // Highlight orders awaiting payment so they stand out in the list.
     final isNew = order.status == StoreOrderStatus.pendingPayment;
 
-    return Container(
+    return Pressable(
+      onTap: onTap,
+      child: Container(
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
@@ -474,6 +435,7 @@ class _OrderCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -1370,6 +1332,7 @@ class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
 
   void _showPaymentConfirmedDialog() {
     final sheetContext = context;
+    Celebration.confetti(context);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1378,19 +1341,7 @@ class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: const BoxDecoration(
-                color: AppTheme.successLight,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                LucideIcons.checkCircle,
-                size: 48,
-                color: AppTheme.success,
-              ),
-            ),
+            const SuccessCheck(size: 80),
             const SizedBox(height: 24),
             Text(
               'Pagamento Confirmado!',

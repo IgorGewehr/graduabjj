@@ -12,6 +12,7 @@ import '../../providers/store_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
 /// Portal Store Screen - Product Catalog for Students
@@ -263,28 +264,11 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
                 if (filtered.isEmpty) {
                   return SliverFillRemaining(
                     hasScrollBody: false,
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(32),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              LucideIcons.package,
-                              size: 48,
-                              color: AppTheme.textSecondary,
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              _searchQuery.isNotEmpty
-                                  ? 'Nenhum produto encontrado'
-                                  : 'Nenhum produto disponivel',
-                              style: AppTheme.titleMedium,
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      ),
+                    child: PolishedEmptyState(
+                      icon: LucideIcons.package,
+                      title: _searchQuery.isNotEmpty
+                          ? 'Nenhum produto encontrado'
+                          : 'Nenhum produto disponivel',
                     ),
                   );
                 }
@@ -303,7 +287,7 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
                       (context, index) => _ProductCard(
                         product: filtered[index],
                         onTap: () => _showProductDetails(filtered[index]),
-                      ),
+                      ).entrance(index: index),
                       childCount: filtered.length,
                     ),
                   ),
@@ -386,6 +370,7 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
       builder: (sheetContext) => _ProductDetailsSheet(
         product: product,
         onAddToCart: (item) {
+          HapticFeedback.mediumImpact();
           ref.read(cartProvider.notifier).addItem(item);
           Navigator.pop(sheetContext);
           scaffoldMessenger.showSnackBar(
@@ -453,7 +438,9 @@ class _ProductCard extends StatelessWidget {
         product.stockType == StoreStockType.inStock &&
         (product.stockQuantity ?? 0) == 0;
 
-    return Container(
+    return Pressable(
+      onTap: isOutOfStock ? null : onTap,
+      child: Container(
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
@@ -570,6 +557,7 @@ class _ProductCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }

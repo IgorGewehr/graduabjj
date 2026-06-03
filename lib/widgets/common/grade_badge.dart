@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 import '../../core/sports.dart';
 import '../../core/theme.dart';
+import '../polish/polish.dart';
 import 'belt_badge.dart';
 
 // ============================================
@@ -74,7 +76,12 @@ class GradeBadge extends StatelessWidget {
               ],
             ],
           ),
-        );
+        ).animate().scale(
+              begin: const Offset(0.92, 0.92),
+              end: const Offset(1, 1),
+              duration: PolishMotion.normal,
+              curve: Curves.easeOutBack,
+            );
 
       case GradeSystem.none:
         return const SizedBox.shrink();

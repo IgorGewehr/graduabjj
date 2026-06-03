@@ -9,6 +9,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/checkin_service.dart';
 import '../../services/services.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin tool for musculação check-in. Adapts to the academy's configured
 /// mode: 'manual' shows a roster the reception marks present, 'qr' shows the
@@ -92,7 +93,10 @@ class _MusculacaoAdminScreenState extends ConsumerState<MusculacaoAdminScreen> {
         backgroundColor: AppTheme.surface,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? Padding(
+              padding: const EdgeInsets.all(16),
+              child: PolishSkeleton.list(count: 6, itemHeight: 56),
+            )
           : _mode == 'qr'
               ? _buildQr()
               : _mode == 'button'
@@ -132,7 +136,7 @@ class _MusculacaoAdminScreenState extends ConsumerState<MusculacaoAdminScreen> {
                 size: 240,
                 version: QrVersions.auto,
               ),
-            ),
+            ).entrance(),
             const SizedBox(height: 16),
             Text(
               'So funciona dentro do horario de funcionamento configurado.',
@@ -173,15 +177,10 @@ class _MusculacaoAdminScreenState extends ConsumerState<MusculacaoAdminScreen> {
 
   Widget _buildRoster() {
     if (_students.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            'Nenhum aluno de musculacao ativo.',
-            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-            textAlign: TextAlign.center,
-          ),
-        ),
+      return const PolishedEmptyState(
+        icon: Icons.fitness_center,
+        title: 'Nenhum aluno de musculacao ativo',
+        subtitle: 'Alunos com a modalidade musculacao aparecem aqui.',
       );
     }
     return RefreshIndicator(
@@ -211,35 +210,43 @@ class _MusculacaoAdminScreenState extends ConsumerState<MusculacaoAdminScreen> {
                     ),
                   ),
                 ),
-                if (done)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.check_circle, color: AppTheme.success, size: 20),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Presente',
-                        style: AppTheme.labelSmall.copyWith(
-                          color: AppTheme.success,
-                          fontWeight: FontWeight.w700,
+                AnimatedSwitcher(
+                  duration: PolishMotion.fast,
+                  transitionBuilder: (child, anim) =>
+                      ScaleTransition(scale: anim, child: child),
+                  child: done
+                      ? Row(
+                          key: const ValueKey('present'),
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.check_circle,
+                                color: AppTheme.success, size: 20),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Presente',
+                              style: AppTheme.labelSmall.copyWith(
+                                color: AppTheme.success,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        )
+                      : ElevatedButton(
+                          key: const ValueKey('mark'),
+                          onPressed: busy ? null : () => _markPresent(s),
+                          child: busy
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Presente'),
                         ),
-                      ),
-                    ],
-                  )
-                else
-                  ElevatedButton(
-                    onPressed: busy ? null : () => _markPresent(s),
-                    child: busy
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Presente'),
-                  ),
+                ),
               ],
             ),
-          );
+          ).entrance(index: i);
         },
       ),
     );

@@ -7,6 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
 import '../../services/notification_service.dart';
+import '../../widgets/polish/polish.dart';
 
 String _formatTimeAgo(DateTime date) {
   final diff = DateTime.now().difference(date);
@@ -101,7 +102,7 @@ class NotificationsScreen extends ConsumerWidget {
         ),
       ),
       body: notificationsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => PolishSkeleton.list(count: 6),
         error: (error, _) => Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -118,32 +119,10 @@ class NotificationsScreen extends ConsumerWidget {
         ),
         data: (notifications) {
           if (notifications.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    LucideIcons.bellOff,
-                    size: 48,
-                    color: AppTheme.textSecondary,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Nenhuma notificacao',
-                    style: AppTheme.bodyMedium.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Voce sera notificado sobre pagamentos e novidades',
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
+            return const PolishedEmptyState(
+              icon: LucideIcons.bellOff,
+              title: 'Nenhuma notificacao',
+              subtitle: 'Voce sera notificado sobre pagamentos e novidades',
             );
           }
 
@@ -282,7 +261,7 @@ class _NotificationListBody extends StatelessWidget {
               }
             },
           ),
-        );
+        ).entrance(index: index);
       },
     );
   }

@@ -15,6 +15,7 @@ import '../../services/event_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/form/form_section.dart';
 import '../../widgets/form/input_field.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Create / edit a Jornal post (event, news or seminar).
 ///
@@ -340,14 +341,17 @@ class _AdminEventFormScreenState extends ConsumerState<AdminEventFormScreen> {
           title: Text(_isEditing ? 'Editar publicação' : 'Nova publicação'),
         ),
         body: _loading
-            ? const Center(child: CircularProgressIndicator())
+            ? Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: PolishSkeleton.list(count: 4, itemHeight: 120),
+              )
             : SafeArea(
                 child: Form(
                   key: _formKey,
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
                     children: [
-                      _coverPicker(),
+                      _coverPicker().entrance(index: 0),
                       const SizedBox(height: 12),
                       FormSection(
                         title: 'Conteúdo',
@@ -380,13 +384,13 @@ class _AdminEventFormScreenState extends ConsumerState<AdminEventFormScreen> {
                             ),
                           ],
                         ),
-                      ),
+                      ).entrance(index: 1),
                       const SizedBox(height: 12),
                       FormSection(
                         title: 'Tipo',
                         icon: LucideIcons.tag,
                         child: _typeSelector(),
-                      ),
+                      ).entrance(index: 2),
                       const SizedBox(height: 12),
                       FormSection(
                         title: 'Quando e onde',
@@ -416,7 +420,7 @@ class _AdminEventFormScreenState extends ConsumerState<AdminEventFormScreen> {
                             ),
                           ],
                         ),
-                      ),
+                      ).entrance(index: 3),
                       const SizedBox(height: 12),
                       FormSection(
                         title: 'Botão de ação',
@@ -440,7 +444,7 @@ class _AdminEventFormScreenState extends ConsumerState<AdminEventFormScreen> {
                             ),
                           ],
                         ),
-                      ),
+                      ).entrance(index: 4),
                       const SizedBox(height: 12),
                       FormSection(
                         title: 'Publicação',
@@ -469,7 +473,7 @@ class _AdminEventFormScreenState extends ConsumerState<AdminEventFormScreen> {
                             ),
                           ],
                         ),
-                      ),
+                      ).entrance(index: 5),
                     ],
                   ),
                 ),

@@ -13,6 +13,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Monitor Student Detail Screen - View student info (no financial access)
 class MonitorStudentDetailScreen extends ConsumerStatefulWidget {
@@ -132,7 +133,10 @@ class _MonitorStudentDetailScreenState
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+              child: PolishSkeleton.list(count: 6, itemHeight: 72),
+            )
           : _student == null
           ? const Center(child: Text('Aluno nao encontrado'))
           : NestedScrollView(
@@ -376,7 +380,7 @@ class _MonitorStudentDetailScreenState
               Expanded(
                 child: _buildStatCard(
                   'Presencas',
-                  '${_student!.totalAttendanceCount}',
+                  _student!.totalAttendanceCount,
                   LucideIcons.clipboardCheck,
                 ),
               ),
@@ -384,7 +388,7 @@ class _MonitorStudentDetailScreenState
               Expanded(
                 child: _buildStatCard(
                   'Graduacoes',
-                  '${_progressions.length}',
+                  _progressions.length,
                   LucideIcons.award,
                 ),
               ),
@@ -568,7 +572,7 @@ class _MonitorStudentDetailScreenState
     );
   }
 
-  Widget _buildStatCard(String label, String value, IconData icon) {
+  Widget _buildStatCard(String label, int value, IconData icon) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -580,8 +584,8 @@ class _MonitorStudentDetailScreenState
         children: [
           Icon(icon, color: AppTheme.primary, size: 24),
           const SizedBox(height: 8),
-          Text(
-            value,
+          AnimatedCountUp(
+            value: value,
             style: AppTheme.headlineMedium.copyWith(
               fontWeight: FontWeight.w700,
             ),
@@ -647,24 +651,9 @@ class _MonitorStudentDetailScreenState
 
   Widget _buildAttendanceTab() {
     if (_attendances.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              LucideIcons.clipboardX,
-              size: 48,
-              color: AppTheme.textDisabled,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Nenhuma presenca registrada',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
+      return const PolishedEmptyState(
+        icon: LucideIcons.clipboardX,
+        title: 'Nenhuma presenca registrada',
       );
     }
 
@@ -774,7 +763,7 @@ class _MonitorStudentDetailScreenState
             ),
             const SizedBox(height: 8),
           ],
-        );
+        ).entrance(index: index);
       },
     );
   }
@@ -812,20 +801,9 @@ class _MonitorStudentDetailScreenState
     allItems.sort((a, b) => b.date.compareTo(a.date));
 
     if (allItems.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(LucideIcons.history, size: 48, color: AppTheme.textDisabled),
-            const SizedBox(height: 16),
-            Text(
-              'Nenhum historico registrado',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
+      return const PolishedEmptyState(
+        icon: LucideIcons.history,
+        title: 'Nenhum historico registrado',
       );
     }
 
@@ -882,31 +860,23 @@ class _MonitorStudentDetailScreenState
               ),
             ],
           ),
-        );
+        ).entrance(index: index);
       },
     );
   }
 
   Widget _buildGlobalTab() {
     if (_isLoadingGlobal) {
-      return const Center(child: CircularProgressIndicator());
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+        child: PolishSkeleton.list(count: 5, itemHeight: 72),
+      );
     }
 
     if (_globalHistory == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(LucideIcons.globe, size: 48, color: AppTheme.textDisabled),
-            const SizedBox(height: 16),
-            Text(
-              'Nao foi possivel carregar o historico global',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
+      return const PolishedEmptyState(
+        icon: LucideIcons.globe,
+        title: 'Nao foi possivel carregar o historico global',
       );
     }
 
@@ -1406,6 +1376,7 @@ class _MonitorStudentDetailScreenState
       );
 
       if (mounted) {
+        Celebration.confetti(context);
         _showLinkCodeDialog(linkCode);
       }
     } catch (e) {

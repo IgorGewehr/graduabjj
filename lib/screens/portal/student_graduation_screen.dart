@@ -12,6 +12,7 @@ import '../../services/firebase_service.dart';
 import '../../services/settings_service.dart';
 import '../../services/skill_progress_service.dart';
 import '../../services/syllabus_service.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Portal "Minha Graduação" (B4 aluno) — faixa atual, checklist de técnicas
 /// com o nível marcado pelo instrutor e % dominado. Somente leitura.
@@ -80,6 +81,7 @@ class _GraduationBodyState extends ConsumerState<_GraduationBody> {
   List<SyllabusTechnique> _techniques = [];
   Map<String, SkillProgress> _progress = {};
   bool _loading = true;
+  bool _celebratedFullMastery = false;
 
   String get _academyId => FirebaseService.academyId;
 
@@ -174,25 +176,30 @@ class _GraduationBodyState extends ConsumerState<_GraduationBody> {
       return StudentGraduationScreen._msg(LucideIcons.award,
           'Modalidade sem graduação', 'Sua modalidade não usa faixas/graus.');
     }
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [PolishSkeleton.list(count: 5)],
+      );
+    }
+    final techniques = _gradeTechniques;
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          if (_sports.length > 1) _sportSelector(),
-          _gradeHeader(),
+          if (_sports.length > 1) _sportSelector().fadeInQuick(),
+          _gradeHeader().entrance(),
           const SizedBox(height: 8),
-          ..._gradeTechniques.map(_techniqueCard),
-          if (_gradeTechniques.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 40),
-              child: Text('Seu instrutor ainda não cadastrou técnicas para '
+          for (var i = 0; i < techniques.length; i++)
+            _techniqueCard(techniques[i]).entrance(index: i),
+          if (techniques.isEmpty)
+            PolishedEmptyState(
+              icon: LucideIcons.award,
+              title: 'Nenhuma técnica ainda',
+              subtitle: 'Seu instrutor ainda não cadastrou técnicas para '
                   'esta faixa.',
-                  textAlign: TextAlign.center,
-                  style: AppTheme.bodySmall
-                      .copyWith(color: AppTheme.textSecondary)),
             ),
         ],
       ),
@@ -237,6 +244,15 @@ class _GraduationBodyState extends ConsumerState<_GraduationBody> {
   Widget _gradeHeader() {
     final ladder = _ladder();
     final m = _mastery;
+    // Genuine win: every technique of this grade is mastered. Fire once.
+    if (m.total > 0 && m.done == m.total && !_celebratedFullMastery) {
+      _celebratedFullMastery = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Celebration.confetti(context);
+      });
+    } else if (m.total == 0 || m.done != m.total) {
+      _celebratedFullMastery = false;
+    }
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -276,17 +292,31 @@ class _GraduationBodyState extends ConsumerState<_GraduationBody> {
           const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
-            child: LinearProgressIndicator(
-              value: m.pct,
-              minHeight: 8,
-              backgroundColor: AppTheme.surfaceVariant,
-              valueColor: const AlwaysStoppedAnimation(AppTheme.primary),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0, end: m.pct),
+              duration: PolishMotion.slow,
+              curve: PolishMotion.entrance,
+              builder: (_, v, _) => LinearProgressIndicator(
+                value: v,
+                minHeight: 8,
+                backgroundColor: AppTheme.surfaceVariant,
+                valueColor: const AlwaysStoppedAnimation(AppTheme.primary),
+              ),
             ),
           ),
           const SizedBox(height: 6),
-          Text('${m.done} de ${m.total} técnicas dominadas',
-              style: AppTheme.labelSmall
-                  .copyWith(color: AppTheme.textSecondary)),
+          Row(
+            children: [
+              AnimatedCountUp(
+                value: m.done,
+                style: AppTheme.labelSmall
+                    .copyWith(color: AppTheme.textSecondary),
+              ),
+              Text(' de ${m.total} técnicas dominadas',
+                  style: AppTheme.labelSmall
+                      .copyWith(color: AppTheme.textSecondary)),
+            ],
+          ),
         ],
       ),
     );

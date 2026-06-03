@@ -19,6 +19,7 @@ import '../../widgets/common/delete_account_helper.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/profile_photo_picker.dart';
 import '../../widgets/loading_button.dart';
+import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
 /// Profile Screen - Redesigned with hero header, stats, and collapsed sections
@@ -56,7 +57,7 @@ class ProfileScreen extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 // Hero Header
-                _HeroHeader(student: student),
+                _HeroHeader(student: student).fadeInQuick(),
 
                 const SizedBox(height: 20),
 
@@ -66,6 +67,7 @@ class ProfileScreen extends ConsumerWidget {
                     _StatCard(
                       icon: LucideIcons.clipboardCheck,
                       value: '${attendanceCountAsync.valueOrNull ?? 0}',
+                      countValue: attendanceCountAsync.valueOrNull ?? 0,
                       label: 'presencas',
                     ),
                     const SizedBox(width: 12),
@@ -503,10 +505,15 @@ class _StatCard extends StatelessWidget {
   final String value;
   final String label;
 
+  /// When set, the [value] renders as an animated count-up instead of static
+  /// text (used for numeric stats like presencas).
+  final int? countValue;
+
   const _StatCard({
     required this.icon,
     required this.value,
     required this.label,
+    this.countValue,
   });
 
   @override
@@ -523,7 +530,14 @@ class _StatCard extends StatelessWidget {
           children: [
             Icon(icon, size: 20, color: AppTheme.textSecondary),
             const SizedBox(height: 8),
-            Text(
+            countValue != null
+                ? AnimatedCountUp(
+                    value: countValue!,
+                    style: AppTheme.headlineMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  )
+                : Text(
               value,
               style: AppTheme.headlineMedium.copyWith(
                 fontWeight: FontWeight.w600,
@@ -587,7 +601,7 @@ class _QuickActionChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

@@ -12,6 +12,7 @@ import '../../models/student.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/belt_badge.dart';
+import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
 /// Monitor Students Screen - For monitors to view and manage students
@@ -201,8 +202,9 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
               color: AppTheme.surfaceVariant,
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Text(
-              '${_students.length} alunos',
+            child: AnimatedCountUp(
+              value: _students.length,
+              suffix: ' alunos',
               style: AppTheme.labelMedium.copyWith(
                 color: AppTheme.textSecondary,
                 fontWeight: FontWeight.w500,
@@ -383,7 +385,7 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
           return _StudentCard(
             student: student,
             onTap: () => context.push('/portal/alunos/${student.id}'),
-          );
+          ).entrance(index: index);
         }, childCount: _filteredStudents.length),
       ),
     );
@@ -435,58 +437,18 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              LucideIcons.users,
-              size: 32,
-              color: AppTheme.textDisabled,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _hasActiveFilters()
-                ? 'Nenhum aluno encontrado'
-                : 'Nenhum aluno cadastrado',
-            style: AppTheme.titleMedium.copyWith(
-              color: AppTheme.textPrimary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _hasActiveFilters()
-                ? 'Tente ajustar os filtros'
-                : 'Adicione o primeiro aluno da academia',
-            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-          ),
-          if (!_hasActiveFilters()) ...[
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () => context.push('/portal/alunos/novo'),
-              icon: const Icon(LucideIcons.userPlus),
-              label: const Text('Cadastrar Aluno'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.textPrimary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
+    return PolishedEmptyState(
+      icon: LucideIcons.users,
+      title: _hasActiveFilters()
+          ? 'Nenhum aluno encontrado'
+          : 'Nenhum aluno cadastrado',
+      subtitle: _hasActiveFilters()
+          ? 'Tente ajustar os filtros'
+          : 'Adicione o primeiro aluno da academia',
+      actionLabel: _hasActiveFilters() ? null : 'Cadastrar Aluno',
+      onAction: _hasActiveFilters()
+          ? null
+          : () => context.push('/portal/alunos/novo'),
     );
   }
 }
@@ -538,7 +500,7 @@ class _StudentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),

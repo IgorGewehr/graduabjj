@@ -13,6 +13,7 @@ import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../services/checkin_service.dart';
 import '../../widgets/checkin_confirm_dialog.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Monitor Attendance Screen - For student monitors to take attendance
 class MonitorAttendanceScreen extends ConsumerStatefulWidget {
@@ -498,7 +499,10 @@ class _MonitorAttendanceScreenState
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+              child: PolishSkeleton.list(count: 8, itemHeight: 72),
+            )
           : RefreshIndicator(
               color: Theme.of(context).colorScheme.primary,
               onRefresh: () async {
@@ -797,44 +801,10 @@ class _MonitorAttendanceScreenState
   }
 
   Widget _buildSelectClassState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                LucideIcons.users,
-                size: 36,
-                color: AppTheme.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'Selecione uma turma',
-              style: AppTheme.titleMedium.copyWith(
-                color: AppTheme.textPrimary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Escolha uma turma acima para\nregistrar as presencas',
-              textAlign: TextAlign.center,
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.users,
+      title: 'Selecione uma turma',
+      subtitle: 'Escolha uma turma acima para registrar as presencas',
     );
   }
 
@@ -843,22 +813,12 @@ class _MonitorAttendanceScreenState
 
     if (filteredStudents.isEmpty) {
       return SliverFillRemaining(
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(LucideIcons.userX, size: 48, color: AppTheme.textDisabled),
-              const SizedBox(height: 16),
-              Text(
-                _searchQuery.isNotEmpty
-                    ? 'Nenhum aluno encontrado'
-                    : 'Nenhum aluno nesta turma',
-                style: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-            ],
-          ),
+        hasScrollBody: false,
+        child: PolishedEmptyState(
+          icon: LucideIcons.userX,
+          title: _searchQuery.isNotEmpty
+              ? 'Nenhum aluno encontrado'
+              : 'Nenhum aluno nesta turma',
         ),
       );
     }
@@ -874,7 +834,7 @@ class _MonitorAttendanceScreenState
             student: student,
             isPresent: isPresent,
             onTap: () => _toggleAttendance(student),
-          );
+          ).entrance(index: index);
         }, childCount: filteredStudents.length),
       ),
     );
@@ -1197,7 +1157,7 @@ class _AttendanceStudentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),

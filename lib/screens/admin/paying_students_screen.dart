@@ -9,6 +9,7 @@ import '../../services/plan_service.dart';
 import '../../services/firebase_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/belt_badge.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Paying Students Screen - List of students enrolled in plans
 class PayingStudentsScreen extends StatefulWidget {
@@ -287,15 +288,14 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
           // Students list
           Expanded(
             child: filtered.isEmpty
-                ? Center(
-                    child: Text(
-                      _searchTerm.isNotEmpty || _planFilter.isNotEmpty
-                          ? 'Nenhum aluno encontrado com os filtros aplicados'
-                          : 'Nenhum aluno pagante cadastrado',
-                      style: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
+                ? PolishedEmptyState(
+                    icon: LucideIcons.wallet,
+                    title: _searchTerm.isNotEmpty || _planFilter.isNotEmpty
+                        ? 'Nenhum aluno encontrado'
+                        : 'Nenhum aluno pagante',
+                    subtitle: _searchTerm.isNotEmpty || _planFilter.isNotEmpty
+                        ? 'Tente ajustar a busca ou os filtros.'
+                        : 'Os alunos matriculados em planos aparecerão aqui.',
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -312,14 +312,13 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                         student.currentBelt,
                       );
 
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () => _showStudentPlansSheet(student),
+                      return Pressable(
+                        onTap: () => _showStudentPlansSheet(student),
+                        child: Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                           child: Padding(
                             padding: const EdgeInsets.all(12),
                             child: Row(
@@ -404,7 +403,7 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                             ),
                           ),
                         ),
-                      );
+                      ).entrance(index: index);
                     },
                   ),
           ),
@@ -532,8 +531,10 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      'R\$ ${totalMonthly.toStringAsFixed(2)}',
+                    AnimatedCountUp(
+                      value: totalMonthly,
+                      decimals: 2,
+                      prefix: 'R\$ ',
                       style: AppTheme.headlineSmall.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.w700,

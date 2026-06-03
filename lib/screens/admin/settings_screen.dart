@@ -23,6 +23,7 @@ import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/delete_account_helper.dart';
+import '../../widgets/polish/polish.dart';
 import 'mercado_pago_connect_screen.dart';
 import 'team_tab_content.dart';
 
@@ -535,7 +536,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       child: Scaffold(
         backgroundColor: AppTheme.background,
         body: _isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                child: PolishSkeleton.list(count: 5, itemHeight: 120),
+              )
             : Column(
                 children: [
                   Expanded(
@@ -1892,7 +1896,7 @@ class _SettingsCard extends StatelessWidget {
           child,
         ],
       ),
-    );
+    ).entrance();
   }
 }
 
@@ -2158,7 +2162,7 @@ class _AccountActionTile extends StatelessWidget {
         ? AppTheme.error.withValues(alpha: 0.2)
         : AppTheme.divider;
 
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),

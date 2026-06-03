@@ -8,6 +8,7 @@ import '../../models/training_video.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 import '../../widgets/common/sport_chip.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Student-facing list of training videos assigned to them. Tapping a video
 /// opens it externally (YouTube/Vimeo app or browser for uploaded files) via
@@ -66,7 +67,7 @@ class _VideosScreenState extends ConsumerState<VideosScreen> {
         backgroundColor: AppTheme.surface,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? PolishSkeleton.list(count: 6)
           : _videos.isEmpty
               ? _empty()
               : RefreshIndicator(
@@ -77,8 +78,7 @@ class _VideosScreenState extends ConsumerState<VideosScreen> {
                     separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (context, i) {
                       final v = _videos[i];
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(12),
+                      return Pressable(
                         onTap: () => _play(v),
                         child: Container(
                           padding: const EdgeInsets.all(14),
@@ -129,7 +129,7 @@ class _VideosScreenState extends ConsumerState<VideosScreen> {
                             ],
                           ),
                         ),
-                      );
+                      ).entrance(index: i);
                     },
                   ),
                 ),
@@ -137,28 +137,10 @@ class _VideosScreenState extends ConsumerState<VideosScreen> {
   }
 
   Widget _empty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.video_library_outlined,
-                size: 48, color: AppTheme.textSecondary),
-            const SizedBox(height: 12),
-            Text(
-              'Nenhum video disponivel ainda.',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Quando seu professor liberar videos, eles aparecem aqui.',
-              style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: Icons.video_library_outlined,
+      title: 'Nenhum video disponivel ainda.',
+      subtitle: 'Quando seu professor liberar videos, eles aparecem aqui.',
     );
   }
 }

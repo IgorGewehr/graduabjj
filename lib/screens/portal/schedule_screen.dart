@@ -13,6 +13,7 @@ import '../../providers/portal_providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import '../../services/checkin_service.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Schedule Screen - Horarios das Aulas / Meus Treinos
 class ScheduleScreen extends ConsumerStatefulWidget {
@@ -266,6 +267,7 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
       groupedByDate.putIfAbsent(key, () => []).add(schedule);
     }
 
+    var animIndex = 0;
     for (final entry in groupedByDate.entries) {
       final dateSchedules = entry.value;
       final isToday = dateSchedules.first.isToday;
@@ -286,7 +288,7 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
               letterSpacing: 0.5,
             ),
           ),
-        ),
+        ).fadeInQuick(),
       );
 
       for (final schedule in dateSchedules) {
@@ -300,9 +302,10 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
               checkinEnabled: checkinEnabled,
               isCreating: _isCreatingCheckin,
               onCheckin: () => _handleCheckin(schedule, studentId, studentName),
-            ),
+            ).entrance(index: animIndex),
           ),
         );
+        animIndex++;
       }
     }
 
@@ -334,6 +337,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
 
       if (mounted) {
         HapticFeedback.heavyImpact();
+        // Genuine win: a confirmed check-in earns a tasteful confetti burst.
+        Celebration.confetti(context);
         context.showSuccess('Check-in realizado com sucesso!');
         ref.invalidate(studentPendingCheckinsProvider(studentId));
       }
@@ -351,43 +356,15 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
   Widget _buildLoadingState() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: List.generate(
-          3,
-          (index) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Container(
-              height: 100,
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ),
-        ),
-      ),
+      child: PolishSkeleton.list(count: 4, itemHeight: 100),
     );
   }
 
   Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, size: 64, color: AppTheme.error),
-            const SizedBox(height: 16),
-            Text(
-              'Erro ao carregar dados',
-              style: AppTheme.titleLarge.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: Icons.error_outline,
+      title: 'Erro ao carregar dados',
+      accent: AppTheme.error,
     );
   }
 

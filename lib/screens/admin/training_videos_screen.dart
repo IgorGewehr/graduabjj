@@ -13,6 +13,7 @@ import '../../models/workout_plan.dart' show WorkoutAudience;
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/common/sport_chip.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin list of training videos + entry point to the form.
 class TrainingVideosScreen extends ConsumerStatefulWidget {
@@ -77,7 +78,10 @@ class _TrainingVideosScreenState extends ConsumerState<TrainingVideosScreen> {
         label: const Text('Novo video'),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: PolishSkeleton.list(count: 5, itemHeight: 72),
+            )
           : _videos.isEmpty
               ? _empty()
               : RefreshIndicator(
@@ -88,8 +92,7 @@ class _TrainingVideosScreenState extends ConsumerState<TrainingVideosScreen> {
                     separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (context, i) {
                       final v = _videos[i];
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(12),
+                      return Pressable(
                         onTap: () => _openForm(v),
                         child: Container(
                           padding: const EdgeInsets.all(14),
@@ -131,7 +134,7 @@ class _TrainingVideosScreenState extends ConsumerState<TrainingVideosScreen> {
                             ],
                           ),
                         ),
-                      );
+                      ).entrance(index: i);
                     },
                   ),
                 ),
@@ -139,28 +142,10 @@ class _TrainingVideosScreenState extends ConsumerState<TrainingVideosScreen> {
   }
 
   Widget _empty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.video_library_outlined,
-                size: 48, color: AppTheme.textSecondary),
-            const SizedBox(height: 12),
-            Text(
-              'Nenhum video ainda.',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Cole um link (YouTube/Vimeo) ou suba um arquivo.',
-              style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: Icons.video_library_outlined,
+      title: 'Nenhum video ainda',
+      subtitle: 'Cole um link (YouTube/Vimeo) ou suba um arquivo.',
     );
   }
 }

@@ -21,6 +21,7 @@ import '../../services/student_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/form/form_section.dart';
 import '../../widgets/form/input_field.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Form to create/edit a physical assessment. Pop returns `true` when an
 /// assessment was saved. Evolution photos (Fase 2) are shown only when
@@ -615,7 +616,7 @@ class _PhysicalAssessmentFormScreenState
                   ),
                 ],
               ),
-            ),
+            ).entrance(index: 0),
             const SizedBox(height: 12),
 
             // Básico + IMC
@@ -638,7 +639,7 @@ class _PhysicalAssessmentFormScreenState
                   ]),
                 ],
               ),
-            ),
+            ).entrance(index: 1),
             const SizedBox(height: 12),
 
             // Perimetria (opcional, recolhível)
@@ -669,7 +670,7 @@ class _PhysicalAssessmentFormScreenState
                     ),
                 ],
               ),
-            ),
+            ).entrance(index: 2),
             const SizedBox(height: 12),
 
             // Dobras cutâneas (opcional, recolhível)
@@ -691,7 +692,7 @@ class _PhysicalAssessmentFormScreenState
                   _pollockBox(),
                 ],
               ),
-            ),
+            ).entrance(index: 3),
             const SizedBox(height: 12),
 
             // Bioimpedância (opcional, recolhível) — entrada manual do aparelho
@@ -723,7 +724,7 @@ class _PhysicalAssessmentFormScreenState
                   ),
                 ],
               ),
-            ),
+            ).entrance(index: 4),
             const SizedBox(height: 12),
 
             // Fotos de evolução (somente adultos)
@@ -765,7 +766,7 @@ class _PhysicalAssessmentFormScreenState
                   ),
                 ],
               ),
-            ),
+            ).entrance(index: 5),
           ],
         ),
         ),

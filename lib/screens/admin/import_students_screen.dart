@@ -11,6 +11,7 @@ import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Bulk student import wizard: pick a CSV + target class, map columns,
 /// preview/validate (with duplicate detection), then import.
@@ -41,6 +42,8 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
 
   double _progress = 0;
   ImportReport? _report;
+  // Ensures the success celebration fires only once per result screen.
+  bool _celebrated = false;
 
   @override
   void initState() {
@@ -136,6 +139,7 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
       _busy = true;
       _step = 3;
       _progress = 0;
+      _celebrated = false;
     });
     final user = await ref.read(currentUserProvider.future);
     try {
@@ -197,7 +201,10 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
         backgroundColor: AppTheme.surface,
       ),
       body: _busy && _step != 3
-          ? const Center(child: CircularProgressIndicator())
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+              child: PolishSkeleton.list(count: 5, itemHeight: 72),
+            )
           : switch (_step) {
               0 => _buildFileStep(),
               1 => _buildMappingStep(),
@@ -410,7 +417,7 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
             padding: const EdgeInsets.all(16),
             itemCount: _rows.length,
             separatorBuilder: (_, _) => const Divider(height: 12),
-            itemBuilder: (context, i) => _rowTile(_rows[i]),
+            itemBuilder: (context, i) => _rowTile(_rows[i]).entrance(index: i),
           ),
         ),
         _buildNavBar(
@@ -518,20 +525,31 @@ class _ImportStudentsScreenState extends ConsumerState<ImportStudentsScreen> {
         ),
       );
     }
+    // Genuine win — students were actually created. Fire a one-shot
+    // celebration after this frame (build-safe).
+    if (r.created > 0 && !_celebrated) {
+      _celebrated = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Celebration.confetti(context);
+      });
+    }
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Icon(Icons.check_circle, color: AppTheme.success, size: 56),
+        const Center(child: SuccessCheck()),
         const SizedBox(height: 12),
         Text('Importacao concluida',
             style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
             textAlign: TextAlign.center),
         const SizedBox(height: 16),
-        _resultLine('Criados', r.created, AppTheme.success),
-        _resultLine('Nao selecionados', r.skipped, AppTheme.warning),
-        _resultLine('Nao couberam (turma cheia)', r.notFitted, AppTheme.warning),
-        _resultLine('Invalidos (sem nome)', r.invalid, AppTheme.error),
-        _resultLine('Falhas', r.failed, AppTheme.error),
+        _resultLine('Criados', r.created, AppTheme.success).entrance(index: 0),
+        _resultLine('Nao selecionados', r.skipped, AppTheme.warning)
+            .entrance(index: 1),
+        _resultLine('Nao couberam (turma cheia)', r.notFitted, AppTheme.warning)
+            .entrance(index: 2),
+        _resultLine('Invalidos (sem nome)', r.invalid, AppTheme.error)
+            .entrance(index: 3),
+        _resultLine('Falhas', r.failed, AppTheme.error).entrance(index: 4),
         if (r.messages.isNotEmpty) ...[
           const SizedBox(height: 16),
           Text('Detalhes',

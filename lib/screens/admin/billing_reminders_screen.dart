@@ -9,6 +9,7 @@ import '../../core/feedback_utils.dart';
 import '../../services/firebase_service.dart';
 import '../../services/billing_reminder_service.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin Billing Reminders Screen
 /// Displays overdue payments organized by collection stages (D+1, D+3, D+7, D+15, D+30+)
@@ -134,7 +135,10 @@ class _AdminBillingRemindersScreenState
       body: Stack(
         children: [
           _isLoading
-              ? const Center(child: CircularProgressIndicator())
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: PolishSkeleton.list(count: 6),
+                )
               : RefreshIndicator(
                   onRefresh: _loadData,
                   child: Column(
@@ -240,28 +244,28 @@ class _AdminBillingRemindersScreenState
             label: 'Total Vencido',
             value: _currencyFormat.format(_stats!.totalOverdueAmount),
             color: AppTheme.error,
-          ),
+          ).entrance(index: 0),
           const SizedBox(width: 12),
           _buildStatCard(
             icon: LucideIcons.users,
             label: 'Inadimplentes',
             value: '${_stats!.totalStudentsOverdue}',
             color: AppTheme.warning,
-          ),
+          ).entrance(index: 1),
           const SizedBox(width: 12),
           _buildStatCard(
             icon: LucideIcons.trendingUp,
             label: 'Taxa Recuperacao',
             value: '${_stats!.recoveryRate.toStringAsFixed(1)}%',
             color: AppTheme.success,
-          ),
+          ).entrance(index: 2),
           const SizedBox(width: 12),
           _buildStatCard(
             icon: LucideIcons.clock,
             label: 'Media Dias Atraso',
             value: '${_stats!.averageDaysOverdue} dias',
             color: AppTheme.info,
-          ),
+          ).entrance(index: 3),
         ],
       ),
     );
@@ -437,24 +441,11 @@ class _AdminBillingRemindersScreenState
     final items = _overdueStages[stage] ?? [];
 
     if (items.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              LucideIcons.checkCircle,
-              size: 48,
-              color: AppTheme.success.withValues(alpha: 0.5),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Nenhum pagamento neste estagio',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
+      return const PolishedEmptyState(
+        icon: LucideIcons.checkCircle,
+        title: 'Nenhum pagamento neste estagio',
+        subtitle: 'Tudo em dia por aqui.',
+        accent: AppTheme.success,
       );
     }
 
@@ -463,7 +454,7 @@ class _AdminBillingRemindersScreenState
       itemCount: items.length,
       itemBuilder: (context, index) {
         final item = items[index];
-        return _buildPaymentItem(item, stage);
+        return _buildPaymentItem(item, stage).entrance(index: index);
       },
     );
   }
@@ -926,6 +917,7 @@ class _AdminBillingRemindersScreenState
         );
 
         if (mounted) {
+          Celebration.confetti(context);
           FeedbackUtils.showSuccess(
             context,
             '${mode == 'whatsapp' ? 'WhatsApp' : 'Email'} enviado para $studentName!',
@@ -1510,6 +1502,13 @@ class _AdminBillingRemindersScreenState
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (!result.scheduled &&
+                    ((result.whatsapp.sent ?? 0) +
+                            (result.email.sent ?? 0)) >
+                        0) ...[
+                  const SuccessCheck(size: 64),
+                  const SizedBox(height: 12),
+                ],
                 if (result.scheduled) ...[
                   Container(
                     padding: const EdgeInsets.all(12),

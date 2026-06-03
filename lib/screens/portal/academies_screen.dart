@@ -9,6 +9,7 @@ import '../../core/theme.dart';
 import '../../models/user.dart';
 import '../../providers/providers.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
 /// Academies Management Screen
@@ -87,21 +88,21 @@ class AcademiesScreen extends ConsumerWidget {
                 const SizedBox(height: 16),
 
                 // Academy cards
-                ...academies.map(
-                  (academy) => Padding(
+                ...academies.asMap().entries.map(
+                  (entry) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: _AcademyCard(
-                      academy: academy,
-                      isSelected: academy.id == selectedId,
-                      isPrimary: academy.id == primaryId,
+                      academy: entry.value,
+                      isSelected: entry.value.id == selectedId,
+                      isPrimary: entry.value.id == primaryId,
                       onTap: () => _showAcademyOptions(
                         context,
                         ref,
-                        academy,
-                        isPrimary: academy.id == primaryId,
+                        entry.value,
+                        isPrimary: entry.value.id == primaryId,
                         canUnlink: academies.length > 1,
                       ),
-                    ),
+                    ).entrance(index: entry.key),
                   ),
                 ),
 
@@ -472,7 +473,7 @@ class _AcademyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),

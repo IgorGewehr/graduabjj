@@ -13,6 +13,7 @@ import '../../models/physical_assessment.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Portal "Minha Evolução" — student-facing physical-assessment progress:
 /// snapshot + deltas vs. previous, time-series charts (fl_chart) and
@@ -27,7 +28,10 @@ class EvolutionScreen extends ConsumerWidget {
     // adding our own Scaffold/AppBar here would stack a second app bar.
     final studentAsync = ref.watch(currentStudentProvider);
     return studentAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [PolishSkeleton.list(count: 4, itemHeight: 120)],
+      ),
       error: (e, _) => _Message(
         icon: LucideIcons.alertTriangle,
         title: 'Erro ao carregar',
@@ -45,7 +49,10 @@ class EvolutionScreen extends ConsumerWidget {
         final listAsync =
             ref.watch(studentPhysicalAssessmentsProvider(student.id));
         return listAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
+          loading: () => ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            children: [PolishSkeleton.list(count: 4, itemHeight: 120)],
+          ),
           error: (e, _) => _Message(
             icon: LucideIcons.alertTriangle,
             title: 'Erro ao carregar',
@@ -216,18 +223,18 @@ class _EvolutionContentState extends State<_EvolutionContent> {
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
-        _snapshotCard(),
+        _snapshotCard().entrance(index: 0),
         ..._metaSection(),
         if (_chartable.isNotEmpty) ...[
           const SizedBox(height: 16),
-          _chartSection(),
+          _chartSection().entrance(index: 2),
         ],
         if (_anglesWithPhotos.isNotEmpty) ...[
           const SizedBox(height: 16),
-          _photoSection(),
+          _photoSection().entrance(index: 3),
         ],
         const SizedBox(height: 16),
-        _historySection(),
+        _historySection().entrance(index: 4),
       ],
     );
   }
@@ -375,7 +382,7 @@ class _EvolutionContentState extends State<_EvolutionContent> {
             ],
           ],
         ),
-      ),
+      ).entrance(index: 1),
     ];
   }
 
@@ -419,11 +426,16 @@ class _EvolutionContentState extends State<_EvolutionContent> {
         const SizedBox(height: 6),
         ClipRRect(
           borderRadius: BorderRadius.circular(6),
-          child: LinearProgressIndicator(
-            value: progress,
-            minHeight: 8,
-            backgroundColor: AppTheme.surfaceVariant,
-            valueColor: const AlwaysStoppedAnimation(AppTheme.primary),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0, end: progress),
+            duration: PolishMotion.slow,
+            curve: PolishMotion.entrance,
+            builder: (_, v, _) => LinearProgressIndicator(
+              value: v,
+              minHeight: 8,
+              backgroundColor: AppTheme.surfaceVariant,
+              valueColor: const AlwaysStoppedAnimation(AppTheme.primary),
+            ),
           ),
         ),
         const SizedBox(height: 4),
@@ -476,7 +488,15 @@ class _EvolutionContentState extends State<_EvolutionContent> {
             ],
           ),
           const SizedBox(height: 16),
-          SizedBox(height: 220, child: _LineChartView(points: points, unit: metric.unit)),
+          SizedBox(
+            height: 220,
+            child: _LineChartView(
+              // Key by metric so switching metrics re-runs the gentle reveal.
+              key: ValueKey(metric.key),
+              points: points,
+              unit: metric.unit,
+            ).fadeInQuick(),
+          ),
         ],
       ),
     );
@@ -649,7 +669,7 @@ class _EvolutionContentState extends State<_EvolutionContent> {
 class _LineChartView extends StatelessWidget {
   final List<({DateTime date, double value})> points;
   final String unit;
-  const _LineChartView({required this.points, required this.unit});
+  const _LineChartView({super.key, required this.points, required this.unit});
 
   @override
   Widget build(BuildContext context) {

@@ -12,6 +12,7 @@ import '../../services/services.dart';
 import '../../widgets/competitions/competition_gallery.dart';
 import '../../widgets/competitions/photo_upload_sheet.dart';
 import '../../widgets/loading_button.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Position display config
 const _positionConfig = {
@@ -169,7 +170,7 @@ class _CompetitionDetailScreenState
           : Column(
               children: [
                 // Competition Info
-                _buildInfoCard(student),
+                _buildInfoCard(student).fadeInQuick(),
 
                 // Tabs
                 Container(
@@ -957,6 +958,7 @@ class _CompetitionDetailScreenState
 
       if (mounted) {
         HapticFeedback.heavyImpact();
+        Celebration.confetti(context);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Inscrito com sucesso!'),

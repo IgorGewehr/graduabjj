@@ -37,11 +37,26 @@ class LoadingButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final enabled = !isLoading && onPressed != null;
+
     return ElevatedButton(
       style: style,
-      onPressed: isLoading ? null : onPressed,
+      // Fire the real callback directly; stays null while loading/disabled so
+      // the button greys out and ignores taps.
+      onPressed: enabled ? onPressed : null,
       child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 200),
+        duration: const Duration(milliseconds: 220),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeOut,
+        // Combine a fade with a gentle scale so the spinner/label swap feels
+        // organic instead of a hard pop.
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.92, end: 1).animate(animation),
+            child: child,
+          ),
+        ),
         child: isLoading
             ? SizedBox(
                 key: const ValueKey('loading'),

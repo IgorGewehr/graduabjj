@@ -11,6 +11,7 @@ import '../../services/instructor_link_code_service.dart';
 import '../../services/student_service.dart';
 import '../../services/team_service.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Team management tab for academy admins.
 ///
@@ -286,36 +287,20 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
             ),
             const SizedBox(height: 8),
             if (_loading)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Center(child: CircularProgressIndicator()),
-              )
+              PolishSkeleton.list(count: 2, itemHeight: 90)
             else if (_codes.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  vertical: 32,
-                  horizontal: 16,
-                ),
-                decoration: BoxDecoration(
-                  color: AppTheme.surfaceVariant,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  'Nenhum convite ativo.',
-                  textAlign: TextAlign.center,
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
+              const PolishedEmptyState(
+                icon: LucideIcons.ticket,
+                title: 'Nenhum convite ativo',
+                subtitle: 'Gere um codigo para convidar um professor.',
               )
             else
-              ..._codes.map(
-                (c) => _CodeRow(
-                  code: c,
-                  onCopy: () => _copyCode(c.code),
-                  onDelete: () => _delete(c),
-                ),
+              ..._codes.asMap().entries.map(
+                (e) => _CodeRow(
+                  code: e.value,
+                  onCopy: () => _copyCode(e.value.code),
+                  onDelete: () => _delete(e.value),
+                ).entrance(index: e.key),
               ),
             const SizedBox(height: 24),
           ],
@@ -871,26 +856,16 @@ class _TeamMembersSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(child: CircularProgressIndicator()),
-      );
+      return PolishSkeleton.list(count: 2, itemHeight: 72);
     }
     if (admins.isEmpty && instructors.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-        decoration: BoxDecoration(
-          color: AppTheme.surfaceVariant,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
-          'Ainda não há equipe cadastrada.',
-          textAlign: TextAlign.center,
-          style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-        ),
+      return const PolishedEmptyState(
+        icon: LucideIcons.users,
+        title: 'Ainda nao ha equipe cadastrada',
+        subtitle: 'Convide professores ou promova alunos.',
       );
     }
+    var memberIndex = -1;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -902,7 +877,7 @@ class _TeamMembersSection extends StatelessWidget {
             // Admins cannot be demoted or revoked from this screen — explicit
             // safety so the academy doesn't accidentally orphan itself.
             actions: const [],
-          ),
+          ).entrance(index: ++memberIndex),
         for (final m in instructors)
           _MemberRow(
             member: m,
@@ -930,7 +905,7 @@ class _TeamMembersSection extends StatelessWidget {
                       onTap: () => onRevoke(m),
                     ),
                   ],
-          ),
+          ).entrance(index: ++memberIndex),
       ],
     );
   }

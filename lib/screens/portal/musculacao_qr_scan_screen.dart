@@ -4,6 +4,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/theme.dart';
 import '../../services/musculacao_checkin_service.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Fullscreen scanner for the fixed musculação QR ('qr' mode). Reads the static
 /// code printed at the reception desk and records attendance through the
@@ -19,18 +20,31 @@ class MusculacaoQrScanScreen extends ConsumerStatefulWidget {
 }
 
 class _MusculacaoQrScanScreenState
-    extends ConsumerState<MusculacaoQrScanScreen> {
+    extends ConsumerState<MusculacaoQrScanScreen>
+    with SingleTickerProviderStateMixin {
   final MobileScannerController _controller = MobileScannerController(
     detectionSpeed: DetectionSpeed.normal,
     facing: CameraFacing.back,
   );
+
+  late final AnimationController _scanLineController;
 
   bool _processing = false;
   bool _success = false;
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    _scanLineController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+  }
+
+  @override
   void dispose() {
+    _scanLineController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -64,6 +78,8 @@ class _MusculacaoQrScanScreenState
         _success = true;
         _processing = false;
       });
+      // Genuine win: musculação check-in confirmed.
+      Celebration.confetti(context);
     } on MusculacaoCheckinException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -95,13 +111,51 @@ class _MusculacaoQrScanScreenState
     return Stack(
       children: [
         MobileScanner(controller: _controller, onDetect: _handle),
-        Center(
-          child: Container(
-            width: 240,
-            height: 240,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.white, width: 3),
-              borderRadius: BorderRadius.circular(16),
+        IgnorePointer(
+          child: Center(
+            child: SizedBox(
+              width: 240,
+              height: 240,
+              child: Stack(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.white, width: 3),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  AnimatedBuilder(
+                    animation: _scanLineController,
+                    builder: (context, _) {
+                      final dy = _scanLineController.value * (240 - 4);
+                      return Positioned(
+                        top: dy,
+                        left: 10,
+                        right: 10,
+                        child: Container(
+                          height: 2,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(2),
+                            gradient: LinearGradient(
+                              colors: [
+                                AppTheme.primary.withValues(alpha: 0),
+                                AppTheme.primary,
+                                AppTheme.primary.withValues(alpha: 0),
+                              ],
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppTheme.primary.withValues(alpha: 0.6),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -135,7 +189,7 @@ class _MusculacaoQrScanScreenState
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.check_circle, color: Colors.greenAccent, size: 96),
+          const SuccessCheck(size: 96, color: Colors.greenAccent),
           const SizedBox(height: 16),
           const Text(
             'Presenca registrada!',
@@ -144,12 +198,12 @@ class _MusculacaoQrScanScreenState
               fontSize: 20,
               fontWeight: FontWeight.w700,
             ),
-          ),
+          ).fadeInQuick(),
           const SizedBox(height: 24),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Concluir'),
-          ),
+          ).entrance(index: 1),
         ],
       ),
     );

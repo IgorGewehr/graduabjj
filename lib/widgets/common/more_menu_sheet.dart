@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
+import '../polish/polish.dart';
 
 /// Menu item shown inside [MoreMenuSheet]. When grouped, [category]
 /// controls which section header it lands under; flat lists leave it null.
@@ -159,14 +160,13 @@ class MoreMenuSheet extends StatelessWidget {
   Widget _buildFlat(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
-      children: items
-          .map(
-            (item) => _MenuItemTile(
-              item: item,
-              onTap: () => onNavigate(item.path),
-            ),
-          )
-          .toList(),
+      children: [
+        for (final entry in items.asMap().entries)
+          _MenuItemTile(
+            item: entry.value,
+            onTap: () => onNavigate(entry.value.path),
+          ).entrance(index: entry.key),
+      ],
     );
   }
 
@@ -227,17 +227,16 @@ class _SectionGrid extends StatelessWidget {
         return Wrap(
           spacing: spacing,
           runSpacing: spacing,
-          children: items
-              .map(
-                (i) => SizedBox(
-                  width: tileWidth,
-                  child: _SectionTile(
-                    item: i,
-                    onTap: () => onNavigate(i.path),
-                  ),
-                ),
-              )
-              .toList(),
+          children: [
+            for (final entry in items.asMap().entries)
+              SizedBox(
+                width: tileWidth,
+                child: _SectionTile(
+                  item: entry.value,
+                  onTap: () => onNavigate(entry.value.path),
+                ).entrance(index: entry.key),
+              ),
+          ],
         );
       },
     );

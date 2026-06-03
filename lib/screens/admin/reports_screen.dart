@@ -11,6 +11,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../providers/portal_providers.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin Reports Screen - Complete dashboard with separated stats
 class AdminReportsScreen extends ConsumerStatefulWidget {
@@ -730,9 +731,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
 
             // Content
             _isLoading
-                ? const SliverFillRemaining(
-                    child: Center(child: CircularProgressIndicator()),
-                  )
+                ? SliverFillRemaining(child: _buildLoadingState())
                 : SliverToBoxAdapter(
                     child: SizedBox(
                       height: MediaQuery.of(context).size.height - 200,
@@ -749,6 +748,46 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                   ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return SingleChildScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: PolishSkeleton.shimmer(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _skeletonBox(height: 96, radius: 16),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(child: _skeletonBox(height: 64, radius: 12)),
+                const SizedBox(width: 12),
+                Expanded(child: _skeletonBox(height: 64, radius: 12)),
+              ],
+            ),
+            const SizedBox(height: 24),
+            _skeletonBox(height: 280, radius: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _skeletonBox({
+    double? width,
+    required double height,
+    double radius = 8,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(radius),
       ),
     );
   }
@@ -929,7 +968,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
             color: AppTheme.success,
             change: change,
             isPositive: isPositive,
-          ),
+          ).entrance(index: 0),
           const SizedBox(height: 16),
 
           // Stats row
@@ -1039,7 +1078,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                     );
                   }).toList(),
             ),
-          ),
+          ).entrance(index: 2),
         ],
       ),
     );
@@ -1110,7 +1149,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
             color: AppTheme.success,
             change: revenueChange,
             isPositive: revenueChange >= 0,
-          ),
+          ).entrance(index: 1),
           const SizedBox(height: 16),
 
           // Tuition stats
@@ -2094,7 +2133,7 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
             subtitle: '$_activeStudents ativos',
             icon: LucideIcons.users,
             color: AppTheme.primary,
-          ),
+          ).entrance(index: 0),
           const SizedBox(height: 16),
 
           // Stats row
@@ -2429,7 +2468,25 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   // ============================================
   Widget _buildRetentionTab() {
     if (_isRetentionLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return SingleChildScrollView(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        child: PolishSkeleton.shimmer(
+          child: Column(
+            children: [
+              _skeletonBox(height: 110, radius: 16),
+              const SizedBox(height: 16),
+              ...List.generate(
+                4,
+                (_) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _skeletonBox(height: 72, radius: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     final filtered = _filteredRetentionStudents;
@@ -2448,40 +2505,24 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
           // Student List
           if (filtered.isEmpty)
             SizedBox(
-              height: 200,
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      LucideIcons.shieldCheck,
-                      size: 64,
-                      color: AppTheme.success.withOpacity(0.5),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      _selectedRetentionFilter != null
-                          ? 'Nenhum aluno neste nivel de risco'
-                          : 'Nenhum aluno em risco!',
-                      style: AppTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _selectedRetentionFilter != null
-                          ? 'Tente outro filtro'
-                          : 'Otimo trabalho!',
-                      style: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
+              height: 240,
+              child: PolishedEmptyState(
+                icon: LucideIcons.shieldCheck,
+                accent: AppTheme.success,
+                title: _selectedRetentionFilter != null
+                    ? 'Nenhum aluno neste nivel de risco'
+                    : 'Nenhum aluno em risco!',
+                subtitle: _selectedRetentionFilter != null
+                    ? 'Tente outro filtro'
+                    : 'Otimo trabalho!',
               ),
             )
           else
-            ...filtered.map(
-              (riskScore) => _buildRetentionStudentItem(riskScore),
-            ),
+            ...filtered.asMap().entries.map(
+                  (e) => _buildRetentionStudentItem(e.value).entrance(
+                    index: e.key,
+                  ),
+                ),
         ],
       ),
     );

@@ -13,6 +13,7 @@ import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../services/checkin_service.dart';
 import '../../widgets/checkin_confirm_dialog.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin Attendance Screen - Mobile-optimized matching webapp UX
 class AdminAttendanceScreen extends ConsumerStatefulWidget {
@@ -601,7 +602,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       body: Stack(
         children: [
           _isLoading
-              ? const Center(child: CircularProgressIndicator())
+              ? PolishSkeleton.list(count: 6)
               : RefreshIndicator(
                   onRefresh: _loadData,
                   child: CustomScrollView(
@@ -991,22 +992,14 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
 
     if (filteredStudents.isEmpty) {
       return SliverFillRemaining(
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(LucideIcons.userX, size: 48, color: AppTheme.textDisabled),
-              const SizedBox(height: 16),
-              Text(
-                _searchQuery.isNotEmpty
-                    ? 'Nenhum aluno encontrado'
-                    : 'Nenhum aluno nesta turma',
-                style: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-            ],
-          ),
+        child: PolishedEmptyState(
+          icon: LucideIcons.userX,
+          title: _searchQuery.isNotEmpty
+              ? 'Nenhum aluno encontrado'
+              : 'Nenhum aluno nesta turma',
+          subtitle: _searchQuery.isNotEmpty
+              ? 'Tente outro termo de busca.'
+              : 'Adicione alunos para registrar presenca.',
         ),
       );
     }
@@ -1022,7 +1015,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
             student: student,
             isPresent: isPresent,
             onTap: () => _toggleAttendance(student),
-          );
+          ).entrance(index: index);
         }, childCount: filteredStudents.length),
       ),
     );
@@ -1345,9 +1338,11 @@ class _AttendanceStudentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: PolishMotion.fast,
+        curve: PolishMotion.transition,
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -1363,17 +1358,25 @@ class _AttendanceStudentCard extends StatelessWidget {
         child: Row(
           children: [
             // Toggle Circle
-            Container(
+            AnimatedContainer(
+              duration: PolishMotion.fast,
+              curve: PolishMotion.transition,
               width: 40,
               height: 40,
               decoration: BoxDecoration(
                 color: isPresent ? AppTheme.success : AppTheme.surfaceVariant,
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                isPresent ? LucideIcons.checkCircle : LucideIcons.circle,
-                color: isPresent ? Colors.white : AppTheme.textDisabled,
-                size: 22,
+              child: AnimatedSwitcher(
+                duration: PolishMotion.fast,
+                transitionBuilder: (child, anim) =>
+                    ScaleTransition(scale: anim, child: child),
+                child: Icon(
+                  isPresent ? LucideIcons.checkCircle : LucideIcons.circle,
+                  key: ValueKey(isPresent),
+                  color: isPresent ? Colors.white : AppTheme.textDisabled,
+                  size: 22,
+                ),
               ),
             ),
             const SizedBox(width: 12),

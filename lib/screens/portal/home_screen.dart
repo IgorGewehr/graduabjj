@@ -16,6 +16,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/grade_display.dart';
+import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 import '../../widgets/sport_tab_bar.dart';
 
@@ -196,7 +197,7 @@ class _WelcomeHeader extends StatelessWidget {
           style: AppTheme.displaySmall.copyWith(fontWeight: FontWeight.w700),
         ),
       ],
-    );
+    ).fadeInQuick();
   }
 }
 
@@ -390,6 +391,7 @@ class _StatsCarousel extends ConsumerWidget {
                 data: (count) => _StatCarouselCard(
                   emoji: '🔥',
                   value: count.toString(),
+                  countValue: count,
                   label: 'Treinos',
                   sublabel: 'Total de presencas',
                   color: AppTheme.warning,
@@ -414,6 +416,7 @@ class _StatsCarousel extends ConsumerWidget {
               _StatCarouselCard(
                 emoji: '📅',
                 value: monthsOnMat > 0 ? monthsOnMat.toString() : '0',
+                countValue: monthsOnMat > 0 ? monthsOnMat : 0,
                 label: 'Meses de Tatame',
                 sublabel: 'Tempo de jornada',
                 color: AppTheme.info,
@@ -426,6 +429,7 @@ class _StatsCarousel extends ConsumerWidget {
                   return _StatCarouselCard(
                     emoji: '🏆',
                     value: total.toString(),
+                    countValue: total,
                     label: 'Competicoes',
                     sublabel: 'Participacoes',
                     color: Colors.purple,
@@ -481,12 +485,17 @@ class _StatCarouselCard extends StatelessWidget {
   final String sublabel;
   final Color color;
 
+  /// When non-null the value renders as an animated count-up (data states);
+  /// loading/error states pass null and fall back to the literal [value].
+  final num? countValue;
+
   const _StatCarouselCard({
     required this.emoji,
     required this.value,
     required this.label,
     required this.sublabel,
     required this.color,
+    this.countValue,
   });
 
   @override
@@ -518,12 +527,19 @@ class _StatCarouselCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  value,
-                  style: AppTheme.displayMedium.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                countValue != null
+                    ? AnimatedCountUp(
+                        value: countValue!,
+                        style: AppTheme.displayMedium.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )
+                    : Text(
+                        value,
+                        style: AppTheme.displayMedium.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                 Text(
                   label,
                   style: AppTheme.titleMedium.copyWith(
@@ -649,7 +665,7 @@ class _DynamicCardsSection extends ConsumerWidget {
             canCheckin: false,
             onTap: () => onTap('/portal/horarios'),
           ),
-        ),
+        ).entrance(index: 0),
 
         const SizedBox(height: 12),
 
@@ -692,7 +708,7 @@ class _DynamicCardsSection extends ConsumerWidget {
               ),
             ),
           ],
-        ),
+        ).entrance(index: 1),
 
         const SizedBox(height: 12),
 
@@ -714,7 +730,7 @@ class _DynamicCardsSection extends ConsumerWidget {
             competition: null,
             onTap: () => onTap('/portal/competicoes'),
           ),
-        ),
+        ).entrance(index: 2),
 
         // Jornal da Academia — minimalist headline (news/seminars live here).
         // Hidden when the academy turned off student visibility.
@@ -1569,9 +1585,8 @@ class _JornalHeadline extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(top: 20),
-      child: GestureDetector(
+      child: Pressable(
         onTap: () => context.push('/portal/jornal'),
-        behavior: HitTestBehavior.opaque,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
           decoration: BoxDecoration(
@@ -1658,12 +1673,12 @@ class _EventsSection extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 10),
-            ...events.map((e) => Padding(
+            ...events.indexed.map((entry) => Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: _EventCard(
-                    event: e,
-                    onTap: () => onTap('/portal/eventos/${e.id}'),
-                  ),
+                    event: entry.$2,
+                    onTap: () => onTap('/portal/eventos/${entry.$2.id}'),
+                  ).entrance(index: entry.$1),
                 )),
           ],
         );
@@ -1696,7 +1711,7 @@ class _EventCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasCover = event.coverUrl != null && event.coverUrl!.isNotEmpty;
 
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
@@ -1710,11 +1725,14 @@ class _EventCard extends StatelessWidget {
             ClipRRect(
               borderRadius: const BorderRadius.horizontal(left: Radius.circular(13)),
               child: hasCover
-                  ? AppCachedImage(
-                      imageUrl: event.coverUrl!,
-                      width: 88,
-                      height: 80,
-                      fit: BoxFit.cover,
+                  ? Hero(
+                      tag: 'event-cover-${event.id}',
+                      child: AppCachedImage(
+                        imageUrl: event.coverUrl!,
+                        width: 88,
+                        height: 80,
+                        fit: BoxFit.cover,
+                      ),
                     )
                   : Container(
                       width: 88,

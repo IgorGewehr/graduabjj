@@ -9,6 +9,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/competitions/team_gallery_view.dart';
+import '../../widgets/polish/polish.dart';
 import '../portal/competition_detail_screen.dart';
 
 /// Admin Competitions Screen - Fintech style matching webapp
@@ -113,8 +114,11 @@ class _AdminCompetitionsScreenState
 
             // Competition List
             _isLoading
-                ? const SliverFillRemaining(
-                    child: Center(child: CircularProgressIndicator()),
+                ? SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: PolishSkeleton.list(count: 4, itemHeight: 120),
+                    ),
                   )
                 : _currentList.isEmpty
                 ? SliverFillRemaining(child: _buildEmptyState())
@@ -134,7 +138,7 @@ class _AdminCompetitionsScreenState
                                 _showDeleteConfirmation(competition),
                             onManageEnrollments: () =>
                                 _showEnrollmentsSheet(competition),
-                          ),
+                          ).entrance(index: index),
                         );
                       }, childCount: _currentList.length),
                     ),
@@ -277,7 +281,7 @@ class _AdminCompetitionsScreenState
                     final textColor = c['textColor'] as Color;
                     final label = c['label'] as String;
 
-                    return GestureDetector(
+                    return Pressable(
                       onTap: () => _showCompetitionDetails(comp),
                       child: Container(
                         width: 160,
@@ -392,33 +396,13 @@ class _AdminCompetitionsScreenState
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: AppTheme.warning.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Icon(LucideIcons.trophy, size: 40, color: AppTheme.warning),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _selectedTabIndex == 0
-                ? 'Nenhum campeonato agendado'
-                : 'Nenhum campeonato passado',
-            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Adicione novos campeonatos para comecar',
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-          ),
-        ],
-      ),
+    return PolishedEmptyState(
+      icon: LucideIcons.trophy,
+      title: _selectedTabIndex == 0
+          ? 'Nenhum campeonato agendado'
+          : 'Nenhum campeonato passado',
+      subtitle: 'Adicione novos campeonatos para comecar.',
+      accent: AppTheme.warning,
     );
   }
 
@@ -1454,7 +1438,7 @@ class _CompetitionCard extends StatelessWidget {
     final daysUntil = competition.date.difference(DateTime.now()).inDays;
     final isUpcoming = daysUntil >= 0;
 
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),

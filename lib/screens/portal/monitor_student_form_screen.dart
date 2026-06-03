@@ -10,6 +10,7 @@ import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Monitor Student Form Screen - Create or edit student (no financial fields)
 class MonitorStudentFormScreen extends ConsumerStatefulWidget {
@@ -187,6 +188,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
       if (isEditing) {
         await studentService.update(widget.studentId!, studentData);
         if (mounted) {
+          Celebration.confetti(context);
           context.showSuccess('Aluno atualizado com sucesso!');
           context.pop();
         }
@@ -199,6 +201,7 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
 
         await studentService.createFromMap(studentData);
         if (mounted) {
+          Celebration.confetti(context);
           context.showSuccess('Aluno cadastrado com sucesso!');
           context.pop();
         }
@@ -277,7 +280,10 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
         ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+              child: PolishSkeleton.list(count: 4, itemHeight: 120),
+            )
           : Form(
               key: _formKey,
               child: SingleChildScrollView(
@@ -285,17 +291,17 @@ class _MonitorStudentFormScreenState extends ConsumerState<MonitorStudentFormScr
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildPersonalInfoSection(),
+                    _buildPersonalInfoSection().entrance(index: 0),
                     const SizedBox(height: 24),
-                    _buildContactSection(),
+                    _buildContactSection().entrance(index: 1),
                     const SizedBox(height: 24),
                     if (_category == StudentCategory.kids) ...[
-                      _buildGuardianSection(),
+                      _buildGuardianSection().entrance(index: 2),
                       const SizedBox(height: 24),
                     ],
-                    _buildAcademyInfoSection(),
+                    _buildAcademyInfoSection().entrance(index: 3),
                     const SizedBox(height: 24),
-                    _buildNotesSection(),
+                    _buildNotesSection().entrance(index: 4),
                     const SizedBox(height: 32),
                   ],
                 ),

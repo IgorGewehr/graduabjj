@@ -10,6 +10,7 @@ import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 import '../../widgets/competitions/team_gallery_view.dart';
+import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
 /// Competitions Screen - Competicoes (with Tabs)
@@ -351,8 +352,8 @@ class _MedalColumn extends StatelessWidget {
       children: [
         Text(emoji, style: const TextStyle(fontSize: 28)),
         const SizedBox(height: 4),
-        Text(
-          count.toString(),
+        AnimatedCountUp(
+          value: count,
           style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w700),
         ),
         Text(
@@ -384,24 +385,9 @@ class _CompetitionsList extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (competitions.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(LucideIcons.trophy, size: 48, color: AppTheme.textDisabled),
-              const SizedBox(height: 16),
-              Text(
-                emptyMessage,
-                style: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.textSecondary,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
+      return PolishedEmptyState(
+        icon: LucideIcons.trophy,
+        title: emptyMessage,
       );
     }
 
@@ -427,7 +413,7 @@ class _CompetitionsList extends ConsumerWidget {
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: GestureDetector(
+          child: Pressable(
             onTap: () => context.push('/portal/competicoes/${competition.id}'),
             child: _CompetitionCard(
               competition: competition,
@@ -435,7 +421,7 @@ class _CompetitionsList extends ConsumerWidget {
               isUpcoming: isUpcoming,
               studentId: student.id,
             ),
-          ),
+          ).entrance(index: index),
         );
       },
     );
@@ -919,7 +905,7 @@ class _TrophyShowcase extends StatelessWidget {
                 final textColor = c['textColor'] as Color;
                 final label = c['label'] as String;
 
-                return GestureDetector(
+                return Pressable(
                   onTap: () => context.push('/portal/competicoes/${comp.id}'),
                   child: Container(
                     width: 160,

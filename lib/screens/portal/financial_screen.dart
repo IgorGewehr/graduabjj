@@ -18,6 +18,7 @@ import '../../services/abacate_pay_service.dart';
 import '../../services/asaas_payment_service.dart';
 import '../../services/mercado_pago_service.dart';
 import '../../models/student.dart';
+import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
 /// PIX payment enabled provider (Mercado Pago, AbacatePay or Asaas).
@@ -238,18 +239,18 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                         count: openPayments.length,
                       ),
                       const SizedBox(height: 12),
-                      ...openPayments.map(
-                        (payment) => Padding(
+                      ...openPayments.asMap().entries.map(
+                        (entry) => Padding(
                           padding: const EdgeInsets.only(bottom: 12),
                           child: _PaymentCard(
-                            payment: payment,
+                            payment: entry.value,
                             formatCurrency: _formatCurrency,
                             showPayButton: abacatePayEnabled,
                             onPayPix: () => _showPixPaymentDialog(
-                              payment,
+                              entry.value,
                               student.fullName,
                             ),
-                          ),
+                          ).entrance(index: entry.key),
                         ),
                       ),
                       const SizedBox(height: 24),
@@ -289,14 +290,14 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                   if (historyPayments.isEmpty)
                     _EmptyHistoryCard()
                   else
-                    ...historyPayments.map(
-                      (payment) => Padding(
+                    ...historyPayments.asMap().entries.map(
+                      (entry) => Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: _PaymentCard(
-                          payment: payment,
+                          payment: entry.value,
                           formatCurrency: _formatCurrency,
                           showStatus: true,
-                        ),
+                        ).entrance(index: entry.key),
                       ),
                     ),
                 ],
@@ -511,7 +512,7 @@ class _DebtAlertCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                GestureDetector(
+                Pressable(
                   onTap: onCopyPix,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -1012,6 +1013,7 @@ class _PixPaymentBottomSheetState
 
   void _showPaymentConfirmedDialog() {
     final sheetContext = context;
+    Celebration.confetti(context);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1020,19 +1022,7 @@ class _PixPaymentBottomSheetState
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppTheme.successLight,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                LucideIcons.checkCircle,
-                size: 48,
-                color: AppTheme.success,
-              ),
-            ),
+            const SuccessCheck(size: 80),
             const SizedBox(height: 24),
             Text(
               'Pagamento Confirmado!',

@@ -7,6 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/theme.dart';
 import '../../services/firebase_service.dart';
 import '../../services/financial_report_service.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin Financial Reports Screen
 /// Displays comprehensive financial reports with KPIs, charts, and export
@@ -163,7 +164,7 @@ class _AdminFinancialReportsScreenState
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? _buildLoadingState()
           : RefreshIndicator(
               onRefresh: _loadData,
               child: SingleChildScrollView(
@@ -173,40 +174,97 @@ class _AdminFinancialReportsScreenState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Month Selector
-                    _buildMonthSelector(),
+                    _buildMonthSelector().fadeInQuick(),
                     const SizedBox(height: 16),
 
                     // KPI Cards
-                    _buildKpiCards(),
+                    _buildKpiCards().entrance(index: 0),
                     const SizedBox(height: 20),
 
                     // Status Distribution
-                    _buildStatusDistribution(),
+                    _buildStatusDistribution().entrance(index: 1),
                     const SizedBox(height: 20),
 
                     // Historical Data (simple chart)
-                    _buildHistoricalSection(),
+                    _buildHistoricalSection().entrance(index: 2),
                     const SizedBox(height: 20),
 
                     // Revenue by Plan
-                    _buildRevenueByPlan(),
+                    _buildRevenueByPlan().entrance(index: 3),
                     const SizedBox(height: 20),
 
                     // Projections
                     if (_projections.isNotEmpty) ...[
-                      _buildProjections(),
+                      _buildProjections().entrance(index: 4),
                       const SizedBox(height: 20),
                     ],
 
                     // Recommendations
                     if (_recommendations.isNotEmpty)
-                      _buildRecommendations(),
+                      _buildRecommendations().entrance(index: 5),
 
                     const SizedBox(height: 24),
                   ],
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return SingleChildScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: PolishSkeleton.shimmer(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(child: _skeletonBox(width: 180, height: 24)),
+            const SizedBox(height: 20),
+            SizedBox(
+              height: 100,
+              child: Row(
+                children: List.generate(
+                  3,
+                  (i) => Padding(
+                    padding: EdgeInsets.only(right: i < 2 ? 12 : 0),
+                    child: _skeletonBox(width: 170, height: 100, radius: 12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: List.generate(
+                3,
+                (i) => Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(right: i < 2 ? 8 : 0),
+                    child: _skeletonBox(height: 90, radius: 12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            _skeletonBox(height: 220, radius: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _skeletonBox({
+    double? width,
+    required double height,
+    double radius = 8,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(radius),
+      ),
     );
   }
 

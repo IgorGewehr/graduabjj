@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/student_provider.dart';
 import '../../services/qr_attendance_service.dart';
+import '../../widgets/polish/polish.dart';
 
 /// QR Scan Screen (Student Portal)
 ///
@@ -247,17 +248,82 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
   }
 }
 
-class _ReticleOverlay extends StatelessWidget {
+class _ReticleOverlay extends StatefulWidget {
+  @override
+  State<_ReticleOverlay> createState() => _ReticleOverlayState();
+}
+
+class _ReticleOverlayState extends State<_ReticleOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    const double box = 240;
     return IgnorePointer(
       child: Center(
-        child: Container(
-          width: 240,
-          height: 240,
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.white.withOpacity(0.8), width: 2),
-            borderRadius: BorderRadius.circular(16),
+        child: SizedBox(
+          width: box,
+          height: box,
+          child: Stack(
+            children: [
+              // Reticle frame
+              Container(
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.8),
+                    width: 2,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              // Sweeping scan line
+              AnimatedBuilder(
+                animation: _controller,
+                builder: (context, _) {
+                  final dy = _controller.value * (box - 4);
+                  return Positioned(
+                    top: dy,
+                    left: 8,
+                    right: 8,
+                    child: Container(
+                      height: 2,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(2),
+                        gradient: LinearGradient(
+                          colors: [
+                            AppTheme.primary.withValues(alpha: 0),
+                            AppTheme.primary,
+                            AppTheme.primary.withValues(alpha: 0),
+                          ],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.primary.withValues(alpha: 0.6),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
         ),
       ),
@@ -265,11 +331,25 @@ class _ReticleOverlay extends StatelessWidget {
   }
 }
 
-class _SuccessView extends StatelessWidget {
+class _SuccessView extends StatefulWidget {
   final QrAttendanceResult result;
   final VoidCallback onScanAnother;
 
   const _SuccessView({required this.result, required this.onScanAnother});
+
+  @override
+  State<_SuccessView> createState() => _SuccessViewState();
+}
+
+class _SuccessViewState extends State<_SuccessView> {
+  @override
+  void initState() {
+    super.initState();
+    // Genuine win: attendance confirmed — celebrate once on appearance.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Celebration.confetti(context);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -280,46 +360,34 @@ class _SuccessView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 96,
-              height: 96,
-              decoration: BoxDecoration(
-                color: AppTheme.successLight,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                LucideIcons.checkCircle,
-                size: 48,
-                color: AppTheme.success,
-              ),
-            ),
+            const SuccessCheck(size: 96),
             const SizedBox(height: 20),
             Text(
               'Presenca registrada!',
               style: AppTheme.headlineLarge,
               textAlign: TextAlign.center,
-            ),
+            ).fadeInQuick(),
             const SizedBox(height: 8),
             Text(
-              result.className,
+              widget.result.className,
               style: AppTheme.titleMedium.copyWith(
                 color: AppTheme.textSecondary,
               ),
               textAlign: TextAlign.center,
-            ),
+            ).entrance(index: 1),
             const SizedBox(height: 4),
             Text(
-              DateFormat('HH:mm').format(result.markedAt),
+              DateFormat('HH:mm').format(widget.result.markedAt),
               style: AppTheme.bodyMedium.copyWith(
                 color: AppTheme.textSecondary,
               ),
-            ),
+            ).entrance(index: 2),
             const SizedBox(height: 32),
             FilledButton.icon(
               icon: const Icon(LucideIcons.qrCode, size: 16),
               label: const Text('Escanear outra turma'),
-              onPressed: onScanAnother,
-            ),
+              onPressed: widget.onScanAnother,
+            ).entrance(index: 3),
             const SizedBox(height: 12),
             TextButton(
               onPressed: () => Navigator.of(context).pop(),

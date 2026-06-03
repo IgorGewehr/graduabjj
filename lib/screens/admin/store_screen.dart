@@ -14,6 +14,7 @@ import '../../services/services.dart';
 import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin Store Screen - Product Management
 class AdminStoreScreen extends ConsumerStatefulWidget {
@@ -127,7 +128,7 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
                           label: stat.$2,
                           value: stat.$3,
                           color: stat.$4,
-                        );
+                        ).entrance(index: index);
                       },
                     ),
                   );
@@ -139,7 +140,8 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     itemCount: 3,
                     separatorBuilder: (_, __) => const SizedBox(width: 12),
-                    itemBuilder: (_, __) => const _StatCardSkeleton(),
+                    itemBuilder: (_, __) =>
+                        PolishSkeleton.shimmer(child: const _StatCardSkeleton()),
                   ),
                 ),
                 error: (_, __) => const SizedBox.shrink(),
@@ -251,7 +253,7 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
                           onToggleActive: () =>
                               _toggleProductActive(filtered[index]),
                           onDelete: () => _deleteProduct(filtered[index]),
-                        ),
+                        ).entrance(index: index),
                       ),
                       childCount: filtered.length,
                     ),
@@ -262,9 +264,11 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
-                    (context, index) => const Padding(
-                      padding: EdgeInsets.only(bottom: 12),
-                      child: _ProductCardSkeleton(),
+                    (context, index) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: PolishSkeleton.shimmer(
+                        child: const _ProductCardSkeleton(),
+                      ),
                     ),
                     childCount: 4,
                   ),
@@ -554,15 +558,14 @@ class _ProductCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+    return Pressable(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.divider),
+        ),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -850,47 +853,13 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                LucideIcons.package,
-                size: 48,
-                color: AppTheme.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Nenhum produto cadastrado',
-              style: AppTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Adicione produtos para sua loja',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: onAdd,
-              icon: const Icon(LucideIcons.plus),
-              label: const Text('Adicionar Produto'),
-            ),
-          ],
-        ),
-      ),
+    return PolishedEmptyState(
+      icon: LucideIcons.package,
+      title: 'Nenhum produto cadastrado',
+      subtitle: 'Adicione produtos para sua loja',
+      actionLabel: 'Adicionar Produto',
+      onAction: onAdd,
+      accent: AppTheme.textSecondary,
     );
   }
 }

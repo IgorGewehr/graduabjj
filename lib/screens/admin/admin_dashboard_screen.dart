@@ -7,6 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin Dashboard Screen - Matching webapp design
 class AdminDashboardScreen extends ConsumerStatefulWidget {
@@ -107,7 +108,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? _buildLoadingState()
           : RefreshIndicator(
               onRefresh: _loadDashboardData,
               child: SingleChildScrollView(
@@ -116,31 +117,81 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Welcome Header
-                    _buildWelcomeHeader(userName),
+                    _buildWelcomeHeader(userName).fadeInQuick(),
 
                     // Quick Actions
-                    _buildQuickActions(),
+                    _buildQuickActions().entrance(index: 0),
 
                     const SizedBox(height: 24),
 
                     // Stats Carousel
-                    _buildStatsCarousel(),
+                    _buildStatsCarousel().entrance(index: 1),
 
                     const SizedBox(height: 24),
 
                     // Monthly Financial Card
-                    _buildMonthlyFinancialCard(),
+                    _buildMonthlyFinancialCard().entrance(index: 2),
 
                     const SizedBox(height: 24),
 
                     // Alerts Section
-                    _buildAlertsSection(),
+                    _buildAlertsSection().entrance(index: 3),
 
                     const SizedBox(height: 100),
                   ],
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return SingleChildScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+        child: PolishSkeleton.shimmer(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _skeletonBox(width: 200, height: 26),
+              const SizedBox(height: 8),
+              _skeletonBox(width: 140, height: 14),
+              const SizedBox(height: 24),
+              Row(
+                children: List.generate(
+                  3,
+                  (i) => Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(right: i < 2 ? 12 : 0),
+                      child: _skeletonBox(height: 96, radius: 16),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              _skeletonBox(height: 100, radius: 16),
+              const SizedBox(height: 24),
+              _skeletonBox(height: 220, radius: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _skeletonBox({
+    double? width,
+    required double height,
+    double radius = 8,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(radius),
+      ),
     );
   }
 
@@ -234,6 +285,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                   icon: LucideIcons.users,
                   label: 'Alunos Ativos',
                   value: totalActive.toString(),
+                  countUpValue: totalActive is num
+                      ? totalActive.toInt()
+                      : int.tryParse('$totalActive') ?? 0,
                   subtitle: 'de $totalStudents total',
                   onTap: () => context.go('/admin/alunos'),
                 ),
@@ -452,7 +506,7 @@ class _QuickActionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 20),
@@ -501,6 +555,10 @@ class _StatsCarouselCard extends StatelessWidget {
   final Color? iconColor;
   final String label;
   final String value;
+
+  /// When provided, the value renders as an animated count-up to this number
+  /// instead of the static [value] string.
+  final int? countUpValue;
   final String subtitle;
   final VoidCallback? onTap;
 
@@ -510,13 +568,14 @@ class _StatsCarouselCard extends StatelessWidget {
     this.iconColor,
     required this.label,
     required this.value,
+    this.countUpValue,
     required this.subtitle,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(14),
@@ -553,12 +612,19 @@ class _StatsCarouselCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    value,
-                    style: AppTheme.headlineSmall.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+                  countUpValue != null
+                      ? AnimatedCountUp(
+                          value: countUpValue!,
+                          style: AppTheme.headlineSmall.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        )
+                      : Text(
+                          value,
+                          style: AppTheme.headlineSmall.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                   Text(
                     subtitle,
                     style: AppTheme.labelSmall.copyWith(
@@ -663,7 +729,7 @@ class _AlertCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),

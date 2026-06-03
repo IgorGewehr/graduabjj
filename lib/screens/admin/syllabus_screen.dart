@@ -9,6 +9,7 @@ import '../../services/firebase_service.dart';
 import '../../services/settings_service.dart';
 import '../../services/syllabus_service.dart';
 import '../../widgets/form/input_field.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin: monta o currículo de técnicas por modalidade/faixa (B1).
 class SyllabusScreen extends StatefulWidget {
@@ -193,7 +194,10 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           if (_supportsKids) _categoryToggle(),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: PolishSkeleton.list(count: 6, itemHeight: 64),
+                  )
                 : _body(),
           ),
         ],
@@ -300,12 +304,13 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       ...byGrade.keys.where((k) => !currentIds.contains(k)), // órfãs ao fim
     ];
 
+    var rowIndex = -1;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
         for (final gid in orderedGradeIds) ...[
           _gradeHeader(gid),
-          for (final t in byGrade[gid]!) _techniqueRow(t),
+          for (final t in byGrade[gid]!) _techniqueRow(t).entrance(index: ++rowIndex),
           const SizedBox(height: 16),
         ],
       ],
@@ -315,39 +320,12 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   Widget _emptyState() {
     // O template semeia faixas adultas → só oferece no BJJ adulto.
     final showSeed = _sport == SportId.bjj && _category == 'adult';
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.bookOpen, size: 48, color: AppTheme.textDisabled),
-            const SizedBox(height: 12),
-            Text('Nenhuma técnica neste currículo ainda',
-                textAlign: TextAlign.center,
-                style: AppTheme.bodyMedium
-                    .copyWith(color: AppTheme.textSecondary)),
-            const SizedBox(height: 4),
-            Text('Toque em "Nova técnica" para começar.',
-                textAlign: TextAlign.center,
-                style:
-                    AppTheme.labelSmall.copyWith(color: AppTheme.textDisabled)),
-            if (showSeed) ...[
-              const SizedBox(height: 20),
-              OutlinedButton.icon(
-                onPressed: _seeding ? null : _seedBjj,
-                icon: _seeding
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(LucideIcons.sparkles, size: 16),
-                label: const Text('Usar template BJJ básico'),
-              ),
-            ],
-          ],
-        ),
-      ),
+    return PolishedEmptyState(
+      icon: LucideIcons.bookOpen,
+      title: 'Nenhuma técnica neste currículo ainda',
+      subtitle: 'Toque em "Nova técnica" para começar.',
+      actionLabel: (showSeed && !_seeding) ? 'Usar template BJJ básico' : null,
+      onAction: (showSeed && !_seeding) ? _seedBjj : null,
     );
   }
 

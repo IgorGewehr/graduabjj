@@ -7,6 +7,7 @@ import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Minhas Modalidades — read-only list of every sport the student trains.
 ///
@@ -28,57 +29,40 @@ class MySportsScreen extends ConsumerWidget {
         return ListView(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
           children: [
-            Text('Minhas Modalidades', style: AppTheme.headlineMedium),
+            Text('Minhas Modalidades', style: AppTheme.headlineMedium)
+                .fadeInQuick(),
             const SizedBox(height: 4),
             Text(
               sports.length == 1
                   ? '1 modalidade'
                   : '${sports.length} modalidades',
               style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-            ),
+            ).fadeInQuick(),
             const SizedBox(height: 20),
-            for (final sport in sports)
+            for (var i = 0; i < sports.length; i++)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: _SportEnrollmentCard(student: student, sport: sport),
+                child: _SportEnrollmentCard(
+                  student: student,
+                  sport: sports[i],
+                ).entrance(index: i),
               ),
           ],
         );
       },
-      loading: () => const Center(
-        child: CircularProgressIndicator(color: AppTheme.primary),
+      loading: () => ListView(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+        children: [PolishSkeleton.list(count: 4)],
       ),
       error: (error, stack) => _buildNoStudentState(),
     );
   }
 
   Widget _buildNoStudentState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(LucideIcons.dumbbell, size: 64,
-                color: AppTheme.textDisabled),
-            const SizedBox(height: 16),
-            Text(
-              'Conta nao vinculada',
-              style: AppTheme.titleLarge.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Vincule sua conta a um aluno para ver suas modalidades.',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.dumbbell,
+      title: 'Conta nao vinculada',
+      subtitle: 'Vincule sua conta a um aluno para ver suas modalidades.',
     );
   }
 }

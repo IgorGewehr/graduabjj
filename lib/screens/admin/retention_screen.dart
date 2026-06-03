@@ -8,6 +8,7 @@ import '../../services/firebase_service.dart';
 import '../../services/retention_service.dart';
 import '../../services/student_service.dart';
 import '../../models/student.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin Retention Screen
 /// Displays student retention analytics, risk scores, and churn indicators
@@ -170,13 +171,15 @@ class _AdminRetentionScreenState
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? _buildLoadingState()
           : RefreshIndicator(
               onRefresh: _loadData,
               child: CustomScrollView(
                 slivers: [
                   // KPI Cards
-                  SliverToBoxAdapter(child: _buildKpiCards()),
+                  SliverToBoxAdapter(
+                    child: _buildKpiCards().fadeInQuick(),
+                  ),
 
                   // Risk Distribution
                   SliverToBoxAdapter(child: _buildRiskDistribution()),
@@ -192,8 +195,9 @@ class _AdminRetentionScreenState
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       sliver: SliverList(
                         delegate: SliverChildBuilderDelegate(
-                          (context, index) =>
-                              _buildStudentItem(_filteredStudents[index]),
+                          (context, index) => _buildStudentItem(
+                            _filteredStudents[index],
+                          ).entrance(index: index),
                           childCount: _filteredStudents.length,
                         ),
                       ),
@@ -205,6 +209,43 @@ class _AdminRetentionScreenState
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return SingleChildScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: PolishSkeleton.shimmer(
+        child: Column(
+          children: [
+            _skeletonBox(height: 100, radius: 16),
+            const SizedBox(height: 20),
+            ...List.generate(
+              5,
+              (_) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _skeletonBox(height: 72, radius: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _skeletonBox({
+    double? width,
+    required double height,
+    double radius = 8,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(radius),
+      ),
     );
   }
 
@@ -365,29 +406,15 @@ class _AdminRetentionScreenState
   // Empty State
   // ============================================
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(LucideIcons.shieldCheck,
-              size: 64, color: AppTheme.success.withOpacity(0.5)),
-          const SizedBox(height: 16),
-          Text(
-            _selectedFilter != null
-                ? 'Nenhum aluno neste nivel de risco'
-                : 'Nenhum aluno em risco!',
-            style: AppTheme.headlineSmall,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _selectedFilter != null
-                ? 'Tente outro filtro'
-                : 'Otimo trabalho!',
-            style:
-                AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-          ),
-        ],
-      ),
+    return PolishedEmptyState(
+      icon: LucideIcons.shieldCheck,
+      accent: AppTheme.success,
+      title: _selectedFilter != null
+          ? 'Nenhum aluno neste nivel de risco'
+          : 'Nenhum aluno em risco!',
+      subtitle: _selectedFilter != null
+          ? 'Tente outro filtro'
+          : 'Otimo trabalho!',
     );
   }
 

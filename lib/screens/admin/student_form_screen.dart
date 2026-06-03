@@ -12,6 +12,7 @@ import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../widgets/form/form_widgets.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin Student Form Screen - Modern tabbed form with progress tracking
 class AdminStudentFormScreen extends ConsumerStatefulWidget {
@@ -252,7 +253,10 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
       backgroundColor: AppTheme.background,
       appBar: _buildAppBar(),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+              child: PolishSkeleton.list(count: 4, itemHeight: 96),
+            )
           : Form(
               key: _formKey,
               child: FormTabs(
@@ -268,21 +272,30 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
                       FormTabPanel(
                         tabKey: 'personal',
                         activeTab: _activeTab,
-                        child: _buildPersonalTab(),
+                        child: KeyedSubtree(
+                          key: const ValueKey('personal'),
+                          child: _buildPersonalTab().fadeInQuick(),
+                        ),
                       ),
 
                       // Contact Tab
                       FormTabPanel(
                         tabKey: 'contact',
                         activeTab: _activeTab,
-                        child: _buildContactTab(),
+                        child: KeyedSubtree(
+                          key: const ValueKey('contact'),
+                          child: _buildContactTab().fadeInQuick(),
+                        ),
                       ),
 
                       // Academy Tab
                       FormTabPanel(
                         tabKey: 'academy',
                         activeTab: _activeTab,
-                        child: _buildAcademyTab(),
+                        child: KeyedSubtree(
+                          key: const ValueKey('academy'),
+                          child: _buildAcademyTab().fadeInQuick(),
+                        ),
                       ),
 
                       const SizedBox(height: 100),
@@ -1673,6 +1686,8 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
           // result and knows to call `_loadData()` with fresh Firestore data.
           context.pop(true);
         } else {
+          // Genuine win — a new student joined the academy.
+          Celebration.confetti(context);
           context.go('/admin/alunos');
         }
       }

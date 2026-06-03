@@ -8,6 +8,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin Store Orders Screen
 class AdminStoreOrdersScreen extends ConsumerStatefulWidget {
@@ -88,7 +89,7 @@ class _AdminStoreOrdersScreenState
                           value: '${stats['pending'] ?? 0}',
                           icon: LucideIcons.clock,
                           color: Colors.orange,
-                        ),
+                        ).entrance(index: 0),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -97,7 +98,7 @@ class _AdminStoreOrdersScreenState
                           value: '${(stats['paid'] ?? 0) + (stats['preparing'] ?? 0)}',
                           icon: LucideIcons.package,
                           color: Colors.blue,
-                        ),
+                        ).entrance(index: 1),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -106,20 +107,32 @@ class _AdminStoreOrdersScreenState
                           value: '${stats['ready'] ?? 0}',
                           icon: LucideIcons.checkCircle,
                           color: Colors.green,
-                        ),
+                        ).entrance(index: 2),
                       ),
                     ],
                   ),
                 ),
-                loading: () => const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20),
+                loading: () => Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: Row(
                     children: [
-                      Expanded(child: _StatCardSkeleton()),
-                      SizedBox(width: 12),
-                      Expanded(child: _StatCardSkeleton()),
-                      SizedBox(width: 12),
-                      Expanded(child: _StatCardSkeleton()),
+                      Expanded(
+                        child: PolishSkeleton.shimmer(
+                          child: const _StatCardSkeleton(),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: PolishSkeleton.shimmer(
+                          child: const _StatCardSkeleton(),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: PolishSkeleton.shimmer(
+                          child: const _StatCardSkeleton(),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -224,7 +237,7 @@ class _AdminStoreOrdersScreenState
                           onTap: () => _showOrderDetails(filtered[index]),
                           onUpdateStatus: (status) =>
                               _updateOrderStatus(filtered[index], status),
-                        ),
+                        ).entrance(index: index),
                       ),
                       childCount: filtered.length,
                     ),
@@ -235,9 +248,11 @@ class _AdminStoreOrdersScreenState
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
-                    (context, index) => const Padding(
-                      padding: EdgeInsets.only(bottom: 12),
-                      child: _OrderCardSkeleton(),
+                    (context, index) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: PolishSkeleton.shimmer(
+                        child: const _OrderCardSkeleton(),
+                      ),
                     ),
                     childCount: 4,
                   ),
@@ -304,6 +319,9 @@ class _AdminStoreOrdersScreenState
       ref.invalidate(ordersProvider);
       ref.invalidate(storeStatsProvider);
       if (mounted) {
+        if (status == StoreOrderStatus.delivered) {
+          Celebration.confetti(context);
+        }
         context.showSuccess('Status atualizado para ${status.label}');
       }
     } catch (e) {
@@ -349,10 +367,17 @@ class _StatCard extends StatelessWidget {
             child: Icon(icon, size: 18, color: color),
           ),
           const SizedBox(height: 12),
-          Text(
-            value,
-            style: AppTheme.headlineSmall.copyWith(fontWeight: FontWeight.w700),
-          ),
+          int.tryParse(value) != null
+              ? AnimatedCountUp(
+                  value: int.parse(value),
+                  style: AppTheme.headlineSmall
+                      .copyWith(fontWeight: FontWeight.w700),
+                )
+              : Text(
+                  value,
+                  style: AppTheme.headlineSmall
+                      .copyWith(fontWeight: FontWeight.w700),
+                ),
           const SizedBox(height: 2),
           Text(
             label,
@@ -513,15 +538,14 @@ class _OrderCard extends StatelessWidget {
     final statusColor = _getStatusColor();
     final nextStatus = _getNextStatus();
 
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+    return Pressable(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.divider),
+        ),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -724,39 +748,11 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                LucideIcons.shoppingCart,
-                size: 48,
-                color: AppTheme.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Nenhum pedido encontrado',
-              style: AppTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Pedidos dos alunos aparecerao aqui',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return const PolishedEmptyState(
+      icon: LucideIcons.shoppingCart,
+      title: 'Nenhum pedido encontrado',
+      subtitle: 'Pedidos dos alunos aparecerao aqui',
+      accent: AppTheme.textSecondary,
     );
   }
 }

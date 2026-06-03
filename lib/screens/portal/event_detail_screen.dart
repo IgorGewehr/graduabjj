@@ -9,6 +9,7 @@ import '../../models/academy_event.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/event_service.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/polish/polish.dart';
 
 class EventDetailScreen extends ConsumerWidget {
   final String eventId;
@@ -109,11 +110,14 @@ class _EventLoaded extends StatelessWidget {
             surfaceTintColor: Colors.transparent,
             flexibleSpace: FlexibleSpaceBar(
               background: event.coverUrl != null
-                  ? AppCachedImage(
-                      imageUrl: event.coverUrl!,
-                      width: double.infinity,
-                      height: 240,
-                      fit: BoxFit.cover,
+                  ? Hero(
+                      tag: 'event-cover-${event.id}',
+                      child: AppCachedImage(
+                        imageUrl: event.coverUrl!,
+                        width: double.infinity,
+                        height: 240,
+                        fit: BoxFit.cover,
+                      ),
                     )
                   : Container(color: AppTheme.surfaceVariant),
             ),
@@ -155,7 +159,7 @@ class _EventLoaded extends StatelessWidget {
                       letterSpacing: -0.5,
                       height: 1.2,
                     ),
-                  ),
+                  ).fadeInQuick(),
                   const SizedBox(height: 16),
 
                   // Date
