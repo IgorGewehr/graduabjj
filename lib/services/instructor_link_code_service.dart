@@ -166,9 +166,13 @@ Future<({InstructorLinkCode code, String academyId})?>
     validateInstructorCodeGlobally(String rawCode) async {
   final code = rawCode.trim().toUpperCase();
   if (code.isEmpty) return null;
+  // MUST filter by usedAt == null to match the Firestore security rules
+  // constraint — a collectionGroup read for a non-staff user is only allowed
+  // on unused codes, so the query must carry the same filter or it's denied.
   final q = await FirebaseService.firestore
       .collectionGroup('instructorLinkCodes')
       .where('code', isEqualTo: code)
+      .where('usedAt', isNull: true)
       .get();
 
   for (final d in q.docs) {
