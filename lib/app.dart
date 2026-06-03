@@ -49,6 +49,7 @@ import 'screens/portal/monitor_attendance_screen.dart';
 import 'screens/portal/monitor_students_screen.dart';
 import 'screens/portal/monitor_student_detail_screen.dart';
 import 'screens/portal/monitor_student_form_screen.dart';
+import 'screens/portal/public_profile_screen.dart';
 import 'providers/portal_providers.dart';
 import 'screens/splash_screen.dart';
 import 'screens/paywall_screen.dart';
@@ -795,6 +796,18 @@ final routerProvider = Provider<GoRouter>((ref) {
                 child: MonitorStudentFormScreen(
                   studentId: state.pathParameters['id'],
                 ),
+              ),
+            ),
+          ),
+          // Read-only public student profile (in-shell push: Android back
+          // returns to the previous portal route — see A7).
+          GoRoute(
+            path: '/portal/profile/:studentId',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: PublicProfileScreen(
+                studentId: state.pathParameters['studentId']!,
               ),
             ),
           ),
