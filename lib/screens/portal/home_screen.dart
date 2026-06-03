@@ -17,6 +17,7 @@ import '../../core/sports.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/skeletons/skeletons.dart';
+import '../../widgets/sport_tab_bar.dart';
 
 /// Home Screen - Portal do Aluno (New Layout)
 class HomeScreen extends ConsumerStatefulWidget {
@@ -88,6 +89,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   sportId: primarySport,
                   belt: grade?.currentGrade ?? 'white',
                   stripes: grade?.currentStripes ?? 0,
+                  sports: s.getSports(),
+                  primarySport: primarySport,
                 );
               },
               loading: () => _WelcomeHeader(
@@ -197,19 +200,39 @@ class _WelcomeHeader extends StatelessWidget {
   }
 }
 
-/// Welcome header with belt badge inline
-class _WelcomeHeaderWithBelt extends StatelessWidget {
+/// Welcome header with belt badge inline.
+///
+/// For multi-sport students it also surfaces a compact "{n} modalidades" pill
+/// next to the belt chip; tapping it reveals a [SportTabBar] row below the
+/// greeting, bound to `selectedSportProvider("home")`. This is purely an
+/// affordance — the rest of the home (graduation cards, etc.) stays all-sports
+/// stacked. Single-sport (or zero graded sports) students see neither the pill
+/// nor the selector, so the layout is pixel-identical to before.
+class _WelcomeHeaderWithBelt extends ConsumerStatefulWidget {
   final String userName;
   final SportId sportId;
   final String belt;
   final int stripes;
+  final List<SportId> sports;
+  final SportId primarySport;
 
   const _WelcomeHeaderWithBelt({
     required this.userName,
     required this.sportId,
     required this.belt,
     required this.stripes,
+    required this.sports,
+    required this.primarySport,
   });
+
+  @override
+  ConsumerState<_WelcomeHeaderWithBelt> createState() =>
+      _WelcomeHeaderWithBeltState();
+}
+
+class _WelcomeHeaderWithBeltState
+    extends ConsumerState<_WelcomeHeaderWithBelt> {
+  bool _selectorOpen = false;
 
   String get _greeting {
     final hour = DateTime.now().hour;
@@ -220,6 +243,8 @@ class _WelcomeHeaderWithBelt extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final multiSport = widget.sports.length > 1;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -232,7 +257,7 @@ class _WelcomeHeaderWithBelt extends StatelessWidget {
           children: [
             Flexible(
               child: Text(
-                userName.split(' ').first,
+                widget.userName.split(' ').first,
                 style: AppTheme.displaySmall.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
@@ -241,14 +266,86 @@ class _WelcomeHeaderWithBelt extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             GradeDisplay(
-              sportId: sportId,
-              grade: belt,
-              stripes: stripes,
+              sportId: widget.sportId,
+              grade: widget.belt,
+              stripes: widget.stripes,
               size: GradeDisplaySize.small,
             ),
+            if (multiSport) ...[
+              const SizedBox(width: 8),
+              _MultiSportPill(
+                count: widget.sports.length,
+                expanded: _selectorOpen,
+                onTap: () => setState(() => _selectorOpen = !_selectorOpen),
+              ),
+            ],
           ],
         ),
+        if (multiSport && _selectorOpen) ...[
+          const SizedBox(height: 12),
+          SportTabBar(
+            sports: widget.sports,
+            selected: ref.watch(selectedSportProvider('home')) ??
+                widget.primarySport,
+            onSelected: (s) =>
+                ref.read(selectedSportProvider('home').notifier).state = s,
+          ),
+        ],
       ],
+    );
+  }
+}
+
+/// Compact, minimalist pill announcing how many sports the student trains.
+/// Doubles as the toggle for the home sport selector — a chevron flips when
+/// the selector is open.
+class _MultiSportPill extends StatelessWidget {
+  final int count;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  const _MultiSportPill({
+    required this.count,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: AppTheme.primary.withValues(alpha: 0.20),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$count modalidades',
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                expanded ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                size: 14,
+                color: AppTheme.primary,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
