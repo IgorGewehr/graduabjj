@@ -3,6 +3,20 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/feedback_utils.dart';
 
+/// Caminho "pai" removendo o último segmento da rota [path].
+///
+/// Ex.: `/admin/alunos/123` → `/admin/alunos`; `/admin/alunos` → `/admin`.
+/// Retorna null quando já é uma aba-raiz (um único segmento) ou sem path.
+///
+/// Função pura extraída para permitir testes unitários — o widget delega aqui.
+String? parentLocation(String? path) {
+  if (path == null || path.isEmpty) return null;
+  final segments = path.split('/').where((s) => s.isNotEmpty).toList();
+  if (segments.length <= 1) return null; // já é raiz (/admin, /portal)
+  segments.removeLast();
+  return '/${segments.join('/')}';
+}
+
 /// Widget que gerencia o comportamento do botão voltar do sistema.
 ///
 /// Como a navegação do app usa `context.go(...)` (que substitui a pilha) com
@@ -37,17 +51,8 @@ class _BackButtonHandlerState extends State<BackButtonHandler> {
   DateTime? _lastBackPressTime;
   static const _backPressInterval = Duration(seconds: 2);
 
-  /// Caminho "pai" removendo o último segmento da rota atual.
-  /// Ex.: `/admin/alunos/123` → `/admin/alunos`; `/admin/alunos` → `/admin`.
-  /// Retorna null quando já é uma aba-raiz (um único segmento) ou sem path.
-  String? _parentLocation() {
-    final path = widget.currentLocation;
-    if (path == null || path.isEmpty) return null;
-    final segments = path.split('/').where((s) => s.isNotEmpty).toList();
-    if (segments.length <= 1) return null; // já é raiz (/admin, /portal)
-    segments.removeLast();
-    return '/${segments.join('/')}';
-  }
+  /// Caminho "pai" da rota atual. Delega para a função pura [parentLocation].
+  String? _parentLocation() => parentLocation(widget.currentLocation);
 
   /// Lógica de "double tap to exit": retorna true só no segundo toque dentro
   /// do intervalo. No primeiro toque, registra e mostra a mensagem.
