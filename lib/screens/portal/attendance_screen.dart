@@ -9,6 +9,7 @@ import '../../providers/providers.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/skeletons/skeletons.dart';
+import '../../widgets/sport_tab_bar.dart';
 
 /// Attendance Screen - Minhas Presencas
 class AttendanceScreen extends ConsumerWidget {
@@ -39,8 +40,35 @@ class AttendanceScreen extends ConsumerWidget {
             ref.invalidate(studentAttendanceCountProvider(student.id));
           },
           child: attendanceAsync.when(
-            data: (records) {
-              final totalCount = countAsync.valueOrNull ?? records.length;
+            data: (allRecords) {
+              // Multi-sport students can filter their attendance by sport.
+              // SportTabBar hides itself when sports.length <= 1, so a
+              // single-sport student sees the full, unfiltered list and an
+              // identical layout. A doc with no sport is legacy data and is
+              // grouped under BJJ — matches graduation/admin filter logic.
+              //
+              // This is a client-side filter over the already-fetched list:
+              // no extra Firestore query and no composite index. A
+              // server-side sport-filtered query would be a future
+              // optimization if a single student ever exceeds ~365 records.
+              final sports = student.getSports();
+              final showSportFilter = sports.length > 1;
+              final selectedSport =
+                  ref.watch(selectedSportProvider('attendance')) ??
+                  student.getPrimarySport();
+              final records = showSportFilter
+                  ? allRecords
+                      .where(
+                        (r) => (r.sport ?? 'bjj') == selectedSport.value,
+                      )
+                      .toList()
+                  : allRecords;
+
+              // When a sport filter is active the total reflects the filtered
+              // list; otherwise we trust the server-side aggregate count.
+              final totalCount = showSportFilter
+                  ? records.length
+                  : (countAsync.valueOrNull ?? records.length);
               final thisMonthCount = _getThisMonthCount(records);
               final calendarDays = _getCalendarDays(records);
 
@@ -52,6 +80,20 @@ class AttendanceScreen extends ConsumerWidget {
                   children: [
                     // Academy indicator for multi-academy users
                     _AcademyIndicator(),
+
+                    // Per-sport filter (multi-sport students only).
+                    if (showSportFilter) ...[
+                      SportTabBar(
+                        sports: sports,
+                        selected: selectedSport,
+                        onSelected: (s) => ref
+                            .read(
+                              selectedSportProvider('attendance').notifier,
+                            )
+                            .state = s,
+                      ),
+                      const SizedBox(height: 12),
+                    ],
 
                     // Stats Cards
                     Row(

@@ -11,6 +11,7 @@ import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
+import '../../widgets/sport_tab_bar.dart';
 
 /// Timeline event types
 enum TimelineEventType { graduation, stripe, competition, milestone, start }
@@ -90,6 +91,14 @@ class TimelineScreen extends ConsumerWidget {
         );
         final academyInfo = ref.watch(currentAcademyInfoProvider);
 
+        // Multi-sport students can filter the timeline by sport. Single-sport
+        // students never see the selector and get the full, unfiltered list.
+        final sports = student.getSports();
+        final showSportFilter = sports.length > 1;
+        final selectedSport =
+            ref.watch(selectedSportProvider('timeline')) ??
+            student.getPrimarySport();
+
         return RefreshIndicator(
           color: Theme.of(context).colorScheme.primary,
           onRefresh: () async {
@@ -124,6 +133,23 @@ class TimelineScreen extends ConsumerWidget {
 
               const SliverToBoxAdapter(child: SizedBox(height: 24)),
 
+              // Per-sport filter (multi-sport students only). SportTabBar
+              // hides itself when sports.length <= 1, but we also gate the
+              // padding so single-sport layout is pixel-identical.
+              if (showSportFilter)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                    child: SportTabBar(
+                      sports: sports,
+                      selected: selectedSport,
+                      onSelected: (s) => ref
+                          .read(selectedSportProvider('timeline').notifier)
+                          .state = s,
+                    ),
+                  ),
+                ),
+
               // Timeline
               SliverToBoxAdapter(
                 child: Padding(
@@ -133,6 +159,7 @@ class TimelineScreen extends ConsumerWidget {
                     achievementsAsync,
                     progressionsAsync,
                     academyInfo?.name,
+                    showSportFilter ? selectedSport : null,
                   ),
                 ),
               ),
@@ -156,6 +183,7 @@ class TimelineScreen extends ConsumerWidget {
     AsyncValue<List<Achievement>> achievementsAsync,
     AsyncValue<List<BeltProgression>> progressionsAsync,
     String? academyName,
+    SportId? sportFilter,
   ) {
     final achievements = achievementsAsync.valueOrNull ?? [];
     final progressions = progressionsAsync.valueOrNull ?? [];
@@ -221,12 +249,22 @@ class TimelineScreen extends ConsumerWidget {
     // Sort by date ascending (oldest first)
     events.sort((a, b) => a.date.compareTo(b.date));
 
-    if (events.isEmpty) {
+    // Client-side sport filter. Only applied for multi-sport students
+    // (sportFilter != null). _TimelineEvent.sportId defaults to BJJ, so
+    // legacy/null-sport events are already grouped under BJJ.
+    // NOTE: this filters the in-memory list — no extra Firestore query and no
+    // composite index. A server-side sport-filtered query would be a future
+    // optimization if a single student ever exceeds ~365 records.
+    final filteredEvents = sportFilter == null
+        ? events
+        : events.where((e) => e.sportId == sportFilter).toList();
+
+    if (filteredEvents.isEmpty) {
       return _buildTimelineEmptyState();
     }
 
     // Reverse for display (newest at top, oldest at bottom)
-    final reversedEvents = events.reversed.toList();
+    final reversedEvents = filteredEvents.reversed.toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
