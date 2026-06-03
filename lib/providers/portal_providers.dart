@@ -340,6 +340,16 @@ final journalAllProvider = FutureProvider<List<AcademyEvent>>((ref) async {
   return EventService(currentUser!.academyId!).listAll();
 });
 
+/// Published posts (events, news, seminars) for the student-facing "Jornal da
+/// Academia" feed, sorted by startDate DESCENDING (newest first).
+final journalEventsProvider = FutureProvider<List<AcademyEvent>>((ref) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+  if (currentUser?.academyId == null) return [];
+  final posts = await EventService(currentUser!.academyId!).listPublished();
+  posts.sort((a, b) => b.startDate.compareTo(a.startDate));
+  return posts;
+});
+
 // ============================================
 // Sport Selection (session / in-memory)
 // ============================================

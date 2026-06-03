@@ -709,7 +709,10 @@ class _DynamicCardsSection extends ConsumerWidget {
           ),
         ),
 
-        // Upcoming Events
+        // Jornal da Academia — minimalist headline (news/seminars live here)
+        const _JornalHeadline(),
+
+        // Upcoming Events (calendar-focused: only postType==event)
         _EventsSection(onTap: onTap),
       ],
     );
@@ -1547,6 +1550,66 @@ class _SportProgressCard extends ConsumerWidget {
 }
 
 // ============================================
+// Jornal Headline
+// ============================================
+
+/// Minimalist single-row entry point to the "Jornal da Academia" feed.
+class _JornalHeadline extends StatelessWidget {
+  const _JornalHeadline();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 20),
+      child: GestureDetector(
+        onTap: () => context.push('/portal/jornal'),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceVariant,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Row(
+            children: [
+              const Icon(LucideIcons.newspaper,
+                  size: 20, color: AppTheme.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'Jornal da Academia',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Notícias, seminários e novidades',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(LucideIcons.chevronRight,
+                  size: 16, color: AppTheme.textDisabled),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================
 // Events Section
 // ============================================
 
@@ -1560,7 +1623,12 @@ class _EventsSection extends ConsumerWidget {
     final eventsAsync = ref.watch(upcomingEventsProvider);
 
     return eventsAsync.when(
-      data: (events) {
+      data: (allEvents) {
+        // The home stays calendar-focused: only actual events. News and
+        // seminars live in the Jornal da Academia feed (no duplicate listing).
+        final events = allEvents
+            .where((e) => e.postType == PostType.event)
+            .toList();
         if (events.isEmpty) return const SizedBox.shrink();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
