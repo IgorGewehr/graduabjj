@@ -6,6 +6,7 @@ import '../../core/sports.dart';
 import '../../core/syllabus_templates.dart';
 import '../../core/theme.dart';
 import '../../services/firebase_service.dart';
+import '../../services/settings_service.dart';
 import '../../services/syllabus_service.dart';
 import '../../widgets/form/input_field.dart';
 
@@ -23,8 +24,14 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   List<SyllabusTechnique> _techniques = [];
   bool _loading = true;
   bool _seeding = false;
+  // Variante de Muay Thai da academia (CBMT/CBMTT) p/ escolher a escada certa.
+  String _muaythaiVariant = muaythaiVariantCbmt;
+  // Categoria de faixas em edição (só o BJJ tem escada kids separada).
+  String _category = 'adult';
 
   SyllabusService get _service => SyllabusService(FirebaseService.academyId);
+
+  bool get _supportsKids => getSport(_sport).supportsKids;
 
   @override
   void initState() {
@@ -34,8 +41,38 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
         .toList();
     _sport =
         _gradedSports.contains(SportId.bjj) ? SportId.bjj : _gradedSports.first;
+    _loadMuaythaiVariant();
     _load();
   }
+
+  Future<void> _loadMuaythaiVariant() async {
+    try {
+      final settings =
+          await SettingsService(FirebaseService.academyId).getAcademySettings();
+      if (!mounted) return;
+      setState(() => _muaythaiVariant =
+          settings?.muaythaiGradeSystem ?? muaythaiVariantCbmt);
+    } catch (_) {/* mantém o default CBMT */}
+  }
+
+  String? get _mtVariant =>
+      _sport == SportId.muaythai ? _muaythaiVariant : null;
+
+  /// Escada de faixas da modalidade + categoria atuais.
+  List<GradeDefinition> _grades() => getGradesForSport(_sport,
+      category: _category, muaythaiVariant: _mtVariant);
+
+  /// Todos os ids de faixa conhecidos da modalidade (adulto ∪ kids) — usado
+  /// para detectar técnicas com faixa "órfã" (fora de qualquer escada).
+  Set<String> _allLadderIds() => {
+        for (final g
+            in getGradesForSport(_sport, muaythaiVariant: _mtVariant))
+          g.id,
+        if (_supportsKids)
+          for (final g in getGradesForSport(_sport,
+              category: 'kids', muaythaiVariant: _mtVariant))
+            g.id,
+      };
 
   Future<void> _load() async {
     setState(() => _loading = true);
@@ -59,7 +96,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   }
 
   Future<void> _openForm({SyllabusTechnique? existing}) async {
-    final grades = getGradesForSport(_sport);
+    final grades = _grades();
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -115,10 +152,11 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       final uid = FirebaseService.currentUserId ?? '';
       // Ordem incremental por faixa.
       final perGrade = <String, int>{};
+      final items = <SyllabusTechnique>[];
       for (final item in bjjStarterTemplate) {
-        final order = perGrade.update(item.gradeId, (v) => v + 1,
-            ifAbsent: () => 0);
-        await _service.create(SyllabusTechnique(
+        final order =
+            perGrade.update(item.gradeId, (v) => v + 1, ifAbsent: () => 0);
+        items.add(SyllabusTechnique(
           id: '',
           sport: SportId.bjj.value,
           gradeId: item.gradeId,
@@ -129,6 +167,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           createdAt: DateTime.now(),
         ));
       }
+      await _service.createMany(items);
       if (!mounted) return;
       context.showSuccess('Template BJJ adicionado! Edite à vontade.');
       _load();
@@ -151,6 +190,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       body: Column(
         children: [
           _sportSelector(),
+          if (_supportsKids) _categoryToggle(),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -185,7 +225,11 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
             selected: selected,
             onSelected: (_) {
               if (s != _sport) {
-                setState(() => _sport = s);
+                setState(() {
+                  _sport = s;
+                  // Só BJJ tem escada kids; volta p/ adulto nas outras.
+                  if (!getSport(s).supportsKids) _category = 'adult';
+                });
                 _load();
               }
             },
@@ -202,54 +246,58 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     );
   }
 
-  Widget _body() {
-    if (_techniques.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(LucideIcons.bookOpen, size: 48, color: AppTheme.textDisabled),
-              const SizedBox(height: 12),
-              Text('Nenhuma técnica neste currículo ainda',
-                  textAlign: TextAlign.center,
-                  style: AppTheme.bodyMedium
-                      .copyWith(color: AppTheme.textSecondary)),
-              const SizedBox(height: 4),
-              Text('Toque em "Nova técnica" para começar.',
-                  textAlign: TextAlign.center,
-                  style: AppTheme.labelSmall
-                      .copyWith(color: AppTheme.textDisabled)),
-              if (_sport == SportId.bjj) ...[
-                const SizedBox(height: 20),
-                OutlinedButton.icon(
-                  onPressed: _seeding ? null : _seedBjj,
-                  icon: _seeding
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(LucideIcons.sparkles, size: 16),
-                  label: const Text('Usar template BJJ básico'),
-                ),
-              ],
-            ],
-          ),
+  Widget _categoryToggle() {
+    Widget chip(String value, String label) {
+      final selected = _category == value;
+      return ChoiceChip(
+        label: Text(label),
+        selected: selected,
+        onSelected: (_) => setState(() => _category = value),
+        labelStyle: AppTheme.labelSmall.copyWith(
+          color: selected ? Colors.white : AppTheme.textSecondary,
+          fontWeight: FontWeight.w600,
         ),
+        selectedColor: AppTheme.primary,
+        backgroundColor: AppTheme.surfaceVariant,
+        showCheckmark: false,
       );
     }
 
-    final grades = getGradesForSport(_sport);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Row(
+        children: [
+          chip('adult', 'Adulto'),
+          const SizedBox(width: 8),
+          chip('kids', 'Kids'),
+        ],
+      ),
+    );
+  }
+
+  Widget _body() {
+    final grades = _grades();
+    final currentIds = grades.map((g) => g.id).toSet();
+    final known = _allLadderIds();
+
+    // Técnicas da categoria atual + "órfãs" (faixa fora de qualquer escada),
+    // que aparecem só na visão adulto para nunca sumirem.
+    final visible =
+        _techniques.where((t) => currentIds.contains(t.gradeId)).toList();
+    final orphans = _category == 'adult'
+        ? _techniques.where((t) => !known.contains(t.gradeId)).toList()
+        : const <SyllabusTechnique>[];
+
+    if (visible.isEmpty && orphans.isEmpty) return _emptyState();
+
     final byGrade = <String, List<SyllabusTechnique>>{};
-    for (final t in _techniques) {
+    for (final t in [...visible, ...orphans]) {
       byGrade.putIfAbsent(t.gradeId, () => []).add(t);
     }
-    // Faixas na ordem da escada; depois quaisquer gradeIds órfãos.
     final orderedGradeIds = <String>[
       for (final g in grades)
         if (byGrade.containsKey(g.id)) g.id,
-      ...byGrade.keys.where((k) => grades.every((g) => g.id != k)),
+      ...byGrade.keys.where((k) => !currentIds.contains(k)), // órfãs ao fim
     ];
 
     return ListView(
@@ -261,6 +309,45 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           const SizedBox(height: 16),
         ],
       ],
+    );
+  }
+
+  Widget _emptyState() {
+    // O template semeia faixas adultas → só oferece no BJJ adulto.
+    final showSeed = _sport == SportId.bjj && _category == 'adult';
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(LucideIcons.bookOpen, size: 48, color: AppTheme.textDisabled),
+            const SizedBox(height: 12),
+            Text('Nenhuma técnica neste currículo ainda',
+                textAlign: TextAlign.center,
+                style: AppTheme.bodyMedium
+                    .copyWith(color: AppTheme.textSecondary)),
+            const SizedBox(height: 4),
+            Text('Toque em "Nova técnica" para começar.',
+                textAlign: TextAlign.center,
+                style:
+                    AppTheme.labelSmall.copyWith(color: AppTheme.textDisabled)),
+            if (showSeed) ...[
+              const SizedBox(height: 20),
+              OutlinedButton.icon(
+                onPressed: _seeding ? null : _seedBjj,
+                icon: _seeding
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(LucideIcons.sparkles, size: 16),
+                label: const Text('Usar template BJJ básico'),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 

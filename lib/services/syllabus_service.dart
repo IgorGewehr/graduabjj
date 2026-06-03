@@ -25,6 +25,17 @@ class SyllabusService {
     return doc.id;
   }
 
+  /// Bulk-creates techniques atomically (used by the template seed).
+  Future<void> createMany(List<SyllabusTechnique> items) async {
+    final batch = FirebaseService.firestore.batch();
+    for (final t in items) {
+      final ref = _ref.doc();
+      batch.set(
+          ref, t.toFirestore()..['createdAt'] = FieldValue.serverTimestamp());
+    }
+    await batch.commit();
+  }
+
   Future<void> update(String id, SyllabusTechnique t) =>
       _collections.syllabusTechnique(id).update(t.toFirestore());
 
