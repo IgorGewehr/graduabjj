@@ -189,6 +189,11 @@ class AcademySettings {
   /// unavailable state. Defaults to true for new and legacy academies.
   final bool journalVisibleToStudents;
 
+  /// Whether the student-facing class attendance ranking is shown. When false,
+  /// the portal nav entry is hidden and the RankingScreen renders an
+  /// unavailable state. Defaults to true for new and legacy academies.
+  final bool rankingVisibleToStudents;
+
   // Musculação (schedule-less) check-in.
   /// 'manual' → staff records presence (works with current rules, no Cloud
   /// Function); 'qr' → student scans a fixed QR; 'button' → student taps a
@@ -249,6 +254,7 @@ class AcademySettings {
     this.storeMinOrderAmount,
     this.studentCheckinEnabled = false,
     this.journalVisibleToStudents = true,
+    this.rankingVisibleToStudents = true,
     this.musculacaoCheckinMode = 'manual',
     this.operatingHours = OperatingHours.empty,
     this.muaythaiGradeSystem = 'cbmt',
@@ -318,6 +324,7 @@ class AcademySettings {
       storeMinOrderAmount: data['storeMinOrderAmount']?.toDouble(),
       studentCheckinEnabled: data['studentCheckinEnabled'] ?? false,
       journalVisibleToStudents: data['journalVisibleToStudents'] ?? true,
+      rankingVisibleToStudents: data['rankingVisibleToStudents'] ?? true,
       musculacaoCheckinMode:
           (data['musculacaoCheckinMode'] as String?) ?? 'manual',
       operatingHours: OperatingHours.fromMap(
@@ -620,6 +627,16 @@ class SettingsService {
   Future<void> updateJournalVisibility(bool value) async {
     await _academyRef.set({
       'journalVisibleToStudents': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Toggle Ranking Visibility for Students
+  // ============================================
+  Future<void> updateRankingVisibility(bool value) async {
+    await _academyRef.set({
+      'rankingVisibleToStudents': value,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }

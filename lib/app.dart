@@ -18,6 +18,7 @@ import 'screens/portal/portal_shell.dart';
 import 'screens/portal/home_screen.dart';
 import 'screens/portal/event_detail_screen.dart';
 import 'screens/portal/jornal_screen.dart';
+import 'screens/portal/ranking_screen.dart';
 import 'screens/portal/profile_screen.dart';
 import 'screens/portal/attendance_screen.dart';
 import 'screens/portal/competitions_screen.dart';
@@ -640,6 +641,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const ScheduleScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/ranking',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const RankingScreen(),
             ),
           ),
           GoRoute(

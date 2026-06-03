@@ -141,6 +141,14 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       path: '/portal/videos',
       section: 'Treinos',
     ),
+    // Comunidade
+    _PortalMenuEntry(
+      label: 'Ranking',
+      icon: LucideIcons.trophy,
+      path: '/portal/ranking',
+      section: 'Comunidade',
+      requiresRankingVisible: true,
+    ),
     // Conquistas
     _PortalMenuEntry(
       label: 'Competicoes',
@@ -240,12 +248,15 @@ class _PortalShellState extends ConsumerState<PortalShell> {
 
     final graduationVisible =
         settings?.graduationProgressVisibleToStudents ?? false;
+    // Defaults to true (visible) for legacy academies, mirroring the screen gate.
+    final rankingVisible = settings?.rankingVisibleToStudents ?? true;
 
     final entries = _menuCatalog.where((e) {
       if (e.requiresKidsCategory && !isKids) return false;
       if (e.requiresStorePublished && !isStorePublished) return false;
       if (e.requiresPlan && !hasPlan) return false;
       if (e.requiresGraduationVisible && !graduationVisible) return false;
+      if (e.requiresRankingVisible && !rankingVisible) return false;
       if (e.hideWhen == _PortalGate.monitor && (isMonitor || hasAttendancePermMenu)) return false;
       return true;
     }).toList();
@@ -406,6 +417,7 @@ class _PortalMenuEntry {
   final bool requiresStorePublished;
   final bool requiresPlan;
   final bool requiresGraduationVisible;
+  final bool requiresRankingVisible;
   final _PortalGate? hideWhen;
 
   const _PortalMenuEntry({
@@ -417,6 +429,7 @@ class _PortalMenuEntry {
     this.requiresGraduationVisible = false,
     this.requiresStorePublished = false,
     this.requiresPlan = false,
+    this.requiresRankingVisible = false,
     this.hideWhen,
   });
 }

@@ -71,6 +71,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _storeCreditCardEnabled = false;
   bool _studentCheckinEnabled = false;
   bool _journalVisibleToStudents = true;
+  bool _rankingVisibleToStudents = true;
 
   // Musculação check-in (schedule-less)
   String _musculacaoCheckinMode = 'manual'; // 'manual' | 'qr' | 'button'
@@ -160,6 +161,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _storeCreditCardEnabled,
       _studentCheckinEnabled,
       _journalVisibleToStudents,
+      _rankingVisibleToStudents,
       _musculacaoCheckinMode,
       hours,
       _muaythaiGradeSystem,
@@ -233,6 +235,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _storeCreditCardEnabled = settings.storeCreditCardEnabled;
           _studentCheckinEnabled = settings.studentCheckinEnabled;
           _journalVisibleToStudents = settings.journalVisibleToStudents;
+          _rankingVisibleToStudents = settings.rankingVisibleToStudents;
           _musculacaoCheckinMode = settings.musculacaoCheckinMode;
           _operatingHours
             ..clear()
@@ -325,6 +328,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         service.toggleAsaas(_asaasEnabled),
         service.toggleStudentCheckin(_studentCheckinEnabled),
         service.updateJournalVisibility(_journalVisibleToStudents),
+        service.updateRankingVisibility(_rankingVisibleToStudents),
         service.updateMusculacaoCheckin(
           mode: _musculacaoCheckinMode,
           operatingHours: OperatingHours(Map.of(_operatingHours)),
@@ -1646,6 +1650,34 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 context.showSuccess('Configuracoes salvas!');
               },
               icon: LucideIcons.newspaper,
+              iconColor: AppTheme.primary,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Ranking de Turmas (student-facing leaderboard visibility)
+          _SettingsCard(
+            title: 'Ranking de Turmas',
+            icon: LucideIcons.trophy,
+            child: _ModernSwitch(
+              title: 'Mostrar ranking de turmas para alunos',
+              subtitle:
+                  'Controla o placar de presencas por turma exibido no portal do aluno',
+              value: _rankingVisibleToStudents,
+              onChanged: (value) async {
+                setState(() => _rankingVisibleToStudents = value);
+                final service = SettingsService(FirebaseService.academyId);
+                await service.updateRankingVisibility(value);
+                if (!mounted) return;
+                ref.invalidate(academySettingsProvider);
+                setState(() {
+                  _savedSnapshot = _snapshot();
+                  _lastDirty = false;
+                });
+                context.showSuccess('Configuracoes salvas!');
+              },
+              icon: LucideIcons.trophy,
               iconColor: AppTheme.primary,
             ),
           ),
