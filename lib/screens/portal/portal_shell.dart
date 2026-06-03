@@ -124,6 +124,12 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       requiresGraduationVisible: true,
     ),
     _PortalMenuEntry(
+      label: 'Minhas Modalidades',
+      icon: LucideIcons.dumbbell,
+      path: '/portal/minhas-modalidades',
+      section: 'Treinos',
+    ),
+    _PortalMenuEntry(
       label: 'Treinos',
       icon: Icons.fitness_center,
       path: '/portal/treinos',
