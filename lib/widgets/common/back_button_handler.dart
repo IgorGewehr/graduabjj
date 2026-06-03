@@ -26,6 +26,32 @@ String? parentLocation(String? path) {
 /// - Em sub-telas sem histórico, navega para o caminho "pai" (ex.:
 ///   `/admin/alunos/123` → `/admin/alunos`) em vez de fechar.
 /// - Só na aba-raiz (`/admin`, `/portal`) aplica "pressione 2x para sair".
+///
+/// ---------------------------------------------------------------------------
+/// CONTRATO COM POPSCOPES FILHOS (auditoria Sprint B2)
+/// ---------------------------------------------------------------------------
+/// Este handler tem `canPop: false` e é o PopScope MAIS EXTERNO. O Flutter
+/// entrega a intenção de voltar ao PopScope MAIS INTERNO primeiro. Logo, todo
+/// PopScope dentro de uma tela DEVE consumir o gesto por completo e NUNCA
+/// deixar a saída do app "vazar" para este handler.
+///
+/// Telas com PopScope próprio auditadas (lib/screens):
+///   - admin/settings_screen.dart           (dirty = `_isDirty` via snapshot)
+///   - admin/physical_assessment_form_screen.dart (dirty = `_isDirty` do form)
+///
+/// Regras que cada PopScope filho deve seguir:
+///   - `canPop: !hasUnsavedChanges` — `true` SÓ quando o form está limpo;
+///     `false` quando sujo, para interceptar o gesto.
+///   - `onPopInvokedWithResult`: `if (didPop) return;` então, se sujo, mostra
+///     um diálogo de confirmar-descarte. CONFIRMAR → `Navigator/context.pop()`
+///     (descarta e sai da tela; este handler resolve então o pai). CANCELAR →
+///     não faz nada (permanece).
+///   - Form LIMPO (`canPop: true`): a rota faz pop normal para a tela pai (NÃO
+///     fecha o app, pois há histórico de navigator abaixo deste shell). Sem
+///     diálogo.
+///   - NUNCA chamar `SystemNavigator.pop` de um PopScope filho; nunca
+///     `canPop: true` enquanto sujo.
+/// ---------------------------------------------------------------------------
 class BackButtonHandler extends StatefulWidget {
   final Widget child;
   final bool isRootRoute;

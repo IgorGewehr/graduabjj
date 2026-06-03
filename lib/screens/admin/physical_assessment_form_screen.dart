@@ -133,7 +133,32 @@ class _PhysicalAssessmentFormScreenState
   bool _saving = false;
   final _formKey = GlobalKey<FormState>();
 
+  // Unsaved-changes tracking. `_savedSnapshot` is the serialized form state at
+  // load time (and after a successful save). The form is "dirty" when the
+  // current snapshot differs — used by the PopScope contract (see
+  // BackButtonHandler docs) to confirm before discarding edits on back.
+  late String _savedSnapshot;
+
   bool get _isEditing => widget.existing != null;
+
+  /// Serialized snapshot of every editable field. Comparing it to
+  /// [_savedSnapshot] tells us whether there are unsaved changes without
+  /// wiring each onChanged. Covers text fields, date, goal and pending/removed
+  /// photos. (Meta edits persist immediately and aren't form-dirty.)
+  String _snapshot() {
+    final fields = <String>[
+      _weight.text, _height.text, _bodyFat.text, _notes.text,
+      _leanMass.text, _fatMass.text, _visceral.text, _bmr.text,
+      _date.toIso8601String(), _goal ?? '',
+      for (final c in _girths.values) c.text,
+      for (final c in _skinfolds.values) c.text,
+    ];
+    final pending = (_pendingPhotos.keys.toList()..sort()).join(',');
+    final toDelete = (_photosToDelete.toList()..sort()).join(',');
+    return '${fields.join('|')}#pending=$pending#del=$toDelete';
+  }
+
+  bool get _isDirty => _snapshot() != _savedSnapshot;
 
   @override
   void initState() {
@@ -158,16 +183,23 @@ class _PhysicalAssessmentFormScreenState
         _existingPhotos[p.angle] = p;
       }
     }
-    // IMC ao vivo conforme peso/altura mudam.
-    _weight.addListener(_onChanged);
-    _height.addListener(_onChanged);
-    // % gordura estimada (Pollock) ao vivo conforme as dobras mudam.
-    for (final c in _skinfolds.values) {
+    // Rebuild on any field edit so live previews (IMC, Pollock) AND the
+    // PopScope `canPop` (which depends on `_isDirty`) stay in sync.
+    for (final c in <TextEditingController>[
+      _weight, _height, _bodyFat, _notes,
+      _leanMass, _fatMass, _visceral, _bmr,
+      ..._girths.values,
+      ..._skinfolds.values,
+    ]) {
       c.addListener(_onChanged);
     }
+    // Baseline for unsaved-changes detection — captured after all prefill.
+    _savedSnapshot = _snapshot();
   }
 
-  void _onChanged() => setState(() {});
+  void _onChanged() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void dispose() {
@@ -223,6 +255,32 @@ class _PhysicalAssessmentFormScreenState
       age: age,
       skinfolds: _collect(_skinfolds),
     );
+  }
+
+  /// Discard-confirm dialog shown on back when the form has unsaved edits.
+  /// Returns true when the user chooses to discard and leave.
+  Future<bool> _confirmDiscard() async {
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Descartar alterações?'),
+        content: const Text(
+          'Você tem alterações não salvas nesta avaliação. Se sair agora, '
+          'elas serão perdidas.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Continuar editando'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Descartar', style: TextStyle(color: AppTheme.error)),
+          ),
+        ],
+      ),
+    );
+    return discard ?? false;
   }
 
   Future<void> _save() async {
@@ -314,6 +372,9 @@ class _PhysicalAssessmentFormScreenState
         }
       }
       if (!mounted) return;
+      // Saved — clear dirty state (defensive; the explicit pop below bypasses
+      // PopScope anyway) and leave returning `true` to the caller.
+      _savedSnapshot = _snapshot();
       context.showSuccess(
           _isEditing ? 'Avaliação atualizada!' : 'Avaliação registrada!');
       Navigator.of(context).pop(true);
@@ -498,13 +559,25 @@ class _PhysicalAssessmentFormScreenState
   @override
   Widget build(BuildContext context) {
     final bmi = _bmiPreview;
-    // canPop:false so back/system-back routes through us — we pop with
-    // `_metaChanged` so the caller reloads when only the meta was edited.
-    // The save button pops `true` explicitly (not gated by PopScope).
+    // PopScope contract (see BackButtonHandler docs). Unlike the canPop:!dirty
+    // pattern, this screen keeps canPop FALSE unconditionally and resolves every
+    // pop itself: it must return `_metaChanged` to the caller (canPop:true would
+    // pop with a null result and break the meta-reload signal). The hard safety
+    // rules still hold — we ALWAYS pop explicitly via Navigator.pop(_metaChanged)
+    // and never reach SystemNavigator, so app-exit can never fall through.
+    // Dirty -> confirm discard first; clean -> pop immediately (no dialog).
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) Navigator.of(context).pop(_metaChanged);
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        if (_isDirty) {
+          final discard = await _confirmDiscard();
+          if (!discard || !mounted) return; // CANCEL → stay
+          _savedSnapshot = _snapshot(); // leaving — drop dirty state
+        }
+        // CONFIRM-discard or a clean form: leave the screen, returning
+        // `_metaChanged` so the caller reloads if only the meta was edited.
+        if (mounted) Navigator.of(context).pop(_metaChanged);
       },
       child: Scaffold(
       backgroundColor: AppTheme.background,
