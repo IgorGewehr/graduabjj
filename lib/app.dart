@@ -1013,6 +1013,32 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
+            path: '/admin/jornal',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminEventsScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/jornal/novo',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const AdminEventFormScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/jornal/:id/editar',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: AdminEventFormScreen(
+                eventId: state.pathParameters['id'],
+              ),
+            ),
+          ),
+          GoRoute(
             path: '/admin/carteira',
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,

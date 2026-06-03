@@ -431,10 +431,18 @@ class AppUser {
   /// Returns true when the user can access [permission] for the current
   /// academy. Admins can do everything; instructors need the permission in
   /// `extraPermissions`; students always return false.
+  /// Permissions every instructor (professor) gets by default, on top of any
+  /// per-academy [extraPermissions] granted by the owner. Owners/admins always
+  /// have everything (see [hasPermission]).
+  static const Set<String> _instructorDefaultPermissions = {
+    'events:manage',
+  };
+
   bool hasPermission(String permission) {
     if (role == UserRole.admin) return true;
     if (role == UserRole.instructor) {
-      return extraPermissions.contains(permission);
+      return _instructorDefaultPermissions.contains(permission) ||
+          extraPermissions.contains(permission);
     }
     return false;
   }

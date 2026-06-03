@@ -151,11 +151,18 @@ class EventService {
   }
 
   /// Publish a post (sets isPublished = true).
-  Future<void> publish(String id) async {
+  ///
+  /// When [notify] is non-null, dispatches the academy publish notification for
+  /// that post (used when a draft is published from the admin edit form with
+  /// "notify students" checked). Leave null to publish silently.
+  Future<void> publish(String id, {AcademyEvent? notify}) async {
     await _ref.doc(id).update({
       'isPublished': true,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+    if (notify != null) {
+      await _notifyOnPublish(notify);
+    }
   }
 
   /// Unpublish a post (sets isPublished = false).

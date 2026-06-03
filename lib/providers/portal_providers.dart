@@ -332,6 +332,14 @@ final upcomingEventsProvider = FutureProvider<List<AcademyEvent>>((ref) async {
   return EventService(currentUser!.academyId!).listUpcoming(limit: 5);
 });
 
+/// All Jornal posts (drafts + published), newest-first, for the admin
+/// management UI. Service already orders by startDate descending.
+final journalAllProvider = FutureProvider<List<AcademyEvent>>((ref) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+  if (currentUser?.academyId == null) return [];
+  return EventService(currentUser!.academyId!).listAll();
+});
+
 // ============================================
 // Sport Selection (session / in-memory)
 // ============================================

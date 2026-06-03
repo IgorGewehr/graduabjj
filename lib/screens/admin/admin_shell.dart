@@ -655,6 +655,13 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       section: 'Gestão',
     ),
     _AdminMenuEntry(
+      label: 'Jornal da Academia',
+      icon: LucideIcons.newspaper,
+      path: '/admin/jornal',
+      section: 'Gestão',
+      requiresPermission: 'events:manage',
+    ),
+    _AdminMenuEntry(
       label: 'Importar alunos',
       icon: Icons.upload_file,
       path: '/admin/importar-alunos',
