@@ -50,6 +50,7 @@ import 'screens/portal/monitor_student_form_screen.dart';
 import 'providers/portal_providers.dart';
 import 'screens/splash_screen.dart';
 import 'screens/paywall_screen.dart';
+import 'widgets/common/back_button_handler.dart';
 // Admin screens
 import 'screens/admin/admin_screens.dart';
 
@@ -514,6 +515,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
+      // Sprint B3 — DECISÃO INTENCIONAL: as rotas de splash e auth abaixo
+      // (/, /login, /register, /link-code, /codigo-equipe, /criar-academia)
+      // NÃO são envolvidas por BackButtonHandler. São telas PRÉ-LOGIN, onde o
+      // voltar físico fechando o app é o comportamento esperado pelo usuário.
+      // A proteção double-tap/parent só vale para rotas pós-login.
+
       // Splash Screen
       GoRoute(path: '/', builder: (context, state) => const SplashScreen()),
 
@@ -782,7 +789,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _buildPageWithPushTransition(
           context: context,
           state: state,
-          child: const QrScanScreen(),
+          // Fora do ShellRoute: protege o voltar físico para retornar a /portal
+          // em vez de fechar o app (deep-link/sem histórico de navigator).
+          child: const BackButtonHandler(
+            currentLocation: '/portal/scan',
+            isRootRoute: false,
+            child: QrScanScreen(),
+          ),
         ),
       ),
 
@@ -802,7 +815,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _buildPageWithPushTransition(
           context: context,
           state: state,
-          child: const NotificationsScreen(),
+          // Fora do ShellRoute: voltar retorna a /portal, nunca fecha o app.
+          child: const BackButtonHandler(
+            currentLocation: '/portal/notificacoes',
+            isRootRoute: false,
+            child: NotificationsScreen(),
+          ),
         ),
       ),
 
@@ -1019,7 +1037,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _buildPageWithPushTransition(
           context: context,
           state: state,
-          child: const NotificationsScreen(),
+          // Fora do ShellRoute: voltar retorna a /admin, nunca fecha o app.
+          child: const BackButtonHandler(
+            currentLocation: '/admin/notificacoes',
+            isRootRoute: false,
+            child: NotificationsScreen(),
+          ),
         ),
       ),
 
@@ -1031,7 +1054,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _buildPageWithPushTransition(
           context: context,
           state: state,
-          child: const PaywallScreen(showClose: true),
+          // Gate logado sem "pai" significativo: um único voltar NÃO pode
+          // fechar o app (regra dura do dono). Usa double-tap-to-exit.
+          child: const BackButtonHandler(
+            currentLocation: '/paywall',
+            isRootRoute: true,
+            child: PaywallScreen(showClose: true),
+          ),
         ),
       ),
     ],
