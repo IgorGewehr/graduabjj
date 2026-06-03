@@ -332,3 +332,17 @@ final upcomingEventsProvider = FutureProvider<List<AcademyEvent>>((ref) async {
   return EventService(currentUser!.academyId!).listUpcoming(limit: 5);
 });
 
+// ============================================
+// Sport Selection (session / in-memory)
+// ============================================
+
+/// The sport currently selected on a given screen, keyed by [screenKey] so
+/// each screen (e.g. graduation, attendance, portal home) keeps its own choice.
+///
+/// `null` means "not chosen yet" — consumers should fall back to the student's
+/// primary sport (`student.getPrimarySport()`) on first build. This is session
+/// state only (a [StateProvider] lives in memory): it survives rebuilds and
+/// navigation within a session but is not persisted across app launches.
+final selectedSportProvider =
+    StateProvider.family<SportId?, String>((ref, screenKey) => null);
+
