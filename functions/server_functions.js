@@ -153,6 +153,301 @@ async function getBillingRecipientUid(studentId, academyId) {
 }
 
 // ============================================
+// S7 — Server-side autonomous WhatsApp + PIX billing reminders
+// ============================================
+//
+// This whole block is INERT until the WHATSAPP_API_KEY secret/env var is set.
+// The gate lives in sendWhatsAppServer(): with no key it returns immediately
+// WITHOUT performing any network call, so wiring it into the crons is safe to
+// ship disabled. The owner sets WHATSAPP_API_KEY later to turn it on.
+//
+// NOTE on env vars: these crons are firebase-functions v1 (functions.pubsub),
+// so process.env.WHATSAPP_API_KEY is populated from functions config / the
+// functions/.env file at runtime and reading it at call-time works. If these
+// were migrated to v2 (onSchedule), the key would instead need to be declared
+// via { secrets: ['WHATSAPP_API_KEY', ...] } on the function and injected by
+// Secret Manager. For v1, WHATSAPP_API_KEY MUST be provided via functions
+// config / .env (same mechanism as NOTIFICATION_API_KEY in index.js).
+
+// ---- 1. Gated WhatsApp sender (the inert switch) -------------------------
+// GATE: with no WHATSAPP_API_KEY, returns {sent:false, skipped:'no_key'}
+// without calling anything. Never throws.
+async function sendWhatsAppServer(phone, message, academyId) {
+  const key = process.env.WHATSAPP_API_KEY;
+  if (!key) {
+    return { sent: false, skipped: 'no_key' };
+  }
+  const url = process.env.WHATSAPP_API_URL ||
+    'https://notification.tensorroot.com/api/send-whatsapp';
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+      },
+      body: JSON.stringify({
+        phone,
+        message,
+        academyId,
+        type: 'billing_reminder',
+      }),
+    });
+    return { sent: res.ok };
+  } catch (e) {
+    console.error('[S7] sendWhatsAppServer failed:', e && e.message);
+    return { sent: false };
+  }
+}
+
+// ---- 2. PIX block resolver (JS port of Dart injectPaymentInfo) -----------
+// If pixCode present: substitute {pix}/{link} and strip the [[PIX]] markers.
+// Else: remove the whole [[PIX]]..[[/PIX]] block. Always safety-strips leftover
+// markers/placeholders, collapses 3+ newlines to 2, and trims.
+function mpInjectPaymentInfo(text, pixCode, ticketUrl) {
+  const has = pixCode != null && pixCode !== '';
+  let out = String(text || '');
+  if (has) {
+    out = out
+      .split('{pix}').join(pixCode)
+      .split('{link}').join(ticketUrl || '')
+      .split('[[PIX]]').join('')
+      .split('[[/PIX]]').join('');
+  } else {
+    out = out.replace(/\[\[PIX\]\][\s\S]*?\[\[\/PIX\]\]/g, '');
+  }
+  // Safety net: never leak raw markers/placeholders.
+  out = out
+    .split('[[PIX]]').join('')
+    .split('[[/PIX]]').join('')
+    .split('{pix}').join('')
+    .split('{link}').join('');
+  // Tidy excess blank lines left by a removed block.
+  out = out.replace(/\n{3,}/g, '\n\n').trim();
+  return out;
+}
+
+// ---- 3. Default WhatsApp templates (ported from the Dart defaults) -------
+// Includes the [[PIX]]..[[/PIX]] block resolved by mpInjectPaymentInfo.
+// Placeholders: {nome}, {valor}, {vencimento}, {dias}, {academia}.
+const DEFAULT_WHATSAPP_TEMPLATES = {
+  'D+0': 'Oi {nome}! Passando rapidinho para lembrar que hoje, dia {vencimento}, vence sua mensalidade de {valor} com a {academia}. Contamos com voce! Qualquer duvida, estamos a disposicao.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'D+1': 'Ola {nome}! Aqui e a {academia}. Identificamos que sua mensalidade de {valor} venceu em {vencimento}. Caso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem. Caso contrario, solicitamos a regularizacao. Obrigado![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'D+3': 'Ola {nome}! Sua mensalidade de {valor} da {academia} esta com 3 dias de atraso (vencimento: {vencimento}). Por favor, regularize sua situacao o mais breve possivel. Em caso de duvidas, estamos a disposicao![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'D+7': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Precisamos que regularize sua situacao para manter seus treinos em dia. Entre em contato conosco para combinar o pagamento.[[PIX]]\n\nPara facilitar, pague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'D+15': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Sua situacao precisa ser regularizada com urgencia para evitar a suspensao do acesso aos treinos. Por favor, entre em contato.[[PIX]]\n\nRegularize agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'D+30': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com mais de 30 dias de atraso. Caso a situacao nao seja regularizada, infelizmente precisaremos suspender seu acesso. Entre em contato urgente para negociarmos.[[PIX]]\n\nRegularize agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+};
+
+// Mirrors the Dart _applyTemplate replaceAll (all occurrences).
+function applyBillingTemplate(tpl, { nome, valor, vencimento, dias, academia }) {
+  return String(tpl || '')
+    .split('{nome}').join(nome != null ? String(nome) : '')
+    .split('{valor}').join(valor != null ? String(valor) : '')
+    .split('{vencimento}').join(vencimento != null ? String(vencimento) : '')
+    .split('{dias}').join(dias != null ? String(dias) : '')
+    .split('{academia}').join(academia != null ? String(academia) : '');
+}
+
+// ---- 4. Stage resolver (mirrors Dart _classifyStage thresholds) ----------
+// 0->'D+0', 1-2->'D+1', 3-6->'D+3', 7-14->'D+7', 15-29->'D+15', >=30->'D+30'.
+function resolveStage(daysOverdue) {
+  if (daysOverdue >= 30) return 'D+30';
+  if (daysOverdue >= 15) return 'D+15';
+  if (daysOverdue >= 7) return 'D+7';
+  if (daysOverdue >= 3) return 'D+3';
+  if (daysOverdue >= 1) return 'D+1';
+  return 'D+0';
+}
+
+// ---- formatting helpers (mirror Dart NumberFormat / DateFormat) ----------
+// {valor}: R$ X,XX (pt-BR). amountReais is in REAIS.
+function formatBrlAmount(amountReais) {
+  const n = Number(amountReais) || 0;
+  return 'R$ ' + n.toFixed(2).replace('.', ',');
+}
+
+// {vencimento}: dd/MM/yyyy.
+function formatBrDate(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+// ---- 5. Best-effort PIX for a reminder (graceful degradation) ------------
+// GATES on the academy having mpConnected AND the financial unpaid. Sources the
+// payer CPF from the student doc (kids -> guardian.cpf, else cpf), mirroring the
+// Dart effectiveCpf. Reuses a still-valid PIX (idempotent), otherwise creates
+// one via createMpPix and persists pixCode/pixTicketUrl/pixExpiresAt (mirroring
+// createMpPixPayment). NEVER throws: returns empty strings on any failure/gate.
+//
+// `financial` must include { id, amount (centavos), studentId, status,
+// description, gatewayPaymentId?, pixCode?, pixExpiresAt? }.
+async function generateReminderPix(academyId, financial) {
+  try {
+    if (!financial || financial.status === 'paid') {
+      return { pixCode: '', ticketUrl: '' };
+    }
+
+    // Gate: academy must have Mercado Pago connected.
+    const acadSnap = await db.doc(`academies/${academyId}`).get();
+    if (!acadSnap.exists || acadSnap.data()?.mpConnected !== true) {
+      return { pixCode: '', ticketUrl: '' };
+    }
+
+    const financialId = financial.id;
+    if (!financialId) return { pixCode: '', ticketUrl: '' };
+
+    // Idempotency: reuse a still-valid PIX (same code for everyone, no double
+    // charge) — mirrors createMpPixPayment.
+    const existingExpiry =
+      financial.pixExpiresAt && typeof financial.pixExpiresAt.toMillis === 'function'
+        ? financial.pixExpiresAt.toMillis()
+        : 0;
+    if (financial.gatewayPaymentId && financial.pixCode && existingExpiry > Date.now()) {
+      return {
+        pixCode: financial.pixCode,
+        ticketUrl: financial.pixTicketUrl || '',
+      };
+    }
+
+    // Source payer info (CPF + email + name) from the student doc.
+    let payerCpf = '';
+    let payerEmail;
+    let payerName = financial.studentName || '';
+    try {
+      const stuSnap = await db
+        .collection('academies').doc(academyId)
+        .collection('students').doc(financial.studentId)
+        .get();
+      if (stuSnap.exists) {
+        const stu = stuSnap.data() || {};
+        const isKids = stu.category === 'kids';
+        payerCpf = (isKids ? stu.guardian?.cpf : stu.cpf) || '';
+        payerEmail = (isKids ? stu.guardian?.email : stu.email) || undefined;
+        payerName = stu.fullName || payerName;
+      }
+    } catch (_) {
+      // fall through with whatever we have
+    }
+
+    // amount is stored in CENTAVOS; createMpPix takes REAIS.
+    const pix = await createMpPix({
+      academyId,
+      transactionAmount: (Number(financial.amount) || 0) / 100,
+      description: financial.description || 'Mensalidade',
+      externalReference: `${academyId}:fin:${financialId}`,
+      payer: { email: payerEmail, cpf: payerCpf, name: payerName },
+    });
+
+    // Persist for reuse (mirrors createMpPixPayment).
+    try {
+      const finRef = db.doc(`academies/${academyId}/financials/${financialId}`);
+      await finRef.update({
+        pixCode: pix.pixCode || null,
+        pixQrCode: pix.qrCodeBase64 || null,
+        pixTicketUrl: pix.ticketUrl || null,
+        gatewayPaymentId: pix.paymentId,
+        paymentGateway: 'mercadopago',
+        pixExpiresAt: admin.firestore.Timestamp.fromDate(pix.expiresAt),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // persistence failure is non-fatal: we still have the code to send now
+    }
+
+    return { pixCode: pix.pixCode || '', ticketUrl: pix.ticketUrl || '' };
+  } catch (e) {
+    console.error('[S7] generateReminderPix failed:', e && e.message);
+    return { pixCode: '', ticketUrl: '' };
+  }
+}
+
+// ---- 6. Orchestrator: build + send one WhatsApp billing reminder ---------
+// GATES: billingSettings.whatsappEnabled !== false; recipient phone present
+// (kids -> guardian.phone else phone, mirroring effectivePhone). When
+// includePaymentLink !== false, generates a best-effort PIX. Picks the custom
+// template (billingSettings.messageTemplates.whatsapp[stage]) or the JS default.
+// NEVER throws.
+//
+// `stage` is 'D+0'..'D+30'. `daysOverdue` defaults to 0 for the due-soon cron.
+async function sendBillingReminderWhatsApp(
+  academyId,
+  academyName,
+  billingSettings,
+  financial,
+  stage,
+  daysOverdue
+) {
+  try {
+    const settings = billingSettings || {};
+    if (settings.whatsappEnabled === false) return;
+
+    // Resolve recipient phone from the student doc (effectivePhone semantics).
+    let phone;
+    try {
+      const stuSnap = await db
+        .collection('academies').doc(academyId)
+        .collection('students').doc(financial.studentId)
+        .get();
+      if (stuSnap.exists) {
+        const stu = stuSnap.data() || {};
+        phone = stu.category === 'kids' ? stu.guardian?.phone : stu.phone;
+      }
+    } catch (_) {
+      // no phone -> gate below
+    }
+    if (!phone || String(phone).trim() === '') return;
+
+    const dueDate = financial.dueDate && typeof financial.dueDate.toDate === 'function'
+      ? financial.dueDate.toDate()
+      : new Date();
+    const valor = formatBrlAmount((Number(financial.amount) || 0) / 100);
+    const vencimento = formatBrDate(dueDate);
+    const dias = daysOverdue || 0;
+
+    // PIX (best-effort) when the academy opted into payment links.
+    let pix = { pixCode: '', ticketUrl: '' };
+    if (settings.includePaymentLink !== false) {
+      pix = await generateReminderPix(academyId, financial);
+    }
+
+    const customTpl = settings.messageTemplates?.whatsapp?.[stage];
+    const tpl = customTpl || DEFAULT_WHATSAPP_TEMPLATES[stage] ||
+      DEFAULT_WHATSAPP_TEMPLATES['D+1'];
+
+    const filled = applyBillingTemplate(tpl, {
+      nome: financial.studentName || '',
+      valor,
+      vencimento,
+      dias,
+      academia: academyName || '',
+    });
+    const msg = mpInjectPaymentInfo(filled, pix.pixCode, pix.ticketUrl);
+
+    await sendWhatsAppServer(phone, msg, academyId);
+  } catch (e) {
+    console.error('[S7] sendBillingReminderWhatsApp failed:', e && e.message);
+  }
+}
+
+// Reads the per-academy billingReminders settings doc once. Returns {} when
+// absent. Never throws.
+async function getBillingReminderSettings(academyId) {
+  try {
+    const snap = await db
+      .collection('academies').doc(academyId)
+      .collection('settings').doc('billingReminders')
+      .get();
+    return snap.exists ? (snap.data() || {}) : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+// ============================================
 // Internal Notification Helper
 // ============================================
 
@@ -470,6 +765,10 @@ exports.scheduledOverdueCheck = functions.pubsub
       let overdueCount = 0;
       let totalOverdueAmount = 0;
 
+      // S7: read the per-academy WhatsApp/PIX reminder settings once.
+      const billingSettings = await getBillingReminderSettings(academyId);
+      const academyName = academy.name || academy.academyName || '';
+
       for (const financialDoc of financialsSnapshot.docs) {
         const financial = financialDoc.data();
         const dueDate = financial.dueDate.toDate();
@@ -510,6 +809,17 @@ exports.scheduledOverdueCheck = functions.pubsub
                 financialId: financialDoc.id, expiresInDays: 30 }
             );
           }
+
+          // S7: additionally send the autonomous WhatsApp + PIX reminder.
+          // INERT until WHATSAPP_API_KEY is set (gate in sendWhatsAppServer).
+          await sendBillingReminderWhatsApp(
+            academyId,
+            academyName,
+            billingSettings,
+            { ...financial, id: financialDoc.id },
+            resolveStage(daysOverdue),
+            daysOverdue
+          );
         }
       }
 
@@ -557,6 +867,11 @@ exports.scheduledDueSoonReminder = functions.pubsub
 
     for (const academyDoc of academiesSnapshot.docs) {
       const academyId = academyDoc.id;
+      const academy = academyDoc.data();
+
+      // S7: read the per-academy WhatsApp/PIX reminder settings once.
+      const billingSettings = await getBillingReminderSettings(academyId);
+      const academyName = academy.name || academy.academyName || '';
 
       // Find pending financials due within 3 days
       const financialsSnapshot = await db
@@ -598,6 +913,19 @@ exports.scheduledDueSoonReminder = functions.pubsub
             );
             console.log(`Sent due soon reminder to user ${userId} for financial ${financialDoc.id}`);
           }
+
+          // S7: additionally send the autonomous WhatsApp + PIX courtesy
+          // reminder for the due-today/due-soon stage ('D+0'). Sent even when
+          // there is no linked app user (recipient is the student's phone).
+          // INERT until WHATSAPP_API_KEY is set (gate in sendWhatsAppServer).
+          await sendBillingReminderWhatsApp(
+            academyId,
+            academyName,
+            billingSettings,
+            { ...financial, id: financialDoc.id },
+            'D+0',
+            0
+          );
         }
       }
     }
