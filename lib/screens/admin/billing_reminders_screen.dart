@@ -661,27 +661,63 @@ class _AdminBillingRemindersScreenState
   // ============================================
   // Send Dialog (individual)
   // ============================================
-  void _showSendDialog({
+  Future<void> _showSendDialog({
     required String mode,
     required Map<String, dynamic> financialItem,
     required BillingStage stage,
     required StudentContact contact,
-  }) {
+  }) async {
+    if (_notificationService == null) return;
+
     final studentName = financialItem['studentName'] as String? ?? '';
     final amount = (financialItem['amount'] as num?)?.toDouble() ?? 0;
     final dueDate = financialItem['dueDate'] as DateTime;
     final daysOverdue = financialItem['daysOverdue'] as int? ?? 0;
+    final financialId = financialItem['id'] as String? ?? '';
+    final studentId = financialItem['studentId'] as String? ?? '';
+    final status = financialItem['status'] as String? ?? '';
 
     String message;
     String subject = '';
 
     if (mode == 'whatsapp') {
+      // PIX gate: only attach a payment link when the setting is on, the
+      // charge is NOT already paid, and we are sending via WhatsApp.
+      final pixGate =
+          (_notificationSettings?.includePaymentLink ?? false) &&
+          status != 'paid';
+
+      String? pixCode;
+      String? ticketUrl;
+      if (pixGate) {
+        final pix = await _notificationService!.ensureValidPixForFinancial(
+          academyId: FirebaseService.academyId,
+          financialId: financialId,
+          amount: amount,
+          studentId: studentId,
+          studentName: studentName,
+          payerCpf: contact.effectiveCpf,
+        );
+        if (pix.pixCode.isNotEmpty) {
+          pixCode = pix.pixCode;
+          ticketUrl = pix.ticketUrl;
+        } else if (mounted) {
+          // MP off / no PIX / error: send without link, but let the admin know.
+          FeedbackUtils.showInfo(
+            context,
+            'PIX indisponivel — enviando sem link de pagamento',
+          );
+        }
+      }
+
       message = _notificationService!.generateWhatsAppMessage(
         stage: stage,
         studentName: studentName,
         amount: amount,
         dueDate: dueDate,
         daysOverdue: daysOverdue,
+        pixCode: pixCode,
+        ticketUrl: ticketUrl,
       );
     } else {
       final content = _notificationService!.generateEmailContent(
@@ -694,6 +730,8 @@ class _AdminBillingRemindersScreenState
       subject = content.subject;
       message = content.message;
     }
+
+    if (!mounted) return;
 
     final messageController = TextEditingController(text: message);
     final subjectController = TextEditingController(text: subject);
@@ -1232,6 +1270,58 @@ class _AdminBillingRemindersScreenState
       int emSent = 0, emFailed = 0, emTotal = 0;
       final failures = <BulkFailure>[];
 
+      // ---- PIX pre-generation (bounded concurrency) ----
+      // For every WhatsApp-eligible, unpaid item (when the setting is on) we
+      // generate a PIX up front, with at most 5 concurrent CF calls. Results
+      // are keyed by financialId; a missing/empty entry => send without PIX.
+      final pixByFinancialId = <String, ({String pixCode, String ticketUrl})>{};
+      final includePix = _notificationSettings?.includePaymentLink ?? false;
+      final whatsappOn = _notificationSettings?.whatsappEnabled ?? false;
+
+      if (includePix && whatsappOn) {
+        final eligible = items.where((item) {
+          final studentId = item['studentId'] as String? ?? '';
+          final contact = _studentContacts[studentId];
+          final phone = contact?.effectivePhone;
+          final status = item['status'] as String? ?? '';
+          return contact != null &&
+              phone != null &&
+              phone.isNotEmpty &&
+              status != 'paid';
+        }).toList();
+
+        const concurrency = 5;
+        for (var i = 0; i < eligible.length; i += concurrency) {
+          final chunk = eligible.sublist(
+            i,
+            (i + concurrency) > eligible.length
+                ? eligible.length
+                : i + concurrency,
+          );
+          final results = await Future.wait(
+            chunk.map((item) async {
+              final financialId = item['id'] as String? ?? '';
+              final studentId = item['studentId'] as String? ?? '';
+              final contact = _studentContacts[studentId];
+              final pix = await _notificationService!.ensureValidPixForFinancial(
+                academyId: FirebaseService.academyId,
+                financialId: financialId,
+                amount: (item['amount'] as num?)?.toDouble() ?? 0,
+                studentId: studentId,
+                studentName: item['studentName'] as String? ?? '',
+                payerCpf: contact?.effectiveCpf,
+              );
+              return MapEntry(financialId, pix);
+            }),
+          );
+          for (final entry in results) {
+            if (entry.value.pixCode.isNotEmpty) {
+              pixByFinancialId[entry.key] = entry.value;
+            }
+          }
+        }
+      }
+
       for (final item in items) {
         final studentId = item['studentId'] as String? ?? '';
         final contact = _studentContacts[studentId];
@@ -1243,6 +1333,7 @@ class _AdminBillingRemindersScreenState
         final daysOverdue = item['daysOverdue'] as int? ?? 0;
         final financialId = item['id'] as String? ?? '';
 
+        // Email + base message: no PIX block (markers auto-strip).
         final personalizedMessage = _notificationService!.applyMessageTemplate(
           messageTemplate,
           studentName,
@@ -1256,6 +1347,19 @@ class _AdminBillingRemindersScreenState
           amount,
           dueDate,
           daysOverdue,
+        );
+
+        // WhatsApp message: inject the pre-generated PIX (if any) for this
+        // financial. When absent, the [[PIX]] block strips to a clean message.
+        final pix = pixByFinancialId[financialId];
+        final whatsAppMessage = _notificationService!.applyMessageTemplate(
+          messageTemplate,
+          studentName,
+          amount,
+          dueDate,
+          daysOverdue,
+          pixCode: pix?.pixCode,
+          ticketUrl: pix?.ticketUrl,
         );
 
         // Send WhatsApp (only if enabled in settings)
@@ -1273,7 +1377,7 @@ class _AdminBillingRemindersScreenState
             dueDate: dueDate,
             daysOverdue: daysOverdue,
             stage: stage,
-            message: personalizedMessage,
+            message: whatsAppMessage,
           );
           if (result.success) {
             waSent++;
