@@ -70,6 +70,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _storePublished = false;
   bool _storeCreditCardEnabled = false;
   bool _studentCheckinEnabled = false;
+  bool _journalVisibleToStudents = true;
 
   // Musculação check-in (schedule-less)
   String _musculacaoCheckinMode = 'manual'; // 'manual' | 'qr' | 'button'
@@ -158,6 +159,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _storePublished,
       _storeCreditCardEnabled,
       _studentCheckinEnabled,
+      _journalVisibleToStudents,
       _musculacaoCheckinMode,
       hours,
       _muaythaiGradeSystem,
@@ -230,6 +232,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _storePublished = settings.storePublished;
           _storeCreditCardEnabled = settings.storeCreditCardEnabled;
           _studentCheckinEnabled = settings.studentCheckinEnabled;
+          _journalVisibleToStudents = settings.journalVisibleToStudents;
           _musculacaoCheckinMode = settings.musculacaoCheckinMode;
           _operatingHours
             ..clear()
@@ -321,6 +324,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         service.toggleAbacatePay(_abacatePayEnabled),
         service.toggleAsaas(_asaasEnabled),
         service.toggleStudentCheckin(_studentCheckinEnabled),
+        service.updateJournalVisibility(_journalVisibleToStudents),
         service.updateMusculacaoCheckin(
           mode: _musculacaoCheckinMode,
           operatingHours: OperatingHours(Map.of(_operatingHours)),
@@ -1615,6 +1619,34 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                   ),
                 ],
               ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Jornal da Academia (student-facing feed visibility)
+          _SettingsCard(
+            title: 'Jornal da Academia',
+            icon: LucideIcons.newspaper,
+            child: _ModernSwitch(
+              title: 'Mostrar Jornal da Academia para alunos',
+              subtitle:
+                  'Controla o feed de noticias, seminarios e novidades exibido no portal do aluno',
+              value: _journalVisibleToStudents,
+              onChanged: (value) async {
+                setState(() => _journalVisibleToStudents = value);
+                final service = SettingsService(FirebaseService.academyId);
+                await service.updateJournalVisibility(value);
+                if (!mounted) return;
+                ref.invalidate(academySettingsProvider);
+                setState(() {
+                  _savedSnapshot = _snapshot();
+                  _lastDirty = false;
+                });
+                context.showSuccess('Configuracoes salvas!');
+              },
+              icon: LucideIcons.newspaper,
+              iconColor: AppTheme.primary,
             ),
           ),
 

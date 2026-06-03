@@ -17,13 +17,23 @@ class JornalScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final postsAsync = ref.watch(journalEventsProvider);
+    // Defense in depth: even reachable via deep link / stale nav, the feed
+    // stays hidden when the academy disabled student visibility. Loading/null
+    // resolves to true so the feed shows by default for legacy academies.
+    final journalVisible = ref.watch(
+      academySettingsProvider.select(
+        (s) => s.valueOrNull?.journalVisibleToStudents ?? true,
+      ),
+    );
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('Jornal da Academia'),
       ),
-      body: RefreshIndicator(
+      body: !journalVisible
+          ? const _JornalUnavailableState()
+          : RefreshIndicator(
         onRefresh: () async => ref.invalidate(journalEventsProvider),
         child: postsAsync.when(
           data: (posts) {
@@ -233,6 +243,37 @@ class _JornalEmptyState extends StatelessWidget {
             SizedBox(height: 16),
             Text(
               'Nenhuma postagem ainda',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown when the academy turned off the student-facing Jornal. Guards against
+/// deep links or stale navigation reaching a feed that should be hidden.
+class _JornalUnavailableState extends StatelessWidget {
+  const _JornalUnavailableState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Icon(LucideIcons.newspaper, size: 48, color: AppTheme.textDisabled),
+            SizedBox(height: 16),
+            Text(
+              'O Jornal não está disponível no momento.',
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,

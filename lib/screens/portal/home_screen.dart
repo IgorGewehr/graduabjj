@@ -582,6 +582,13 @@ class _DynamicCardsSection extends ConsumerWidget {
         false;
     final showMusculacaoCheckin = practicesMusculacao &&
         (musculacaoMode == 'button' || musculacaoMode == 'qr');
+    // Jornal headline visibility — admins can hide the student feed. Loading/null
+    // resolves to true so legacy academies never flicker the tile hidden.
+    final journalVisible = ref.watch(
+      academySettingsProvider.select(
+        (s) => s.valueOrNull?.journalVisibleToStudents ?? true,
+      ),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -709,8 +716,9 @@ class _DynamicCardsSection extends ConsumerWidget {
           ),
         ),
 
-        // Jornal da Academia — minimalist headline (news/seminars live here)
-        const _JornalHeadline(),
+        // Jornal da Academia — minimalist headline (news/seminars live here).
+        // Hidden when the academy turned off student visibility.
+        if (journalVisible) const _JornalHeadline(),
 
         // Upcoming Events (calendar-focused: only postType==event)
         _EventsSection(onTap: onTap),

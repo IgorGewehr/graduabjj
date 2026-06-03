@@ -184,6 +184,11 @@ class AcademySettings {
   // Student Check-in Settings
   final bool studentCheckinEnabled;
 
+  /// Whether the student-facing "Jornal da Academia" feed is shown. When false,
+  /// the home headline tile is hidden and the JornalScreen renders an
+  /// unavailable state. Defaults to true for new and legacy academies.
+  final bool journalVisibleToStudents;
+
   // Musculação (schedule-less) check-in.
   /// 'manual' → staff records presence (works with current rules, no Cloud
   /// Function); 'qr' → student scans a fixed QR; 'button' → student taps a
@@ -243,6 +248,7 @@ class AcademySettings {
     this.storeWelcomeMessage,
     this.storeMinOrderAmount,
     this.studentCheckinEnabled = false,
+    this.journalVisibleToStudents = true,
     this.musculacaoCheckinMode = 'manual',
     this.operatingHours = OperatingHours.empty,
     this.muaythaiGradeSystem = 'cbmt',
@@ -311,6 +317,7 @@ class AcademySettings {
       storeWelcomeMessage: data['storeWelcomeMessage'],
       storeMinOrderAmount: data['storeMinOrderAmount']?.toDouble(),
       studentCheckinEnabled: data['studentCheckinEnabled'] ?? false,
+      journalVisibleToStudents: data['journalVisibleToStudents'] ?? true,
       musculacaoCheckinMode:
           (data['musculacaoCheckinMode'] as String?) ?? 'manual',
       operatingHours: OperatingHours.fromMap(
@@ -605,6 +612,16 @@ class SettingsService {
       'studentCheckinEnabled': enabled,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  // ============================================
+  // Toggle Jornal Visibility for Students
+  // ============================================
+  Future<void> updateJournalVisibility(bool value) async {
+    await _academyRef.set({
+      'journalVisibleToStudents': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   // ============================================
