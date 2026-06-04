@@ -2398,12 +2398,26 @@ async function assertCanPayFor(request, academyId, studentId) {
 
 /** Maps an MP error to a friendly message — notably the seller-has-no-PIX-key case. */
 function mapMpPixError(e) {
+  // Log the RAW Mercado Pago rejection so production failures are diagnosable —
+  // the user only ever sees the mapped, friendly message below.
+  console.error('[createMpPix] MP rejeitou a cobranca PIX:',
+    'status=', e && e.status,
+    'data=', e && e.data ? JSON.stringify(e.data) : (e && e.message));
   const text = `${e && e.data ? JSON.stringify(e.data) : ''} ${e && e.message ? e.message : ''}`
     .toLowerCase();
   if (text.includes('without key enabled for qr') || text.includes('qr render')) {
     return new HttpsError('failed-precondition',
       'A conta Mercado Pago da academia ainda nao tem uma chave PIX habilitada. ' +
       'Ative o PIX no app do Mercado Pago e tente novamente.');
+  }
+  if (text.includes('email')) {
+    return new HttpsError('failed-precondition',
+      'E-mail do pagador invalido para o Mercado Pago. Verifique o e-mail da sua conta.');
+  }
+  if (text.includes('identification') || text.includes('cpf') ||
+      text.includes('payer')) {
+    return new HttpsError('failed-precondition',
+      'Dados do pagador invalidos (CPF/e-mail). Confira seu CPF e tente novamente.');
   }
   return new HttpsError('internal', 'Falha ao gerar a cobranca PIX.');
 }
@@ -2460,7 +2474,9 @@ async function createMpPix({ academyId, transactionAmount, description, external
         notification_url: `${mpMktWebhookUrl()}?acad=${encodeURIComponent(academyId)}`,
         application_fee: 0,
         payer: {
-          email: (payer && payer.email) || 'sememail@bjjeasy.com.br',
+          // Never send a fake placeholder domain — Mercado Pago rejects it.
+          // A real email is enforced by the callers (createMpPixPayment).
+          email: (payer && payer.email) || undefined,
           first_name: nameParts[0] || undefined,
           last_name: nameParts.length > 1 ? nameParts.slice(1).join(' ') : undefined,
           identification: cpf.length >= 11 ? { type: 'CPF', number: cpf } : undefined,
@@ -2529,12 +2545,34 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
     };
   }
 
+  // PIX requires a valid payer CPF (Brazilian regulation) AND a real e-mail.
+  // Mirror the marketplace reference: fail fast with a clear message instead of
+  // letting Mercado Pago reject an incomplete payer (which surfaced to students
+  // as a generic "falha na cobranca PIX").
+  const cpfDigits = String(payerCpf || '').replace(/\D/g, '');
+  if (cpfDigits.length < 11) {
+    throw new HttpsError('failed-precondition',
+      'Para pagar via PIX e necessario um CPF valido. Informe seu CPF e tente novamente.');
+  }
+  let resolvedEmail = String(payerEmail || '').trim();
+  if (!resolvedEmail || !resolvedEmail.includes('@') ||
+      resolvedEmail.endsWith('@bjjeasy.com.br')) {
+    try {
+      const authUser = await admin.auth().getUser(request.auth.uid);
+      resolvedEmail = (authUser.email || '').trim();
+    } catch (_) { /* keep whatever we had */ }
+  }
+  if (!resolvedEmail || !resolvedEmail.includes('@')) {
+    throw new HttpsError('failed-precondition',
+      'E necessario um e-mail valido na sua conta para gerar a cobranca PIX.');
+  }
+
   const pix = await createMpPix({
     academyId,
     transactionAmount: Number(fin.amount) || 0, // server-derived REAIS
     description: sanitizeString(description) || 'Mensalidade',
     externalReference: `${academyId}:fin:${financialId}`,
-    payer: { email: payerEmail, cpf: payerCpf, name: studentName },
+    payer: { email: resolvedEmail, cpf: cpfDigits, name: studentName },
   });
 
   const expiresAt = admin.firestore.Timestamp.fromDate(pix.expiresAt);
