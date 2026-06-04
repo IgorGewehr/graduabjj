@@ -59,14 +59,15 @@
       (leaderboard por turma, semanal/mensal) entregue na branch `cobranca-pix-whatsapp`
       (já mergeada na nossa). **Faltam**: streaks, metas de frequência mensal, badges.
       _(todas)_
-- [ ] **A5. Biblioteca de exercícios com vídeo demonstrativo** — catálogo curado
-      que o montador de planilha seleciona; cada exercício linka vídeo/GIF.
-      Reaproveita a infra de vídeo. _(todas — alimenta condicionamento de qualquer arte
-      e o treino de musculação)_
-- [ ] **A6. Registro de execução de treino + progressão/PR** — aluno marca
-      séries/carga feitas, histórico, recorde automático, gráficos. Hoje o app
-      entrega o plano mas não registra execução. _(musculação + condicionamento de
-      qualquer modalidade)_
+- [x] **A5. Biblioteca de exercícios com vídeo demonstrativo** ✅ — catálogo
+      `exercises` por academia (grupo muscular/equipamento/vídeo) + seed; **picker
+      no montador** (linka `exerciseId`, mantém texto livre); **"Ver demonstração"**
+      no portal. Ver `docs/plano-treino-execucao.md`.
+- [x] **A6. Registro de execução de treino + progressão/PR** ✅ — aluno registra
+      **séries (reps + carga + RPE)** por exercício (`workoutExecutions`, upsert
+      idempotente/dia); **progresso por exercício** com PR (carga + 1RM Epley),
+      **gráfico fl_chart** e histórico; **celebração de novo PR**. _Pendente: teste
+      manual + merge p/ produção._
 
 ---
 
@@ -149,11 +150,11 @@
 
 1. ~~**A3 — Avaliação física/antropometria** (+ F1 storage.rules)~~ ✅ **FEITO**
    (5 fases; falta teste manual + merge). Também fechou D1 e E3.
-2. **A6 + A5 — Registro de treino + biblioteca de exercícios** → engajamento diário
-   (musculação e condicionamento). **← PRÓXIMO sugerido.**
-3. **B1→B4 — Currículo + requisitos de graduação** → transforma a graduação de
-   "só presença" em pedagógica; beneficia 6 modalidades de uma vez.
+2. ~~**A6 + A5 — Registro de treino + biblioteca de exercícios**~~ ✅ **FEITO**
+   (6 fases; falta teste manual + merge). 1RM Epley cobre parte de E2.
+3. ~~**B1→B4 — Currículo + requisitos de graduação**~~ ✅ **FEITO** (6 fases).
 4. **A1 — Reserva de aula com vaga/waitlist** → operação (turmas lotando).
+   **← PRÓXIMO sugerido.**
 5. **A2 + F2 — Push real** → retenção (lembretes).
 6. **C1→C3 — Sparring/rounds/cartel** → diferenciador para trocação.
 7. **A4 — Gamificação** → camada de engajamento sobre o resto.

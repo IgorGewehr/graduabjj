@@ -31,6 +31,9 @@ class WorkoutExercise {
   final String? load;
   final String? rest;
   final String? notes;
+  /// Vínculo opcional com o catálogo (A5). Null = exercício de texto livre
+  /// (legado). Quando presente, habilita vídeo de demonstração + agregação de PR.
+  final String? exerciseId;
 
   const WorkoutExercise({
     required this.name,
@@ -39,6 +42,7 @@ class WorkoutExercise {
     this.load,
     this.rest,
     this.notes,
+    this.exerciseId,
   });
 
   factory WorkoutExercise.fromMap(Map<String, dynamic> m) => WorkoutExercise(
@@ -48,6 +52,7 @@ class WorkoutExercise {
         load: m['load'] as String?,
         rest: m['rest'] as String?,
         notes: m['notes'] as String?,
+        exerciseId: m['exerciseId'] as String?,
       );
 
   Map<String, dynamic> toMap() => {
@@ -57,6 +62,8 @@ class WorkoutExercise {
         if (load != null && load!.isNotEmpty) 'load': load,
         if (rest != null && rest!.isNotEmpty) 'rest': rest,
         if (notes != null && notes!.isNotEmpty) 'notes': notes,
+        if (exerciseId != null && exerciseId!.isNotEmpty)
+          'exerciseId': exerciseId,
       };
 
   WorkoutExercise copyWith({
@@ -66,6 +73,7 @@ class WorkoutExercise {
     String? load,
     String? rest,
     String? notes,
+    String? exerciseId,
   }) =>
       WorkoutExercise(
         name: name ?? this.name,
@@ -74,6 +82,7 @@ class WorkoutExercise {
         load: load ?? this.load,
         rest: rest ?? this.rest,
         notes: notes ?? this.notes,
+        exerciseId: exerciseId ?? this.exerciseId,
       );
 }
 

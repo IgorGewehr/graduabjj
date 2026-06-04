@@ -865,6 +865,28 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Catalogo de exercicios (A5) — staff escreve; qualquer membro le.
+      // Nao e sensivel.
+      // ============================================
+      match /exercises/{exerciseId} {
+        allow read: if belongsToAcademy(academyId);
+        allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
+      // Registro de execucao de treino (A6) — o aluno escreve/le os seus;
+      // staff le (acompanhar). Espelha workoutLogs.
+      // ============================================
+      match /workoutExecutions/{execId} {
+        allow read: if isAcademyStaff(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow create: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, request.resource.data.studentId);
+        allow update, delete: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, resource.data.studentId);
+      }
+
+      // ============================================
       // Notifications
       // ============================================
       match /notifications/{notificationId} {

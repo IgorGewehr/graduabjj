@@ -103,7 +103,7 @@ class NotificationDispatcher {
       priority: NotificationPriority.normal,
       title: 'Aula Disponível',
       message: 'O check-in para $className está aberto! Aula às $timeFormat.',
-      actionUrl: '/portal/presenca',
+      actionUrl: '/portal/presencas',
       actionLabel: 'Fazer check-in',
       expiresInDays: 1,
     );
@@ -122,7 +122,7 @@ class NotificationDispatcher {
       priority: NotificationPriority.high,
       title: 'Pronto para Graduação!',
       message: 'Você atingiu $attendanceCount presenças e está elegível para graduação!',
-      actionUrl: '/portal/presenca',
+      actionUrl: '/portal/presencas',
       actionLabel: 'Ver progresso',
       studentId: studentId,
       expiresInDays: 30,
