@@ -35,28 +35,12 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
 
     // Students must be linked to a student record to see their orders.
     if (studentId == null) {
-      return Scaffold(
+      return const Scaffold(
         backgroundColor: AppTheme.background,
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  LucideIcons.alertCircle,
-                  size: 48,
-                  color: AppTheme.textSecondary,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Voce precisa estar vinculado a um aluno',
-                  style: AppTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
+        body: PolishedEmptyState(
+          icon: LucideIcons.userX,
+          title: 'Conta nao vinculada',
+          subtitle: 'Voce precisa estar vinculado a um aluno para ver pedidos.',
         ),
       );
     }
@@ -148,9 +132,11 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
-                    (context, index) => const Padding(
-                      padding: EdgeInsets.only(bottom: 12),
-                      child: _OrderCardSkeleton(),
+                    (context, index) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: PolishSkeleton.shimmer(
+                        child: const _OrderCardSkeleton(),
+                      ),
                     ),
                     childCount: 3,
                   ),
@@ -158,28 +144,16 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
               ),
               error: (error, _) => SliverFillRemaining(
                 hasScrollBody: false,
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        LucideIcons.alertCircle,
-                        size: 48,
-                        color: AppTheme.error,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Erro ao carregar pedidos',
-                        style: AppTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: () =>
-                            ref.invalidate(studentOrdersProvider(studentId)),
-                        child: const Text('Tentar novamente'),
-                      ),
-                    ],
-                  ),
+                child: PolishedEmptyState(
+                  icon: LucideIcons.alertCircle,
+                  title: 'Erro ao carregar pedidos',
+                  subtitle: 'Verifique sua conexao e tente novamente.',
+                  accent: AppTheme.error,
+                  actionLabel: 'Tentar novamente',
+                  onAction: () {
+                    HapticFeedback.lightImpact();
+                    ref.invalidate(studentOrdersProvider(studentId));
+                  },
                 ),
               ),
             ),
@@ -269,26 +243,24 @@ class _OrderCard extends StatelessWidget {
     return Pressable(
       onTap: onTap,
       child: Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isNew ? statusColor.withValues(alpha: 0.5) : AppTheme.divider,
-          width: isNew ? 1.5 : 1,
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color:
+                isNew ? statusColor.withValues(alpha: 0.5) : AppTheme.divider,
+            width: isNew ? 1.5 : 1,
+          ),
+          boxShadow: isNew
+              ? [
+                  BoxShadow(
+                    color: statusColor.withValues(alpha: 0.12),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
+              : null,
         ),
-        boxShadow: isNew
-            ? [
-                BoxShadow(
-                  color: statusColor.withValues(alpha: 0.12),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ]
-            : null,
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -397,7 +369,6 @@ class _OrderCard extends StatelessWidget {
             ],
           ),
         ),
-      ),
       ),
     );
   }

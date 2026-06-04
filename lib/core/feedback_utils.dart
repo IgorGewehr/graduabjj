@@ -231,6 +231,65 @@ class FeedbackUtils {
       icon: LucideIcons.trash2,
     );
   }
+
+  // ── Haptics ──────────────────────────────────────────────────────────────
+  // Thin, named wrappers so call sites express *intent* (tap/select/success/
+  // failure) instead of guessing an impact strength. Keeps the tactile
+  // vocabulary consistent app-wide.
+
+  /// A light tick — taps on cards/tiles and minor toggles.
+  static void tapHaptic() => HapticFeedback.lightImpact();
+
+  /// A selection tick — choosing an option/segment.
+  static void selectHaptic() => HapticFeedback.selectionClick();
+
+  /// A firm thud — a genuine success (payment confirmed, graduation).
+  static void successHaptic() => HapticFeedback.heavyImpact();
+
+  /// A medium bump — a recoverable failure/validation error.
+  static void errorHaptic() => HapticFeedback.mediumImpact();
+
+  /// Runs an async [action] with standardized feedback: an optional haptic on
+  /// success, a success SnackBar (when [successMessage] is set) and an error
+  /// SnackBar derived from [errorMessage] on throw. Returns the action's result,
+  /// or null when it threw.
+  ///
+  /// This is the single place that wires "do the thing → tell the user how it
+  /// went" so screens stop hand-rolling try/catch + snackbar boilerplate. It is
+  /// purely a feedback wrapper — it never swallows side effects, only reports
+  /// the outcome, and rethrows nothing (callers branch on the null result).
+  ///
+  /// [context] is re-checked for mountedness via [context.mounted] before any
+  /// SnackBar, so it is safe to await across an async gap.
+  ///
+  /// Usage:
+  /// ```dart
+  /// final ok = await FeedbackUtils.runWithFeedback(
+  ///   context,
+  ///   action: () => repo.save(item),
+  ///   successMessage: 'Salvo!',
+  ///   errorMessage: 'Nao foi possivel salvar.',
+  /// );
+  /// ```
+  static Future<T?> runWithFeedback<T>(
+    BuildContext context, {
+    required Future<T> Function() action,
+    String? successMessage,
+    String errorMessage = 'Algo deu errado. Tente novamente.',
+    bool successHapticFeedback = true,
+  }) async {
+    try {
+      final result = await action();
+      if (context.mounted) {
+        if (successHapticFeedback) successHaptic();
+        if (successMessage != null) showSuccess(context, successMessage);
+      }
+      return result;
+    } catch (_) {
+      if (context.mounted) showError(context, errorMessage);
+      return null;
+    }
+  }
 }
 
 /// Extension for easy access from BuildContext

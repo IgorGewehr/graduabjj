@@ -376,13 +376,30 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppTheme.divider),
       ),
-      child: Center(
-        child: Text(
-          message,
-          style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-        ),
+      child: Column(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              LucideIcons.calendarClock,
+              size: 26,
+              color: AppTheme.primary,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+          ),
+        ],
       ),
-    );
+    ).fadeInQuick();
   }
 }
 

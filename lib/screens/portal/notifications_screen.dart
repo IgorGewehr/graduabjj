@@ -103,19 +103,16 @@ class NotificationsScreen extends ConsumerWidget {
       ),
       body: notificationsAsync.when(
         loading: () => PolishSkeleton.list(count: 6),
-        error: (error, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                LucideIcons.alertCircle,
-                size: 48,
-                color: AppTheme.textSecondary,
-              ),
-              const SizedBox(height: 12),
-              Text('Erro ao carregar notificacoes', style: AppTheme.bodyMedium),
-            ],
-          ),
+        error: (error, _) => PolishedEmptyState(
+          icon: LucideIcons.alertCircle,
+          title: 'Erro ao carregar notificacoes',
+          subtitle: 'Verifique sua conexao e tente novamente.',
+          accent: AppTheme.error,
+          actionLabel: 'Tentar novamente',
+          onAction: () {
+            HapticFeedback.lightImpact();
+            ref.invalidate(userNotificationsProvider);
+          },
         ),
         data: (notifications) {
           if (notifications.isEmpty) {
@@ -129,16 +126,23 @@ class NotificationsScreen extends ConsumerWidget {
           // Wrap the whole list in an AnimatedSwitcher keyed by the unread
           // count so a "marcar todas lidas" change cross-fades the row
           // styles instead of repainting them in place.
-          return AnimatedSwitcher(
-            duration: const Duration(milliseconds: 250),
-            child: _NotificationListBody(
-              key: ValueKey(
-                'notifications-${notifications.length}-${notifications.where((n) => !n.read).length}',
+          return RefreshIndicator(
+            color: AppTheme.primary,
+            onRefresh: () async {
+              HapticFeedback.mediumImpact();
+              ref.invalidate(userNotificationsProvider);
+            },
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 250),
+              child: _NotificationListBody(
+                key: ValueKey(
+                  'notifications-${notifications.length}-${notifications.where((n) => !n.read).length}',
+                ),
+                notifications: notifications,
+                notificationService: notificationService,
+                getIconForType: _getIconForType,
+                getColorForPriority: _getColorForPriority,
               ),
-              notifications: notifications,
-              notificationService: notificationService,
-              getIconForType: _getIconForType,
-              getColorForPriority: _getColorForPriority,
             ),
           );
         },
@@ -167,6 +171,7 @@ class _NotificationListBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: notifications.length,
       separatorBuilder: (_, __) => const Divider(height: 1, indent: 68),

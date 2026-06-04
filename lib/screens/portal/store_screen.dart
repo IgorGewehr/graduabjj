@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
@@ -27,6 +28,7 @@ class PortalStoreScreen extends ConsumerStatefulWidget {
 class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
   String _searchQuery = '';
   StoreProductCategory? _categoryFilter;
+  final TextEditingController _searchController = TextEditingController();
 
   /// 300ms debounce timer for the product search input. Without this, every
   /// keystroke triggered a full sliver rebuild + filter pass — typing "joao"
@@ -37,7 +39,15 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
   @override
   void dispose() {
     _searchDebounce?.cancel();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  void _clearSearch() {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    FeedbackUtils.tapHaptic();
+    setState(() => _searchQuery = '');
   }
 
   void _onSearchChanged(String value) {
@@ -154,9 +164,17 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: TextField(
+                  controller: _searchController,
                   decoration: InputDecoration(
                     hintText: 'Buscar produtos...',
                     prefixIcon: const Icon(LucideIcons.search, size: 20),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(LucideIcons.x, size: 18),
+                            onPressed: _clearSearch,
+                            tooltip: 'Limpar',
+                          )
+                        : null,
                     filled: true,
                     fillColor: AppTheme.surface,
                     border: OutlineInputBorder(
@@ -232,13 +250,21 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
                 }
 
                 if (filtered.isEmpty) {
+                  final isSearching = _searchQuery.isNotEmpty;
                   return SliverFillRemaining(
                     hasScrollBody: false,
                     child: PolishedEmptyState(
-                      icon: LucideIcons.package,
-                      title: _searchQuery.isNotEmpty
+                      icon: isSearching
+                          ? LucideIcons.searchX
+                          : LucideIcons.package,
+                      title: isSearching
                           ? 'Nenhum produto encontrado'
                           : 'Nenhum produto disponivel',
+                      subtitle: isSearching
+                          ? 'Tente outro termo de busca.'
+                          : 'Novos produtos aparecerao aqui em breve.',
+                      actionLabel: isSearching ? 'Limpar busca' : null,
+                      onAction: isSearching ? _clearSearch : null,
                     ),
                   );
                 }
@@ -272,27 +298,16 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
               ),
               error: (error, _) => SliverFillRemaining(
                 hasScrollBody: false,
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        LucideIcons.alertCircle,
-                        size: 48,
-                        color: AppTheme.error,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Erro ao carregar produtos',
-                        style: AppTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: () => ref.invalidate(activeProductsProvider),
-                        child: const Text('Tentar novamente'),
-                      ),
-                    ],
-                  ),
+                child: PolishedEmptyState(
+                  icon: LucideIcons.alertCircle,
+                  title: 'Erro ao carregar produtos',
+                  subtitle: 'Verifique sua conexao e tente novamente.',
+                  accent: AppTheme.error,
+                  actionLabel: 'Tentar novamente',
+                  onAction: () {
+                    FeedbackUtils.tapHaptic();
+                    ref.invalidate(activeProductsProvider);
+                  },
                 ),
               ),
             ),
@@ -343,11 +358,25 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
           HapticFeedback.mediumImpact();
           ref.read(cartProvider.notifier).addItem(item);
           Navigator.pop(sheetContext);
+          scaffoldMessenger.hideCurrentSnackBar();
           scaffoldMessenger.showSnackBar(
             SnackBar(
-              content: const Text('Produto adicionado ao carrinho'),
+              content: const Row(
+                children: [
+                  Icon(LucideIcons.checkCircle, color: Colors.white, size: 20),
+                  SizedBox(width: 12),
+                  Expanded(child: Text('Produto adicionado ao carrinho')),
+                ],
+              ),
+              backgroundColor: AppTheme.success,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              margin: const EdgeInsets.all(16),
               action: SnackBarAction(
                 label: 'Ver Carrinho',
+                textColor: Colors.white,
                 onPressed: () => parentContext.push('/portal/loja/carrinho'),
               ),
             ),
@@ -372,9 +401,15 @@ class _FilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
+    return Pressable(
+      onTap: () {
+        FeedbackUtils.selectHaptic();
+        onTap();
+      },
+      haptic: false,
+      child: AnimatedContainer(
+        duration: PolishMotion.fast,
+        curve: PolishMotion.transition,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected ? AppTheme.primary : AppTheme.surface,
@@ -411,14 +446,12 @@ class _ProductCard extends StatelessWidget {
     return Pressable(
       onTap: isOutOfStock ? null : onTap,
       child: Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: InkWell(
-        onTap: isOutOfStock ? null : onTap,
-        borderRadius: BorderRadius.circular(16),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.divider),
+        ),
+        clipBehavior: Clip.antiAlias,
         child: Opacity(
           opacity: isOutOfStock ? 0.6 : 1.0,
           child: Column(
@@ -527,7 +560,6 @@ class _ProductCard extends StatelessWidget {
             ],
           ),
         ),
-      ),
       ),
     );
   }

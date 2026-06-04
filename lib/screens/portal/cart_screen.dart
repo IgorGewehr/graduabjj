@@ -59,11 +59,16 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                             ],
                           ),
                         ),
-                        TextButton(
+                        TextButton.icon(
                           onPressed: () {
+                            FeedbackUtils.tapHaptic();
                             cartNotifier.clear();
                           },
-                          child: const Text('Limpar'),
+                          icon: const Icon(LucideIcons.trash2, size: 16),
+                          label: const Text('Limpar'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppTheme.error,
+                          ),
                         ),
                       ],
                     ),
@@ -140,11 +145,24 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              Text(
-                                cartNotifier.formattedTotal,
-                                style: AppTheme.headlineSmall.copyWith(
-                                  color: AppTheme.primary,
-                                  fontWeight: FontWeight.w700,
+                              AnimatedSwitcher(
+                                duration: PolishMotion.fast,
+                                transitionBuilder: (child, animation) =>
+                                    FadeTransition(
+                                  opacity: animation,
+                                  child: ScaleTransition(
+                                    scale: Tween<double>(begin: 0.94, end: 1)
+                                        .animate(animation),
+                                    child: child,
+                                  ),
+                                ),
+                                child: Text(
+                                  cartNotifier.formattedTotal,
+                                  key: ValueKey(cartNotifier.formattedTotal),
+                                  style: AppTheme.headlineSmall.copyWith(
+                                    color: AppTheme.primary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
                             ],

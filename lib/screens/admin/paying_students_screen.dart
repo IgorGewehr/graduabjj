@@ -297,7 +297,10 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                         ? 'Tente ajustar a busca ou os filtros.'
                         : 'Os alunos matriculados em planos aparecerão aqui.',
                   )
-                : ListView.builder(
+                : RefreshIndicator(
+                    onRefresh: _refreshPlans,
+                    child: ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: filtered.length,
                     itemBuilder: (context, index) {
@@ -405,6 +408,7 @@ class _PayingStudentsScreenState extends State<PayingStudentsScreen> {
                         ),
                       ).entrance(index: index);
                     },
+                  ),
                   ),
           ),
         ],

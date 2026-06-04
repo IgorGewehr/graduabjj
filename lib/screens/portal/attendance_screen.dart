@@ -180,12 +180,16 @@ class AttendanceScreen extends ConsumerWidget {
               );
             },
             loading: () => _buildLoadingState(),
-            error: (_, __) => _buildErrorState(),
+            error: (_, __) => _buildErrorState(() {
+              ref.invalidate(studentAttendanceProvider(student.id));
+              ref.invalidate(studentAttendanceCountProvider(student.id));
+            }),
           ),
         );
       },
       loading: () => _buildLoadingState(),
-      error: (_, __) => _buildErrorState(),
+      error: (_, __) =>
+          _buildErrorState(() => ref.invalidate(currentStudentProvider)),
     );
   }
 
@@ -250,11 +254,17 @@ class AttendanceScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildErrorState() {
-    return const PolishedEmptyState(
+  Widget _buildErrorState(VoidCallback onRetry) {
+    return PolishedEmptyState(
       icon: LucideIcons.alertCircle,
       title: 'Erro ao carregar dados',
+      subtitle: 'Verifique sua conexao e tente novamente.',
       accent: AppTheme.error,
+      actionLabel: 'Tentar novamente',
+      onAction: () {
+        HapticFeedback.lightImpact();
+        onRetry();
+      },
     );
   }
 
@@ -543,7 +553,10 @@ class _AcademyIndicator extends ConsumerWidget {
               ),
             ),
             GestureDetector(
-              onTap: () => _showAcademySwitcher(context, ref),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                _showAcademySwitcher(context, ref);
+              },
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(

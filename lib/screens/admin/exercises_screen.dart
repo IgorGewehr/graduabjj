@@ -7,6 +7,7 @@ import '../../core/theme.dart';
 import '../../services/exercise_service.dart';
 import '../../services/firebase_service.dart';
 import '../../widgets/form/input_field.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Admin: catálogo de exercícios da academia (A5). CRUD + seed.
 class ExercisesScreen extends StatefulWidget {
@@ -127,8 +128,8 @@ class _ExercisesScreenState extends State<ExercisesScreen> {
         title: const Text('Catálogo de exercícios'),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _body(),
+          ? PolishSkeleton.list(count: 7, itemHeight: 64)
+          : RefreshIndicator(onRefresh: _load, child: _body()),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
@@ -141,36 +142,28 @@ class _ExercisesScreenState extends State<ExercisesScreen> {
 
   Widget _body() {
     if (_exercises.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(LucideIcons.dumbbell, size: 48, color: AppTheme.textDisabled),
-              const SizedBox(height: 12),
-              Text('Catálogo vazio',
-                  style: AppTheme.bodyMedium
-                      .copyWith(color: AppTheme.textSecondary)),
-              const SizedBox(height: 4),
-              Text('Toque em "Novo exercício" para começar.',
-                  textAlign: TextAlign.center,
-                  style: AppTheme.labelSmall
-                      .copyWith(color: AppTheme.textDisabled)),
-              const SizedBox(height: 20),
-              OutlinedButton.icon(
-                onPressed: _seeding ? null : _seed,
-                icon: _seeding
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(LucideIcons.sparkles, size: 16),
-                label: const Text('Usar catálogo básico de musculação'),
-              ),
-            ],
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(height: MediaQuery.of(context).size.height * 0.12),
+          const PolishedEmptyState(
+            icon: LucideIcons.dumbbell,
+            title: 'Catálogo vazio',
+            subtitle: 'Toque em "Novo exercício" para começar.',
           ),
-        ),
+          Center(
+            child: OutlinedButton.icon(
+              onPressed: _seeding ? null : _seed,
+              icon: _seeding
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(LucideIcons.sparkles, size: 16),
+              label: const Text('Usar catálogo básico de musculação'),
+            ),
+          ),
+        ],
       );
     }
 
@@ -185,7 +178,9 @@ class _ExercisesScreenState extends State<ExercisesScreen> {
       ...byGroup.keys.where((g) => !muscleGroups.containsKey(g)),
     ];
 
+    var rowIndex = 0;
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
         for (final g in orderedGroups) ...[
@@ -195,14 +190,14 @@ class _ExercisesScreenState extends State<ExercisesScreen> {
                 style:
                     AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w700)),
           ),
-          for (final e in byGroup[g]!) _exerciseRow(e),
+          for (final e in byGroup[g]!) _exerciseRow(e, rowIndex++),
           const SizedBox(height: 12),
         ],
       ],
     );
   }
 
-  Widget _exerciseRow(Exercise e) {
+  Widget _exerciseRow(Exercise e, int index) {
     final sub = [
       if (e.equipmentLabel != null) e.equipmentLabel!,
     ].join(' · ');
@@ -237,7 +232,7 @@ class _ExercisesScreenState extends State<ExercisesScreen> {
           onPressed: () => _delete(e),
         ),
       ),
-    );
+    ).entrance(index: index);
   }
 }
 
@@ -393,23 +388,11 @@ class _ExerciseFormSheetState extends State<_ExerciseFormSheet> {
                 keyboardType: TextInputType.url,
               ),
               const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  onPressed: _saving ? null : _save,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: _saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
-                      : const Text('Salvar'),
-                ),
+              PolishButton(
+                label: 'Salvar',
+                icon: LucideIcons.check,
+                isLoading: _saving,
+                onPressed: _saving ? null : _save,
               ),
             ],
           ),

@@ -416,15 +416,12 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  ClipRRect(
+                  AnimatedProgressBar(
+                    value: percentPaid / 100,
+                    color: AppTheme.success,
+                    backgroundColor: Colors.white24,
+                    minHeight: 6,
                     borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: percentPaid / 100,
-                      backgroundColor: Colors.white24,
-                      valueColor:
-                          const AlwaysStoppedAnimation<Color>(AppTheme.success),
-                      minHeight: 6,
-                    ),
                   ),
                 ],
               ),

@@ -481,28 +481,11 @@ class _AdminEventFormScreenState extends ConsumerState<AdminEventFormScreen> {
         bottomNavigationBar: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: SizedBox(
-              height: 52,
-              child: ElevatedButton(
-                onPressed: _saving ? null : _save,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: _saving
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : Text(_isEditing ? 'Salvar alterações' : 'Salvar'),
-              ),
+            child: PolishButton(
+              label: _isEditing ? 'Salvar alterações' : 'Salvar',
+              icon: LucideIcons.check,
+              isLoading: _saving,
+              onPressed: _saving ? null : _save,
             ),
           ),
         ),

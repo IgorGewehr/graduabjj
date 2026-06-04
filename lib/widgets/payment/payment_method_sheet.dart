@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../services/abacate_pay_service.dart' show PaymentLink;
 import '../../services/payment/payment_gateway_resolver.dart';
 import '../payment_sheets.dart';
+import '../polish/polish.dart';
 import 'payment_target.dart';
 
 /// Animated PIX / Cartao method picker, inspired by the marketplace's
@@ -246,8 +247,8 @@ class _PaymentMethodCardState extends State<_PaymentMethodCard> {
       onTapCancel: () => setState(() => _pressed = false),
       onTap: widget.onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
+        duration: PolishMotion.fast,
+        curve: PolishMotion.press,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: highlighted
@@ -264,7 +265,8 @@ class _PaymentMethodCardState extends State<_PaymentMethodCard> {
         child: Row(
           children: [
             AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
+              duration: PolishMotion.fast,
+              curve: PolishMotion.press,
               width: 48,
               height: 48,
               decoration: BoxDecoration(

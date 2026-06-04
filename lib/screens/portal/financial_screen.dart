@@ -412,12 +412,15 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
               );
             },
             loading: () => _buildLoadingState(),
-            error: (_, __) => _buildErrorState(),
+            error: (_, __) => _buildErrorState(
+              () => ref.invalidate(studentPaymentsProvider(student.id)),
+            ),
           ),
         );
       },
       loading: () => _buildLoadingState(),
-      error: (_, __) => _buildErrorState(),
+      error: (_, __) =>
+          _buildErrorState(() => ref.invalidate(currentStudentProvider)),
     );
   }
 
@@ -477,41 +480,17 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
     );
   }
 
-  Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppTheme.errorLight,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(
-                LucideIcons.alertCircle,
-                size: 40,
-                color: AppTheme.error,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Erro ao carregar dados',
-              style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Tente novamente mais tarde.',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
+  Widget _buildErrorState(VoidCallback onRetry) {
+    return PolishedEmptyState(
+      icon: LucideIcons.alertCircle,
+      title: 'Erro ao carregar dados',
+      subtitle: 'Verifique sua conexao e tente novamente.',
+      accent: AppTheme.error,
+      actionLabel: 'Tentar novamente',
+      onAction: () {
+        FeedbackUtils.tapHaptic();
+        onRetry();
+      },
     );
   }
 }

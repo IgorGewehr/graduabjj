@@ -5,10 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/number_format.dart';
 import '../../core/theme.dart';
 import '../../services/firebase_service.dart';
 import '../../services/workout_execution_service.dart';
+import '../../widgets/polish/polish.dart';
 
 /// Portal: progresso de um exercício (A6 fase 4) — PR, gráfico no tempo e
 /// histórico de sessões. Somente leitura.
@@ -73,7 +75,7 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
         title: Text(widget.exerciseName, overflow: TextOverflow.ellipsis),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? _loadingState()
           : _error
               ? _errorState()
               : _history.isEmpty
@@ -82,48 +84,39 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
     );
   }
 
-  Widget _errorState() => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(LucideIcons.alertTriangle,
-                  size: 48, color: AppTheme.textSecondary),
-              const SizedBox(height: 16),
-              Text('Erro ao carregar o progresso',
-                  style: AppTheme.titleMedium, textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: _load,
-                icon: const Icon(LucideIcons.refreshCw, size: 16),
-                label: const Text('Tentar novamente'),
-              ),
-            ],
-          ),
+  Widget _loadingState() => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            PolishSkeleton.stats(count: 2, height: 80),
+            const SizedBox(height: 20),
+            PolishSkeleton.shimmer(
+              child: PolishSkeleton.bar(height: 180, radius: 12),
+            ),
+            const SizedBox(height: 20),
+            PolishSkeleton.list(count: 4, scrollable: false, showAvatar: false),
+          ],
         ),
       );
 
-  Widget _empty() => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(LucideIcons.lineChart, size: 48, color: AppTheme.textSecondary),
-              const SizedBox(height: 16),
-              Text('Sem registros ainda',
-                  style: AppTheme.titleMedium, textAlign: TextAlign.center),
-              const SizedBox(height: 8),
-              Text(
-                  'Registre as séries deste exercício no seu treino para ver a '
-                  'evolução aqui.',
-                  textAlign: TextAlign.center,
-                  style: AppTheme.bodySmall
-                      .copyWith(color: AppTheme.textSecondary)),
-            ],
-          ),
-        ),
+  Widget _errorState() => PolishedEmptyState(
+        icon: LucideIcons.alertTriangle,
+        title: 'Erro ao carregar o progresso',
+        subtitle: 'Verifique sua conexao e tente novamente.',
+        accent: AppTheme.error,
+        actionLabel: 'Tentar novamente',
+        onAction: () {
+          FeedbackUtils.tapHaptic();
+          _load();
+        },
+      );
+
+  Widget _empty() => const PolishedEmptyState(
+        icon: LucideIcons.lineChart,
+        title: 'Sem registros ainda',
+        subtitle: 'Registre as séries deste exercício no seu treino para ver a '
+            'evolução aqui.',
       );
 
   Widget _content() {

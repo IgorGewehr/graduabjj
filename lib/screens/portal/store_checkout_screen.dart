@@ -334,7 +334,7 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
         );
       case StoreCheckoutStep.processing:
       case StoreCheckoutStep.done:
-        return const Center(child: CircularProgressIndicator());
+        return const _ProcessingStep();
     }
   }
 }
@@ -735,6 +735,41 @@ class _PaymentStep extends StatelessWidget {
 }
 
 // ===========================================================================
+// Processing step
+// ===========================================================================
+
+/// Contextual "creating your order" state shown while the order is being placed
+/// — a spinner with a reassuring label instead of a bare, context-free
+/// indicator.
+class _ProcessingStep extends StatelessWidget {
+  const _ProcessingStep();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 28,
+            height: 28,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Criando seu pedido...',
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+          ),
+        ],
+      ).fadeInQuick(),
+    );
+  }
+}
+
+// ===========================================================================
 // Bottom actions
 // ===========================================================================
 
@@ -779,37 +814,15 @@ class _BottomActions extends StatelessWidget {
           ),
         ],
       ),
-      child: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton(
-          onPressed: isLoading ? null : (isPayment ? onConfirm : onNext),
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            backgroundColor: AppTheme.primary,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          child: isLoading
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                )
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(isPayment ? LucideIcons.wallet : LucideIcons.arrowRight,
-                        size: 20),
-                    const SizedBox(width: 8),
-                    Text(label),
-                  ],
-                ),
-        ),
+      child: PolishButton(
+        label: label,
+        icon: isPayment ? LucideIcons.wallet : LucideIcons.arrowRight,
+        isLoading: isLoading,
+        radius: 12,
+        // The press haptic is already fired by the call sites (_confirm /
+        // onNext), so suppress the duplicate tick here.
+        haptic: false,
+        onPressed: isPayment ? onConfirm : onNext,
       ),
     );
   }

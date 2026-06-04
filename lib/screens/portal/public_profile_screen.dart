@@ -78,7 +78,17 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen>
     );
 
     return profileAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 8),
+          PolishSkeleton.header(avatarSize: 64),
+          const SizedBox(height: 16),
+          Expanded(
+            child: PolishSkeleton.list(count: 4, showAvatar: false),
+          ),
+        ],
+      ),
       error: (e, st) => _buildMessage(
         icon: LucideIcons.alertTriangle,
         title: 'Erro ao carregar',

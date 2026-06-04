@@ -759,7 +759,12 @@ class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
                   const SizedBox(height: 12),
                   Expanded(
                     child: _loading
-                        ? const Center(child: CircularProgressIndicator())
+                        ? PolishSkeleton.list(
+                            count: 5,
+                            itemHeight: 56,
+                            scrollable: false,
+                            padding: EdgeInsets.zero,
+                          )
                         : _filtered.isEmpty
                         ? Center(
                             child: Text(

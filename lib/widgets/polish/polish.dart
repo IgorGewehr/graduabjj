@@ -7,10 +7,12 @@
 /// ```
 library;
 
+export '../loading_button.dart';
 export 'animated_count_up.dart';
 export 'animated_progress.dart';
 export 'celebration.dart';
 export 'entrance.dart';
+export 'polish_button.dart';
 export 'polish_card.dart';
 export 'polish_tokens.dart';
 export 'polished_empty_state.dart';

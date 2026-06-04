@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -65,7 +66,11 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
     final rankingAsync = ref.watch(classRankingProvider(key));
 
     return RefreshIndicator(
-      onRefresh: () async => ref.invalidate(classRankingProvider(key)),
+      color: AppTheme.primary,
+      onRefresh: () async {
+        HapticFeedback.mediumImpact();
+        ref.invalidate(classRankingProvider(key));
+      },
       child: rankingAsync.when(
         loading: () => Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -158,7 +163,10 @@ class _RankingHeader extends StatelessWidget {
             ],
             selected: {category},
             showSelectedIcon: false,
-            onSelectionChanged: (set) => onCategoryChanged(set.first),
+            onSelectionChanged: (set) {
+              HapticFeedback.selectionClick();
+              onCategoryChanged(set.first);
+            },
           ),
           const SizedBox(height: 12),
           // Period segmented control
@@ -175,7 +183,10 @@ class _RankingHeader extends StatelessWidget {
             ],
             selected: {period},
             showSelectedIcon: false,
-            onSelectionChanged: (set) => onPeriodChanged(set.first),
+            onSelectionChanged: (set) {
+              HapticFeedback.selectionClick();
+              onPeriodChanged(set.first);
+            },
           ),
         ],
       ),

@@ -27,8 +27,23 @@ class StudentGraduationScreen extends ConsumerWidget {
         false;
 
     return studentAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => _msg(LucideIcons.alertTriangle, 'Erro ao carregar', '$e'),
+      loading: () => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            PolishSkeleton.header(),
+            const SizedBox(height: 16),
+            PolishSkeleton.list(count: 5, scrollable: false, showAvatar: false),
+          ],
+        ),
+      ),
+      error: (e, _) => const PolishedEmptyState(
+        icon: LucideIcons.alertTriangle,
+        title: 'Erro ao carregar',
+        subtitle: 'Verifique sua conexao e tente novamente.',
+        accent: AppTheme.error,
+      ),
       data: (student) {
         if (student == null) {
           return _msg(LucideIcons.userX, 'Perfil não vinculado',
@@ -43,25 +58,8 @@ class StudentGraduationScreen extends ConsumerWidget {
     );
   }
 
-  static Widget _msg(IconData icon, String title, String sub) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 48, color: AppTheme.textSecondary),
-              const SizedBox(height: 16),
-              Text(title,
-                  style: AppTheme.titleMedium, textAlign: TextAlign.center),
-              const SizedBox(height: 8),
-              Text(sub,
-                  style: AppTheme.bodySmall
-                      .copyWith(color: AppTheme.textSecondary),
-                  textAlign: TextAlign.center),
-            ],
-          ),
-        ),
-      );
+  static Widget _msg(IconData icon, String title, String sub) =>
+      PolishedEmptyState(icon: icon, title: title, subtitle: sub);
 }
 
 class _GraduationBody extends ConsumerStatefulWidget {

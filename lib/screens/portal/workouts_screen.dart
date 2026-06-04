@@ -68,7 +68,11 @@ class _WorkoutsScreenState extends ConsumerState<WorkoutsScreen> {
           : _plans.isEmpty
               ? _empty()
               : RefreshIndicator(
-                  onRefresh: _load,
+                  color: AppTheme.primary,
+                  onRefresh: () {
+                    HapticFeedback.mediumImpact();
+                    return _load();
+                  },
                   child: ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: _plans.length,
@@ -211,6 +215,7 @@ class _WorkoutPlanDetailScreenState
   }
 
   void _toggle(String key, bool value) {
+    FeedbackUtils.selectHaptic();
     setState(() {
       if (value) {
         _done.add(key);
@@ -260,12 +265,31 @@ class _WorkoutPlanDetailScreenState
           ],
           if (!plan.isFile && total > 0) ...[
             const SizedBox(height: 12),
-            Text(
-              'Concluidos hoje: ${_done.length}/$total',
-              style: AppTheme.labelSmall.copyWith(
-                color: AppTheme.primary,
-                fontWeight: FontWeight.w600,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Concluidos hoje',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  '${_done.length}/$total',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            AnimatedProgressBar(
+              value: _done.length / total,
+              color: AppTheme.primary,
+              backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
+              minHeight: 6,
             ),
           ],
           const SizedBox(height: 16),
@@ -704,22 +728,11 @@ class _RegisterExecutionSheetState extends State<_RegisterExecutionSheet> {
                 ),
               ),
               const SizedBox(height: 16),
-              SizedBox(
-                height: 48,
-                child: ElevatedButton(
-                  onPressed: _saving ? null : _save,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: _saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
-                      : const Text('Salvar'),
-                ),
+              PolishButton(
+                label: 'Salvar',
+                icon: Icons.check,
+                isLoading: _saving,
+                onPressed: _saving ? null : _save,
               ),
             ],
           ),

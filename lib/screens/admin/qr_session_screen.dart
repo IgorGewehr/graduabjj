@@ -114,7 +114,16 @@ class _AdminQrSessionScreenState extends ConsumerState<AdminQrSessionScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              child: PolishSkeleton.list(
+                count: 5,
+                itemHeight: 76,
+                showAvatar: false,
+                scrollable: false,
+                padding: EdgeInsets.zero,
+              ),
+            )
           : academyId == null
               ? Center(
                   child: Text(

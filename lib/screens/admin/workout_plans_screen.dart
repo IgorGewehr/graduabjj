@@ -1010,7 +1010,13 @@ class _ExerciseCatalogPickerState extends State<_ExerciseCatalogPicker> {
               const SizedBox(height: 12),
               Expanded(
                 child: _loading
-                    ? const Center(child: CircularProgressIndicator())
+                    ? PolishSkeleton.list(
+                        count: 6,
+                        itemHeight: 56,
+                        showAvatar: false,
+                        scrollable: false,
+                        padding: EdgeInsets.zero,
+                      )
                     : _all.isEmpty
                         ? Center(
                             child: Text(

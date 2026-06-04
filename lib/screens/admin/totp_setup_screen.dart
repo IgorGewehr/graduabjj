@@ -111,7 +111,21 @@ class _TotpSetupScreenState extends ConsumerState<TotpSetupScreen> {
       ),
       body: SafeArea(
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Gerando chave de seguranca...',
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              )
             : _errorMessage != null && _currentStep == 0 && _qrCodeUri == null
                 ? _buildError()
                 : _buildStepContent(),
