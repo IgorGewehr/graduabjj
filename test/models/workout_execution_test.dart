@@ -3,13 +3,13 @@ import 'package:graduabjj/models/workout_execution.dart';
 
 void main() {
   group('WorkoutExecution.docId', () {
-    test('determinístico por aluno/plano/dia/exercício/data', () {
+    test('determinístico (data antes dos índices)', () {
       final d = DateTime(2026, 6, 4);
-      expect(WorkoutExecution.docId('s1', 'p1', 0, 2, d), 's1_p1_0_2_20260604');
+      expect(WorkoutExecution.docId('s1', 'p1', 0, 2, d), 's1_p1_20260604_0_2');
       // mesmo dia, qualquer hora → mesmo id (idempotente)
       expect(
         WorkoutExecution.docId('s1', 'p1', 0, 2, DateTime(2026, 6, 4, 23, 59)),
-        's1_p1_0_2_20260604',
+        's1_p1_20260604_0_2',
       );
       // exercício diferente → id diferente
       expect(
@@ -19,9 +19,11 @@ void main() {
       );
     });
 
-    test('padding de mês/dia', () {
+    test('dayPrefix isola aluno/plano/dia', () {
+      expect(WorkoutExecution.dayPrefix('s1', 'p1', DateTime(2026, 6, 4)),
+          's1_p1_20260604_');
       expect(WorkoutExecution.docId('s', 'p', 1, 0, DateTime(2026, 1, 9)),
-          's_p_1_0_20260109');
+          's_p_20260109_1_0');
     });
   });
 

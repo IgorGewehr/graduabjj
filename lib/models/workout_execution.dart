@@ -54,16 +54,23 @@ class WorkoutExecution {
     required this.createdAt,
   });
 
-  /// Id determinístico por (aluno, plano, dia, exercício, DIA) — um registro de
-  /// execução por exercício por dia (o array `sets` guarda todas as séries).
+  static String _ymd(DateTime date) =>
+      '${date.year}'
+      '${date.month.toString().padLeft(2, '0')}'
+      '${date.day.toString().padLeft(2, '0')}';
+
+  /// Prefixo do documentId que isola as execuções de um (aluno, plano, DIA) —
+  /// permite buscar "as execuções de hoje deste plano" por range de documentId,
+  /// sem índice composto. A DATA vem antes dos índices justamente para isso.
+  static String dayPrefix(String studentId, String planId, DateTime date) =>
+      '${studentId}_${planId}_${_ymd(date)}_';
+
+  /// Id determinístico por (aluno, plano, DIA, dia-do-treino, exercício) — um
+  /// registro por exercício por dia (o array `sets` guarda todas as séries).
   /// Evita duplicatas ao re-registrar; espelha o padrão do checklist diário.
   static String docId(String studentId, String planId, int dayIndex,
-      int exerciseIndex, DateTime date) {
-    final d = '${date.year}'
-        '${date.month.toString().padLeft(2, '0')}'
-        '${date.day.toString().padLeft(2, '0')}';
-    return '${studentId}_${planId}_${dayIndex}_${exerciseIndex}_$d';
-  }
+          int exerciseIndex, DateTime date) =>
+      '${dayPrefix(studentId, planId, date)}${dayIndex}_$exerciseIndex';
 
   factory WorkoutExecution.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>? ?? {};

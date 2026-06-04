@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/workout_plan.dart';
 import '../../providers/providers.dart';
@@ -170,6 +172,8 @@ class _WorkoutPlanDetailScreenState
   String? _studentId;
   // Catálogo (A5) por id → para mostrar "Ver demonstração" nos exercícios linkados.
   Map<String, Exercise> _exercisesById = {};
+  // Execuções de hoje (A6), por "dayIndex:exerciseIndex".
+  Map<String, WorkoutExecution> _execByKey = {};
 
   WorkoutPlan get plan => widget.plan;
 
@@ -180,6 +184,14 @@ class _WorkoutPlanDetailScreenState
       _loadLog();
       _loadCatalog();
     }
+  }
+
+  Future<void> _loadExecutions(String studentId) async {
+    try {
+      final map = await WorkoutExecutionService(FirebaseService.academyId)
+          .getByPlanForDay(studentId, plan.id, DateTime.now());
+      if (mounted) setState(() => _execByKey = map);
+    } catch (_) {/* não-fatal */}
   }
 
   Future<void> _loadCatalog() async {
@@ -198,6 +210,7 @@ class _WorkoutPlanDetailScreenState
       final student = await ref.read(currentStudentProvider.future);
       if (student == null) return;
       _studentId = student.id;
+      _loadExecutions(student.id);
       final done = await WorkoutPlanService(FirebaseService.academyId)
           .getTodayLog(student.id, plan.id);
       if (mounted) {
@@ -391,19 +404,37 @@ class _WorkoutPlanDetailScreenState
                             .copyWith(color: AppTheme.textSecondary),
                       ),
                     ],
-                    if (_videoUrlFor(ex) != null)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                          onPressed: () => _openVideo(_videoUrlFor(ex)!),
+                    _execSummary(dayIndex, exIndex),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        if (_videoUrlFor(ex) != null)
+                          TextButton.icon(
+                            onPressed: () => _openVideo(_videoUrlFor(ex)!),
+                            style: TextButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            icon: const Icon(Icons.play_circle_outline,
+                                size: 16),
+                            label: const Text('Ver demonstracao'),
+                          ),
+                        TextButton.icon(
+                          onPressed: () => _register(dayIndex, exIndex, ex),
                           style: TextButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 4),
                             visualDensity: VisualDensity.compact,
                           ),
-                          icon: const Icon(Icons.play_circle_outline, size: 16),
-                          label: const Text('Ver demonstracao'),
+                          icon: const Icon(Icons.fitness_center, size: 16),
+                          label: Text(
+                            _execByKey.containsKey('$dayIndex:$exIndex')
+                                ? 'Editar registro'
+                                : 'Registrar',
+                          ),
                         ),
-                      ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -412,6 +443,53 @@ class _WorkoutPlanDetailScreenState
         ),
       ),
     );
+  }
+
+  /// Resumo do que foi registrado hoje (séries · melhor carga), se houver.
+  Widget _execSummary(int dayIndex, int exIndex) {
+    final e = _execByKey['$dayIndex:$exIndex'];
+    if (e == null || e.sets.isEmpty) return const SizedBox.shrink();
+    final best = e.bestLoadKg;
+    final txt = '${e.sets.length} série(s)'
+        '${best > 0 ? ' · melhor ${best.toStringAsFixed(best == best.roundToDouble() ? 0 : 1)} kg' : ''}';
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          Icon(Icons.check_circle, size: 13, color: AppTheme.success),
+          const SizedBox(width: 4),
+          Text(txt,
+              style:
+                  AppTheme.labelSmall.copyWith(color: AppTheme.success)),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _register(int dayIndex, int exIndex, WorkoutExercise ex) async {
+    final sid = _studentId;
+    if (sid == null) return;
+    final saved = await showModalBottomSheet<WorkoutExecution>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => _RegisterExecutionSheet(
+        academyId: FirebaseService.academyId,
+        studentId: sid,
+        planId: plan.id,
+        dayIndex: dayIndex,
+        exerciseIndex: exIndex,
+        exerciseId: ex.exerciseId,
+        exerciseName: ex.name,
+        existing: _execByKey['$dayIndex:$exIndex'],
+      ),
+    );
+    if (saved != null && mounted) {
+      setState(() => _execByKey['$dayIndex:$exIndex'] = saved);
+    }
   }
 
   /// URL de vídeo do exercício do catálogo vinculado (ou null).
@@ -425,5 +503,263 @@ class _WorkoutPlanDetailScreenState
   Future<void> _openVideo(String url) async {
     final uri = Uri.tryParse(url);
     if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+}
+
+/// Folha de registro de execução (A6): séries (reps + carga, RPE opcional).
+class _RegisterExecutionSheet extends StatefulWidget {
+  final String academyId;
+  final String studentId;
+  final String planId;
+  final int dayIndex;
+  final int exerciseIndex;
+  final String? exerciseId;
+  final String exerciseName;
+  final WorkoutExecution? existing;
+
+  const _RegisterExecutionSheet({
+    required this.academyId,
+    required this.studentId,
+    required this.planId,
+    required this.dayIndex,
+    required this.exerciseIndex,
+    required this.exerciseId,
+    required this.exerciseName,
+    required this.existing,
+  });
+
+  @override
+  State<_RegisterExecutionSheet> createState() =>
+      _RegisterExecutionSheetState();
+}
+
+class _SetRow {
+  final TextEditingController reps;
+  final TextEditingController load;
+  final TextEditingController rpe;
+  _SetRow({String reps = '', String load = '', String rpe = ''})
+      : reps = TextEditingController(text: reps),
+        load = TextEditingController(text: load),
+        rpe = TextEditingController(text: rpe);
+  void dispose() {
+    reps.dispose();
+    load.dispose();
+    rpe.dispose();
+  }
+}
+
+class _RegisterExecutionSheetState extends State<_RegisterExecutionSheet> {
+  final List<_SetRow> _rows = [];
+  late final TextEditingController _notes;
+  bool _saving = false;
+
+  static String _n(num v) =>
+      v == v.toInt() ? v.toInt().toString() : v.toString();
+
+  @override
+  void initState() {
+    super.initState();
+    _notes = TextEditingController(text: widget.existing?.notes ?? '');
+    final sets = widget.existing?.sets ?? const [];
+    if (sets.isEmpty) {
+      _rows.add(_SetRow());
+    } else {
+      for (final s in sets) {
+        _rows.add(_SetRow(
+          reps: s.reps == 0 ? '' : '${s.reps}',
+          load: s.load == 0 ? '' : _n(s.load),
+          rpe: s.rpe == null ? '' : '${s.rpe}',
+        ));
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final r in _rows) {
+      r.dispose();
+    }
+    _notes.dispose();
+    super.dispose();
+  }
+
+  double? _parseLoad(String t) =>
+      double.tryParse(t.trim().replaceAll(',', '.'));
+
+  Future<void> _save() async {
+    final sets = <SetEntry>[];
+    for (final r in _rows) {
+      final reps = int.tryParse(r.reps.text.trim()) ?? 0;
+      final load = _parseLoad(r.load.text) ?? 0;
+      if (reps <= 0) continue; // linha sem reps é ignorada
+      sets.add(SetEntry(
+        reps: reps,
+        load: load,
+        rpe: int.tryParse(r.rpe.text.trim()),
+      ));
+    }
+    if (sets.isEmpty) {
+      context.showWarning('Informe ao menos uma série (reps).');
+      return;
+    }
+    setState(() => _saving = true);
+    final now = DateTime.now();
+    final exec = WorkoutExecution(
+      id: '',
+      studentId: widget.studentId,
+      planId: widget.planId,
+      dayIndex: widget.dayIndex,
+      exerciseIndex: widget.exerciseIndex,
+      exerciseId: widget.exerciseId,
+      exerciseName: widget.exerciseName,
+      date: DateTime(now.year, now.month, now.day),
+      sets: sets,
+      notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+      createdAt: now,
+    );
+    try {
+      await WorkoutExecutionService(widget.academyId).upsert(exec);
+      if (!mounted) return;
+      Navigator.of(context).pop(exec);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        context.showError('Nao foi possivel salvar: $e');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: mq.viewInsets.bottom + 16,
+        ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+              maxHeight: (mq.size.height - mq.viewInsets.bottom) * 0.85),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(widget.exerciseName,
+                  style: AppTheme.titleMedium
+                      .copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text('Registre as séries feitas hoje',
+                  style: AppTheme.labelSmall
+                      .copyWith(color: AppTheme.textSecondary)),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _rows.length,
+                  itemBuilder: (_, i) => _setRowWidget(i),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => setState(() => _rows.add(_SetRow())),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Adicionar série'),
+                ),
+              ),
+              const SizedBox(height: 4),
+              TextField(
+                controller: _notes,
+                decoration: const InputDecoration(
+                  labelText: 'Observações (opcional)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: _saving ? null : _save,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: _saving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : const Text('Salvar'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _setRowWidget(int i) {
+    final r = _rows[i];
+    InputDecoration dec(String label) => InputDecoration(
+          labelText: label,
+          isDense: true,
+          border: const OutlineInputBorder(),
+        );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 26,
+            child: Text('${i + 1}',
+                style: AppTheme.labelSmall
+                    .copyWith(color: AppTheme.textSecondary)),
+          ),
+          Expanded(
+            child: TextField(
+              controller: r.reps,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: dec('Reps'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: r.load,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))
+              ],
+              decoration: dec('Carga kg'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 64,
+            child: TextField(
+              controller: r.rpe,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: dec('RPE'),
+            ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.close, size: 18),
+            color: AppTheme.textSecondary,
+            onPressed: _rows.length <= 1
+                ? null
+                : () => setState(() => _rows.removeAt(i).dispose()),
+          ),
+        ],
+      ),
+    );
   }
 }

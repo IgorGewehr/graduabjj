@@ -35,6 +35,28 @@ class WorkoutExecutionService {
   Future<void> delete(String id) =>
       _collections.workoutExecution(id).delete();
 
+  /// Execuções de um plano num dia (mapa "dayIndex:exerciseIndex" → execução).
+  /// Range de documentId pelo prefixo do dia (sentinela 0xF8FF como limite
+  /// superior) — sem índice composto.
+  Future<Map<String, WorkoutExecution>> getByPlanForDay(
+    String studentId,
+    String planId,
+    DateTime date,
+  ) async {
+    final prefix = WorkoutExecution.dayPrefix(studentId, planId, date);
+    final upper = prefix + String.fromCharCode(0xf8ff);
+    final snap = await _ref
+        .where(FieldPath.documentId, isGreaterThanOrEqualTo: prefix)
+        .where(FieldPath.documentId, isLessThan: upper)
+        .get();
+    final out = <String, WorkoutExecution>{};
+    for (final d in snap.docs) {
+      final e = WorkoutExecution.fromFirestore(d);
+      out['${e.dayIndex}:${e.exerciseIndex}'] = e;
+    }
+    return out;
+  }
+
   /// Histórico de um exercício (por nome — consistente p/ livre e catálogo),
   /// mais recente primeiro. Índice composto (studentId, exerciseName, date DESC).
   Future<List<WorkoutExecution>> getHistoryForExercise(
