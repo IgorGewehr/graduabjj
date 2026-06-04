@@ -37,19 +37,14 @@ tela admin de catálogo, **picker no montador**, e exibir o vídeo no portal.
 
 ---
 
-## 2. Decisões a confirmar (antes de codar)
+## 2. Decisões (CONFIRMADAS 2026-06)
 
-0. **Branch:** seguir em `feat/evolucao-modulos`.
-1. **Dono do catálogo (A5):** por **academia** (curável) **+ seed** opcional de exercícios
-   comuns de musculação? _(recomendação: por-academia + seed)_
-2. **Granularidade do registro (A6):** **por série** (reps + carga, RPE opcional) ou
-   **simples** (1 carga/reps por exercício)? _(recomendação: **por série** — habilita PR
-   e gráfico de verdade)_
-3. **PR / métrica de progresso:** melhor **carga**, **1RM estimado** (Epley) ou **ambos**?
-   _(recomendação: ambos — guardar séries cruas e derivar PR de carga + 1RM estimado)_
-4. **Vídeo do exercício (A5):** **`videoUrl` direto** no Exercise (simples, como o syllabus)
-   ou **linkar** um `TrainingVideo` existente? _(recomendação: `videoUrl` direto no MVP;
-   link com a biblioteca depois)_
+0. **Branch:** `feat/evolucao-modulos`.
+1. **Catálogo (A5):** **por academia + seed** opcional de exercícios comuns de musculação.
+2. **Registro (A6):** **por série** — reps + carga (RPE opcional).
+3. **PR / progresso:** **ambos** — guardar séries cruas e derivar PR de **melhor carga** E
+   **1RM estimado (Epley)**; gráfico de carga/1RM no tempo.
+4. **Vídeo do exercício (A5):** **`videoUrl` direto** no Exercise (link/Storage).
 
 **Padrão do montador (sem decisão — já assumo):** manter o **texto livre** atual
 (retrocompatível) **e** adicionar um **picker do catálogo** opcional; ao escolher do
