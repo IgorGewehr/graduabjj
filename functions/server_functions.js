@@ -2704,6 +2704,17 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
     throw new HttpsError('permission-denied', 'Record does not belong to this student');
   }
 
+  // SECURITY (defesa em profundidade): cartao de credito na LOJA so quando a
+  // academia habilitou storeCreditCardEnabled. O gate da UI nao basta — reforco
+  // server-side aqui. Mensalidade (nao-order) nao e afetada.
+  if (isOrder) {
+    const acadSnap = await db.doc(`academies/${academyId}`).get();
+    if (acadSnap.data()?.storeCreditCardEnabled !== true) {
+      throw new HttpsError('failed-precondition',
+        'Pagamento com cartao nao esta habilitado para a loja desta academia.');
+    }
+  }
+
   // SECURITY: never trust the client amount. DERIVE the charge server-side from
   // the stored record. The client sends CENTAVOS; the client value is only a
   // cross-check (1-centavo tolerance). financial.amount is REAIS (canonical);

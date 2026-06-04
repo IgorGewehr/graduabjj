@@ -285,8 +285,6 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                         totalOpen: totalOpen,
                         openCount: openPayments.length,
                         overdueCount: overdueCount,
-                        pixKey: pixKey,
-                        onCopyPix: () => _copyPixKey(pixKey),
                         formatCurrency: _formatCurrency,
                       ),
                       const SizedBox(height: 24),
@@ -307,6 +305,8 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                             formatCurrency: _formatCurrency,
                             showPayButton: abacatePayEnabled,
                             gatewayConnected: abacatePayEnabled,
+                            pixKey: pixKey,
+                            onCopyPix: () => _copyPixKey(pixKey),
                             onPayPix: () => _showPixPaymentDialog(
                               entry.value,
                               student.fullName,
@@ -474,16 +474,12 @@ class _DebtAlertCard extends StatelessWidget {
   final double totalOpen;
   final int openCount;
   final int overdueCount;
-  final String pixKey;
-  final VoidCallback onCopyPix;
   final String Function(double) formatCurrency;
 
   const _DebtAlertCard({
     required this.totalOpen,
     required this.openCount,
     required this.overdueCount,
-    required this.pixKey,
-    required this.onCopyPix,
     required this.formatCurrency,
   });
 
@@ -550,62 +546,6 @@ class _DebtAlertCard extends StatelessWidget {
               ),
             ],
           ),
-          if (pixKey.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            const Divider(height: 1),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Icon(
-                  LucideIcons.qrCode,
-                  size: 16,
-                  color: AppTheme.textSecondary,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'PIX: $pixKey',
-                    style: AppTheme.bodySmall.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Pressable(
-                  onTap: onCopyPix,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surface,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          LucideIcons.copy,
-                          size: 14,
-                          color: AppTheme.textPrimary,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Copiar',
-                          style: AppTheme.labelSmall.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     );
@@ -794,6 +734,12 @@ class _PaymentCard extends StatelessWidget {
   final bool gatewayConnected;
   final VoidCallback? onPayPix;
 
+  /// Academy static PIX key, shown ONLY as an explicit manual fallback when no
+  /// gateway is connected (never alongside the in-app checkout, to avoid
+  /// off-app payments the webhook can't reconcile).
+  final String pixKey;
+  final VoidCallback? onCopyPix;
+
   const _PaymentCard({
     required this.payment,
     required this.formatCurrency,
@@ -801,6 +747,8 @@ class _PaymentCard extends StatelessWidget {
     this.showPayButton = false,
     this.gatewayConnected = true,
     this.onPayPix,
+    this.pixKey = '',
+    this.onCopyPix,
   });
 
   @override
@@ -977,6 +925,55 @@ class _PaymentCard extends StatelessWidget {
                 ],
               ),
             ),
+            if (pixKey.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Pressable(
+                onTap: onCopyPix,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppTheme.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(LucideIcons.qrCode,
+                          size: 16, color: AppTheme.textSecondary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Chave PIX da academia (pagamento manual)',
+                              style: AppTheme.labelSmall.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            Text(
+                              pixKey,
+                              style: AppTheme.bodySmall,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(LucideIcons.copy,
+                          size: 16, color: AppTheme.textPrimary),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Pague pela chave acima e envie o comprovante; a baixa e feita na recepcao.',
+                style: AppTheme.labelSmall.copyWith(color: AppTheme.textDisabled),
+              ),
+            ],
           ],
         ],
       ),
