@@ -1,7 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/graduation_factors.dart';
 import '../core/sports.dart';
 import 'firebase_service.dart';
+import 'skill_progress_service.dart';
+import 'syllabus_service.dart';
 
 /// Belt Order (adult)
 const List<String> beltOrder = ['white', 'blue', 'purple', 'brown', 'black'];
@@ -27,11 +30,17 @@ class AcademyGraduationConfig {
   /// Takes precedence over [threshold] when an entry exists for the
   /// student's sport + current belt.
   final Map<String, Map<String, int>> requirementsBySport;
+  /// Política das técnicas do currículo (B2): 'informative' | 'required'.
+  final String skillPolicy;
+  /// % mínimo de técnicas dominadas quando [skillPolicy] == 'required'.
+  final int minSkillPct;
 
   const AcademyGraduationConfig({
     this.threshold,
     this.useClassWeights = false,
     this.requirementsBySport = const {},
+    this.skillPolicy = 'informative',
+    this.minSkillPct = 80,
   });
 }
 
@@ -130,6 +139,20 @@ class EligibilityResult {
   final String message;
   final bool weighted; // true when current count used Class.weight summation
 
+  // Requisitos compostos (B2). Preenchidos por checkEligibilityForStudent;
+  // nulos no caminho puro (checkEligibility só usa presença).
+  /// Técnicas dominadas / total cadastradas para a faixa atual (null = sem dado).
+  final int? skillDone;
+  final int? skillTotal;
+  /// % dominado (0–100), ou null quando não há currículo.
+  final double? skillPct;
+  /// A política exige técnicas (`required`).
+  final bool skillRequired;
+  /// Requisito de técnicas atendido (true quando informativo ou sem currículo).
+  final bool skillMet;
+  /// Tempo-em-faixa em dias (informativo). Null se indeterminado.
+  final int? daysInBelt;
+
   EligibilityResult({
     required this.eligible,
     this.nextBelt,
@@ -139,7 +162,41 @@ class EligibilityResult {
     required this.missingClasses,
     required this.message,
     this.weighted = false,
+    this.skillDone,
+    this.skillTotal,
+    this.skillPct,
+    this.skillRequired = false,
+    this.skillMet = true,
+    this.daysInBelt,
   });
+
+  EligibilityResult copyWith({
+    bool? eligible,
+    String? message,
+    int? skillDone,
+    int? skillTotal,
+    double? skillPct,
+    bool? skillRequired,
+    bool? skillMet,
+    int? daysInBelt,
+  }) {
+    return EligibilityResult(
+      eligible: eligible ?? this.eligible,
+      nextBelt: nextBelt,
+      nextStripes: nextStripes,
+      currentClasses: currentClasses,
+      requiredClasses: requiredClasses,
+      missingClasses: missingClasses,
+      message: message ?? this.message,
+      weighted: weighted,
+      skillDone: skillDone ?? this.skillDone,
+      skillTotal: skillTotal ?? this.skillTotal,
+      skillPct: skillPct ?? this.skillPct,
+      skillRequired: skillRequired ?? this.skillRequired,
+      skillMet: skillMet ?? this.skillMet,
+      daysInBelt: daysInBelt ?? this.daysInBelt,
+    );
+  }
 }
 
 /// Per-student eligibility row used by the students list.
@@ -318,6 +375,9 @@ class BeltProgressionService {
         useClassWeights: data['useClassWeights'] == true,
         requirementsBySport:
             _parseRequirementsBySport(data['graduationRequirementsBySport']),
+        skillPolicy:
+            (data['graduationSkillPolicy'] as String?) ?? 'informative',
+        minSkillPct: (data['graduationMinSkillPct'] as num?)?.toInt() ?? 80,
       );
     } catch (_) {
       return const AcademyGraduationConfig();
@@ -448,19 +508,64 @@ class BeltProgressionService {
     // attendances accumulated *since* that promotion. The mestre may have
     // chosen to wait past the threshold (e.g. promoted at 82 with target 75)
     // — those 7 extra do NOT carry over to the next graduation.
-    final baseline = await getLastPromotionBaseline(
-      studentId,
-      sportId: sportId,
-    );
+    // Progressões (uma leitura) → baseline + data da última promoção no esporte.
+    final progressions = await getByStudent(studentId);
+    final forSport = progressions
+        .where((p) => p.getSport() == sportId)
+        .toList()
+      ..sort((a, b) => b.promotionDate.compareTo(a.promotionDate));
+    final baseline = forSport.isEmpty ? 0 : forSport.first.baselineCount;
+    final lastPromoDate =
+        forSport.isEmpty ? null : forSport.first.promotionDate;
     final sinceLastPromotion = (totalClasses - baseline).clamp(0, totalClasses);
 
-    return checkEligibility(
+    final base = checkEligibility(
       currentBelt: currentBelt,
       currentStripes: currentStripes,
       totalClasses: sinceLastPromotion,
       sportId: sportId,
       category: category,
       config: cfg,
+    );
+
+    // Requisitos compostos (B2): % de técnicas dominadas na faixa atual +
+    // tempo-em-faixa. Bloqueia a elegibilidade só quando a política é 'required'.
+    final techniques =
+        await SyllabusService(academyId).getBySport(sportId.value);
+    final gradeTechs =
+        techniques.where((t) => t.gradeId == currentBelt).toList();
+    final progress = await SkillProgressService(academyId)
+        .getByStudent(studentId, sport: sportId.value);
+    final progMap = {for (final p in progress) p.techniqueId: p};
+    final dominated = gradeTechs
+        .where((t) => progMap[t.id]?.level.isMastered ?? false)
+        .length;
+    final factors = computeSkillFactors(
+      dominatedCount: dominated,
+      totalForGrade: gradeTechs.length,
+      policy: cfg.skillPolicy,
+      minSkillPct: cfg.minSkillPct,
+    );
+    final days = daysInBelt(
+      lastPromotion: lastPromoDate,
+      startDate: (data['startDate'] as Timestamp?)?.toDate(),
+      now: DateTime.now(),
+    );
+
+    // Bloqueado por técnica = elegível por presença, mas política exige e não atingiu.
+    final blockedBySkill = base.eligible && !factors.met;
+    return base.copyWith(
+      eligible: base.eligible && factors.met,
+      message: blockedBySkill
+          ? 'Faltam técnicas: ${factors.done}/${factors.total} dominadas '
+              '(mín. ${cfg.minSkillPct}%)'
+          : base.message,
+      skillDone: factors.done,
+      skillTotal: factors.total,
+      skillPct: factors.pct,
+      skillRequired: factors.required,
+      skillMet: factors.met,
+      daysInBelt: days,
     );
   }
 

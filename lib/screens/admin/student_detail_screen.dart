@@ -631,12 +631,66 @@ class _AdminStudentDetailScreenState
           Text(
             eligible
                 ? '${e.currentClasses}/${e.requiredClasses} $unit — pronto para a proxima graduacao.'
-                : 'Faltam ${e.missingClasses} $unit (${e.currentClasses}/${e.requiredClasses})',
+                : (e.skillRequired &&
+                        !e.skillMet &&
+                        e.requiredClasses > 0 &&
+                        e.currentClasses >= e.requiredClasses)
+                    // Presenca ja atingida, mas a politica de tecnicas bloqueia.
+                    ? e.message
+                    : 'Faltam ${e.missingClasses} $unit (${e.currentClasses}/${e.requiredClasses})',
             style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
           ),
+          if ((e.skillTotal != null && e.skillTotal! > 0) ||
+              e.daysInBelt != null) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                if (e.skillTotal != null && e.skillTotal! > 0)
+                  _factorChip(
+                    LucideIcons.clipboardCheck,
+                    'Tecnicas ${e.skillDone}/${e.skillTotal}'
+                    '${e.skillPct != null ? ' (${e.skillPct!.round()}%)' : ''}'
+                    '${e.skillRequired ? ' • exigido' : ''}',
+                    (e.skillRequired && !e.skillMet)
+                        ? AppTheme.error
+                        : color,
+                  ),
+                if (e.daysInBelt != null)
+                  _factorChip(
+                      LucideIcons.clock, _timeInBelt(e.daysInBelt!), color),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _factorChip(IconData icon, String text, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: color),
+            const SizedBox(width: 4),
+            Text(text,
+                style: AppTheme.labelSmall
+                    .copyWith(color: AppTheme.textSecondary)),
+          ],
+        ),
+      );
+
+  String _timeInBelt(int days) {
+    if (days < 30) return '$days d na faixa';
+    final months = (days / 30).round();
+    return months <= 1 ? '1 mes na faixa' : '$months meses na faixa';
   }
 
   // ============================================

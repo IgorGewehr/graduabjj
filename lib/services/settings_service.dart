@@ -173,6 +173,11 @@ class AcademySettings {
   /// Whether students see their own attendance-to-graduation progress on
   /// the portal home. When false, the count stays admin-only.
   final bool graduationProgressVisibleToStudents;
+  /// Política das técnicas do currículo na graduação (B2): 'informative'
+  /// (default — só mostra) ou 'required' (bloqueia até atingir o % mínimo).
+  final String graduationSkillPolicy;
+  /// % mínimo de técnicas dominadas exigido quando a política é 'required'.
+  final int graduationMinSkillPct;
 
   // Store Settings
   final bool storeEnabled;
@@ -247,6 +252,8 @@ class AcademySettings {
     this.useClassWeights = false,
     this.graduationMode = 'manual',
     this.graduationProgressVisibleToStudents = false,
+    this.graduationSkillPolicy = 'informative',
+    this.graduationMinSkillPct = 80,
     this.storeEnabled = false,
     this.storePublished = false,
     this.storeCreditCardEnabled = false,
@@ -317,6 +324,10 @@ class AcademySettings {
       graduationMode: (data['graduationMode'] as String?) ?? 'manual',
       graduationProgressVisibleToStudents:
           data['graduationProgressVisibleToStudents'] ?? false,
+      graduationSkillPolicy:
+          (data['graduationSkillPolicy'] as String?) ?? 'informative',
+      graduationMinSkillPct:
+          (data['graduationMinSkillPct'] as num?)?.toInt() ?? 80,
       storeEnabled: data['storeEnabled'] ?? false,
       storePublished: data['storePublished'] ?? false,
       storeCreditCardEnabled: data['storeCreditCardEnabled'] ?? false,
@@ -524,6 +535,8 @@ class SettingsService {
     String? mode,
     bool? progressVisibleToStudents,
     Map<String, Map<String, int>>? requirementsBySport,
+    String? skillPolicy,
+    int? minSkillPct,
   }) async {
     final data = <String, dynamic>{
       'autoGraduationEnabled': enabled,
@@ -540,6 +553,12 @@ class SettingsService {
     }
     if (requirementsBySport != null) {
       data['graduationRequirementsBySport'] = requirementsBySport;
+    }
+    if (skillPolicy != null) {
+      data['graduationSkillPolicy'] = skillPolicy;
+    }
+    if (minSkillPct != null) {
+      data['graduationMinSkillPct'] = minSkillPct;
     }
     await _academyRef.update(data);
   }
