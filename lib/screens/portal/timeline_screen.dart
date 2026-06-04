@@ -15,7 +15,16 @@ import '../../widgets/polish/polish.dart';
 import '../../widgets/sport_tab_bar.dart';
 
 /// Timeline event types
-enum TimelineEventType { graduation, stripe, competition, milestone, start }
+enum TimelineEventType {
+  graduation,
+  stripe,
+  competition,
+  milestone,
+  start,
+  attendanceStreak,
+  rankingPosition,
+  trainingPr,
+}
 
 /// Timeline event model
 class _TimelineEvent {
@@ -62,6 +71,29 @@ DateTime? _sportStartDate(Student student, SportId sport) {
     }
   } catch (_) {/* unexpected type — ignore */}
   return null;
+}
+
+/// Maps an [AchievementType] coming from the achievement store onto its
+/// [TimelineEventType] for rendering. Graduation/stripe are intentionally
+/// excluded here because those events are sourced from belt progressions (to
+/// avoid duplicates). Returns null for types the timeline should skip.
+TimelineEventType? _timelineTypeForAchievement(AchievementType type) {
+  switch (type) {
+    case AchievementType.competition:
+      return TimelineEventType.competition;
+    case AchievementType.milestone:
+      return TimelineEventType.milestone;
+    case AchievementType.attendanceStreak:
+      return TimelineEventType.attendanceStreak;
+    case AchievementType.rankingPosition:
+      return TimelineEventType.rankingPosition;
+    case AchievementType.trainingPr:
+      return TimelineEventType.trainingPr;
+    case AchievementType.graduation:
+    case AchievementType.stripe:
+      // Sourced from belt progressions — skip to avoid duplicate entries.
+      return null;
+  }
 }
 
 /// Belt progressions provider for timeline
@@ -258,30 +290,30 @@ class TimelineScreen extends ConsumerWidget {
       );
     }
 
-    // Add achievements (only competitions and milestones, since graduations come from progressions)
+    // Add achievements. Graduations/stripes come from belt progressions, so we
+    // render the remaining achievement-store types: competitions, generic
+    // milestones, and the gamification markers (attendance streak, ranking
+    // position, training PR). Unknown/legacy types map to a generic milestone.
     for (final a in achievements) {
-      if (a.type == AchievementType.competition ||
-          a.type == AchievementType.milestone) {
-        events.add(
-          _TimelineEvent(
-            id: 'achievement_${a.id}',
-            date: a.date,
-            type: a.type == AchievementType.competition
-                ? TimelineEventType.competition
-                : TimelineEventType.milestone,
-            title: a.title,
-            description: a.description,
-            position: a.position?.value,
-            academyName: academyName,
-            // Respect the achievement's stored sport so multi-sport students
-            // see competitions/milestones under the correct tab. Legacy
-            // records without a sport fall back to the primary sport.
-            sportId: a.sport != null
-                ? SportId.fromString(a.sport!)
-                : student.getPrimarySport(),
-          ),
-        );
-      }
+      final mapped = _timelineTypeForAchievement(a.type);
+      if (mapped == null) continue;
+      events.add(
+        _TimelineEvent(
+          id: 'achievement_${a.id}',
+          date: a.date,
+          type: mapped,
+          title: a.title,
+          description: a.description,
+          position: a.position?.value,
+          academyName: academyName,
+          // Respect the achievement's stored sport so multi-sport students
+          // see markers under the correct tab. Legacy records without a sport
+          // fall back to the primary sport.
+          sportId: a.sport != null
+              ? SportId.fromString(a.sport!)
+              : student.getPrimarySport(),
+        ),
+      );
     }
 
     // Sort by date ascending (oldest first)
@@ -568,6 +600,15 @@ class _JourneyCardState extends State<_JourneyCard> {
           }),
         ),
 
+        // "Pronto para graduação" badge — transient UI state derived from the
+        // existing per-sport eligibility provider (no new query, no achievement
+        // created). Mirrors the belt-chip sport so it agrees with the filtered
+        // timeline below.
+        _GraduationReadyBadge(
+          studentId: widget.student.id,
+          sport: beltSport,
+        ),
+
         // Medal Display
         if ((medalStats['total'] ?? 0) > 0) ...[
           const SizedBox(height: 20),
@@ -617,6 +658,74 @@ class _JourneyCardState extends State<_JourneyCard> {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// "Apto a graduar" badge for the JourneyCard.
+///
+/// Consumes [studentSportEligibilityProvider] (the same service the portal
+/// progress card already reads — no extra query) and, when the student is
+/// eligible for the next graduation, shows a transient "Pronto para graduação"
+/// badge. This is purely informational UI state: it does NOT create any
+/// achievement/doc and writes nothing to Firestore. Hidden while loading, on
+/// error, when there's no configured requirement, or when not eligible.
+class _GraduationReadyBadge extends ConsumerWidget {
+  final String studentId;
+  final SportId sport;
+
+  const _GraduationReadyBadge({
+    required this.studentId,
+    required this.sport,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final eligibility = ref
+        .watch(
+          studentSportEligibilityProvider(
+            (studentId: studentId, sport: sport),
+          ),
+        )
+        .valueOrNull;
+
+    // No data yet, no configured requirement, or not eligible → render nothing.
+    if (eligibility == null ||
+        eligibility.requiredClasses <= 0 ||
+        !eligibility.eligible) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppTheme.successLight,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.success.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              LucideIcons.partyPopper,
+              size: 18,
+              color: AppTheme.success,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                'Pronto para graduação',
+                style: AppTheme.labelMedium.copyWith(
+                  color: AppTheme.success,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -779,6 +888,27 @@ class _TimelineItem extends StatelessWidget {
           icon: LucideIcons.flag,
           color: const Color(0xFF2563EB),
           bgColor: const Color(0xFFEFF6FF),
+        );
+      case TimelineEventType.attendanceStreak:
+        // Streak of attendance — warm orange "flame".
+        return _EventConfig(
+          icon: LucideIcons.flame,
+          color: const Color(0xFFEA580C),
+          bgColor: const Color(0xFFFFEDD5),
+        );
+      case TimelineEventType.rankingPosition:
+        // Ranking position — amber "trophy".
+        return _EventConfig(
+          icon: LucideIcons.trophy,
+          color: const Color(0xFFD97706),
+          bgColor: const Color(0xFFFEF3C7),
+        );
+      case TimelineEventType.trainingPr:
+        // Training personal record — indigo "trending up".
+        return _EventConfig(
+          icon: LucideIcons.trendingUp,
+          color: const Color(0xFF4F46E5),
+          bgColor: const Color(0xFFE0E7FF),
         );
     }
   }
@@ -982,6 +1112,21 @@ class _TypeChip extends StatelessWidget {
         label = 'Inicio';
         bgColor = const Color(0xFFEFF6FF);
         textColor = const Color(0xFF2563EB);
+        break;
+      case TimelineEventType.attendanceStreak:
+        label = 'Sequencia';
+        bgColor = const Color(0xFFFFEDD5);
+        textColor = const Color(0xFFEA580C);
+        break;
+      case TimelineEventType.rankingPosition:
+        label = 'Ranking';
+        bgColor = const Color(0xFFFEF3C7);
+        textColor = const Color(0xFFD97706);
+        break;
+      case TimelineEventType.trainingPr:
+        label = 'Recorde';
+        bgColor = const Color(0xFFE0E7FF);
+        textColor = const Color(0xFF4F46E5);
         break;
     }
 

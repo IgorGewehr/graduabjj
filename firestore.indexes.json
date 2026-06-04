@@ -60,6 +60,24 @@
       ]
     },
     {
+      "//": "Gamificacao (marcos): idempotencia das CFs de streak/ranking — query-before-create por (studentId + autoKey) em academies/{id}/achievements garante que cada marco e criado uma unica vez.",
+      "collectionGroup": "achievements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "autoKey", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Gamificacao (marcos): filtros admin por aluno + tipo (ex.: listar so milestone/competition de um aluno) sem ler todos os achievements.",
+      "collectionGroup": "achievements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "type", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "financials",
       "queryScope": "COLLECTION",
       "fields": [

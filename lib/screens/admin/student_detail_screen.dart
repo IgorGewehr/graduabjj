@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -2049,6 +2050,12 @@ class _AdminStudentDetailScreenState
   }
 
   Widget _buildAchievementsTab() {
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    // Generic milestones / gamification markers are managed by any staff member
+    // (instructor/admin). Belt-bound achievements (graduation/stripe) require
+    // graduation:manage — enforced per-action in the edit/add flows.
+    final isStaff = currentUser?.isInstructor ?? false;
+
     return Stack(
       children: [
         _achievements.isEmpty
@@ -2069,9 +2076,68 @@ class _AdminStudentDetailScreenState
                     onEdit: () => _showEditAchievementDialog(achievement),
                     onDelete: () =>
                         _showDeleteAchievementConfirmation(achievement),
+                    onTogglePublic: () => _toggleAchievementPublic(achievement),
                   ).entrance(index: index);
                 },
               ),
+        // Bulk actions (staff only) — top-right overlay menu.
+        if (isStaff)
+          Positioned(
+            top: 8,
+            right: 8,
+            child: Material(
+              color: Colors.transparent,
+              child: PopupMenuButton<String>(
+                icon: Icon(LucideIcons.settings2, color: AppTheme.textSecondary),
+                tooltip: 'Ações em massa',
+                onSelected: (value) {
+                  switch (value) {
+                    case 'all_public':
+                      _bulkSetPublic(true);
+                      break;
+                    case 'all_private':
+                      _bulkSetPublic(false);
+                      break;
+                    case 'recompute':
+                      _recomputeMilestones();
+                      break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'all_public',
+                    child: Row(
+                      children: [
+                        Icon(LucideIcons.eye, size: 20),
+                        SizedBox(width: 8),
+                        Text('Tornar todos públicos'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'all_private',
+                    child: Row(
+                      children: [
+                        Icon(LucideIcons.eyeOff, size: 20),
+                        SizedBox(width: 8),
+                        Text('Tornar todos privados'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'recompute',
+                    child: Row(
+                      children: [
+                        Icon(LucideIcons.refreshCw, size: 20),
+                        SizedBox(width: 8),
+                        Text('Recalcular marcos'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         // FAB to add achievement
         Positioned(
           bottom: 16,
@@ -2090,13 +2156,131 @@ class _AdminStudentDetailScreenState
     );
   }
 
+  /// Toggles a single achievement's public visibility (per-row action,
+  /// delegates to achievement_service.togglePublic). Belt-bound achievements
+  /// (graduation/stripe) require graduation:manage; others need staff.
+  Future<void> _toggleAchievementPublic(Achievement achievement) async {
+    if (!_canManageAchievement(achievement)) {
+      context.showError('Você não tem permissão para alterar esta conquista.');
+      return;
+    }
+    try {
+      final service = AchievementService(FirebaseService.academyId);
+      await service.togglePublic(achievement.id);
+      if (mounted) {
+        context.showSuccess(
+          achievement.isPublic ? 'Conquista ocultada.' : 'Conquista publicada.',
+        );
+        await _loadData();
+      }
+    } catch (e) {
+      if (mounted) context.showError('Erro: $e');
+    }
+  }
+
+  /// Bulk visibility change for every achievement of this student.
+  /// Belt-bound achievements are skipped unless the user has graduation:manage,
+  /// preserving the per-type permission model.
+  Future<void> _bulkSetPublic(bool isPublic) async {
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    final canGraduate =
+        currentUser?.hasPermission('graduation:manage') ?? false;
+    final parentContext = context;
+    try {
+      final service = AchievementService(FirebaseService.academyId);
+      var changed = 0;
+      var skipped = 0;
+      for (final a in _achievements) {
+        if (a.isPublic == isPublic) continue;
+        final beltBound = a.type == AchievementType.graduation ||
+            a.type == AchievementType.stripe;
+        if (beltBound && !canGraduate) {
+          skipped++;
+          continue;
+        }
+        await service.update(a.id, {'isPublic': isPublic});
+        changed++;
+      }
+      if (parentContext.mounted) {
+        final base = isPublic
+            ? '$changed conquista(s) tornada(s) pública(s).'
+            : '$changed conquista(s) tornada(s) privada(s).';
+        parentContext.showSuccess(
+          skipped > 0 ? '$base ($skipped de faixa ignorada(s))' : base,
+        );
+        await _loadData();
+      }
+    } catch (e) {
+      if (parentContext.mounted) parentContext.showError('Erro: $e');
+    }
+  }
+
+  /// Server-authoritative recompute of streak/ranking/anniversary milestones
+  /// for this student (CF recomputeStudentMilestones — task 17). Idempotent:
+  /// a re-run only creates the markers still missing.
+  Future<void> _recomputeMilestones() async {
+    final parentContext = context;
+    try {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('recomputeStudentMilestones')
+          .call({
+        'academyId': FirebaseService.academyId,
+        'studentId': widget.studentId,
+      });
+      final created = (result.data?['created'] as num?)?.toInt() ?? 0;
+      if (parentContext.mounted) {
+        parentContext.showSuccess(
+          created > 0
+              ? '$created novo(s) marco(s) criado(s).'
+              : 'Nenhum marco novo (já está atualizado).',
+        );
+        await _loadData();
+      }
+    } on FirebaseFunctionsException catch (e) {
+      if (parentContext.mounted) {
+        parentContext.showError(
+          e.code == 'permission-denied'
+              ? 'Apenas a equipe da academia pode recalcular marcos.'
+              : 'Erro ao recalcular: ${e.message ?? e.code}',
+        );
+      }
+    } catch (e) {
+      if (parentContext.mounted) parentContext.showError('Erro: $e');
+    }
+  }
+
+  /// True when the current user may edit/toggle/delete [achievement].
+  /// Belt-bound (graduation/stripe) → graduation:manage || admin.
+  /// Everything else → any staff (instructor/admin).
+  bool _canManageAchievement(Achievement achievement) {
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser == null) return false;
+    final beltBound = achievement.type == AchievementType.graduation ||
+        achievement.type == AchievementType.stripe;
+    if (beltBound) {
+      return currentUser.isAdmin ||
+          currentUser.hasPermission('graduation:manage');
+    }
+    return currentUser.isInstructor;
+  }
+
   void _showAddAchievementDialog() {
     final titleController = TextEditingController();
     final descriptionController = TextEditingController();
+    // Gamification inputs (PII-free labels/contadores).
+    final streakDaysController = TextEditingController();
+    final rankingScopeController = TextEditingController();
+    final rankingRankController = TextEditingController();
+    final prMetricController = TextEditingController();
+    final prValueController = TextEditingController();
+    final prUnitController = TextEditingController();
+    final iconKeyController = TextEditingController();
     DateTime selectedDate = DateTime.now();
     AchievementType selectedType = AchievementType.milestone;
     String? selectedBelt;
     int selectedStripes = 1;
+    // Visibility default = público (marco genérico); ajustado por tipo.
+    bool isPublic = true;
 
     // Sport-aware: graduação/grau é por modalidade. Default = esporte primário;
     // se o aluno tem mais de uma modalidade, um seletor aparece no diálogo.
@@ -2158,9 +2342,27 @@ class _AdminStudentDetailScreenState
                         value: AchievementType.milestone,
                         child: Text('Marco/Conquista'),
                       ),
+                      const DropdownMenuItem(
+                        value: AchievementType.attendanceStreak,
+                        child: Text('Sequência de presença'),
+                      ),
+                      const DropdownMenuItem(
+                        value: AchievementType.rankingPosition,
+                        child: Text('Posição no ranking'),
+                      ),
+                      const DropdownMenuItem(
+                        value: AchievementType.trainingPr,
+                        child: Text('Recorde de treino (PR)'),
+                      ),
                     ],
                     onChanged: (value) {
-                      setDialogState(() => selectedType = value!);
+                      setDialogState(() {
+                        selectedType = value!;
+                        // Visibility default follows the owner decision:
+                        // streak/ranking → public; PR → private; others public.
+                        isPublic =
+                            selectedType != AchievementType.trainingPr;
+                      });
                     },
                   ),
                   const SizedBox(height: 16),
@@ -2266,8 +2468,11 @@ class _AdminStudentDetailScreenState
                     const SizedBox(height: 16),
                   ],
 
-                  // Title (for milestone type)
-                  if (selectedType == AchievementType.milestone) ...[
+                  // Title (for milestone + gamification types).
+                  if (selectedType == AchievementType.milestone ||
+                      selectedType == AchievementType.attendanceStreak ||
+                      selectedType == AchievementType.rankingPosition ||
+                      selectedType == AchievementType.trainingPr) ...[
                     Text('Título', style: AppTheme.labelMedium),
                     const SizedBox(height: 8),
                     TextField(
@@ -2275,6 +2480,126 @@ class _AdminStudentDetailScreenState
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
                         hintText: 'Ex: 100 Treinos, Campeão Regional...',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Attendance streak: dias de sequência (contador PII-free).
+                  if (selectedType == AchievementType.attendanceStreak) ...[
+                    Text('Dias de sequência', style: AppTheme.labelMedium),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: streakDaysController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        hintText: 'Ex: 30',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Ranking position: escopo + posição (rótulos PII-free).
+                  if (selectedType == AchievementType.rankingPosition) ...[
+                    Text('Escopo do ranking', style: AppTheme.labelMedium),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: rankingScopeController,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        hintText: 'Ex: Mensal, Academia',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text('Posição', style: AppTheme.labelMedium),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: rankingRankController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        hintText: 'Ex: 1',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Training PR: métrica + valor + unidade (recorde de carga).
+                  if (selectedType == AchievementType.trainingPr) ...[
+                    Text('Métrica', style: AppTheme.labelMedium),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: prMetricController,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        hintText: 'Ex: Supino, Agachamento',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Valor', style: AppTheme.labelMedium),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: prValueController,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                        decimal: true),
+                                decoration: const InputDecoration(
+                                  border: OutlineInputBorder(),
+                                  hintText: 'Ex: 120',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Unidade', style: AppTheme.labelMedium),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: prUnitController,
+                                decoration: const InputDecoration(
+                                  border: OutlineInputBorder(),
+                                  hintText: 'kg',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Ícone (opcional) — chave PII-free de exibição.
+                  if (selectedType == AchievementType.milestone ||
+                      selectedType == AchievementType.attendanceStreak ||
+                      selectedType == AchievementType.rankingPosition ||
+                      selectedType == AchievementType.trainingPr) ...[
+                    Text('Ícone (opcional)', style: AppTheme.labelMedium),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: iconKeyController,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        hintText: 'Ex: flame, trophy, dumbbell',
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -2327,6 +2652,28 @@ class _AdminStudentDetailScreenState
                       ),
                     ),
                   ),
+                  const SizedBox(height: 16),
+
+                  // Visibility toggle (público entre membros / privado).
+                  // Default segue a decisão do dono: PR nasce privado, demais
+                  // públicos — mas a recepção pode ajustar aqui.
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      'Visível para a academia',
+                      style: AppTheme.labelMedium,
+                    ),
+                    subtitle: Text(
+                      isPublic
+                          ? 'Outros membros podem ver esta conquista.'
+                          : 'Apenas a equipe e o próprio aluno veem.',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    value: isPublic,
+                    onChanged: (v) => setDialogState(() => isPublic = v),
+                  ),
                 ],
               ),
             ),
@@ -2337,13 +2684,35 @@ class _AdminStudentDetailScreenState
               ),
               FilledButton(
                 onPressed: () async {
+                  // Permission gate: belt-bound types need graduation:manage;
+                  // generic/gamification markers need staff.
+                  final currentUser =
+                      ref.read(currentUserProvider).valueOrNull;
+                  final beltBound =
+                      selectedType == AchievementType.graduation ||
+                          selectedType == AchievementType.stripe;
+                  final allowed = currentUser != null &&
+                      (beltBound
+                          ? (currentUser.isAdmin ||
+                              currentUser.hasPermission('graduation:manage'))
+                          : currentUser.isInstructor);
+                  if (!allowed) {
+                    parentContext.showError(
+                      'Você não tem permissão para registrar este tipo.',
+                    );
+                    return;
+                  }
+
                   // Validate
                   if (selectedType == AchievementType.graduation &&
                       selectedBelt == null) {
                     parentContext.showError('Selecione a faixa');
                     return;
                   }
-                  if (selectedType == AchievementType.milestone &&
+                  if ((selectedType == AchievementType.milestone ||
+                          selectedType == AchievementType.attendanceStreak ||
+                          selectedType == AchievementType.rankingPosition ||
+                          selectedType == AchievementType.trainingPr) &&
                       titleController.text.trim().isEmpty) {
                     parentContext.showError('Informe o título');
                     return;
@@ -2366,6 +2735,8 @@ class _AdminStudentDetailScreenState
                       title = titleController.text.trim();
                     }
 
+                    final iconKey = iconKeyController.text.trim();
+
                     await service.create(
                       studentId: _student!.id,
                       studentName: _student!.fullName,
@@ -2385,6 +2756,35 @@ class _AdminStudentDetailScreenState
                               selectedType == AchievementType.stripe)
                           ? selectedSport.value
                           : null,
+                      streakDays: selectedType ==
+                              AchievementType.attendanceStreak
+                          ? int.tryParse(streakDaysController.text.trim())
+                          : null,
+                      rankingScope:
+                          selectedType == AchievementType.rankingPosition &&
+                                  rankingScopeController.text.trim().isNotEmpty
+                              ? rankingScopeController.text.trim()
+                              : null,
+                      rankingRank: selectedType ==
+                              AchievementType.rankingPosition
+                          ? int.tryParse(rankingRankController.text.trim())
+                          : null,
+                      prMetric:
+                          selectedType == AchievementType.trainingPr &&
+                                  prMetricController.text.trim().isNotEmpty
+                              ? prMetricController.text.trim()
+                              : null,
+                      prValue: selectedType == AchievementType.trainingPr
+                          ? num.tryParse(
+                              prValueController.text.trim().replaceAll(',', '.'),
+                            )
+                          : null,
+                      prUnit: selectedType == AchievementType.trainingPr &&
+                              prUnitController.text.trim().isNotEmpty
+                          ? prUnitController.text.trim()
+                          : null,
+                      iconKey: iconKey.isNotEmpty ? iconKey : null,
+                      isPublic: isPublic,
                       createdBy: 'admin',
                     );
 
@@ -2408,7 +2808,23 @@ class _AdminStudentDetailScreenState
   }
 
   void _showEditAchievementDialog(Achievement achievement) {
+    // Permission gate: belt-bound achievements require graduation:manage;
+    // everything else requires staff. Block before opening the editor.
+    if (!_canManageAchievement(achievement)) {
+      context.showError('Você não tem permissão para editar esta conquista.');
+      return;
+    }
+
     DateTime selectedDate = achievement.date;
+    bool isPublic = achievement.isPublic;
+    final titleController = TextEditingController(text: achievement.title);
+    final descriptionController =
+        TextEditingController(text: achievement.description ?? '');
+
+    // Graduation/stripe titles are derived from belt/stripe data — keep the
+    // title read-only for those; description/date/visibility remain editable.
+    final isBeltBound = achievement.type == AchievementType.graduation ||
+        achievement.type == AchievementType.stripe;
 
     // Store parent context before dialog
     final parentContext = context;
@@ -2418,63 +2834,101 @@ class _AdminStudentDetailScreenState
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            title: const Text('Editar Data'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  achievement.title,
-                  style: AppTheme.titleMedium.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                if (achievement.description != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    achievement.description!,
-                    style: AppTheme.bodySmall.copyWith(
-                      color: AppTheme.textSecondary,
+            title: const Text('Editar Conquista'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Title — editable except for derived belt/stripe titles.
+                  Text('Título', style: AppTheme.labelMedium),
+                  const SizedBox(height: 8),
+                  if (isBeltBound)
+                    Text(
+                      achievement.title,
+                      style: AppTheme.titleMedium.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    )
+                  else
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                      ),
                     ),
+                  const SizedBox(height: 16),
+
+                  // Description (editable for all types).
+                  Text('Descrição (opcional)', style: AppTheme.labelMedium),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: descriptionController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      hintText: 'Detalhes adicionais...',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  Text('Data da Conquista', style: AppTheme.labelMedium),
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: dialogContext,
+                        initialDate: selectedDate,
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime.now(),
+                        locale: const Locale('pt', 'BR'),
+                      );
+                      if (picked != null) {
+                        setDialogState(() => selectedDate = picked);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 16,
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: AppTheme.divider),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today, size: 18),
+                          const SizedBox(width: 8),
+                          Text(DateFormat('dd/MM/yyyy').format(selectedDate)),
+                          const Spacer(),
+                          const Icon(Icons.edit, size: 16, color: Colors.grey),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Visibility (público entre membros / privado).
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      'Visível para a academia',
+                      style: AppTheme.labelMedium,
+                    ),
+                    subtitle: Text(
+                      isPublic
+                          ? 'Outros membros podem ver esta conquista.'
+                          : 'Apenas a equipe e o próprio aluno veem.',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    value: isPublic,
+                    onChanged: (v) => setDialogState(() => isPublic = v),
                   ),
                 ],
-                const SizedBox(height: 24),
-                Text('Data da Conquista', style: AppTheme.labelMedium),
-                const SizedBox(height: 8),
-                InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: dialogContext,
-                      initialDate: selectedDate,
-                      firstDate: DateTime(2000),
-                      lastDate: DateTime.now(),
-                      locale: const Locale('pt', 'BR'),
-                    );
-                    if (picked != null) {
-                      setDialogState(() => selectedDate = picked);
-                    }
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: AppTheme.divider),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.calendar_today, size: 18),
-                        const SizedBox(width: 8),
-                        Text(DateFormat('dd/MM/yyyy').format(selectedDate)),
-                        const Spacer(),
-                        const Icon(Icons.edit, size: 16, color: Colors.grey),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
             actions: [
               TextButton(
@@ -2483,18 +2937,34 @@ class _AdminStudentDetailScreenState
               ),
               FilledButton(
                 onPressed: () async {
+                  if (!isBeltBound &&
+                      titleController.text.trim().isEmpty) {
+                    parentContext.showError('Informe o título');
+                    return;
+                  }
+
                   Navigator.pop(dialogContext);
 
                   try {
                     final service = AchievementService(
                       FirebaseService.academyId,
                     );
-                    await service.update(achievement.id, {
+                    final data = <String, dynamic>{
                       'date': Timestamp.fromDate(selectedDate),
-                    });
+                      'isPublic': isPublic,
+                      'description':
+                          descriptionController.text.trim().isNotEmpty
+                              ? descriptionController.text.trim()
+                              : null,
+                    };
+                    // Only persist a custom title for non-derived types.
+                    if (!isBeltBound) {
+                      data['title'] = titleController.text.trim();
+                    }
+                    await service.update(achievement.id, data);
 
                     if (mounted) {
-                      parentContext.showSuccess('Data atualizada!');
+                      parentContext.showSuccess('Conquista atualizada!');
                       await _loadData();
                     }
                   } catch (e) {
@@ -2513,6 +2983,10 @@ class _AdminStudentDetailScreenState
   }
 
   void _showDeleteAchievementConfirmation(Achievement achievement) {
+    if (!_canManageAchievement(achievement)) {
+      context.showError('Você não tem permissão para excluir esta conquista.');
+      return;
+    }
     // Store parent context before dialog
     final parentContext = context;
 
@@ -3663,11 +4137,13 @@ class _AchievementCard extends StatelessWidget {
   final Achievement achievement;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback onTogglePublic;
 
   const _AchievementCard({
     required this.achievement,
     required this.onEdit,
     required this.onDelete,
+    required this.onTogglePublic,
   });
 
   @override
@@ -3748,6 +4224,26 @@ class _AchievementCard extends StatelessWidget {
                             ),
                           ),
                         ),
+                        const SizedBox(width: 8),
+                        // Visibility indicator: público (membros) vs privado.
+                        Icon(
+                          achievement.isPublic
+                              ? LucideIcons.eye
+                              : LucideIcons.eyeOff,
+                          size: 14,
+                          color: achievement.isPublic
+                              ? AppTheme.textSecondary
+                              : Colors.redAccent,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          achievement.isPublic ? 'Público' : 'Privado',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: achievement.isPublic
+                                ? AppTheme.textSecondary
+                                : Colors.redAccent,
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -3759,6 +4255,7 @@ class _AchievementCard extends StatelessWidget {
                 onSelected: (value) {
                   if (value == 'edit') onEdit();
                   if (value == 'delete') onDelete();
+                  if (value == 'toggle') onTogglePublic();
                 },
                 itemBuilder: (context) => [
                   const PopupMenuItem(
@@ -3767,7 +4264,26 @@ class _AchievementCard extends StatelessWidget {
                       children: [
                         Icon(Icons.edit, size: 20),
                         SizedBox(width: 8),
-                        Text('Editar data'),
+                        Text('Editar'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'toggle',
+                    child: Row(
+                      children: [
+                        Icon(
+                          achievement.isPublic
+                              ? LucideIcons.eyeOff
+                              : LucideIcons.eye,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          achievement.isPublic
+                              ? 'Tornar privado'
+                              : 'Tornar público',
+                        ),
                       ],
                     ),
                   ),
@@ -3800,6 +4316,12 @@ class _AchievementCard extends StatelessWidget {
         return Icons.emoji_events;
       case AchievementType.milestone:
         return Icons.star;
+      case AchievementType.attendanceStreak:
+        return LucideIcons.flame;
+      case AchievementType.rankingPosition:
+        return LucideIcons.trendingUp;
+      case AchievementType.trainingPr:
+        return LucideIcons.dumbbell;
     }
   }
 
@@ -3813,6 +4335,12 @@ class _AchievementCard extends StatelessWidget {
         return Colors.amber;
       case AchievementType.milestone:
         return Colors.green;
+      case AchievementType.attendanceStreak:
+        return Colors.deepOrange;
+      case AchievementType.rankingPosition:
+        return Colors.teal;
+      case AchievementType.trainingPr:
+        return Colors.indigo;
     }
   }
 
@@ -3826,6 +4354,12 @@ class _AchievementCard extends StatelessWidget {
         return 'Competição';
       case AchievementType.milestone:
         return 'Marco';
+      case AchievementType.attendanceStreak:
+        return 'Sequência';
+      case AchievementType.rankingPosition:
+        return 'Ranking';
+      case AchievementType.trainingPr:
+        return 'Recorde';
     }
   }
 }

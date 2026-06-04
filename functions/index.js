@@ -1348,6 +1348,12 @@ exports.trialExpiryReminder = onSchedule(
   const {
     buildPublicProfileProjection: _bppHelper,
     PUBLIC_PROFILE_SAFE_FIELDS: _ppSafeFields,
+    // Gamification helpers are plain functions reused by the on-demand
+    // recompute callable / tests — NOT Cloud Functions. Strip so endpoint
+    // discovery does not try to deploy them as invalid functions.
+    processAcademyGamification: _procGami,
+    computeCurrentStreak: _computeStreak,
+    rankFromGamificationPairs: _rankPairs,
     ...serverTriggers
   } = require('./server_functions');
   Object.assign(exports, serverTriggers);

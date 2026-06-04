@@ -402,6 +402,27 @@ class _AchievementTile extends StatelessWidget {
           color: const Color(0xFF10B981),
           bg: const Color(0xFFD1FAE5),
         );
+      case AchievementType.attendanceStreak:
+        // Streak of attendance — warm orange "flame" (matches timeline).
+        return (
+          icon: LucideIcons.flame,
+          color: const Color(0xFFEA580C),
+          bg: const Color(0xFFFFEDD5),
+        );
+      case AchievementType.rankingPosition:
+        // Ranking position — amber "trophy" (matches timeline).
+        return (
+          icon: LucideIcons.trophy,
+          color: const Color(0xFFD97706),
+          bg: const Color(0xFFFEF3C7),
+        );
+      case AchievementType.trainingPr:
+        // Training personal record — indigo "trending up" (matches timeline).
+        return (
+          icon: LucideIcons.trendingUp,
+          color: const Color(0xFF4F46E5),
+          bg: const Color(0xFFE0E7FF),
+        );
     }
   }
 

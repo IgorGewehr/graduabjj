@@ -6,7 +6,15 @@ import 'notification_dispatcher.dart';
 import 'student_service.dart';
 
 /// Achievement Type
-enum AchievementType { graduation, stripe, competition, milestone }
+enum AchievementType {
+  graduation,
+  stripe,
+  competition,
+  milestone,
+  attendanceStreak,
+  rankingPosition,
+  trainingPr,
+}
 
 extension AchievementTypeExtension on AchievementType {
   String get value {
@@ -19,6 +27,12 @@ extension AchievementTypeExtension on AchievementType {
         return 'competition';
       case AchievementType.milestone:
         return 'milestone';
+      case AchievementType.attendanceStreak:
+        return 'attendanceStreak';
+      case AchievementType.rankingPosition:
+        return 'rankingPosition';
+      case AchievementType.trainingPr:
+        return 'trainingPr';
     }
   }
 
@@ -32,7 +46,14 @@ extension AchievementTypeExtension on AchievementType {
         return AchievementType.competition;
       case 'milestone':
         return AchievementType.milestone;
+      case 'attendanceStreak':
+        return AchievementType.attendanceStreak;
+      case 'rankingPosition':
+        return AchievementType.rankingPosition;
+      case 'trainingPr':
+        return AchievementType.trainingPr;
       default:
+        // Back-compat: unknown/legacy values fall back to milestone.
         return AchievementType.milestone;
     }
   }
@@ -109,6 +130,25 @@ class Achievement {
   // Milestone fields
   final String? milestone;
 
+  // Gamification fields (PII-free contadores/labels).
+  /// Streak de presença em dias (attendanceStreak).
+  final int? streakDays;
+  /// Escopo do ranking (ex. 'academy', 'monthly') — rótulo, sem PII.
+  final String? rankingScope;
+  /// Posição no ranking (rankingPosition).
+  final int? rankingRank;
+  /// Métrica do PR de treino (ex. 'supino', 'agachamento').
+  final String? prMetric;
+  /// Valor do PR de treino (carga/repetições) — recomputado server-side.
+  final num? prValue;
+  /// Unidade do PR (ex. 'kg', 'reps').
+  final String? prUnit;
+  /// Chave de ícone para exibição (sem PII).
+  final String? iconKey;
+  /// Chave de idempotência para marcos criados automaticamente
+  /// (alinha query-before-create por studentId+autoKey).
+  final String? autoKey;
+
   final String? photoUrl;
   final bool isPublic;
   final DateTime createdAt;
@@ -131,6 +171,14 @@ class Achievement {
     this.competitionName,
     this.position,
     this.milestone,
+    this.streakDays,
+    this.rankingScope,
+    this.rankingRank,
+    this.prMetric,
+    this.prValue,
+    this.prUnit,
+    this.iconKey,
+    this.autoKey,
     this.photoUrl,
     this.isPublic = true,
     required this.createdAt,
@@ -139,8 +187,15 @@ class Achievement {
 
   factory Achievement.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    return Achievement.fromMap(doc.id, data);
+  }
+
+  /// Pure parsing seam shared by [fromFirestore] (testable without a
+  /// DocumentSnapshot, which is sealed). Tolerant of legacy docs missing the
+  /// gamification fields (all optional → null).
+  factory Achievement.fromMap(String id, Map<String, dynamic> data) {
     return Achievement(
-      id: doc.id,
+      id: id,
       studentId: data['studentId'] ?? '',
       studentName: data['studentName'] ?? '',
       type: AchievementTypeExtension.fromString(data['type'] ?? 'milestone'),
@@ -158,6 +213,14 @@ class Achievement {
           ? CompetitionPositionExtension.fromString(data['position'])
           : null,
       milestone: data['milestone'],
+      streakDays: (data['streakDays'] as num?)?.toInt(),
+      rankingScope: data['rankingScope'],
+      rankingRank: (data['rankingRank'] as num?)?.toInt(),
+      prMetric: data['prMetric'],
+      prValue: data['prValue'] as num?,
+      prUnit: data['prUnit'],
+      iconKey: data['iconKey'],
+      autoKey: data['autoKey'],
       photoUrl: data['photoUrl'],
       isPublic: data['isPublic'] ?? true,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
@@ -352,6 +415,14 @@ class AchievementService {
     String? competitionName,
     CompetitionPosition? position,
     String? milestone,
+    int? streakDays,
+    String? rankingScope,
+    int? rankingRank,
+    String? prMetric,
+    num? prValue,
+    String? prUnit,
+    String? iconKey,
+    String? autoKey,
     String? photoUrl,
     bool isPublic = true,
     String? createdBy,
@@ -373,6 +444,14 @@ class AchievementService {
       'competitionName': competitionName,
       'position': position?.value,
       'milestone': milestone,
+      'streakDays': streakDays,
+      'rankingScope': rankingScope,
+      'rankingRank': rankingRank,
+      'prMetric': prMetric,
+      'prValue': prValue,
+      'prUnit': prUnit,
+      'iconKey': iconKey,
+      'autoKey': autoKey,
       'photoUrl': photoUrl,
       'isPublic': isPublic,
       'createdAt': FieldValue.serverTimestamp(),

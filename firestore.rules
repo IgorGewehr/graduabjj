@@ -804,9 +804,14 @@ service cloud.firestore {
         allow read: if belongsToAcademy(academyId);
         allow write: if isAcademyStaff(academyId);
 
-        // Students can create their own achievements (auto-created after competition results)
+        // Students can create their OWN achievements, but ONLY competition results
+        // (anti-fraud de gamificacao). Marcos de graduacao/faixa (graduation/stripe),
+        // pagamento (stripe), e contadores server-authoritative
+        // (milestone/attendanceStreak/rankingPosition/trainingPr) so podem ser
+        // criados por staff (allow write na linha 805) ou pelas Cloud Functions.
         allow create: if belongsToAcademy(academyId)
-                      && isOwnStudentRecord(academyId, request.resource.data.studentId);
+                      && isOwnStudentRecord(academyId, request.resource.data.studentId)
+                      && request.resource.data.type == 'competition';
       }
 
       // ============================================

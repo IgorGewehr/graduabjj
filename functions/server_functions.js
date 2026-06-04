@@ -1068,6 +1068,405 @@ exports.scheduledDueSoonReminder = functions.pubsub
     return null;
   });
 
+// ============================================================
+// Gamification — server-authoritative milestones (streak + ranking)
+// ============================================================
+//
+// A daily scheduled job that, PER ACADEMY, recomputes from REAL attendance:
+//   1) the student's current consecutive-day attendance streak, and
+//   2) the student's monthly attendance-ranking position per scope
+//      (geral / adulto / kids),
+// then writes `attendanceStreak` / `rankingPosition` achievements into the
+// canonical `achievements` collection.
+//
+// SECURITY / PRIVACY (owner decision in /tmp/seguranca.txt):
+//   - Values are ALWAYS recomputed server-side from the academy's own
+//     attendance docs — NEVER trusted from any client counter.
+//   - Streak and ranking milestones are PII-free counters/labels and are born
+//     isPublic:true (visible among academy members).
+//   - These NEVER touch the publicProfiles mirror (PUBLIC_PROFILE_SAFE_FIELDS
+//     is unchanged); they live only in `achievements`.
+//   - Idempotency: each auto-created milestone carries a deterministic
+//     `autoKey`; we query-before-create by (studentId + autoKey) so a second
+//     run (or the on-demand recompute callable in task 17) never duplicates.
+//     Requires the composite index achievements(studentId ASC, autoKey ASC).
+//   - The per-attendance "treinos totais" milestone already exists in the
+//     client (attendance_service.dart) and is intentionally NOT duplicated
+//     here (different autoKey namespace + different type).
+
+// Attendance-streak thresholds (consecutive calendar days with a check-in)
+// worth a milestone. Mirrors the spirit of the client's totals milestones but
+// for *consecutive days* rather than lifetime totals.
+const STREAK_DAY_THRESHOLDS = [3, 5, 7, 14, 21, 30, 60, 90, 180, 365];
+
+// How many top positions of each monthly ranking scope earn a milestone.
+const RANKING_TOP_N = 3;
+
+// Local-time YYYY-MM-DD for a JS Date (process.env.TZ is pinned to Brazil in
+// index.js, so getFullYear/getMonth/getDate are Brazil wall-clock).
+function localDayKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Local-time YYYY-MM for a JS Date (the monthly ranking autoKey period).
+function localMonthKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+// Pure: current consecutive-day streak ending at the most recent attendance
+// day, given a set of distinct local day-keys (YYYY-MM-DD) and "today"/
+// "yesterday" keys. The streak is only "current" if the latest attendance is
+// today or yesterday (a gap of >1 day breaks it). Exposed (no Firestore) for
+// reuse and testing. Mirrors the client's day-based notion of attendance.
+function computeCurrentStreak(dayKeySet, todayKey, yesterdayKey) {
+  if (!dayKeySet || dayKeySet.size === 0) return 0;
+  const sorted = Array.from(dayKeySet).sort(); // lexicographic == chronological
+  const latest = sorted[sorted.length - 1];
+  // Stale streak: last check-in is older than yesterday → not current.
+  if (latest !== todayKey && latest !== yesterdayKey) return 0;
+
+  // Walk backwards day-by-day from `latest` while each previous calendar day is
+  // also present.
+  let streak = 0;
+  let cursor = new Date(`${latest}T12:00:00`); // noon avoids DST edge issues
+  // Guard the loop to a sane maximum (e.g. 2 years) to never spin forever.
+  for (let i = 0; i < 800; i++) {
+    const key = localDayKey(cursor);
+    if (dayKeySet.has(key)) {
+      streak++;
+      cursor.setDate(cursor.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+  return streak;
+}
+
+// Pure: rank students by attendance-record count, highest first, ties broken by
+// most-recent attendance (desc). Mirrors RankingService.rankFromPairs in the
+// Flutter client so the server agrees with what the app shows. `pairs` is a list
+// of { studentId, dateMs }. Returns [{ studentId, count, rank }] (1-based).
+function rankFromPairs(pairs) {
+  const counts = new Map();
+  const mostRecent = new Map();
+  for (const p of pairs) {
+    counts.set(p.studentId, (counts.get(p.studentId) || 0) + 1);
+    const cur = mostRecent.get(p.studentId);
+    if (cur == null || p.dateMs > cur) mostRecent.set(p.studentId, p.dateMs);
+  }
+  const entries = Array.from(counts.keys()).map((id) => ({
+    studentId: id,
+    count: counts.get(id),
+    mostRecentMs: mostRecent.get(id) || 0,
+  }));
+  entries.sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return b.mostRecentMs - a.mostRecentMs;
+  });
+  return entries.map((e, i) => ({ studentId: e.studentId, count: e.count, rank: i + 1 }));
+}
+
+// Query-before-create idempotent write of an auto milestone, keyed by
+// (studentId + autoKey). Returns true when a new doc was created, false when one
+// already existed (no-op). NEVER touches publicProfiles.
+async function upsertAutoAchievement(academyId, fields) {
+  const { studentId, autoKey } = fields;
+  if (!studentId || !autoKey) return false;
+  const ref = db
+    .collection('academies').doc(academyId)
+    .collection('achievements');
+
+  // Idempotency guard: composite index achievements(studentId ASC, autoKey ASC).
+  const existing = await ref
+    .where('studentId', '==', studentId)
+    .where('autoKey', '==', autoKey)
+    .limit(1)
+    .get();
+  if (!existing.empty) return false;
+
+  await ref.add({
+    studentId,
+    studentName: fields.studentName || 'Aluno',
+    type: fields.type, // 'attendanceStreak' | 'rankingPosition'
+    title: fields.title,
+    description: fields.description || null,
+    date: admin.firestore.Timestamp.fromDate(fields.date || new Date()),
+    // Gamification PII-free fields (subset; the rest stay null for back-compat).
+    streakDays: fields.streakDays != null ? fields.streakDays : null,
+    rankingScope: fields.rankingScope || null,
+    rankingRank: fields.rankingRank != null ? fields.rankingRank : null,
+    iconKey: fields.iconKey || null,
+    autoKey,
+    // Owner decision: streak + ranking milestones are born public.
+    isPublic: true,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdBy: 'system:gamification',
+  });
+  return true;
+}
+
+// Core worker: recompute streak + monthly ranking milestones for ONE academy.
+// `onlyStudentId` (optional) restricts the streak pass to a single student —
+// used by the on-demand recompute callable (task 17). Ranking is always
+// computed academy-wide (you cannot rank one student in isolation) but only the
+// requested student's position is written when `onlyStudentId` is set.
+// Returns the number of NEW milestones created.
+async function processAcademyGamification(academyId, onlyStudentId = null) {
+  const now = new Date();
+  const todayKey = localDayKey(now);
+  const yesterdayKey = localDayKey(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+  const monthKey = localMonthKey(now);
+
+  const acadRef = db.collection('academies').doc(academyId);
+
+  // Denormalized student names (PII-free label fallback for the milestone).
+  const studentNames = new Map();
+  try {
+    const studentsSnap = await acadRef.collection('students').get();
+    for (const s of studentsSnap.docs) {
+      const d = s.data() || {};
+      studentNames.set(s.id, d.fullName || d.name || 'Aluno');
+    }
+  } catch (e) {
+    console.error(`[gamification] students read failed ${academyId}`, e && e.message);
+  }
+
+  // Class → category map, to scope the ranking (kids vs adult). Matches the
+  // client's _classIdsForCategory: kids = explicitly tagged kids; adult bucket =
+  // adult-tagged PLUS untagged/legacy classes.
+  const kidsClassIds = new Set();
+  const adultClassIds = new Set();
+  try {
+    const classesSnap = await acadRef.collection('classes').get();
+    for (const c of classesSnap.docs) {
+      const cat = (c.data() || {}).category;
+      if (cat === 'kids') kidsClassIds.add(c.id);
+      else adultClassIds.add(c.id); // adult-tagged + untagged default to adult
+    }
+  } catch (e) {
+    console.error(`[gamification] classes read failed ${academyId}`, e && e.message);
+  }
+
+  let created = 0;
+
+  // -------- 1) Attendance STREAK (consecutive days) --------
+  // Read a bounded recent window of attendance (last ~400 days) so the streak
+  // computation has the days it needs without scanning all history. Grouped per
+  // student into a set of distinct local day-keys.
+  const streakWindowStart = new Date(now.getTime() - 400 * 24 * 60 * 60 * 1000);
+  const perStudentDays = new Map(); // studentId -> Set<dayKey>
+  try {
+    let q = acadRef
+      .collection('attendance')
+      .where('date', '>=', admin.firestore.Timestamp.fromDate(streakWindowStart));
+    if (onlyStudentId) q = q.where('studentId', '==', onlyStudentId);
+    const attSnap = await q.get();
+    for (const doc of attSnap.docs) {
+      const d = doc.data() || {};
+      const sid = d.studentId;
+      const ts = d.date;
+      if (!sid || !ts || typeof ts.toDate !== 'function') continue;
+      const dayKey = localDayKey(ts.toDate());
+      let set = perStudentDays.get(sid);
+      if (!set) { set = new Set(); perStudentDays.set(sid, set); }
+      set.add(dayKey);
+    }
+  } catch (e) {
+    console.error(`[gamification] attendance(streak) read failed ${academyId}`, e && e.message);
+  }
+
+  for (const [sid, daySet] of perStudentDays.entries()) {
+    if (onlyStudentId && sid !== onlyStudentId) continue;
+    const streak = computeCurrentStreak(daySet, todayKey, yesterdayKey);
+    if (streak <= 0) continue;
+    // Award every threshold the student has currently reached. autoKey is keyed
+    // on the threshold (not the live count) so it is stable and idempotent: the
+    // milestone "atingiu 7 dias" is created once, ever.
+    for (const threshold of STREAK_DAY_THRESHOLDS) {
+      if (streak < threshold) break;
+      const ok = await upsertAutoAchievement(academyId, {
+        studentId: sid,
+        studentName: studentNames.get(sid),
+        type: 'attendanceStreak',
+        title: `Sequência de ${threshold} dias`,
+        description: `${threshold} dias consecutivos de presença. Mantenha o ritmo!`,
+        streakDays: threshold,
+        iconKey: 'streak',
+        autoKey: `streak_${threshold}`,
+        date: now,
+      });
+      if (ok) created++;
+    }
+  }
+
+  // -------- 2) Monthly RANKING position (geral / adulto / kids) --------
+  // Recompute the current-month ranking server-side from real attendance and
+  // award a milestone to the top N of each scope. autoKey is monthly, e.g.
+  // rank_geral_2026-06, so it is idempotent within the month and a fresh
+  // milestone is minted each new month.
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthAttendance = [];
+  try {
+    const monthSnap = await acadRef
+      .collection('attendance')
+      .where('date', '>=', admin.firestore.Timestamp.fromDate(monthStart))
+      .get();
+    for (const doc of monthSnap.docs) {
+      const d = doc.data() || {};
+      if (!d.studentId || !d.date || typeof d.date.toDate !== 'function') continue;
+      monthAttendance.push({
+        studentId: d.studentId,
+        classId: d.classId || null,
+        dateMs: d.date.toDate().getTime(),
+      });
+    }
+  } catch (e) {
+    console.error(`[gamification] attendance(ranking) read failed ${academyId}`, e && e.message);
+  }
+
+  const scopes = [
+    { id: 'geral', label: 'Geral', filter: null },
+    { id: 'adulto', label: 'Adulto', filter: (a) => a.classId && adultClassIds.has(a.classId) },
+    { id: 'kids', label: 'Kids', filter: (a) => a.classId && kidsClassIds.has(a.classId) },
+  ];
+
+  for (const scope of scopes) {
+    const pairs = scope.filter
+      ? monthAttendance.filter(scope.filter)
+      : monthAttendance;
+    if (pairs.length === 0) continue;
+    const ranked = rankFromPairs(pairs);
+    const autoKey = `rank_${scope.id}_${monthKey}`;
+    for (const entry of ranked) {
+      if (entry.rank > RANKING_TOP_N) break;
+      if (onlyStudentId && entry.studentId !== onlyStudentId) continue;
+      const ok = await upsertAutoAchievement(academyId, {
+        studentId: entry.studentId,
+        studentName: studentNames.get(entry.studentId),
+        type: 'rankingPosition',
+        title: `${entry.rank}º lugar no ranking ${scope.label}`,
+        description: `Top ${entry.rank} de presença no ranking ${scope.label} de ${monthKey}.`,
+        rankingScope: scope.id,
+        rankingRank: entry.rank,
+        iconKey: 'ranking',
+        autoKey, // monthly idempotency key (per studentId via query-before-create)
+        date: now,
+      });
+      if (ok) created++;
+    }
+  }
+
+  return created;
+}
+
+// Exported for reuse by the on-demand recompute callable (task 17) and tests.
+exports.processAcademyGamification = processAcademyGamification;
+exports.computeCurrentStreak = computeCurrentStreak;
+exports.rankFromGamificationPairs = rankFromPairs;
+
+/**
+ * Scheduled: Daily at 7:30 AM (Brasilia Time).
+ * Action: per academy, recompute attendance streak + monthly ranking position
+ * and write idempotent attendanceStreak/rankingPosition milestones.
+ * Mirrors scheduledOverdueCheck's per-academy iteration shape.
+ */
+exports.scheduledGamificationMilestones = functions.pubsub
+  .schedule('30 7 * * *')
+  .timeZone('America/Sao_Paulo')
+  .onRun(async () => {
+    console.log('Running scheduled gamification milestones (streak + ranking)');
+
+    const academiesSnapshot = await db.collection('academies').get();
+    let totalCreated = 0;
+
+    for (const academyDoc of academiesSnapshot.docs) {
+      const academyId = academyDoc.id;
+      try {
+        const created = await processAcademyGamification(academyId);
+        totalCreated += created;
+        if (created > 0) {
+          console.log(`[gamification] academy ${academyId}: ${created} new milestone(s)`);
+        }
+      } catch (e) {
+        // Never let one academy's failure abort the whole cron.
+        console.error(`[gamification] academy ${academyId} failed`, e && e.message);
+      }
+    }
+
+    console.log(`Gamification milestones completed (${totalCreated} created)`);
+    return null;
+  });
+
+/**
+ * Returns true when `uid` is staff (admin OR instructor) of `academyId`,
+ * read from userAcademyMapping. Mirrors the `isStaff` helper in index.js — kept
+ * local here because that helper is not exported across modules.
+ */
+async function isAcademyStaff(uid, academyId) {
+  if (!uid || !academyId) return false;
+  const snap = await db.collection('userAcademyMapping').doc(uid).get();
+  if (!snap.exists) return false;
+  const data = snap.data() || {};
+  const details = data.academyDetails || {};
+  const entry = details[academyId];
+  return !!(entry && (entry.role === 'admin' || entry.role === 'instructor'));
+}
+
+/**
+ * HTTP Callable: on-demand recompute of streak + ranking milestones for ONE
+ * student (task 17). Used by the professor's per-student / bulk "recalcular
+ * marcos" action.
+ *
+ * Body: { academyId: string, studentId: string }
+ *
+ * SECURITY / PRIVACY (owner decision in /tmp/seguranca.txt):
+ *   - Gated to STAFF (admin OR instructor) of the academy via the auth context.
+ *     A non-staff caller gets permission-denied.
+ *   - Values are recomputed SERVER-SIDE from real attendance — the client only
+ *     names the student, never a counter.
+ *   - Fully idempotent: delegates to processAcademyGamification(academyId,
+ *     studentId), whose upsertAutoAchievement query-before-creates by
+ *     (studentId + autoKey). A second call is a no-op (0 created).
+ *   - Streak/ranking milestones are born isPublic:true and NEVER touch the
+ *     publicProfiles mirror (PUBLIC_PROFILE_SAFE_FIELDS is unchanged).
+ */
+exports.recomputeStudentMilestones = onCall(async (request) => {
+  const auth = request.auth;
+  if (!auth) {
+    throw new HttpsError('unauthenticated', 'Login required.');
+  }
+
+  const data = request.data || {};
+  const academyId = (data.academyId || '').toString();
+  const studentId = (data.studentId || '').toString();
+  if (!academyId || !studentId) {
+    throw new HttpsError(
+      'invalid-argument',
+      'academyId e studentId são obrigatórios.'
+    );
+  }
+
+  // Staff gate: only admin/instructor of THIS academy may recompute.
+  if (!(await isAcademyStaff(auth.uid, academyId))) {
+    throw new HttpsError(
+      'permission-denied',
+      'Apenas a equipe da academia pode recalcular marcos.'
+    );
+  }
+
+  // Server-authoritative, idempotent recompute for the single student.
+  const created = await processAcademyGamification(academyId, studentId);
+  console.log(
+    `[gamification] on-demand recompute academy=${academyId} student=${studentId}: ${created} new milestone(s)`
+  );
+  return { created };
+});
+
 // ============================================
 // Cloud Functions - HTTP Callable (notifications)
 // ============================================
