@@ -29,6 +29,7 @@ import 'screens/portal/musculacao_qr_scan_screen.dart';
 import 'screens/admin/musculacao_admin_screen.dart';
 import 'screens/portal/workouts_screen.dart';
 import 'screens/admin/workout_plans_screen.dart';
+import 'screens/admin/exercises_screen.dart';
 import 'screens/portal/videos_screen.dart';
 import 'screens/admin/training_videos_screen.dart';
 import 'screens/admin/import_students_screen.dart';
@@ -945,6 +946,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const WorkoutPlansScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/exercicios',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const ExercisesScreen(),
             ),
           ),
           GoRoute(

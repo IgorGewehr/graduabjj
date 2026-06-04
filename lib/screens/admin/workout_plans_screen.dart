@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
@@ -71,6 +72,13 @@ class _WorkoutPlansScreenState extends ConsumerState<WorkoutPlansScreen> {
       appBar: AppBar(
         title: const Text('Treinos'),
         backgroundColor: AppTheme.surface,
+        actions: [
+          IconButton(
+            tooltip: 'Catálogo de exercícios',
+            icon: const Icon(Icons.fitness_center),
+            onPressed: () => context.push('/admin/exercicios'),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openBuilder(),
