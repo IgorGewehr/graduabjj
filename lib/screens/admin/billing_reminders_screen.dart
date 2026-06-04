@@ -872,6 +872,20 @@ class _AdminBillingRemindersScreenState
       final financialId = financialItem['id'] as String? ?? '';
       final studentId = financialItem['studentId'] as String? ?? '';
 
+      // M4: re-read live status before charging. If it was paid (or is no
+      // longer collectible) since the list was loaded, SKIP — never re-charge.
+      final paidIds = await _billingService.getPaidFinancialIds([financialId]);
+      if (paidIds.contains(financialId)) {
+        if (mounted) {
+          FeedbackUtils.showInfo(
+            context,
+            'Cobranca ja paga — envio ignorado para $studentName.',
+          );
+        }
+        await _loadData();
+        return;
+      }
+
       NotificationResult result;
 
       if (mode == 'whatsapp') {
@@ -1255,12 +1269,39 @@ class _AdminBillingRemindersScreenState
     setState(() => _isSending = true);
 
     try {
-      final items = _overdueStages[stage] ?? [];
+      final allItems = _overdueStages[stage] ?? [];
+
+      // M4: re-read live status for the whole batch and DROP anything already
+      // paid (or no longer collectible) before sending. Surface the skip count.
+      final paidIds = await _billingService.getPaidFinancialIds(
+        allItems.map((i) => i['id'] as String? ?? ''),
+      );
+      final items = allItems
+          .where((i) => !paidIds.contains(i['id'] as String? ?? ''))
+          .toList();
+      final alreadyPaidSkipped = allItems.length - items.length;
+
+      if (items.isEmpty) {
+        if (mounted) {
+          FeedbackUtils.showInfo(
+            context,
+            alreadyPaidSkipped > 0
+                ? 'Todas as $alreadyPaidSkipped cobrancas ja foram pagas — nada a enviar.'
+                : 'Nada a enviar.',
+          );
+        }
+        await _loadData();
+        return;
+      }
+
       final messageTemplate = message;
       final subjectTemplate = subject;
       int waSent = 0, waFailed = 0, waTotal = 0;
       int emSent = 0, emFailed = 0, emTotal = 0;
       final failures = <BulkFailure>[];
+      // L3: track WhatsApp link attachment outcomes so the admin sees how many
+      // messages went out WITH a PIX/link vs WITHOUT (silent link failures).
+      int waWithLink = 0, waWithoutLink = 0;
 
       // ---- PIX pre-generation (bounded concurrency) ----
       // For every WhatsApp-eligible, unpaid item (when the setting is on) we
@@ -1373,6 +1414,15 @@ class _AdminBillingRemindersScreenState
           );
           if (result.success) {
             waSent++;
+            // L3: only meaningful when a link was actually intended (PIX setting
+            // on + WhatsApp on). Otherwise neither counter moves.
+            if (includePix && whatsappOn) {
+              if (pix != null && pix.pixCode.isNotEmpty) {
+                waWithLink++;
+              } else {
+                waWithoutLink++;
+              }
+            }
           } else {
             waFailed++;
             failures.add(
@@ -1458,8 +1508,14 @@ class _AdminBillingRemindersScreenState
             ),
             failures: failures,
           ),
+          alreadyPaidSkipped: alreadyPaidSkipped,
+          waWithLink: waWithLink,
+          waWithoutLink: waWithoutLink,
+          linkIntended: includePix && whatsappOn,
         );
       }
+      // Refresh so the just-paid/charged items reflect current state.
+      await _loadData();
     } catch (e) {
       if (mounted) {
         FeedbackUtils.showError(context, 'Erro no envio em massa: $e');
@@ -1472,7 +1528,13 @@ class _AdminBillingRemindersScreenState
   // ============================================
   // Bulk Server Result Dialog
   // ============================================
-  void _showBulkServerResultDialog(BulkServerResult result) {
+  void _showBulkServerResultDialog(
+    BulkServerResult result, {
+    int alreadyPaidSkipped = 0,
+    int waWithLink = 0,
+    int waWithoutLink = 0,
+    bool linkIntended = false,
+  }) {
     showDialog(
       context: context,
       builder: (dialogContext) {
@@ -1585,6 +1647,75 @@ class _AdminBillingRemindersScreenState
                     ],
                   ),
                 ),
+
+                // M4: charges that were already paid and got skipped.
+                if (alreadyPaidSkipped > 0) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.info.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          LucideIcons.checkCircle,
+                          size: 16,
+                          color: AppTheme.info,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '$alreadyPaidSkipped ja paga(s), ignorada(s)',
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.info,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                // L3: PIX/link attachment outcome for WhatsApp sends.
+                if (linkIntended &&
+                    (waWithLink > 0 || waWithoutLink > 0)) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: waWithoutLink > 0
+                          ? AppTheme.warning.withValues(alpha: 0.08)
+                          : AppTheme.success.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          LucideIcons.creditCard,
+                          size: 16,
+                          color: waWithoutLink > 0
+                              ? AppTheme.warning
+                              : AppTheme.success,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'WhatsApp — enviadas com link: $waWithLink / sem link: $waWithoutLink',
+                            style: AppTheme.bodySmall.copyWith(
+                              color: waWithoutLink > 0
+                                  ? AppTheme.warning
+                                  : AppTheme.success,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 // Failures
                 if (result.failures.isNotEmpty) ...[

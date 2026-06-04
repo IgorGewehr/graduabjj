@@ -66,6 +66,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _abacatePayEnabled = false;
   bool _asaasEnabled = false;
   bool _mpConnected = false;
+  // Backend-set flag: MP auth repeatedly failed; admin must reconnect even
+  // though mpConnected may still be true.
+  bool _mpNeedsReauth = false;
   bool _mpBusy = false;
   bool _storeEnabled = false;
   bool _storePublished = false;
@@ -231,6 +234,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _abacatePayEnabled = settings.abacatePayEnabled;
           _asaasEnabled = settings.asaasEnabled;
           _mpConnected = settings.mpConnected;
+          _mpNeedsReauth = settings.mpNeedsReauth;
           _storeEnabled = settings.storeEnabled;
           _storePublished = settings.storePublished;
           _storeCreditCardEnabled = settings.storeCreditCardEnabled;
@@ -1030,7 +1034,66 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 16),
-          if (_mpConnected)
+          // Reauth required: the connection went stale (token revoked/expired).
+          // Surface a clear warning + "Reconectar" CTA even while mpConnected is
+          // still true, so payments don't keep silently failing.
+          if (_mpConnected && _mpNeedsReauth) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.warning.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: AppTheme.warning.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(LucideIcons.alertTriangle,
+                      size: 18, color: AppTheme.warning),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'A conexao com o Mercado Pago expirou. Reconecte para '
+                      'voltar a receber os pagamentos dos alunos.',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.warning,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _mpBusy ? null : _connectMercadoPago,
+                icon: _mpBusy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(LucideIcons.refreshCw, size: 18),
+                label: Text(
+                    _mpBusy ? 'Reconectando...' : 'Reconectar Mercado Pago'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.warning,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _mpBusy ? null : _disconnectMercadoPago,
+                child: const Text('Desconectar'),
+              ),
+            ),
+          ] else if (_mpConnected)
             Row(
               children: [
                 Icon(LucideIcons.checkCircle, size: 18, color: AppTheme.success),
@@ -1081,6 +1144,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     if (connected == true && mounted) {
       setState(() {
         _mpConnected = true;
+        _mpNeedsReauth = false;
         _abacatePayEnabled = false;
         _asaasEnabled = false;
       });
@@ -1112,7 +1176,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     try {
       final ok = await MercadoPagoService(FirebaseService.academyId).disconnect();
       if (mounted && ok) {
-        setState(() => _mpConnected = false);
+        setState(() {
+          _mpConnected = false;
+          _mpNeedsReauth = false;
+        });
         context.showSuccess('Mercado Pago desconectado.');
       } else if (mounted) {
         context.showError('Falha ao desconectar.');

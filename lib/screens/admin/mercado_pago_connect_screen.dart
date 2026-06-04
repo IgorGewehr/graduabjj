@@ -120,7 +120,10 @@ class _MercadoPagoConnectScreenState extends State<MercadoPagoConnectScreen>
   Future<bool> _isConnected() async {
     try {
       final s = await SettingsService(widget.academyId).getAcademySettings();
-      return s?.mpConnected ?? false;
+      // A healthy connection requires mpConnected AND not flagged for reauth.
+      // If the backend set mpNeedsReauth, the OAuth round-trip didn't actually
+      // restore a working token, so we must not report success.
+      return (s?.mpConnected ?? false) && !(s?.mpNeedsReauth ?? false);
     } catch (_) {
       return false;
     }

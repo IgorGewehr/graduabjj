@@ -349,11 +349,32 @@ class _AdminWalletScreenState extends ConsumerState<AdminWalletScreen> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(academySettingsProvider).valueOrNull;
+    final mpConnected = settings?.mpConnected ?? false;
+    // The platform wallet (saldo/saques) only exists for the AbacatePay flow.
+    // When Mercado Pago is connected, money lands straight in the academy's own
+    // MP account, so there's no platform balance to show — but it's not a
+    // disabled dead-end either. Show an MP-appropriate informational view.
     final isPaymentEnabled = settings?.abacatePayEnabled ?? false; // Apenas AbacatePay
     final currencyFormat =
         NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
 
     if (!isPaymentEnabled) {
+      if (mpConnected) {
+        return Scaffold(
+          backgroundColor: AppTheme.background,
+          body: PolishedEmptyState(
+            icon: LucideIcons.wallet,
+            accent: const Color(0xFF009EE3),
+            title: 'Pagamentos via Mercado Pago',
+            subtitle:
+                'Sua conta esta conectada ao Mercado Pago. Os pagamentos caem '
+                'direto na sua conta Mercado Pago — sem saldo nem saques pela '
+                'plataforma. Acompanhe o dinheiro pelo app do Mercado Pago.',
+            actionLabel: 'Ir para Configuracoes',
+            onAction: () => context.go('/admin/configuracoes'),
+          ),
+        );
+      }
       return Scaffold(
         backgroundColor: AppTheme.background,
         body: PolishedEmptyState(

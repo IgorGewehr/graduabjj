@@ -2117,7 +2117,9 @@ async function mpRequest(method, path, { body, token, idempotencyKey } = {}) {
 async function getMpAccessToken(academyId) {
   const ref = db.doc(`academies/${academyId}/private/mpAuth`);
   const lockRef = db.doc(`academies/${academyId}/private/mpTokenLock`);
+  const academyRef = db.doc(`academies/${academyId}`);
   const bufferMs = 5 * 60 * 1000;
+  const LOCK_STALE_MS = 30 * 1000;
 
   const readTokens = async () => {
     const s = await ref.get();
@@ -2126,36 +2128,82 @@ async function getMpAccessToken(academyId) {
     }
     return s.data();
   };
+  const exp = (x) => (x && typeof x.toMillis === 'function') ? x.toMillis() : 0;
+  const isFresh = (data) =>
+    data && data.accessToken && Date.now() < exp(data.expiresAt) - bufferMs;
 
   const d = await readTokens();
-  const exp = (x) => (x && typeof x.toMillis === 'function') ? x.toMillis() : 0;
-  if (d.accessToken && Date.now() < exp(d.expiresAt) - bufferMs) {
+  if (isFresh(d)) {
     return d.accessToken;
   }
 
   // Token expired/near expiry. Acquire a lock so concurrent calls don't both
   // refresh — MP ROTATES the refresh_token on every refresh, so a double
   // refresh would invalidate the connection.
-  try {
-    await lockRef.create({ at: admin.firestore.FieldValue.serverTimestamp() });
-  } catch (_) {
-    // Another call is refreshing — wait briefly and return the fresh token.
-    await new Promise((r) => setTimeout(r, 2000));
-    return (await readTokens()).accessToken;
+  const acquireLock = async () => {
+    try {
+      await lockRef.create({ at: admin.firestore.FieldValue.serverTimestamp() });
+      return true;
+    } catch (_) {
+      // Lock exists. If it's stale (an orphaned lock from a crashed/timed-out
+      // call), reclaim it so an academy can't be permanently degraded.
+      const ls = await lockRef.get().catch(() => null);
+      const at = ls && ls.exists ? ls.data().at : null;
+      if (!ls || !ls.exists || (exp(at) && Date.now() - exp(at) > LOCK_STALE_MS)) {
+        await lockRef.delete().catch(() => {});
+        try {
+          await lockRef.create({ at: admin.firestore.FieldValue.serverTimestamp() });
+          return true;
+        } catch (_) {
+          return false; // someone else reclaimed it first
+        }
+      }
+      return false;
+    }
+  };
+
+  if (!(await acquireLock())) {
+    // Another call is refreshing. Re-read the token + expiry in a bounded loop
+    // (short waits) instead of a single blind read, so we never return a stale
+    // token. If the holder never finishes, fall through to retry the lock once.
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      const cur = await readTokens();
+      if (isFresh(cur)) {
+        return cur.accessToken;
+      }
+    }
+    // Holder appears stuck; attempt to take over (acquireLock reclaims if stale).
+    if (!(await acquireLock())) {
+      const cur = await readTokens();
+      if (isFresh(cur)) return cur.accessToken;
+      throw new HttpsError('deadline-exceeded',
+        'Não foi possível atualizar o token do Mercado Pago. Tente novamente.');
+    }
   }
+
   try {
     const fresh = await readTokens();
-    if (fresh.accessToken && Date.now() < exp(fresh.expiresAt) - bufferMs) {
+    if (isFresh(fresh)) {
       return fresh.accessToken; // someone else refreshed before we locked
     }
-    const tok = await mpRequest('POST', '/oauth/token', {
-      body: {
-        client_id: process.env.MP_OAUTH_CLIENT_ID,
-        client_secret: process.env.MP_OAUTH_CLIENT_SECRET,
-        grant_type: 'refresh_token',
-        refresh_token: fresh.refreshToken,
-      },
-    });
+    let tok;
+    try {
+      tok = await mpRequest('POST', '/oauth/token', {
+        body: {
+          client_id: process.env.MP_OAUTH_CLIENT_ID,
+          client_secret: process.env.MP_OAUTH_CLIENT_SECRET,
+          grant_type: 'refresh_token',
+          refresh_token: fresh.refreshToken,
+        },
+      });
+    } catch (err) {
+      // refresh_token exchange failed — connection is broken and the admin must
+      // reconnect. Flag it (best-effort) so the admin UI can prompt a reconnect.
+      await academyRef.set({ mpNeedsReauth: true }, { merge: true }).catch(() => {});
+      throw new HttpsError('failed-precondition',
+        'A conexão com o Mercado Pago expirou. Reconecte a conta nas configurações.');
+    }
     await ref.set({
       accessToken: tok.access_token,
       refreshToken: tok.refresh_token || fresh.refreshToken,
@@ -2163,6 +2211,10 @@ async function getMpAccessToken(academyId) {
         Date.now() + (Number(tok.expires_in) || 0) * 1000),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
+    // Successful refresh — clear any stale reconnect flag (best-effort).
+    await academyRef.set(
+      { mpNeedsReauth: admin.firestore.FieldValue.delete() }, { merge: true }
+    ).catch(() => {});
     return tok.access_token;
   } finally {
     await lockRef.delete().catch(() => {});

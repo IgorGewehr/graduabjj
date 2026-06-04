@@ -153,6 +153,11 @@ class AcademySettings {
   final bool mpConnected;
   final String? mpPublicKey;
 
+  /// Set by the backend when MP auth repeatedly fails (e.g. the refresh token
+  /// was revoked or expired). When true, the admin must reconnect even if
+  /// [mpConnected] is still true. Defaults to false.
+  final bool mpNeedsReauth;
+
   // Auto-graduation Settings
   /// Master toggle for the entire attendance-based graduation feature.
   /// When false: the Graduation tab disappears from admin nav, the student
@@ -241,6 +246,7 @@ class AcademySettings {
     this.asaasKycOnboardingUrl,
     this.mpConnected = false,
     this.mpPublicKey,
+    this.mpNeedsReauth = false,
     this.autoGraduationEnabled = false,
     this.autoGraduationAttendances,
     this.graduationRequirementsBySport = const {},
@@ -309,6 +315,7 @@ class AcademySettings {
       asaasKycOnboardingUrl: data['asaasKycOnboardingUrl'],
       mpConnected: data['mpConnected'] ?? false,
       mpPublicKey: data['mpPublicKey'],
+      mpNeedsReauth: data['mpNeedsReauth'] ?? false,
       autoGraduationEnabled: data['autoGraduationEnabled'] ?? false,
       autoGraduationAttendances: data['autoGraduationAttendances'],
       graduationRequirementsBySport:

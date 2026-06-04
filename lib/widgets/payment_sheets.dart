@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:confetti/confetti.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -21,7 +23,9 @@ import '../services/mercado_pago_service.dart';
 // Modern PIX Payment Bottom Sheet
 // ============================================
 class PixPaymentSheet extends StatefulWidget {
-  final PaymentLink paymentLink;
+  /// Pre-created PIX link. May be null when the sheet is responsible for
+  /// generating it (see [requireCpf] / [onRegenerate]).
+  final PaymentLink? paymentLink;
   final double amount;
   final String? orderId;
   final String? financialId;
@@ -29,16 +33,40 @@ class PixPaymentSheet extends StatefulWidget {
   final VoidCallback? onPaymentConfirmed;
   final VoidCallback? onClose;
 
+  /// Whether to prompt the payer for their CPF before generating the PIX.
+  /// Set this true when the caller does NOT already have a CPF on file (e.g.
+  /// Mercado Pago requires it). When true the sheet opens with [paymentLink]
+  /// null-able via [onGenerateWithCpf]; the QR/code area shows a CPF form first.
+  final bool requireCpf;
+
+  /// Called with a validated, digits-only CPF when [requireCpf] is true and the
+  /// payer submits the form. Should create the PIX (passing the CPF into the
+  /// gateway call) and return the resulting [PaymentLink], or null/throw on
+  /// failure. The sheet handles loading + friendly error states around it.
+  final Future<PaymentLink?> Function(String cpf)? onGenerateWithCpf;
+
+  /// Called when the payer taps "gerar novo" after the PIX expired (or to retry
+  /// a failed generation). Should create a fresh [PaymentLink] and return it, or
+  /// null/throw on failure. When [requireCpf] is true the previously captured
+  /// CPF is passed back so the payer does not retype it.
+  final Future<PaymentLink?> Function(String? cpf)? onRegenerate;
+
   const PixPaymentSheet({
     super.key,
-    required this.paymentLink,
+    this.paymentLink,
     required this.amount,
     this.orderId,
     this.financialId,
     required this.description,
     this.onPaymentConfirmed,
     this.onClose,
-  });
+    this.requireCpf = false,
+    this.onGenerateWithCpf,
+    this.onRegenerate,
+  }) : assert(
+          paymentLink != null || requireCpf || onRegenerate != null,
+          'PixPaymentSheet needs a paymentLink, or requireCpf, or an onRegenerate callback to obtain one.',
+        );
 
   @override
   State<PixPaymentSheet> createState() => _PixPaymentSheetState();
@@ -57,12 +85,33 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
   Timer? _expirationTimer;
   Duration _timeRemaining = const Duration(hours: 24);
 
+  /// The active PIX link. Starts from the widget but can be replaced by a
+  /// CPF-driven generation or a regenerate-after-expiry.
+  PaymentLink? _link;
+  bool _expired = false;
+
+  /// Captured CPF (digits-only) when [PixPaymentSheet.requireCpf] is true, so a
+  /// later regenerate can reuse it.
+  String? _capturedCpf;
+
+  /// Busy while generating/regenerating a link.
+  bool _generating = false;
+
+  /// Friendly pt-BR error from a failed generation, with a retry affordance.
+  String? _genError;
+
+  final _cpfController = TextEditingController();
+  final _cpfFormKey = GlobalKey<FormState>();
+
   @override
   void initState() {
     super.initState();
+    _link = widget.paymentLink;
     _setupAnimations();
-    _setupPaymentListener();
-    _startExpirationTimer();
+    if (_link != null) {
+      _setupPaymentListener();
+      _startExpirationTimer();
+    }
   }
 
   void _setupAnimations() {
@@ -86,9 +135,14 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
   }
 
   void _startExpirationTimer() {
-    // Calculate remaining time from paymentLink expiration
-    final expiresAt = widget.paymentLink.expiresAt;
+    _expirationTimer?.cancel();
+    final link = _link;
+    if (link == null) return;
+
+    // Calculate remaining time from the active link's expiration (pixExpiresAt).
+    final expiresAt = link.expiresAt;
     _timeRemaining = expiresAt.difference(DateTime.now());
+    _expired = _timeRemaining.isNegative;
 
     _expirationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
@@ -99,6 +153,7 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
       setState(() {
         _timeRemaining = expiresAt.difference(DateTime.now());
         if (_timeRemaining.isNegative) {
+          _expired = true;
           timer.cancel();
         }
       });
@@ -149,11 +204,119 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
     _animationController.dispose();
     _paymentListener?.cancel();
     _expirationTimer?.cancel();
+    _cpfController.dispose();
     super.dispose();
   }
 
+  /// Maps gateway/FirebaseFunctions errors to friendly pt-BR copy.
+  String _friendlyError(Object error) {
+    if (error is FirebaseFunctionsException) {
+      switch (error.code) {
+        case 'unauthenticated':
+          return 'Sessao expirada. Faca login novamente para gerar o PIX.';
+        case 'permission-denied':
+          return 'Sem permissao para gerar este pagamento.';
+        case 'failed-precondition':
+          return error.message ??
+              'Pagamento indisponivel no momento. Tente novamente.';
+        case 'invalid-argument':
+          return error.message ?? 'Dados invalidos. Verifique e tente novamente.';
+        case 'deadline-exceeded':
+        case 'unavailable':
+          return 'Servico indisponivel. Verifique sua conexao e tente novamente.';
+        default:
+          return error.message ?? 'Nao foi possivel gerar o PIX. Tente novamente.';
+      }
+    }
+    return 'Nao foi possivel gerar o PIX. Tente novamente.';
+  }
+
+  /// Generates the first link from a submitted CPF (requireCpf flow).
+  Future<void> _generateWithCpf() async {
+    if (!(_cpfFormKey.currentState?.validate() ?? false)) return;
+    final cpf = _cpfController.text.replaceAll(RegExp(r'\D'), '');
+    _capturedCpf = cpf;
+    final cb = widget.onGenerateWithCpf;
+    if (cb == null) return;
+
+    setState(() {
+      _generating = true;
+      _genError = null;
+    });
+    try {
+      final link = await cb(cpf);
+      if (!mounted) return;
+      if (link == null) {
+        setState(() {
+          _generating = false;
+          _genError = 'Nao foi possivel gerar o PIX. Tente novamente.';
+        });
+        return;
+      }
+      _adoptLink(link);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _generating = false;
+        _genError = _friendlyError(e);
+      });
+    }
+  }
+
+  /// Regenerates the link after expiry or a failed generation.
+  Future<void> _regenerate() async {
+    final cb = widget.onRegenerate;
+    if (cb == null) return;
+    setState(() {
+      _generating = true;
+      _genError = null;
+    });
+    try {
+      final link = await cb(_capturedCpf);
+      if (!mounted) return;
+      if (link == null) {
+        setState(() {
+          _generating = false;
+          _genError = 'Nao foi possivel gerar um novo PIX. Tente novamente.';
+        });
+        return;
+      }
+      _adoptLink(link);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _generating = false;
+        _genError = _friendlyError(e);
+      });
+    }
+  }
+
+  /// Adopts a freshly generated link: resets expiry/listener and shows the QR.
+  void _adoptLink(PaymentLink link) {
+    final hadLink = _link != null;
+    setState(() {
+      _link = link;
+      _expired = false;
+      _generating = false;
+      _genError = null;
+      _copied = false;
+    });
+    if (!hadLink) _setupPaymentListener();
+    _startExpirationTimer();
+  }
+
+  Future<void> _openTicketUrl() async {
+    final url = _link?.ticketUrl;
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
   void _copyPixCode() {
-    Clipboard.setData(ClipboardData(text: widget.paymentLink.pixCode));
+    final link = _link;
+    if (link == null) return;
+    Clipboard.setData(ClipboardData(text: link.pixCode));
     HapticFeedback.mediumImpact();
     setState(() => _copied = true);
 
@@ -264,32 +427,7 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
                       .slideY(begin: 0.08, curve: Curves.easeOut),
                   const SizedBox(height: 24),
 
-                  // QR Code with glow effect
-                  _buildQRCode()
-                      .animate()
-                      .fadeIn(delay: 140.ms, duration: 300.ms)
-                      .slideY(begin: 0.08, curve: Curves.easeOut),
-                  const SizedBox(height: 20),
-
-                  // Copy Code Button
-                  _buildCopyButton()
-                      .animate()
-                      .fadeIn(delay: 220.ms, duration: 300.ms)
-                      .slideY(begin: 0.08, curve: Curves.easeOut),
-                  const SizedBox(height: 20),
-
-                  // Instructions
-                  _buildInstructions()
-                      .animate()
-                      .fadeIn(delay: 300.ms, duration: 300.ms)
-                      .slideY(begin: 0.08, curve: Curves.easeOut),
-                  const SizedBox(height: 20),
-
-                  // Status Indicator
-                  _buildStatusIndicator()
-                      .animate()
-                      .fadeIn(delay: 380.ms, duration: 300.ms),
-                  const SizedBox(height: 16),
+                  ..._buildBody(),
                 ],
               ),
             ),
@@ -407,7 +545,8 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
               ),
             ],
           ),
-          // Expiration timer
+          // Expiration timer (only while an active link is counting down)
+          if (_link != null && !_expired)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
@@ -444,6 +583,357 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
     );
   }
 
+  /// Chooses the central content depending on the current state:
+  /// CPF capture form, generation error, expired affordance, or the QR/code.
+  List<Widget> _buildBody() {
+    // Generation error (failed create/regenerate) takes priority.
+    if (_genError != null) {
+      return [
+        _buildErrorRetry()
+            .animate()
+            .fadeIn(duration: 250.ms)
+            .slideY(begin: 0.08, curve: Curves.easeOut),
+      ];
+    }
+
+    // No link yet and we need a CPF first.
+    if (_link == null && widget.requireCpf) {
+      return [
+        _buildCpfCapture()
+            .animate()
+            .fadeIn(duration: 250.ms)
+            .slideY(begin: 0.08, curve: Curves.easeOut),
+      ];
+    }
+
+    // No link yet (regenerate-only entry) — show a generate affordance.
+    if (_link == null) {
+      return [
+        _buildGeneratePrompt()
+            .animate()
+            .fadeIn(duration: 250.ms)
+            .slideY(begin: 0.08, curve: Curves.easeOut),
+      ];
+    }
+
+    // Expired — offer "gerar novo".
+    if (_expired) {
+      return [
+        _buildExpired()
+            .animate()
+            .fadeIn(duration: 250.ms)
+            .slideY(begin: 0.08, curve: Curves.easeOut),
+      ];
+    }
+
+    // Active link — QR + copy + (optional) browser link + instructions.
+    return [
+      _buildQRCode()
+          .animate()
+          .fadeIn(delay: 140.ms, duration: 300.ms)
+          .slideY(begin: 0.08, curve: Curves.easeOut),
+      const SizedBox(height: 20),
+      _buildCopyButton()
+          .animate()
+          .fadeIn(delay: 220.ms, duration: 300.ms)
+          .slideY(begin: 0.08, curve: Curves.easeOut),
+      if ((_link?.ticketUrl ?? '').isNotEmpty) ...[
+        const SizedBox(height: 12),
+        _buildTicketUrlButton()
+            .animate()
+            .fadeIn(delay: 260.ms, duration: 300.ms),
+      ],
+      const SizedBox(height: 20),
+      _buildInstructions()
+          .animate()
+          .fadeIn(delay: 300.ms, duration: 300.ms)
+          .slideY(begin: 0.08, curve: Curves.easeOut),
+      const SizedBox(height: 20),
+      _buildStatusIndicator()
+          .animate()
+          .fadeIn(delay: 380.ms, duration: 300.ms),
+      const SizedBox(height: 16),
+    ];
+  }
+
+  Widget _buildCpfCapture() {
+    return Form(
+      key: _cpfFormKey,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Informe seu CPF',
+              style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Necessario para gerar o pagamento PIX.',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _cpfController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [CpfFormatter()],
+              validator: Validators.cpf,
+              decoration: InputDecoration(
+                labelText: 'CPF',
+                hintText: '000.000.000-00',
+                prefixIcon: const Icon(LucideIcons.fileText, size: 20),
+                filled: true,
+                fillColor: AppTheme.surface,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: AppTheme.primary, width: 2),
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _generating ? null : _generateWithCpf,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 0,
+                ),
+                child: _generating
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        'Gerar PIX',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGeneratePrompt() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Text(
+            'Gere o codigo PIX para pagar.',
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _generating ? null : _regenerate,
+              icon: _generating
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(LucideIcons.qrCode, size: 18),
+              label: const Text('Gerar PIX'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 0,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExpired() {
+    final canRegenerate = widget.onRegenerate != null;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.error.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.error.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        children: [
+          const Icon(LucideIcons.clock, color: AppTheme.error, size: 32),
+          const SizedBox(height: 12),
+          Text(
+            'Codigo PIX expirado',
+            style: AppTheme.titleSmall.copyWith(
+              color: AppTheme.error,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            canRegenerate
+                ? 'O tempo para pagamento acabou. Gere um novo codigo.'
+                : 'O tempo para pagamento acabou. Feche e tente novamente.',
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            textAlign: TextAlign.center,
+          ),
+          if (canRegenerate) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _generating ? null : _regenerate,
+                icon: _generating
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(LucideIcons.refreshCw, size: 18),
+                label: const Text('Gerar novo'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorRetry() {
+    // Retry uses the same path that failed: CPF-driven generation if we still
+    // have no link and requireCpf, otherwise regenerate.
+    final useCpfRetry = _link == null &&
+        widget.requireCpf &&
+        widget.onGenerateWithCpf != null &&
+        (_capturedCpf == null);
+    final canRetry =
+        useCpfRetry || widget.onRegenerate != null || _capturedCpf != null;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.error.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.error.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        children: [
+          const Icon(LucideIcons.alertCircle, color: AppTheme.error, size: 32),
+          const SizedBox(height: 12),
+          Text(
+            _genError ?? 'Algo deu errado.',
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.error),
+            textAlign: TextAlign.center,
+          ),
+          if (canRetry) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _generating
+                    ? null
+                    : () {
+                        if (useCpfRetry) {
+                          _generateWithCpf();
+                        } else {
+                          _regenerate();
+                        }
+                      },
+                icon: _generating
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(LucideIcons.refreshCw, size: 18),
+                label: const Text('Tentar novamente'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTicketUrlButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _openTicketUrl,
+        icon: const Icon(LucideIcons.externalLink, size: 18),
+        label: const Text('Abrir pagina de pagamento'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppTheme.primary,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          side: BorderSide(color: AppTheme.primary.withValues(alpha: 0.4)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildQRCode() {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -467,7 +957,7 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
       child: Column(
         children: [
           QrImageView(
-            data: widget.paymentLink.pixCode,
+            data: _link?.pixCode ?? '',
             version: QrVersions.auto,
             size: 200,
             backgroundColor: Colors.white,
@@ -924,6 +1414,31 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
   }
 
 
+  /// Maps gateway/FirebaseFunctions errors to friendly pt-BR copy.
+  String _friendlyCardError(Object error) {
+    if (error is FirebaseFunctionsException) {
+      switch (error.code) {
+        case 'unauthenticated':
+          return 'Sessao expirada. Faca login novamente e tente de novo.';
+        case 'permission-denied':
+          return 'Sem permissao para realizar este pagamento.';
+        case 'invalid-argument':
+          return error.message ??
+              'Dados invalidos. Verifique o cartao e tente novamente.';
+        case 'failed-precondition':
+          return error.message ??
+              'Pagamento indisponivel no momento. Tente novamente.';
+        case 'deadline-exceeded':
+        case 'unavailable':
+          return 'Servico indisponivel. Verifique sua conexao e tente novamente.';
+        default:
+          return error.message ??
+              'Nao foi possivel processar o pagamento. Tente novamente.';
+      }
+    }
+    return 'Nao foi possivel processar o pagamento. Tente novamente.';
+  }
+
   Future<void> _handlePayment() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -1038,12 +1553,13 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
         }
       } else {
         setState(() {
-          _errorMessage = result.message ?? 'Erro ao processar pagamento';
+          _errorMessage =
+              result.message ?? 'Pagamento nao aprovado. Verifique os dados do cartao e tente novamente.';
         });
       }
     } catch (e) {
       setState(() {
-        _errorMessage = 'Erro: $e';
+        _errorMessage = _friendlyCardError(e);
       });
     } finally {
       if (mounted) {
@@ -1292,9 +1808,9 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                               color: Colors.white,
                             ),
                           )
-                        : const Text(
-                            'Pagar Agora',
-                            style: TextStyle(
+                        : Text(
+                            _errorMessage != null ? 'Tentar novamente' : 'Pagar Agora',
+                            style: const TextStyle(
                               fontWeight: FontWeight.w600,
                               fontSize: 16,
                             ),

@@ -1,13 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
@@ -18,6 +14,7 @@ import '../../services/mercado_pago_service.dart';
 import '../../services/firebase_service.dart';
 import '../../providers/store_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../widgets/payment_sheets.dart';
 import '../../widgets/polish/polish.dart';
 
 /// Portal Store Orders Screen - Student's Orders or All Orders for Admin/Instructor
@@ -533,8 +530,43 @@ class _OrderDetailsSheet extends ConsumerStatefulWidget {
 }
 
 class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
-  bool _isLoadingPayment = false;
   bool _isUpdatingStatus = false;
+
+  /// Resolved payment gateway for this academy. Loaded lazily for the student
+  /// view so we can gate the PIX/Card buttons (and only forward the CPF to
+  /// Mercado Pago). `null` while loading, `_Gateway.none` when nothing is
+  /// connected (we then tell the student to arrange payment with the academy).
+  _Gateway? _gateway;
+
+  @override
+  void initState() {
+    super.initState();
+    // Only the student view (pending order) needs the gateway resolution.
+    if (!widget.isAdminView &&
+        widget.order.status == StoreOrderStatus.pendingPayment) {
+      _resolveGateway();
+    }
+  }
+
+  Future<void> _resolveGateway() async {
+    final academyId = FirebaseService.academyId;
+    // Precedence: Mercado Pago (mpConnected) > Asaas > AbacatePay.
+    _Gateway resolved;
+    try {
+      if (await MercadoPagoService(academyId).isEnabled()) {
+        resolved = _Gateway.mercadoPago;
+      } else if (await AsaasPaymentService(academyId).isEnabled()) {
+        resolved = _Gateway.asaas;
+      } else if (await AbacatePayService(academyId).isEnabled()) {
+        resolved = _Gateway.abacatePay;
+      } else {
+        resolved = _Gateway.none;
+      }
+    } catch (_) {
+      resolved = _Gateway.none;
+    }
+    if (mounted) setState(() => _gateway = resolved);
+  }
 
   Future<void> _updateStatus(StoreOrderStatus newStatus) async {
     final academyId = FirebaseService.academyId;
@@ -602,86 +634,194 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
     }
   }
 
-  Future<void> _handlePixPayment() async {
+  /// Short order description used as the payment label.
+  String get _orderDescription =>
+      'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}';
+
+  /// Creates the store-order PIX link for the resolved gateway. Only Mercado
+  /// Pago needs/forwards the payer CPF (digits-only); Asaas/AbacatePay ignore
+  /// it. Amount is passed in REAIS (the gateway services convert internally).
+  Future<PaymentLink?> _createOrderPix({String? cpf}) async {
     final academyId = FirebaseService.academyId;
-
     final currentUser = ref.read(currentUserProvider).valueOrNull;
-    if (currentUser == null) return;
+    if (currentUser == null) return null;
+    final studentId = currentUser.studentId ?? '';
 
-    setState(() => _isLoadingPayment = true);
-
-    try {
-      final desc =
-          'Pedido #${widget.order.id.substring(widget.order.id.length - 6).toUpperCase()}';
-      final studentId = currentUser.studentId ?? '';
-
-      // Gateway precedence: Mercado Pago (connected) > Asaas > AbacatePay.
-      final mp = MercadoPagoService(academyId);
-      final asaasService = AsaasPaymentService(academyId);
-
-      PaymentLink? paymentLink;
-      if (await mp.isEnabled()) {
-        paymentLink = await mp.createStoreOrderPayment(
+    switch (_gateway) {
+      case _Gateway.mercadoPago:
+        return MercadoPagoService(academyId).createStoreOrderPayment(
           amount: widget.order.total,
           orderId: widget.order.id,
           studentId: studentId,
           studentName: currentUser.displayName,
-          description: desc,
+          description: _orderDescription,
+          cpf: cpf,
         );
-      } else if (await asaasService.isEnabled()) {
-        paymentLink = await asaasService.createStoreOrderPayment(
+      case _Gateway.asaas:
+        return AsaasPaymentService(academyId).createStoreOrderPayment(
           amount: widget.order.total,
           orderId: widget.order.id,
           studentId: studentId,
           studentName: currentUser.displayName,
-          description: desc,
+          description: _orderDescription,
         );
-      } else {
-        paymentLink = await AbacatePayService(academyId).createStoreOrderPayment(
+      case _Gateway.abacatePay:
+        return AbacatePayService(academyId).createStoreOrderPayment(
           amount: widget.order.total,
           orderId: widget.order.id,
           studentId: studentId,
           studentName: currentUser.displayName,
-          description: desc,
+          description: _orderDescription,
         );
-      }
-
-      if (paymentLink != null && mounted) {
-        Navigator.pop(context);
-        _showPixPaymentSheet(context, paymentLink);
-      } else if (mounted) {
-        context.showError('Erro ao gerar pagamento PIX');
-      }
-    } catch (e) {
-      if (mounted) {
-        context.showError('Erro: $e');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoadingPayment = false);
-      }
+      case _Gateway.none:
+      case null:
+        return null;
     }
   }
 
-  void _showPixPaymentSheet(BuildContext context, PaymentLink paymentLink) {
+  void _onPaymentSettled() {
     final studentId =
         ref.read(currentUserProvider).valueOrNull?.studentId ?? '';
+    if (studentId.isNotEmpty) {
+      ref.invalidate(studentOrdersProvider(studentId));
+    }
+    ref.invalidate(ordersProvider);
+  }
+
+  void _openPixSheet() {
+    final gateway = _gateway;
+    if (gateway == null || gateway == _Gateway.none) return;
+    final requireCpf = gateway == _Gateway.mercadoPago;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _PixPaymentBottomSheet(
-        paymentLink: paymentLink,
-        orderId: widget.order.id,
+      builder: (_) => PixPaymentSheet(
         amount: widget.order.total,
-        studentId: studentId,
-        onPaymentConfirmed: () {
-          // Refresh the orders list when payment is confirmed
-          ref.invalidate(studentOrdersProvider(studentId));
-        },
+        orderId: widget.order.id,
+        description: _orderDescription,
+        // Mercado Pago: capture CPF first, then create the PIX with it.
+        requireCpf: requireCpf,
+        onGenerateWithCpf:
+            requireCpf ? (cpf) => _createOrderPix(cpf: cpf) : null,
+        // Allow regeneration after expiry / failed generation for every gateway.
+        onRegenerate: (cpf) => _createOrderPix(cpf: cpf),
+        onPaymentConfirmed: _onPaymentSettled,
       ),
     );
+  }
+
+  void _openCardSheet() {
+    final gateway = _gateway;
+    if (gateway == null || gateway == _Gateway.none) return;
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => CardPaymentSheet(
+        amount: widget.order.total,
+        description: _orderDescription,
+        orderId: widget.order.id,
+        studentId: currentUser.studentId ?? '',
+        studentName: currentUser.displayName,
+        onPaymentSuccess: _onPaymentSettled,
+      ),
+    );
+  }
+
+  /// Builds the student-facing payment options for a pending order, gated on
+  /// the resolved gateway. While resolving -> spinner; no gateway connected ->
+  /// a friendly "arrange directly with the academy" notice (never a dead-end
+  /// charge attempt); otherwise the shared PIX + Card sheets.
+  List<Widget> _buildPaymentSection() {
+    final gateway = _gateway;
+
+    if (gateway == null) {
+      return const [
+        Padding(
+          padding: EdgeInsets.symmetric(vertical: 16),
+          child: Center(
+            child: SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
+        ),
+      ];
+    }
+
+    if (gateway == _Gateway.none) {
+      return [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceVariant,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                LucideIcons.info,
+                size: 20,
+                color: AppTheme.textSecondary,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Combine o pagamento diretamente com a academia.',
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ];
+    }
+
+    return [
+      // PIX Button
+      SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _openPixSheet,
+          icon: const Icon(LucideIcons.qrCode),
+          label: const Text('Pagar com PIX'),
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 12),
+      // Card Button
+      SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: _openCardSheet,
+          icon: const Icon(LucideIcons.creditCard),
+          label: const Text('Pagar com Cartao'),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            foregroundColor: AppTheme.primary,
+            side: BorderSide(color: AppTheme.primary.withValues(alpha: 0.5)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ),
+    ];
   }
 
   Widget _buildAdminActionButton({
@@ -1068,39 +1208,7 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      // PIX Button
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _isLoadingPayment
-                              ? null
-                              : _handlePixPayment,
-                          icon: _isLoadingPayment
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(LucideIcons.qrCode),
-                          label: Text(
-                            _isLoadingPayment
-                                ? 'Gerando PIX...'
-                                : 'Pagar com PIX',
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            backgroundColor: AppTheme.primary,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                      ),
-                      // Card payment disabled - coming soon
+                      ..._buildPaymentSection(),
                     ],
                   ],
                 ),
@@ -1266,844 +1374,7 @@ class _TimelineStep {
   });
 }
 
-/// PIX Payment Bottom Sheet with real-time payment listener
-class _PixPaymentBottomSheet extends StatefulWidget {
-  final PaymentLink paymentLink;
-  final String orderId;
-  final double amount;
-  final String studentId;
-  final void Function()? onPaymentConfirmed;
-
-  const _PixPaymentBottomSheet({
-    required this.paymentLink,
-    required this.orderId,
-    required this.amount,
-    required this.studentId,
-    this.onPaymentConfirmed,
-  });
-
-  @override
-  State<_PixPaymentBottomSheet> createState() => _PixPaymentBottomSheetState();
-}
-
-class _PixPaymentBottomSheetState extends State<_PixPaymentBottomSheet> {
-  bool _paymentConfirmed = false;
-  StreamSubscription<DocumentSnapshot>? _orderListener;
-
-  @override
-  void initState() {
-    super.initState();
-    _setupOrderListener();
-  }
-
-  @override
-  void dispose() {
-    _orderListener?.cancel();
-    super.dispose();
-  }
-
-  /// Listen to order status changes in real-time
-  void _setupOrderListener() {
-    final academyId = FirebaseService.academyId;
-
-    _orderListener = FirebaseFirestore.instance
-        .collection('academies')
-        .doc(academyId)
-        .collection('storeOrders')
-        .doc(widget.orderId)
-        .snapshots()
-        .listen((snapshot) {
-          if (!mounted) return;
-
-          final data = snapshot.data();
-          if (data != null && data['status'] == 'paid' && !_paymentConfirmed) {
-            setState(() {
-              _paymentConfirmed = true;
-            });
-
-            // Show success feedback
-            _showPaymentConfirmedDialog();
-
-            // Notify parent
-            widget.onPaymentConfirmed?.call();
-          }
-        });
-  }
-
-  void _showPaymentConfirmedDialog() {
-    final sheetContext = context;
-    Celebration.confetti(context);
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SuccessCheck(size: 80),
-            const SizedBox(height: 24),
-            Text(
-              'Pagamento Confirmado!',
-              style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Seu pedido foi pago com sucesso.',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-        actions: [
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.pop(dialogContext); // Close dialog
-                if (mounted) Navigator.pop(sheetContext); // Close bottom sheet
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.success,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              child: const Text('Fechar'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Handle
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.divider,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 24),
-            // Header
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    LucideIcons.qrCode,
-                    color: AppTheme.primary,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Pagar com PIX',
-                        style: AppTheme.titleLarge.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(
-                        'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}',
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(LucideIcons.x),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            // Amount
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'Valor: ',
-                    style: AppTheme.bodyLarge.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                  Text(
-                    'R\$ ${widget.amount.toStringAsFixed(2)}',
-                    style: AppTheme.headlineMedium.copyWith(
-                      color: AppTheme.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-            // QR Code
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: QrImageView(
-                data: widget.paymentLink.pixCode,
-                version: QrVersions.auto,
-                size: 200,
-                backgroundColor: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Escaneie o QR Code com o app do seu banco',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            // Copy Code Button
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      widget.paymentLink.pixCode.length > 30
-                          ? '${widget.paymentLink.pixCode.substring(0, 30)}...'
-                          : widget.paymentLink.pixCode,
-                      style: AppTheme.bodySmall.copyWith(
-                        fontFamily: 'monospace',
-                        color: AppTheme.textSecondary,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: () {
-                      Clipboard.setData(
-                        ClipboardData(text: widget.paymentLink.pixCode),
-                      );
-                      context.showSuccess('Codigo PIX copiado!');
-                    },
-                    icon: const Icon(LucideIcons.copy, size: 16),
-                    label: const Text('Copiar'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-            // Instructions
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.blue.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        LucideIcons.info,
-                        size: 20,
-                        color: Colors.blue,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Instrucoes',
-                        style: AppTheme.titleSmall.copyWith(
-                          color: Colors.blue,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _buildInstruction('1', 'Abra o app do seu banco'),
-                  const SizedBox(height: 8),
-                  _buildInstruction('2', 'Escolha pagar via PIX'),
-                  const SizedBox(height: 8),
-                  _buildInstruction('3', 'Escaneie o QR Code ou cole o codigo'),
-                  const SizedBox(height: 8),
-                  _buildInstruction('4', 'Confirme o pagamento'),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            // Real-time payment status indicator
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _paymentConfirmed
-                    ? AppTheme.successLight
-                    : AppTheme.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (_paymentConfirmed)
-                    const Icon(
-                      LucideIcons.checkCircle,
-                      size: 18,
-                      color: AppTheme.success,
-                    )
-                  else
-                    SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          AppTheme.primary,
-                        ),
-                      ),
-                    ),
-                  const SizedBox(width: 12),
-                  Text(
-                    _paymentConfirmed
-                        ? 'Pagamento confirmado!'
-                        : 'Aguardando pagamento...',
-                    style: AppTheme.bodySmall.copyWith(
-                      color: _paymentConfirmed
-                          ? AppTheme.success
-                          : AppTheme.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInstruction(String number, String text) {
-    return Row(
-      children: [
-        Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(
-            color: Colors.blue.withValues(alpha: 0.2),
-            shape: BoxShape.circle,
-          ),
-          child: Center(
-            child: Text(
-              number,
-              style: AppTheme.labelSmall.copyWith(
-                color: Colors.blue,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            text,
-            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textPrimary),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Card Payment Bottom Sheet
-class _CardPaymentBottomSheet extends StatefulWidget {
-  final String orderId;
-  final double amount;
-  final String studentId;
-  final String studentName;
-  final VoidCallback onPaymentSuccess;
-
-  const _CardPaymentBottomSheet({
-    required this.orderId,
-    required this.amount,
-    required this.studentId,
-    required this.studentName,
-    required this.onPaymentSuccess,
-  });
-
-  @override
-  State<_CardPaymentBottomSheet> createState() =>
-      _CardPaymentBottomSheetState();
-}
-
-class _CardPaymentBottomSheetState extends State<_CardPaymentBottomSheet> {
-  final _formKey = GlobalKey<FormState>();
-  final _cardNumberController = TextEditingController();
-  final _cardHolderController = TextEditingController();
-  final _expirationController = TextEditingController();
-  final _cvvController = TextEditingController();
-  final _cpfController = TextEditingController();
-
-  bool _isLoading = false;
-  String? _errorMessage;
-
-  @override
-  void dispose() {
-    _cardNumberController.dispose();
-    _cardHolderController.dispose();
-    _expirationController.dispose();
-    _cvvController.dispose();
-    _cpfController.dispose();
-    super.dispose();
-  }
-
-  String _formatCardNumber(String value) {
-    final digitsOnly = value.replaceAll(RegExp(r'\D'), '');
-    final buffer = StringBuffer();
-    for (int i = 0; i < digitsOnly.length && i < 16; i++) {
-      if (i > 0 && i % 4 == 0) buffer.write(' ');
-      buffer.write(digitsOnly[i]);
-    }
-    return buffer.toString();
-  }
-
-  String _formatExpiration(String value) {
-    final digitsOnly = value.replaceAll(RegExp(r'\D'), '');
-    if (digitsOnly.length >= 2) {
-      return '${digitsOnly.substring(0, 2)}/${digitsOnly.substring(2, digitsOnly.length.clamp(2, 4))}';
-    }
-    return digitsOnly;
-  }
-
-  String _formatCpf(String value) {
-    final digitsOnly = value.replaceAll(RegExp(r'\D'), '');
-    final buffer = StringBuffer();
-    for (int i = 0; i < digitsOnly.length && i < 11; i++) {
-      if (i == 3 || i == 6) buffer.write('.');
-      if (i == 9) buffer.write('-');
-      buffer.write(digitsOnly[i]);
-    }
-    return buffer.toString();
-  }
-
-  Future<void> _handlePayment() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    final academyId = FirebaseService.academyId;
-
-    try {
-      final expParts = _expirationController.text.split('/');
-      final cardData = CardData(
-        cardNumber: _cardNumberController.text,
-        cardHolder: _cardHolderController.text,
-        expirationMonth: expParts[0],
-        expirationYear: expParts.length > 1 ? expParts[1] : '',
-        cvv: _cvvController.text,
-        cpf: _cpfController.text,
-      );
-
-      final desc =
-          'Pedido #${widget.orderId.substring(widget.orderId.length - 6).toUpperCase()}';
-
-      // Gateway precedence: Mercado Pago (connected) > Asaas > AbacatePay.
-      final mp = MercadoPagoService(academyId);
-      final asaasService = AsaasPaymentService(academyId);
-      final useMp = await mp.isEnabled();
-      final isAsaas = !useMp && await asaasService.isEnabled();
-
-      CardPaymentResult result;
-      if (useMp) {
-        result = await mp.createStoreOrderCardPayment(
-          amount: widget.amount,
-          orderId: widget.orderId,
-          studentId: widget.studentId,
-          studentName: widget.studentName,
-          cardData: cardData,
-          description: desc,
-        );
-      } else if (isAsaas) {
-        result = await asaasService.createStoreOrderCardPayment(
-          amount: widget.amount,
-          orderId: widget.orderId,
-          studentId: widget.studentId,
-          studentName: widget.studentName,
-          cardData: cardData,
-          description: desc,
-        );
-      } else {
-        result = await AbacatePayService(academyId).createStoreOrderCardPayment(
-          amount: widget.amount,
-          orderId: widget.orderId,
-          studentId: widget.studentId,
-          studentName: widget.studentName,
-          cardData: cardData,
-          description: desc,
-        );
-      }
-
-      if (result.success) {
-        if (mounted) {
-          context.showSuccess(result.message ?? 'Pagamento aprovado!');
-          widget.onPaymentSuccess();
-        }
-      } else {
-        setState(() {
-          _errorMessage = result.message ?? 'Erro ao processar pagamento';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Erro: $e';
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: SingleChildScrollView(
-        padding: EdgeInsets.only(
-          left: 24,
-          right: 24,
-          top: 24,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-        ),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Handle
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppTheme.divider,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              // Header
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      LucideIcons.creditCard,
-                      color: AppTheme.primary,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Pagar com Cartao',
-                          style: AppTheme.titleLarge.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        Text(
-                          'R\$ ${widget.amount.toStringAsFixed(2)}',
-                          style: AppTheme.titleMedium.copyWith(
-                            color: AppTheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(LucideIcons.x),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-
-              // Error Message
-              if (_errorMessage != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.errorLight,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        LucideIcons.alertCircle,
-                        color: AppTheme.error,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _errorMessage!,
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.error,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // Card Number
-              TextFormField(
-                controller: _cardNumberController,
-                decoration: const InputDecoration(
-                  labelText: 'Numero do Cartao',
-                  hintText: '0000 0000 0000 0000',
-                  prefixIcon: Icon(LucideIcons.creditCard),
-                ),
-                keyboardType: TextInputType.number,
-                onChanged: (value) {
-                  final formatted = _formatCardNumber(value);
-                  if (formatted != value) {
-                    _cardNumberController.value = TextEditingValue(
-                      text: formatted,
-                      selection: TextSelection.collapsed(
-                        offset: formatted.length,
-                      ),
-                    );
-                  }
-                },
-                validator: (value) {
-                  if (value == null || value.replaceAll(' ', '').length < 16) {
-                    return 'Numero do cartao invalido';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
-              // Card Holder
-              TextFormField(
-                controller: _cardHolderController,
-                decoration: const InputDecoration(
-                  labelText: 'Nome no Cartao',
-                  hintText: 'NOME COMO NO CARTAO',
-                  prefixIcon: Icon(LucideIcons.user),
-                ),
-                textCapitalization: TextCapitalization.characters,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Nome obrigatorio';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
-              // Expiration and CVV
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _expirationController,
-                      decoration: const InputDecoration(
-                        labelText: 'Validade',
-                        hintText: 'MM/AA',
-                        prefixIcon: Icon(LucideIcons.calendar),
-                      ),
-                      keyboardType: TextInputType.number,
-                      onChanged: (value) {
-                        final formatted = _formatExpiration(value);
-                        if (formatted != value) {
-                          _expirationController.value = TextEditingValue(
-                            text: formatted,
-                            selection: TextSelection.collapsed(
-                              offset: formatted.length,
-                            ),
-                          );
-                        }
-                      },
-                      validator: (value) {
-                        if (value == null ||
-                            !value.contains('/') ||
-                            value.length < 5) {
-                          return 'Invalido';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _cvvController,
-                      decoration: const InputDecoration(
-                        labelText: 'CVV',
-                        hintText: '000',
-                        prefixIcon: Icon(LucideIcons.lock),
-                      ),
-                      keyboardType: TextInputType.number,
-                      obscureText: true,
-                      maxLength: 4,
-                      validator: (value) {
-                        if (value == null || value.length < 3) {
-                          return 'Invalido';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // CPF
-              TextFormField(
-                controller: _cpfController,
-                decoration: const InputDecoration(
-                  labelText: 'CPF do Titular',
-                  hintText: '000.000.000-00',
-                  prefixIcon: Icon(LucideIcons.fileText),
-                ),
-                keyboardType: TextInputType.number,
-                onChanged: (value) {
-                  final formatted = _formatCpf(value);
-                  if (formatted != value) {
-                    _cpfController.value = TextEditingValue(
-                      text: formatted,
-                      selection: TextSelection.collapsed(
-                        offset: formatted.length,
-                      ),
-                    );
-                  }
-                },
-                validator: (value) {
-                  if (value == null ||
-                      value.replaceAll(RegExp(r'\D'), '').length < 11) {
-                    return 'CPF invalido';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 24),
-
-              // Submit Button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _isLoading ? null : _handlePayment,
-                  icon: _isLoading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(LucideIcons.check),
-                  label: Text(_isLoading ? 'Processando...' : 'Pagar'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
-
-              // Security Note
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    LucideIcons.shield,
-                    size: 16,
-                    color: AppTheme.textSecondary,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Pagamento seguro',
-                    style: AppTheme.bodySmall.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+/// Payment gateway resolved for the academy, in precedence order
+/// (Mercado Pago > Asaas > AbacatePay). [_Gateway.none] means no gateway is
+/// connected, so payment must be arranged directly with the academy.
+enum _Gateway { mercadoPago, asaas, abacatePay, none }

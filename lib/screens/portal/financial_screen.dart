@@ -1,13 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
@@ -18,6 +14,7 @@ import '../../services/abacate_pay_service.dart';
 import '../../services/asaas_payment_service.dart';
 import '../../services/mercado_pago_service.dart';
 import '../../models/student.dart';
+import '../../widgets/payment_sheets.dart';
 import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
@@ -77,6 +74,7 @@ class _DependentSection extends ConsumerWidget {
                   payment: payment,
                   formatCurrency: formatCurrency,
                   showPayButton: abacatePayEnabled,
+                  gatewayConnected: abacatePayEnabled,
                   onPayPix: () => onPayPix(payment),
                 ),
               ),
@@ -109,15 +107,77 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
     context.showSuccess('Chave PIX copiada!');
   }
 
-  void _showPixPaymentDialog(Payment payment, String studentName) {
+  Future<void> _showPixPaymentDialog(
+    Payment payment,
+    String studentName,
+  ) async {
+    final academyId = FirebaseService.academyId;
+    final description = payment.description ??
+        'Mensalidade - ${payment.referenceMonth ?? ''}';
+
+    // Resolve the connected gateway up front so we know whether the payer CPF
+    // must be captured (Mercado Pago requires it for PIX). Precedence:
+    // Mercado Pago (connected) > Asaas > AbacatePay.
+    final mp = MercadoPagoService(academyId);
+    final asaasService = AsaasPaymentService(academyId);
+
+    bool useMp = false;
+    bool useAsaas = false;
+    try {
+      useMp = await mp.isEnabled();
+      useAsaas = !useMp && await asaasService.isEnabled();
+    } catch (_) {
+      // Treat resolution failure as the default (AbacatePay) fallback.
+    }
+
+    if (!mounted) return;
+
+    // Builds the PIX link on the resolved gateway. Only Mercado Pago forwards
+    // the payer CPF; Asaas/AbacatePay createPix* do not accept it.
+    Future<PaymentLink?> generate(String? cpf) async {
+      if (useMp) {
+        return mp.createPixPayment(
+          amount: payment.value,
+          financialId: payment.id,
+          studentId: payment.studentId,
+          studentName: studentName,
+          description: description,
+          cpf: cpf,
+        );
+      } else if (useAsaas) {
+        return asaasService.createPixPayment(
+          amount: payment.value,
+          financialId: payment.id,
+          studentId: payment.studentId,
+          studentName: studentName,
+          description: description,
+        );
+      }
+      return AbacatePayService(academyId).createPixPayment(
+        amount: payment.value,
+        financialId: payment.id,
+        studentId: payment.studentId,
+        studentName: studentName,
+        description: description,
+      );
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _PixPaymentBottomSheet(
-        payment: payment,
-        studentName: studentName,
-        formatCurrency: _formatCurrency,
+      builder: (sheetContext) => PixPaymentSheet(
+        amount: payment.value,
+        financialId: payment.id,
+        description: description,
+        // MP needs a validated CPF before generating; other gateways generate
+        // immediately via onRegenerate's "Gerar PIX" prompt.
+        requireCpf: useMp,
+        onGenerateWithCpf: useMp ? (cpf) => generate(cpf) : null,
+        onRegenerate: (cpf) => generate(cpf),
+        onPaymentConfirmed: () {
+          ref.invalidate(studentPaymentsProvider(payment.studentId));
+        },
       ),
     );
   }
@@ -246,6 +306,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                             payment: entry.value,
                             formatCurrency: _formatCurrency,
                             showPayButton: abacatePayEnabled,
+                            gatewayConnected: abacatePayEnabled,
                             onPayPix: () => _showPixPaymentDialog(
                               entry.value,
                               student.fullName,
@@ -727,6 +788,10 @@ class _PaymentCard extends StatelessWidget {
   final String Function(double) formatCurrency;
   final bool showStatus;
   final bool showPayButton;
+
+  /// Whether a payment gateway is connected for this academy. When false and
+  /// the charge is open, a friendly "not connected" notice replaces the button.
+  final bool gatewayConnected;
   final VoidCallback? onPayPix;
 
   const _PaymentCard({
@@ -734,6 +799,7 @@ class _PaymentCard extends StatelessWidget {
     required this.formatCurrency,
     this.showStatus = false,
     this.showPayButton = false,
+    this.gatewayConnected = true,
     this.onPayPix,
   });
 
@@ -881,6 +947,36 @@ class _PaymentCard extends StatelessWidget {
                 ),
               ),
             ),
+          ]
+          // No gateway connected: friendly notice instead of the pay button.
+          else if (!gatewayConnected && !isPaid && !isCancelled) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    LucideIcons.info,
+                    size: 16,
+                    color: AppTheme.textSecondary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Pagamento online indisponivel. Fale com a recepcao para quitar.',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ],
       ),
@@ -941,359 +1037,6 @@ class _StatusChip extends StatelessWidget {
             color: textColor,
             fontWeight: FontWeight.w600,
             fontSize: 10,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// PIX Payment Bottom Sheet
-class _PixPaymentBottomSheet extends ConsumerStatefulWidget {
-  final Payment payment;
-  final String studentName;
-  final String Function(double) formatCurrency;
-
-  const _PixPaymentBottomSheet({
-    required this.payment,
-    required this.studentName,
-    required this.formatCurrency,
-  });
-
-  @override
-  ConsumerState<_PixPaymentBottomSheet> createState() =>
-      _PixPaymentBottomSheetState();
-}
-
-class _PixPaymentBottomSheetState
-    extends ConsumerState<_PixPaymentBottomSheet> {
-  bool _isLoading = true;
-  PaymentLink? _paymentLink;
-  String? _error;
-  bool _paymentConfirmed = false;
-  StreamSubscription<DocumentSnapshot>? _paymentListener;
-
-  @override
-  void initState() {
-    super.initState();
-    _generatePixPayment();
-    _setupPaymentListener();
-  }
-
-  @override
-  void dispose() {
-    _paymentListener?.cancel();
-    super.dispose();
-  }
-
-  void _setupPaymentListener() {
-    final academyId = FirebaseService.academyId;
-
-    _paymentListener = FirebaseFirestore.instance
-        .collection('academies')
-        .doc(academyId)
-        .collection('financials')
-        .doc(widget.payment.id)
-        .snapshots()
-        .listen((snapshot) {
-          if (!mounted) return;
-
-          final data = snapshot.data();
-          if (data != null && data['status'] == 'paid' && !_paymentConfirmed) {
-            setState(() {
-              _paymentConfirmed = true;
-            });
-
-            _showPaymentConfirmedDialog();
-
-            ref.invalidate(studentPaymentsProvider(widget.payment.studentId));
-          }
-        });
-  }
-
-  void _showPaymentConfirmedDialog() {
-    final sheetContext = context;
-    Celebration.confetti(context);
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SuccessCheck(size: 80),
-            const SizedBox(height: 24),
-            Text(
-              'Pagamento Confirmado!',
-              style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w600),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Seu pagamento foi recebido com sucesso.',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-        actions: [
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.pop(dialogContext); // Close dialog
-                if (mounted) Navigator.pop(sheetContext); // Close bottom sheet
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.success,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              child: const Text('Fechar'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _generatePixPayment() async {
-    final academyId = FirebaseService.academyId;
-
-    try {
-      final description = widget.payment.description ??
-          'Mensalidade - ${widget.payment.referenceMonth ?? ''}';
-
-      // Gateway precedence: Mercado Pago (connected) > Asaas > AbacatePay.
-      final mp = MercadoPagoService(academyId);
-      final asaasService = AsaasPaymentService(academyId);
-
-      PaymentLink? link;
-      if (await mp.isEnabled()) {
-        link = await mp.createPixPayment(
-          amount: widget.payment.value,
-          financialId: widget.payment.id,
-          studentId: widget.payment.studentId,
-          studentName: widget.studentName,
-          description: description,
-        );
-      } else if (await asaasService.isEnabled()) {
-        link = await asaasService.createPixPayment(
-          amount: widget.payment.value,
-          financialId: widget.payment.id,
-          studentId: widget.payment.studentId,
-          studentName: widget.studentName,
-          description: description,
-        );
-      } else {
-        link = await AbacatePayService(academyId).createPixPayment(
-          amount: widget.payment.value,
-          financialId: widget.payment.id,
-          studentId: widget.payment.studentId,
-          studentName: widget.studentName,
-          description: description,
-        );
-      }
-
-      setState(() {
-        _paymentLink = link;
-        _isLoading = false;
-        if (link == null) {
-          _error = 'Erro ao gerar pagamento PIX';
-        }
-      });
-    } catch (e) {
-      setState(() {
-        _error = 'Erro ao gerar pagamento: $e';
-        _isLoading = false;
-      });
-    }
-  }
-
-  void _copyPixCode() {
-    if (_paymentLink?.pixCode != null) {
-      Clipboard.setData(ClipboardData(text: _paymentLink!.pixCode));
-      context.showSuccess('Codigo PIX copiado!');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.divider,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              Text(
-                'Pagar com PIX',
-                style: AppTheme.titleLarge.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '${widget.payment.description ?? 'Mensalidade'} - ${widget.formatCurrency(widget.payment.value)}',
-                style: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              if (_isLoading)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 40),
-                  child: Column(
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Gerando QR Code...'),
-                    ],
-                  ),
-                )
-              else if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 40),
-                  child: Column(
-                    children: [
-                      const Icon(
-                        LucideIcons.alertCircle,
-                        size: 48,
-                        color: AppTheme.error,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        _error!,
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.error,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                )
-              else if (_paymentLink != null)
-                Column(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppTheme.divider),
-                      ),
-                      child: QrImageView(
-                        data: _paymentLink!.pixCode,
-                        version: QrVersions.auto,
-                        size: 200,
-                        backgroundColor: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    Text(
-                      'Escaneie o QR Code ou copie o codigo PIX',
-                      style: AppTheme.bodySmall.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _copyPixCode,
-                        icon: const Icon(LucideIcons.copy, size: 18),
-                        label: const Text('Copiar Codigo PIX'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _paymentConfirmed
-                            ? AppTheme.successLight
-                            : AppTheme.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: [
-                          if (_paymentConfirmed)
-                            const Icon(
-                              LucideIcons.checkCircle,
-                              size: 18,
-                              color: AppTheme.success,
-                            )
-                          else
-                            SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  AppTheme.primary,
-                                ),
-                              ),
-                            ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              _paymentConfirmed
-                                  ? 'Pagamento confirmado!'
-                                  : 'Aguardando pagamento...',
-                              style: AppTheme.bodySmall.copyWith(
-                                color: _paymentConfirmed
-                                    ? AppTheme.success
-                                    : AppTheme.primary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-
-              const SizedBox(height: 16),
-
-              SizedBox(
-                width: double.infinity,
-                child: TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Fechar'),
-                ),
-              ),
-            ],
           ),
         ),
       ),

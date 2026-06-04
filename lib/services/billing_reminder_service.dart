@@ -246,7 +246,9 @@ class BillingReminderService {
           : DateTime.now();
 
       final daysOverdue = _calculateDaysOverdue(dueDate);
-      if (daysOverdue < 1) continue;
+      // Include due-today (daysOverdue == 0 -> D+0 courtesy) up to D+30+.
+      // Negative (not yet due) is excluded.
+      if (daysOverdue < 0) continue;
 
       final stage = _classifyStage(daysOverdue);
       if (stage == null) continue;
@@ -276,6 +278,44 @@ class BillingReminderService {
     }
 
     return result;
+  }
+
+  // ============================================
+  // Re-read live status for financial ids (anti double-charge guard)
+  // ============================================
+  /// Re-reads the current `status` of each financial id straight from
+  /// Firestore. Returns the set of ids that are ALREADY PAID right now, so the
+  /// caller can SKIP them before (re)sending a charge. Ids that fail to read or
+  /// no longer exist are treated as paid/gone and reported as skipped, never
+  /// re-charged. Never throws.
+  Future<Set<String>> getPaidFinancialIds(Iterable<String> financialIds) async {
+    final ids = financialIds.where((id) => id.isNotEmpty).toSet();
+    if (ids.isEmpty) return <String>{};
+
+    final paid = <String>{};
+    await Future.wait(
+      ids.map((id) async {
+        try {
+          final doc = await _financialsRef.doc(id).get();
+          if (!doc.exists) {
+            paid.add(id); // gone -> do not charge
+            return;
+          }
+          final data = doc.data() as Map<String, dynamic>?;
+          final status = data?['status'] as String? ?? '';
+          // Anything no longer collectible (paid / cancelled / refunded) is
+          // treated as "do not re-charge".
+          if (status != 'overdue' && status != 'pending') {
+            paid.add(id);
+          }
+        } catch (_) {
+          // Be conservative: on read failure, skip rather than risk a
+          // double-charge.
+          paid.add(id);
+        }
+      }),
+    );
+    return paid;
   }
 
   // ============================================
@@ -373,7 +413,8 @@ class BillingReminderService {
           : DateTime.now();
 
       final daysOverdue = _calculateDaysOverdue(dueDate);
-      if (daysOverdue < 1) continue;
+      // Mirror getOverdueWithStages: due-today (D+0) counts, not-yet-due drops.
+      if (daysOverdue < 0) continue;
 
       final stage = _classifyStage(daysOverdue);
       if (stage == null) continue;
