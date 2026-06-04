@@ -363,15 +363,27 @@ class BeltProgressionService {
     return forSport.first.baselineCount;
   }
 
-  /// Sums Attendance.weight (defaulting to 1 for legacy docs) for a student.
-  /// Use when [AcademyGraduationConfig.useClassWeights] is true.
-  Future<int> getWeightedAttendanceCount(String studentId) async {
+  /// Sums Attendance.weight (defaulting to 1 for legacy docs) for a student,
+  /// filtered to [sportId] so a multi-sport student's progress isn't padded by
+  /// other modalities (e.g. Muay Thai aulas must not count for BJJ). Legacy
+  /// docs without a `sport` field are treated as BJJ for back-compat, mirroring
+  /// the unweighted branch. Use when [AcademyGraduationConfig.useClassWeights]
+  /// is true.
+  Future<int> getWeightedAttendanceCount(
+    String studentId, {
+    required SportId sportId,
+  }) async {
     final snap = await _collections.attendance
         .where('studentId', isEqualTo: studentId)
         .get();
     double total = 0;
     for (final d in snap.docs) {
       final data = d.data() as Map<String, dynamic>;
+      final s = data['sport'];
+      final matches = sportId == SportId.bjj
+          ? (s == null || s == 'bjj')
+          : (s == sportId.value);
+      if (!matches) continue;
       final w = data['weight'];
       total += (w is num && w > 0) ? w.toDouble() : 1.0;
     }
@@ -420,7 +432,7 @@ class BeltProgressionService {
     // BJJ for back-compat.
     int systemCount;
     if (cfg.useClassWeights) {
-      systemCount = await getWeightedAttendanceCount(studentId);
+      systemCount = await getWeightedAttendanceCount(studentId, sportId: sportId);
     } else {
       Query attendQuery = _collections.attendance
           .where('studentId', isEqualTo: studentId);
@@ -525,7 +537,7 @@ class BeltProgressionService {
       // matching checkEligibilityForStudent so the list and detail agree.
       int systemCount;
       if (cfg.useClassWeights) {
-        systemCount = await getWeightedAttendanceCount(doc.id);
+        systemCount = await getWeightedAttendanceCount(doc.id, sportId: sportId);
       } else {
         final ac = await _collections.attendance
             .where('studentId', isEqualTo: doc.id)
@@ -719,7 +731,7 @@ class BeltProgressionService {
     final config = await loadAcademyConfig();
     int effectiveCount;
     if (config.useClassWeights) {
-      final systemCount = await getWeightedAttendanceCount(studentId);
+      final systemCount = await getWeightedAttendanceCount(studentId, sportId: sportId);
       final initial = (studentData['initialAttendanceCount'] ?? 0) as int;
       effectiveCount = systemCount + initial;
     } else {

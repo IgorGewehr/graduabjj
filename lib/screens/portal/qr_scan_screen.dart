@@ -150,6 +150,12 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
                 MobileScanner(
                   controller: _controller,
                   onDetect: _handleDetection,
+                  errorBuilder: (context, error) => _CameraErrorView(
+                    error: error,
+                    onRetry: () {
+                      _controller.start();
+                    },
+                  ),
                 ),
                 _ReticleOverlay(),
                 Positioned(
@@ -244,6 +250,81 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+/// Styled fallback shown when the camera cannot start (permission denied, no
+/// camera, or a controller failure). Replaces the bare unstyled default error
+/// from mobile_scanner with a dark panel, a clear PT-BR message, and recovery
+/// affordances (retry + back).
+class _CameraErrorView extends StatelessWidget {
+  final MobileScannerException error;
+  final VoidCallback onRetry;
+
+  const _CameraErrorView({required this.error, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final code = error.errorCode;
+    final isPermission = code == MobileScannerErrorCode.permissionDenied;
+    final isUnsupported = code == MobileScannerErrorCode.unsupported;
+
+    final String title;
+    final String detail;
+    if (isPermission) {
+      title = 'Acesso a camera negado';
+      detail =
+          'Para escanear o QR, permita o acesso a camera nas configuracoes do '
+          'aparelho e tente novamente.';
+    } else if (isUnsupported) {
+      title = 'Camera indisponivel';
+      detail = 'Este aparelho nao oferece uma camera para leitura do QR.';
+    } else {
+      title = 'Camera indisponivel';
+      detail = 'Nao foi possivel iniciar a camera. Tente novamente.';
+    }
+
+    return Container(
+      color: Colors.black,
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isPermission ? LucideIcons.cameraOff : LucideIcons.alertTriangle,
+              color: Colors.white,
+              size: 56,
+            ),
+            const SizedBox(height: 20),
+            Text(
+              title,
+              style: AppTheme.headlineSmall.copyWith(color: Colors.white),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              detail,
+              style: AppTheme.bodyMedium.copyWith(color: Colors.white70),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 28),
+            if (!isUnsupported)
+              FilledButton.icon(
+                icon: const Icon(LucideIcons.refreshCw, size: 16),
+                label: const Text('Tentar novamente'),
+                onPressed: onRetry,
+              ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => Navigator.of(context).maybePop(),
+              style: TextButton.styleFrom(foregroundColor: Colors.white),
+              child: const Text('Voltar'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -84,12 +84,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 if (sports[primarySport]?.gradeSystem == GradeSystem.none) {
                   return _WelcomeHeader(userName: s.displayName);
                 }
-                final grade = s.getGrade(primarySport);
                 return _WelcomeHeaderWithBelt(
+                  student: s,
                   userName: s.displayName,
-                  sportId: primarySport,
-                  belt: grade?.currentGrade ?? 'white',
-                  stripes: grade?.currentStripes ?? 0,
                   sports: s.getSports(),
                   primarySport: primarySport,
                 );
@@ -205,23 +202,20 @@ class _WelcomeHeader extends StatelessWidget {
 ///
 /// For multi-sport students it also surfaces a compact "{n} modalidades" pill
 /// next to the belt chip; tapping it reveals a [SportTabBar] row below the
-/// greeting, bound to `selectedSportProvider("home")`. This is purely an
-/// affordance — the rest of the home (graduation cards, etc.) stays all-sports
-/// stacked. Single-sport (or zero graded sports) students see neither the pill
-/// nor the selector, so the layout is pixel-identical to before.
+/// greeting, bound to `selectedSportProvider("home")`. The belt chip is
+/// reactive: it follows the selected sport, recomputing the grade from
+/// [student] so picking a modality actually updates the belt/stripes shown.
+/// Single-sport (or zero graded sports) students see neither the pill nor the
+/// selector, so the layout is pixel-identical to before.
 class _WelcomeHeaderWithBelt extends ConsumerStatefulWidget {
+  final dynamic student;
   final String userName;
-  final SportId sportId;
-  final String belt;
-  final int stripes;
   final List<SportId> sports;
   final SportId primarySport;
 
   const _WelcomeHeaderWithBelt({
+    required this.student,
     required this.userName,
-    required this.sportId,
-    required this.belt,
-    required this.stripes,
     required this.sports,
     required this.primarySport,
   });
@@ -246,6 +240,12 @@ class _WelcomeHeaderWithBeltState
   Widget build(BuildContext context) {
     final multiSport = widget.sports.length > 1;
 
+    // The belt chip follows the sport selected in the tab bar (defaulting to
+    // the primary sport), so picking a modality recomputes the grade shown.
+    final selectedSport =
+        ref.watch(selectedSportProvider('home')) ?? widget.primarySport;
+    final grade = widget.student.getGrade(selectedSport);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -267,9 +267,9 @@ class _WelcomeHeaderWithBeltState
             ),
             const SizedBox(width: 12),
             GradeDisplay(
-              sportId: widget.sportId,
-              grade: widget.belt,
-              stripes: widget.stripes,
+              sportId: selectedSport,
+              grade: grade?.currentGrade ?? 'white',
+              stripes: grade?.currentStripes ?? 0,
               size: GradeDisplaySize.small,
             ),
             if (multiSport) ...[
@@ -286,8 +286,7 @@ class _WelcomeHeaderWithBeltState
           const SizedBox(height: 12),
           SportTabBar(
             sports: widget.sports,
-            selected: ref.watch(selectedSportProvider('home')) ??
-                widget.primarySport,
+            selected: selectedSport,
             onSelected: (s) =>
                 ref.read(selectedSportProvider('home').notifier).state = s,
           ),
@@ -422,7 +421,8 @@ class _StatsCarousel extends ConsumerWidget {
                 color: AppTheme.info,
               ),
 
-              // Competitions card
+              // Medals card — the source counts only podium finishes
+              // (gold/silver/bronze), so the label matches the value.
               medalCountAsync.when(
                 data: (medals) {
                   final total = medals['total'] ?? 0;
@@ -430,23 +430,23 @@ class _StatsCarousel extends ConsumerWidget {
                     emoji: '🏆',
                     value: total.toString(),
                     countValue: total,
-                    label: 'Competicoes',
-                    sublabel: 'Participacoes',
+                    label: 'Medalhas',
+                    sublabel: 'Pódios conquistados',
                     color: Colors.purple,
                   );
                 },
                 loading: () => _StatCarouselCard(
                   emoji: '🏆',
                   value: '...',
-                  label: 'Competicoes',
-                  sublabel: 'Participacoes',
+                  label: 'Medalhas',
+                  sublabel: 'Pódios conquistados',
                   color: Colors.purple,
                 ),
                 error: (_, __) => _StatCarouselCard(
                   emoji: '🏆',
                   value: '0',
-                  label: 'Competicoes',
-                  sublabel: 'Participacoes',
+                  label: 'Medalhas',
+                  sublabel: 'Pódios conquistados',
                   color: Colors.purple,
                 ),
               ),
@@ -1018,8 +1018,10 @@ class _NextClassCard extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // Card only routes to Horários (check-in happens there),
+                      // so the label reflects navigation, not a one-tap action.
                       Text(
-                        'Fazer Check-in',
+                        'Ver check-in',
                         style: AppTheme.labelSmall.copyWith(
                           color: Colors.white,
                           fontWeight: FontWeight.w600,

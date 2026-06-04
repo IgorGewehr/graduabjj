@@ -45,6 +45,25 @@ class _TimelineEvent {
   });
 }
 
+/// Reads sportData[sport.value]['startDate'] defensively (DateTime, ISO string
+/// or Firestore Timestamp). Returns null when absent or of an unexpected type —
+/// never throws. Mirrors MySportsScreen so the per-sport origin date agrees.
+DateTime? _sportStartDate(Student student, SportId sport) {
+  final raw = student.sportData?[sport.value];
+  if (raw is! Map) return null;
+  final value = raw['startDate'];
+  if (value is DateTime) return value;
+  if (value is String && value.isNotEmpty) return DateTime.tryParse(value);
+  try {
+    final dynamic dyn = value;
+    if (dyn != null) {
+      final maybe = dyn.toDate();
+      if (maybe is DateTime) return maybe;
+    }
+  } catch (_) {/* unexpected type — ignore */}
+  return null;
+}
+
 /// Belt progressions provider for timeline
 final studentBeltProgressionsProvider =
     FutureProvider.family<List<BeltProgression>, String>((
@@ -125,6 +144,11 @@ class TimelineScreen extends ConsumerWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: _JourneyCard(
                     student: student,
+                    // When a multi-sport student is filtering the timeline, the
+                    // belt chip reflects the selected sport so header and list
+                    // agree. The training/time/competition counts remain global
+                    // (no per-sport provider) and are labelled "no total".
+                    selectedSport: showSportFilter ? selectedSport : null,
                     attendanceCountAsync: attendanceCountAsync,
                     medalCountAsync: medalCountAsync,
                     competitionsAsync: competitionsAsync,
@@ -192,17 +216,24 @@ class TimelineScreen extends ConsumerWidget {
     // Build unified timeline events
     final events = <_TimelineEvent>[];
 
-    // Add start event
+    // Add start event. Tag it to whichever sport is being viewed (sportFilter
+    // when a multi-sport student selected a tab) so every sport tab keeps a
+    // "Inicio da Jornada" origin marker. Single-sport / unfiltered views fall
+    // back to the primary sport. When a per-sport startDate exists in
+    // sportData it takes precedence, mirroring MySportsScreen.
+    final startSport = sportFilter ?? student.getPrimarySport();
     events.add(
       _TimelineEvent(
         id: 'start',
-        date: student.jiujitsuStartDate ?? student.startDate,
+        date: _sportStartDate(student, startSport) ??
+            student.jiujitsuStartDate ??
+            student.startDate,
         type: TimelineEventType.start,
         title: 'Inicio da Jornada',
         description: 'Primeiro treino na academia',
         belt: 'white',
         academyName: academyName,
-        sportId: student.getPrimarySport(),
+        sportId: startSport,
       ),
     );
 
@@ -242,6 +273,12 @@ class TimelineScreen extends ConsumerWidget {
             description: a.description,
             position: a.position?.value,
             academyName: academyName,
+            // Respect the achievement's stored sport so multi-sport students
+            // see competitions/milestones under the correct tab. Legacy
+            // records without a sport fall back to the primary sport.
+            sportId: a.sport != null
+                ? SportId.fromString(a.sport!)
+                : student.getPrimarySport(),
           ),
         );
       }
@@ -393,12 +430,16 @@ class TimelineScreen extends ConsumerWidget {
 /// Journey Card with Stats Carousel
 class _JourneyCard extends StatefulWidget {
   final Student student;
+  /// Sport selected in the timeline's SportTabBar, or null for single-sport /
+  /// unfiltered. Drives the belt chip so it matches the filtered list below.
+  final SportId? selectedSport;
   final AsyncValue<int> attendanceCountAsync;
   final AsyncValue<Map<String, int>> medalCountAsync;
   final AsyncValue<List<Competition>> competitionsAsync;
 
   const _JourneyCard({
     required this.student,
+    this.selectedSport,
     required this.attendanceCountAsync,
     required this.medalCountAsync,
     required this.competitionsAsync,
@@ -448,7 +489,16 @@ class _JourneyCardState extends State<_JourneyCard> {
         widget.medalCountAsync.valueOrNull ??
         {'gold': 0, 'silver': 0, 'bronze': 0, 'total': 0};
     final competitions = widget.competitionsAsync.valueOrNull ?? [];
-    final beltColor = _getBeltDisplayColor(widget.student.currentBelt, sportId: widget.student.getPrimarySport());
+
+    // Belt chip reflects the selected sport (when filtering) so the header
+    // agrees with the sport-filtered timeline below. Falls back to the primary
+    // sport's legacy belt for single-sport / unfiltered views.
+    final beltSport = widget.selectedSport ?? widget.student.getPrimarySport();
+    final beltGrade = widget.student.getGrade(beltSport);
+    final beltValue = beltGrade?.currentGrade ?? widget.student.currentBelt;
+    final beltStripes =
+        beltGrade?.currentStripes ?? widget.student.currentStripes;
+    final beltColor = _getBeltDisplayColor(beltValue, sportId: beltSport);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -464,12 +514,9 @@ class _JourneyCardState extends State<_JourneyCard> {
                 icon: LucideIcons.award,
                 iconColor: beltColor,
                 iconBgColor: beltColor.withValues(alpha: 0.15),
-                value: getGradeLabel(
-                  widget.student.getPrimarySport(),
-                  widget.student.currentBelt,
-                ),
-                label: widget.student.currentStripes > 0
-                    ? '${widget.student.currentStripes} grau${widget.student.currentStripes > 1 ? 's' : ''}'
+                value: getGradeLabel(beltSport, beltValue),
+                label: beltStripes > 0
+                    ? '$beltStripes grau${beltStripes > 1 ? 's' : ''}'
                     : 'Faixa Atual',
               ),
               _JourneyCarouselCard(
@@ -477,7 +524,9 @@ class _JourneyCardState extends State<_JourneyCard> {
                 iconColor: AppTheme.success,
                 iconBgColor: AppTheme.successLight,
                 value: attendanceCount.toString(),
-                label: 'Treinos',
+                // Count is across all sports — label it so the header doesn't
+                // imply it's scoped to the selected sport tab.
+                label: widget.selectedSport != null ? 'Treinos (total)' : 'Treinos',
               ),
               _JourneyCarouselCard(
                 icon: LucideIcons.clock,

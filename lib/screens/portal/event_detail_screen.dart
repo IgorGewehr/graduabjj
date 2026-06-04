@@ -11,6 +11,19 @@ import '../../services/event_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/polish/polish.dart';
 
+/// Single published Jornal post keyed by `(academyId, eventId)`.
+///
+/// Reads the doc directly via [EventService.getById] (one Firestore read) and
+/// returns null when the post is missing or not published — the detail screen
+/// is reachable only for published posts. Memoizing the fetch in a provider
+/// keeps rebuilds (keyboard, theme, parent) from re-running the network call.
+final eventDetailProvider = FutureProvider.family<AcademyEvent?,
+    ({String academyId, String eventId})>((ref, args) async {
+  final event = await EventService(args.academyId).getById(args.eventId);
+  if (event == null || !event.isPublished) return null;
+  return event;
+});
+
 class EventDetailScreen extends ConsumerWidget {
   final String eventId;
 
@@ -29,25 +42,27 @@ class EventDetailScreen extends ConsumerWidget {
   }
 }
 
-class _EventDetailBody extends StatelessWidget {
+class _EventDetailBody extends ConsumerWidget {
   final String academyId;
   final String eventId;
 
   const _EventDetailBody({required this.academyId, required this.eventId});
 
   @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<AcademyEvent?>(
-      future: EventService(academyId).listPublished().then(
-            (list) => list.where((e) => e.id == eventId).firstOrNull,
-          ),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-        final event = snap.data;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final eventAsync = ref.watch(
+      eventDetailProvider((academyId: academyId, eventId: eventId)),
+    );
+
+    return eventAsync.when(
+      loading: () => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, stack) => Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: Text('Evento não encontrado.')),
+      ),
+      data: (event) {
         if (event == null) {
           return Scaffold(
             appBar: AppBar(),
@@ -129,25 +144,40 @@ class _EventLoaded extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Status badge
-                  if (event.isOngoing)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.successLight,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text(
-                        'Acontecendo agora',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.success,
-                        ),
-                      ),
+                  // Post-type pill (Evento / Notícia / Seminário) so news and
+                  // seminars are visually distinct from events on this shared
+                  // detail screen. Same colours as the jornal feed badge.
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _PostTypePill(type: event.postType),
+                        // "Acontecendo agora" only makes sense for real events;
+                        // news/seminar posts often start "now" with no endDate,
+                        // which would spuriously read as ongoing.
+                        if (event.postType == PostType.event && event.isOngoing)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppTheme.successLight,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              'Acontecendo agora',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.success,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
+                  ),
 
                   // Title
                   Text(
@@ -226,6 +256,48 @@ class _EventLoaded extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Coloured pill describing the post type: Evento=blue, Notícia=grey,
+/// Seminário=purple (mirrors the jornal feed `_PostTypeBadge` colours).
+class _PostTypePill extends StatelessWidget {
+  final PostType type;
+  const _PostTypePill({required this.type});
+
+  @override
+  Widget build(BuildContext context) {
+    late final String label;
+    late final Color color;
+    switch (type) {
+      case PostType.event:
+        label = 'Evento';
+        color = AppTheme.info;
+        break;
+      case PostType.news:
+        label = 'Notícia';
+        color = AppTheme.textSecondary;
+        break;
+      case PostType.seminar:
+        label = 'Seminário';
+        color = const Color(0xFF8B5CF6);
+        break;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
       ),
     );
   }

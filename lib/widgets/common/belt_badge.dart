@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../polish/polish.dart';
 
@@ -99,18 +100,30 @@ class BeltBadge extends StatelessWidget {
   final BeltSize size;
   final bool showLabel;
 
+  /// When provided, the belt color is resolved from this sport's grade ladder
+  /// (GradeDefinition), so non-BJJ belts render their true color. When null,
+  /// falls back to the legacy BJJ-oriented theme color map.
+  final SportId? sportId;
+
   const BeltBadge({
     super.key,
     required this.belt,
     this.stripes = 0,
     this.size = BeltSize.medium,
     this.showLabel = false,
+    this.sportId,
   });
 
   @override
   Widget build(BuildContext context) {
     final config = _sizeConfig[size]!;
-    final beltColor = AppTheme.getBeltColor(belt);
+    // Resolve the belt color from the sport's grade ladder when the sport is
+    // known (so non-BJJ belts like Luta Livre DAN 'black-red' and the coral
+    // ranks render their true color, and the blue/etc. shades match the
+    // graduation screen); fall back to the legacy theme map otherwise.
+    final beltColor = sportId != null
+        ? getGradeColor(sportId!, belt)
+        : AppTheme.getBeltColor(belt);
     final beltLabel = getBeltLabel(belt);
     final isWhiteBelt = belt == 'white';
     final isBlackBelt = belt == 'black';

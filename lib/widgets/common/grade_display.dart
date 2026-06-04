@@ -42,6 +42,7 @@ class GradeDisplay extends StatelessWidget {
           stripes: stripes,
           size: _toBeltSize(size),
           showLabel: showLabel,
+          sportId: sportId,
         );
 
       case GradeSystem.armband:

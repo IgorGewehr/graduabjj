@@ -360,8 +360,20 @@ class CheckinService {
 
         success++;
       } catch (e) {
-        // Student might already be marked present, skip
-        failed++;
+        // If the student is already marked present (e.g. they also
+        // self-checked-in via QR), the pending check-in is now redundant.
+        // Delete it so it doesn't linger in the staff list / hasCheckin badge,
+        // and count it as a success rather than a failure.
+        if (e.toString().contains('marcado como presente')) {
+          try {
+            await _collections.checkin(checkinId).delete();
+          } catch (_) {
+            // Best-effort cleanup; ignore delete failures.
+          }
+          success++;
+        } else {
+          failed++;
+        }
       }
     }
 

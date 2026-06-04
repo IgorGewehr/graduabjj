@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/theme.dart';
@@ -89,6 +90,18 @@ class _MusculacaoQrScanScreenState
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted && !_success) setState(() => _error = null);
       });
+    } catch (_) {
+      // A TimeoutException, network drop or platform-channel error would
+      // otherwise escape uncaught, leaving the scanner frozen on a spinner with
+      // no way to retry. Surface a fallback message and re-arm the scanner.
+      if (!mounted) return;
+      setState(() {
+        _error = 'Falha inesperada. Tente de novo.';
+        _processing = false;
+      });
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted && !_success) setState(() => _error = null);
+      });
     }
   }
 
@@ -110,7 +123,16 @@ class _MusculacaoQrScanScreenState
   Widget _buildScanner() {
     return Stack(
       children: [
-        MobileScanner(controller: _controller, onDetect: _handle),
+        MobileScanner(
+          controller: _controller,
+          onDetect: _handle,
+          errorBuilder: (context, error) => _CameraErrorView(
+            error: error,
+            onRetry: () {
+              _controller.start();
+            },
+          ),
+        ),
         IgnorePointer(
           child: Center(
             child: SizedBox(
@@ -205,6 +227,80 @@ class _MusculacaoQrScanScreenState
             child: const Text('Concluir'),
           ).entrance(index: 1),
         ],
+      ),
+    );
+  }
+}
+
+/// Styled fallback shown when the camera cannot start (permission denied, no
+/// camera, or a controller failure). Replaces mobile_scanner's bare unstyled
+/// default error with a dark panel, a PT-BR message and recovery affordances.
+class _CameraErrorView extends StatelessWidget {
+  final MobileScannerException error;
+  final VoidCallback onRetry;
+
+  const _CameraErrorView({required this.error, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final code = error.errorCode;
+    final isPermission = code == MobileScannerErrorCode.permissionDenied;
+    final isUnsupported = code == MobileScannerErrorCode.unsupported;
+
+    final String title;
+    final String detail;
+    if (isPermission) {
+      title = 'Acesso a camera negado';
+      detail =
+          'Para escanear o QR, permita o acesso a camera nas configuracoes do '
+          'aparelho e tente novamente.';
+    } else if (isUnsupported) {
+      title = 'Camera indisponivel';
+      detail = 'Este aparelho nao oferece uma camera para leitura do QR.';
+    } else {
+      title = 'Camera indisponivel';
+      detail = 'Nao foi possivel iniciar a camera. Tente novamente.';
+    }
+
+    return Container(
+      color: Colors.black,
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isPermission ? LucideIcons.cameraOff : LucideIcons.alertTriangle,
+              color: Colors.white,
+              size: 56,
+            ),
+            const SizedBox(height: 20),
+            Text(
+              title,
+              style: AppTheme.headlineSmall.copyWith(color: Colors.white),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              detail,
+              style: AppTheme.bodyMedium.copyWith(color: Colors.white70),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 28),
+            if (!isUnsupported)
+              FilledButton.icon(
+                icon: const Icon(LucideIcons.refreshCw, size: 16),
+                label: const Text('Tentar novamente'),
+                onPressed: onRetry,
+              ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => Navigator.of(context).maybePop(),
+              style: TextButton.styleFrom(foregroundColor: Colors.white),
+              child: const Text('Voltar'),
+            ),
+          ],
+        ),
       ),
     );
   }

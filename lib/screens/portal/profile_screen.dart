@@ -445,6 +445,12 @@ class _HeroHeader extends ConsumerWidget {
     // academies//students/... and Storage denies it.
     final academyId = ref.watch(selectedAcademyIdProvider) ?? FirebaseService.academyId;
 
+    // Resolve the grade for the student's primary sport. The flat
+    // currentBelt/currentStripes fields are legacy BJJ-oriented and are only
+    // correct for a BJJ-primary student; getGrade returns the per-sport grade.
+    final primarySport = student.getPrimarySport();
+    final grade = student.getGrade(primarySport);
+
     return Column(
       children: [
         // Avatar
@@ -472,9 +478,9 @@ class _HeroHeader extends ConsumerWidget {
         const SizedBox(height: 8),
         // Grade Display (sport-aware)
         GradeDisplay(
-          sportId: student.getPrimarySport(),
-          grade: student.currentBelt,
-          stripes: student.currentStripes,
+          sportId: primarySport,
+          grade: grade?.currentGrade ?? 'white',
+          stripes: grade?.currentStripes ?? 0,
           size: GradeDisplaySize.large,
           showLabel: true,
         ),
