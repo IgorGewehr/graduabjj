@@ -387,6 +387,9 @@ class AppUser {
       instructorId: data['instructorId'],
       pendingStudentLink: data['pendingStudentLink'],
       approvedAt: _parseDate(data['approvedAt']),
+      extraPermissions: data['extraPermissions'] is List
+          ? List<String>.from(data['extraPermissions'])
+          : const [],
       createdAt: _parseDate(data['createdAt']) ?? DateTime.now(),
       updatedAt: _parseDate(data['updatedAt']) ?? DateTime.now(),
     );

@@ -1171,43 +1171,56 @@ function rankFromPairs(pairs) {
   return entries.map((e, i) => ({ studentId: e.studentId, count: e.count, rank: i + 1 }));
 }
 
-// Query-before-create idempotent write of an auto milestone, keyed by
-// (studentId + autoKey). Returns true when a new doc was created, false when one
-// already existed (no-op). NEVER touches publicProfiles.
+// Atomic idempotent write of an auto milestone, keyed by (studentId + autoKey).
+// Returns true when a new doc was created, false when one already existed
+// (no-op). NEVER touches publicProfiles.
+//
+// Uses a DETERMINISTIC doc-id (`${studentId}_${autoKey}`) plus `.create()`,
+// which fails with ALREADY_EXISTS when the doc is present. This makes the
+// creation atomic and closes the concurrency race between the daily cron
+// (scheduledGamificationMilestones) and the on-demand callable
+// (recomputeStudentMilestones) that could otherwise both observe "no existing
+// doc" and both write, producing a duplicate milestone.
 async function upsertAutoAchievement(academyId, fields) {
   const { studentId, autoKey } = fields;
   if (!studentId || !autoKey) return false;
-  const ref = db
+
+  // Deterministic, collision-proof id. studentId is a Firestore uid and autoKey
+  // is a system-generated slug, so neither contains '/' (the only char illegal
+  // in a doc id), making this safe as a document path segment.
+  const docId = `${studentId}_${autoKey}`;
+  const docRef = db
     .collection('academies').doc(academyId)
-    .collection('achievements');
+    .collection('achievements')
+    .doc(docId);
 
-  // Idempotency guard: composite index achievements(studentId ASC, autoKey ASC).
-  const existing = await ref
-    .where('studentId', '==', studentId)
-    .where('autoKey', '==', autoKey)
-    .limit(1)
-    .get();
-  if (!existing.empty) return false;
-
-  await ref.add({
-    studentId,
-    studentName: fields.studentName || 'Aluno',
-    type: fields.type, // 'attendanceStreak' | 'rankingPosition'
-    title: fields.title,
-    description: fields.description || null,
-    date: admin.firestore.Timestamp.fromDate(fields.date || new Date()),
-    // Gamification PII-free fields (subset; the rest stay null for back-compat).
-    streakDays: fields.streakDays != null ? fields.streakDays : null,
-    rankingScope: fields.rankingScope || null,
-    rankingRank: fields.rankingRank != null ? fields.rankingRank : null,
-    iconKey: fields.iconKey || null,
-    autoKey,
-    // Owner decision: streak + ranking milestones are born public.
-    isPublic: true,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    createdBy: 'system:gamification',
-  });
-  return true;
+  try {
+    // .create() is atomic: it fails if the doc already exists, so two concurrent
+    // executions for the same (studentId, autoKey) cannot both succeed.
+    await docRef.create({
+      studentId,
+      studentName: fields.studentName || 'Aluno',
+      type: fields.type, // 'attendanceStreak' | 'rankingPosition'
+      title: fields.title,
+      description: fields.description || null,
+      date: admin.firestore.Timestamp.fromDate(fields.date || new Date()),
+      // Gamification PII-free fields (subset; the rest stay null for back-compat).
+      streakDays: fields.streakDays != null ? fields.streakDays : null,
+      rankingScope: fields.rankingScope || null,
+      rankingRank: fields.rankingRank != null ? fields.rankingRank : null,
+      iconKey: fields.iconKey || null,
+      autoKey,
+      // Owner decision: streak + ranking milestones are born public.
+      isPublic: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdBy: 'system:gamification',
+    });
+    return true;
+  } catch (err) {
+    // ALREADY_EXISTS (gRPC code 6) -> the milestone is already present: no-op.
+    if (err && err.code === 6) return false;
+    throw err;
+  }
 }
 
 // Core worker: recompute streak + monthly ranking milestones for ONE academy.
@@ -3014,6 +3027,9 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
   const orderSnap = await orderRef.get();
   if (!orderSnap.exists) throw new HttpsError('not-found', 'Order not found');
   const order = orderSnap.data();
+  if (order.studentId !== studentId) {
+    throw new HttpsError('permission-denied', 'Order does not belong to this student');
+  }
   if (order.status === 'paid') {
     throw new HttpsError('already-exists', 'This order has already been paid');
   }
@@ -3041,12 +3057,34 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
     };
   }
 
+  // PIX requires a valid payer CPF (Brazilian regulation) AND a real e-mail.
+  // Mirror the mensalidade path: fail fast with a clear message instead of
+  // letting Mercado Pago reject an incomplete payer (which surfaced to users
+  // as a generic "falha na cobranca PIX").
+  const cpfDigits = String(payerCpf || '').replace(/\D/g, '');
+  if (cpfDigits.length < 11) {
+    throw new HttpsError('failed-precondition',
+      'Para pagar via PIX e necessario um CPF valido. Informe seu CPF e tente novamente.');
+  }
+  let resolvedEmail = String(payerEmail || '').trim();
+  if (!resolvedEmail || !resolvedEmail.includes('@') ||
+      resolvedEmail.endsWith('@bjjeasy.com.br')) {
+    try {
+      const authUser = await admin.auth().getUser(request.auth.uid);
+      resolvedEmail = (authUser.email || '').trim();
+    } catch (_) { /* keep whatever we had */ }
+  }
+  if (!resolvedEmail || !resolvedEmail.includes('@')) {
+    throw new HttpsError('failed-precondition',
+      'E necessario um e-mail valido na sua conta para gerar a cobranca PIX.');
+  }
+
   const pix = await createMpPix({
     academyId,
     transactionAmount: expectedReais, // server-derived reais
     description: sanitizeString(description) || 'Pedido da Loja',
     externalReference: `${academyId}:order:${orderId}`,
-    payer: { email: payerEmail, cpf: payerCpf, name: studentName },
+    payer: { email: resolvedEmail, cpf: cpfDigits, name: studentName },
   });
 
   const expiresAt = admin.firestore.Timestamp.fromDate(pix.expiresAt);
@@ -3289,32 +3327,42 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
 
   if (type === 'order') {
     const orderRef = db.doc(`academies/${academyId}/storeOrders/${docId}`);
-    const snap = await orderRef.get();
-    if (!snap.exists || snap.data().status === 'paid') return; // idempotent
-    // SECURITY: refuse to settle if the paid amount differs from the order
-    // total (reais, 1-centavo tolerance). Protects against a tampered or
-    // mismatched MP payment flipping the order to paid for the wrong value.
-    const expectedReais = orderExpectedTotalReais(snap.data());
-    const paidReais = Number(payment.transaction_amount) || 0;
-    if (Math.abs(expectedReais - paidReais) > 0.01) {
-      console.error('[mpMktSettle] amount mismatch order', docId,
-        'expected', expectedReais, 'paid', paidReais);
-      return; // do NOT settle
-    }
-    await orderRef.update({
-      status: 'paid',
-      paidAt: admin.firestore.FieldValue.serverTimestamp(),
-      paymentMethod: method,
-      paymentGateway: 'mercadopago',
-      gatewayPaymentId: chargeId,
-      externalPaymentId: chargeId,
-      pixCode: admin.firestore.FieldValue.delete(),
-      pixQrCode: admin.firestore.FieldValue.delete(),
-      pixTicketUrl: admin.firestore.FieldValue.delete(),
-      pixExpiresAt: admin.firestore.FieldValue.delete(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    // Atomic status flip: read + guard + update inside a transaction so that
+    // an inline (sync card) settle and the webhook settle for the SAME payment
+    // cannot both pass the early-return and double-decrement stock / double-
+    // notify. Only the execution that actually performed the flip proceeds.
+    const settle = await db.runTransaction(async (transaction) => {
+      const snap = await transaction.get(orderRef);
+      if (!snap.exists || snap.data().status === 'paid') {
+        return { didSettle: false }; // idempotent
+      }
+      // SECURITY: refuse to settle if the paid amount differs from the order
+      // total (reais, 1-centavo tolerance). Protects against a tampered or
+      // mismatched MP payment flipping the order to paid for the wrong value.
+      const expectedReais = orderExpectedTotalReais(snap.data());
+      const paidReais = Number(payment.transaction_amount) || 0;
+      if (Math.abs(expectedReais - paidReais) > 0.01) {
+        console.error('[mpMktSettle] amount mismatch order', docId,
+          'expected', expectedReais, 'paid', paidReais);
+        return { didSettle: false }; // do NOT settle
+      }
+      transaction.update(orderRef, {
+        status: 'paid',
+        paidAt: admin.firestore.FieldValue.serverTimestamp(),
+        paymentMethod: method,
+        paymentGateway: 'mercadopago',
+        gatewayPaymentId: chargeId,
+        externalPaymentId: chargeId,
+        pixCode: admin.firestore.FieldValue.delete(),
+        pixQrCode: admin.firestore.FieldValue.delete(),
+        pixTicketUrl: admin.firestore.FieldValue.delete(),
+        pixExpiresAt: admin.firestore.FieldValue.delete(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return { didSettle: true, items: snap.data().items };
     });
-    const items = snap.data().items;
+    if (!settle.didSettle) return; // another execution already settled it
+    const items = settle.items;
     if (Array.isArray(items)) {
       for (const item of items) {
         const productRef = db.doc(`academies/${academyId}/storeProducts/${item.productId}`);
@@ -3335,29 +3383,37 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
 
   // mensalidade / financial
   const finRef = db.doc(`academies/${academyId}/financials/${docId}`);
-  const snap = await finRef.get();
-  if (!snap.exists || snap.data().status === 'paid') return; // idempotent
-  // SECURITY: refuse to settle if the paid amount differs from the stored
-  // financial amount (REAIS, canonical; 1-centavo tolerance).
-  const expectedFinReais = Number(snap.data().amount) || 0;
-  const paidFinReais = Number(payment.transaction_amount) || 0;
-  if (Math.abs(expectedFinReais - paidFinReais) > 0.01) {
-    console.error('[mpMktSettle] amount mismatch fin', docId,
-      'expected', expectedFinReais, 'paid', paidFinReais);
-    return; // do NOT settle
-  }
-  await finRef.update({
-    status: 'paid',
-    paymentDate: admin.firestore.FieldValue.serverTimestamp(),
-    method: method,
-    paymentGateway: 'mercadopago',
-    gatewayPaymentId: chargeId,
-    pixCode: admin.firestore.FieldValue.delete(),
-    pixQrCode: admin.firestore.FieldValue.delete(),
-    pixTicketUrl: admin.firestore.FieldValue.delete(),
-    pixExpiresAt: admin.firestore.FieldValue.delete(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  // Atomic status flip (see order branch above): guards against the inline +
+  // webhook double-settle so the admin notify fires exactly once.
+  const finSettle = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(finRef);
+    if (!snap.exists || snap.data().status === 'paid') {
+      return { didSettle: false }; // idempotent
+    }
+    // SECURITY: refuse to settle if the paid amount differs from the stored
+    // financial amount (REAIS, canonical; 1-centavo tolerance).
+    const expectedFinReais = Number(snap.data().amount) || 0;
+    const paidFinReais = Number(payment.transaction_amount) || 0;
+    if (Math.abs(expectedFinReais - paidFinReais) > 0.01) {
+      console.error('[mpMktSettle] amount mismatch fin', docId,
+        'expected', expectedFinReais, 'paid', paidFinReais);
+      return { didSettle: false }; // do NOT settle
+    }
+    transaction.update(finRef, {
+      status: 'paid',
+      paymentDate: admin.firestore.FieldValue.serverTimestamp(),
+      method: method,
+      paymentGateway: 'mercadopago',
+      gatewayPaymentId: chargeId,
+      pixCode: admin.firestore.FieldValue.delete(),
+      pixQrCode: admin.firestore.FieldValue.delete(),
+      pixTicketUrl: admin.firestore.FieldValue.delete(),
+      pixExpiresAt: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return { didSettle: true };
   });
+  if (!finSettle.didSettle) return; // another execution already settled it
   await notifyAdminCF(academyId, 'payment_received', 'Pagamento Recebido',
     `Pagamento de R$ ${amtFmt} recebido ${viaLabel}.`, { financialId: docId });
 }

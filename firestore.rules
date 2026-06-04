@@ -520,8 +520,12 @@ service cloud.firestore {
         // Anyone authenticated can read UNUSED codes (collectionGroup validation)
         allow read: if resource.data.usedAt == null;
 
-        // Staff can create/delete codes
-        allow create, delete: if isAcademyStaff(academyId);
+        // Only admins can create codes (they carry grantable extraPermissions,
+        // so an instructor must not be able to mint privilege escalations).
+        allow create: if isAcademyAdmin(academyId);
+
+        // Staff can delete codes
+        allow delete: if isAcademyStaff(academyId);
 
         // Allow marking as used during redemption (authenticated users only)
         allow update: if isAuthenticated()

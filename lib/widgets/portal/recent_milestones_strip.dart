@@ -85,7 +85,7 @@ class RecentMilestonesStrip extends ConsumerWidget {
         children: [
           // Header — tappable shortcut to the full timeline.
           Pressable(
-            onTap: () => context.go('/portal/timeline'),
+            onTap: () => context.go('/portal/linha-do-tempo'),
             haptic: false,
             child: Row(
               children: [
@@ -133,7 +133,7 @@ class RecentMilestonesStrip extends ConsumerWidget {
               itemBuilder: (context, index) {
                 return _MilestoneChip(
                   event: recent[index],
-                  onTap: () => context.go('/portal/timeline'),
+                  onTap: () => context.go('/portal/linha-do-tempo'),
                 ).entrance(index: index);
               },
             ),

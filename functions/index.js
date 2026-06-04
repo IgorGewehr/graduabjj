@@ -40,6 +40,38 @@ function requireAuth(request) {
   return request.auth.uid;
 }
 
+// Server-side allowlist of extra permissions an admin may grant to an
+// instructor. Mirrors kGrantableExtraPermissions in
+// lib/services/instructor_link_code_service.dart — keep these in sync.
+// Authoritative: any key NOT in this set is silently dropped, so a forged
+// instructorLinkCodes doc (or a tampered call) cannot escalate privilege.
+const GRANTABLE_EXTRA_PERMISSIONS = new Set([
+  'attendance:take',
+  'financial:view',
+  'financial:create',
+  'students:create',
+  'students:delete',
+  'reports:view',
+  'competitions:create',
+  'graduation:manage',
+  'students:manage',
+]);
+
+/**
+ * Clamp an arbitrary extraPermissions value to the grantable allowlist.
+ * Returns a de-duplicated array containing only allowed string permissions.
+ */
+function sanitizeExtraPermissions(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  for (const p of raw) {
+    if (typeof p === 'string' && GRANTABLE_EXTRA_PERMISSIONS.has(p)) {
+      seen.add(p);
+    }
+  }
+  return Array.from(seen);
+}
+
 /** Returns true when uid is admin of academyId per userAcademyMapping. */
 async function isAdmin(uid, academyId) {
   const snap = await db.collection('userAcademyMapping').doc(uid).get();
@@ -129,8 +161,19 @@ exports.joinAcademy = onCall(async (request) => {
   }
   const userData = userSnap.data() || {};
 
+  // Captures the studentId actually linked (validated inside the transaction).
+  let linkedStudentId = null;
+
   // 4. Atomic: add academy to mapping + mark code used + upsert academy user doc.
   await db.runTransaction(async (tx) => {
+    // Re-read the code doc INSIDE the transaction so codeRef is part of the
+    // read-set. This forces Firestore to abort the losing transaction when two
+    // redemptions of the same one-shot code race, guaranteeing single use.
+    const codeSnap = await tx.get(codeRef);
+    if (!codeSnap.exists || codeSnap.get('usedAt') != null) {
+      throw new HttpsError('not-found', 'Código inválido ou já utilizado.');
+    }
+
     const mappingSnap = await tx.get(mappingRef);
     const mappingData = mappingSnap.exists ? (mappingSnap.data() || {}) : null;
 
@@ -140,8 +183,35 @@ exports.joinAcademy = onCall(async (request) => {
       throw new HttpsError('already-exists', 'Você já está vinculado a esta academia.');
     }
 
+    // The studentId carried by the code is set by whoever created the code
+    // (staff OR monitor — monitors are non-admin students). Trusting it verbatim
+    // would let a malicious monitor point a code at ANOTHER student's record,
+    // linking the redeeming account to that student's data. Only honour the
+    // studentId when it references an UNCLAIMED student record (no linkedUserId
+    // yet). Otherwise ignore it and join with no studentId. All reads must
+    // precede writes in a transaction, so resolve this before any tx.set/update.
+    let resolvedStudentId = null;
+    let studentRefToClaim = null;
+    if (codeData.studentId) {
+      const studentRef = db
+          .collection('academies').doc(academyId)
+          .collection('students').doc(String(codeData.studentId));
+      const studentSnap = await tx.get(studentRef);
+      if (studentSnap.exists) {
+        const existingLink = studentSnap.get('linkedUserId');
+        // Accept only if the record is orphan, or already linked to THIS caller.
+        if (!existingLink || existingLink === uid) {
+          resolvedStudentId = codeData.studentId;
+          // Stamp ownership on an orphan record so it can never be re-pointed
+          // by a later code crafted with the same studentId.
+          if (!existingLink) studentRefToClaim = studentRef;
+        }
+      }
+    }
+    linkedStudentId = resolvedStudentId;
+
     const detailEntry = {
-      studentId: codeData.studentId || null,
+      studentId: resolvedStudentId,
       role: 'student',
       joinedAt: FieldValue.serverTimestamp(),
       status: 'active',
@@ -159,6 +229,14 @@ exports.joinAcademy = onCall(async (request) => {
         academyIds: [academyId],
         primaryAcademyId: academyId,
         academyDetails: {[academyId]: detailEntry},
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    // Claim the orphan student record for this caller.
+    if (studentRefToClaim) {
+      tx.update(studentRefToClaim, {
+        linkedUserId: uid,
         updatedAt: FieldValue.serverTimestamp(),
       });
     }
@@ -195,7 +273,7 @@ exports.joinAcademy = onCall(async (request) => {
   return {
     success: true,
     academyId,
-    studentId: codeData.studentId || null,
+    studentId: linkedStudentId,
   };
 });
 
@@ -241,6 +319,14 @@ exports.redeemInstructorCode = onCall(async (request) => {
   const userData = userSnap.data() || {};
 
   await db.runTransaction(async (tx) => {
+    // Re-read the code doc INSIDE the transaction so codeRef is part of the
+    // read-set. This forces Firestore to abort the losing transaction when two
+    // redemptions of the same one-shot code race, guaranteeing single use.
+    const codeSnap = await tx.get(codeRef);
+    if (!codeSnap.exists || codeSnap.get('usedAt') != null) {
+      throw new HttpsError('not-found', 'Código inválido ou já utilizado.');
+    }
+
     const mappingSnap = await tx.get(mappingRef);
     const mappingData = mappingSnap.exists ? (mappingSnap.data() || {}) : null;
 
@@ -255,8 +341,11 @@ exports.redeemInstructorCode = onCall(async (request) => {
       joinedAt: FieldValue.serverTimestamp(),
       status: 'active',
     };
-    if (Array.isArray(codeData.extraPermissions) && codeData.extraPermissions.length > 0) {
-      detailEntry.extraPermissions = codeData.extraPermissions;
+    // Clamp to the server allowlist — never trust extraPermissions stamped on
+    // the code doc (an instructor could have forged it via direct write).
+    const grantedPermissions = sanitizeExtraPermissions(codeData.extraPermissions);
+    if (grantedPermissions.length > 0) {
+      detailEntry.extraPermissions = grantedPermissions;
     }
 
     if (mappingData) {
@@ -348,6 +437,18 @@ exports.promoteToInstructor = onCall(async (request) => {
               .limit(1),
       );
       studentId = studentsSnap.empty ? null : studentsSnap.docs[0].id;
+
+      // Consent guard: never synthesise a membership from scratch. The target
+      // must already belong to the academy (linked student record above, or an
+      // existing academies/{id}/users/{userId} doc). Otherwise an admin could
+      // inject an arbitrary uid into someone else's mapping without consent.
+      if (studentId === null) {
+        const academyUserSnap = await tx.get(academyUserRef);
+        if (!academyUserSnap.exists) {
+          throw new HttpsError(
+              'failed-precondition', 'Usuário não é membro desta academia.');
+        }
+      }
     }
 
     // One field-path update: creates the entry when missing (keeping studentId
@@ -364,8 +465,11 @@ exports.promoteToInstructor = onCall(async (request) => {
       update[`academyDetails.${academyId}.studentId`] = studentId;
       update[`academyDetails.${academyId}.joinedAt`] = FieldValue.serverTimestamp();
     }
+    // Clamp to the server allowlist before persisting (defense in depth even
+    // though only admins reach here).
     if (Array.isArray(extraPermissions)) {
-      update[`academyDetails.${academyId}.extraPermissions`] = extraPermissions;
+      update[`academyDetails.${academyId}.extraPermissions`] =
+          sanitizeExtraPermissions(extraPermissions);
     }
     tx.update(mappingRef, update);
 
