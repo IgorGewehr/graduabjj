@@ -268,8 +268,14 @@ class _ExerciseFormSheetState extends State<_ExerciseFormSheet> {
     _name = TextEditingController(text: e?.name ?? '');
     _description = TextEditingController(text: e?.description ?? '');
     _videoUrl = TextEditingController(text: e?.videoUrl ?? '');
-    _muscleGroup = e?.muscleGroup ?? muscleGroups.keys.first;
-    _equipment = e?.equipment;
+    // Coage valores fora das listas conhecidas para evitar crash do dropdown
+    // (value precisa existir nos items).
+    final mg = e?.muscleGroup;
+    _muscleGroup = (mg != null && muscleGroups.containsKey(mg))
+        ? mg
+        : muscleGroups.keys.first;
+    final eq = e?.equipment;
+    _equipment = (eq != null && equipmentTypes.containsKey(eq)) ? eq : null;
   }
 
   @override
