@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
@@ -501,11 +502,49 @@ class PaymentService {
     DateTime? paymentDate,
   }) async {
     final paidAt = paymentDate ?? DateTime.now();
-    return update(id, {
+
+    // Read the live gateway payment id BEFORE we strip the pix fields, so we
+    // can best-effort cancel the open MP PIX (otherwise the already-sent link
+    // stays payable -> double payment).
+    String? gatewayPaymentId;
+    String? paymentGateway;
+    try {
+      final snap = await _paymentsRef.doc(id).get();
+      final data = snap.data() as Map<String, dynamic>?;
+      gatewayPaymentId = data?['gatewayPaymentId'] as String?;
+      paymentGateway = data?['paymentGateway'] as String?;
+    } catch (_) {
+      // non-fatal: proceed with the mark-paid regardless
+    }
+
+    final payment = await update(id, {
       'status': PaymentStatus.paid.value,
       'method': method.value,
       'paymentDate': Timestamp.fromDate(paidAt),
+      // Kill the live PIX on the doc (mirrors mpMktSettle): an admin marking
+      // the charge paid offline must invalidate the already-sent code.
+      'pixCode': FieldValue.delete(),
+      'pixQrCode': FieldValue.delete(),
+      'pixTicketUrl': FieldValue.delete(),
+      'pixExpiresAt': FieldValue.delete(),
     });
+
+    // Best-effort: cancel the open MP PIX so it can no longer be paid. Never
+    // block the mark-paid if cancellation fails.
+    if (gatewayPaymentId != null &&
+        gatewayPaymentId.isNotEmpty &&
+        paymentGateway == 'mercadopago') {
+      try {
+        await FirebaseFunctions.instance.httpsCallable('cancelMpPix').call({
+          'academyId': academyId,
+          'paymentId': gatewayPaymentId,
+        });
+      } catch (e) {
+        print('[PaymentService] cancelMpPix failed (non-fatal): $e');
+      }
+    }
+
+    return payment;
   }
 
   // ============================================

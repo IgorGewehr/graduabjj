@@ -2332,6 +2332,28 @@ function mapMpPixError(e) {
 }
 
 /**
+ * Server-side authoritative store-order total in REAIS. Recomputes from the
+ * line items (each item carries the server-validated `price`), falling back to
+ * the persisted `total`/`totalAmount` when items are unavailable. Used to DERIVE
+ * the MP charge so the client-supplied amount is never trusted.
+ */
+function orderExpectedTotalReais(order) {
+  const items = order && order.items;
+  if (Array.isArray(items) && items.length > 0) {
+    let sum = 0;
+    let ok = true;
+    for (const it of items) {
+      const price = Number((it && (it.price ?? it.unitPrice)));
+      const qty = Number(it && it.quantity);
+      if (!Number.isFinite(price) || !Number.isFinite(qty)) { ok = false; break; }
+      sum += price * qty;
+    }
+    if (ok) return sum;
+  }
+  return Number((order && (order.total ?? order.totalAmount)) || 0);
+}
+
+/**
  * Creates a PIX payment on the academy's MP account. transactionAmount in REAIS.
  * MP requires the payer identification (CPF) for PIX — pass it when available.
  */
@@ -2340,11 +2362,18 @@ async function createMpPix({ academyId, transactionAmount, description, external
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const cpf = ((payer && payer.cpf) || '').replace(/\D/g, '');
   const nameParts = ((payer && payer.name) || '').trim().split(/\s+/);
+  // Idempotency key must be UNIQUE per minted PIX: external_reference is FIXED
+  // per financial/order (the webhook parses it), so reusing it as the
+  // idempotency key would make MP return the SAME (possibly expired) payment on
+  // a regeneration after the 24h expiry. Append a fresh epoch-millis suffix so
+  // each mint creates a fresh, payable PIX.
+  const idempotencyKey =
+    `${externalReference}:${admin.firestore.Timestamp.now().toMillis()}`;
   let payment;
   try {
     payment = await mpRequest('POST', '/v1/payments', {
       token,
-      idempotencyKey: externalReference,
+      idempotencyKey,
       body: {
         transaction_amount: Number(transactionAmount.toFixed(2)),
         description: description || 'Pagamento',
@@ -2400,6 +2429,16 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
     throw new HttpsError('already-exists', 'This payment has already been completed');
   }
 
+  // SECURITY: never trust the client amount. The charge is DERIVED from the
+  // stored financial amount (centavos). If a client amount is supplied it must
+  // match within a 1-centavo tolerance, else reject (mirrors
+  // createOrderPixPayment:1487 for AbacatePay).
+  const expectedAmount = Number(fin.amount) || 0;
+  if (Math.abs(expectedAmount - amount) > 1) {
+    throw new HttpsError('invalid-argument',
+      `Amount (${amount}) does not match financial amount (${expectedAmount})`);
+  }
+
   // Idempotency: reuse a still-valid PIX so the kid and the responsible adult
   // opening the same charge get the SAME code (no double charge).
   const existingExpiry = fin.pixExpiresAt && typeof fin.pixExpiresAt.toMillis === 'function'
@@ -2416,7 +2455,7 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
 
   const pix = await createMpPix({
     academyId,
-    transactionAmount: amount / 100, // centavos -> reais
+    transactionAmount: expectedAmount / 100, // server-derived centavos -> reais
     description: sanitizeString(description) || 'Mensalidade',
     externalReference: `${academyId}:fin:${financialId}`,
     payer: { email: payerEmail, cpf: payerCpf, name: studentName },
@@ -2464,6 +2503,17 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
     throw new HttpsError('already-exists', 'This order has already been paid');
   }
 
+  // SECURITY: never trust the client amount. Derive the charge server-side from
+  // the order (reais). Prefer recomputing from the line items (each carries a
+  // server-validated price), falling back to the persisted total. The client
+  // now sends CENTAVOS (H1); it is only a cross-check (1-centavo tolerance).
+  const expectedReais = orderExpectedTotalReais(order);
+  const expectedCentavos = Math.round(expectedReais * 100);
+  if (Math.abs(expectedCentavos - amount) > 1) {
+    throw new HttpsError('invalid-argument',
+      `Amount (${amount}) does not match order total (${expectedCentavos})`);
+  }
+
   const existingExpiry = order.pixExpiresAt && typeof order.pixExpiresAt.toMillis === 'function'
     ? order.pixExpiresAt.toMillis() : 0;
   if (order.gatewayPaymentId && order.pixCode && existingExpiry > Date.now()) {
@@ -2478,7 +2528,7 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
 
   const pix = await createMpPix({
     academyId,
-    transactionAmount: Number(amount), // already in reais
+    transactionAmount: expectedReais, // server-derived reais
     description: sanitizeString(description) || 'Pedido da Loja',
     externalReference: `${academyId}:order:${orderId}`,
     payer: { email: payerEmail, cpf: payerCpf, name: studentName },
@@ -2528,15 +2578,27 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
     : db.doc(`academies/${academyId}/financials/${financialId}`);
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError('not-found', 'Record not found');
-  if (snap.data().status === 'paid') {
+  const recData = snap.data();
+  if (recData.status === 'paid') {
     throw new HttpsError('already-exists', 'Already paid');
   }
-  if (!isOrder && snap.data().studentId !== studentId) {
+  if (!isOrder && recData.studentId !== studentId) {
     throw new HttpsError('permission-denied', 'Record does not belong to this student');
   }
 
-  // mensalidade=centavos, loja=reais (match the PIX contracts).
-  const transactionAmount = isOrder ? Number(amount) : amount / 100;
+  // SECURITY: never trust the client amount. DERIVE the charge server-side from
+  // the stored record. Both order and financial now carry CENTAVOS from the
+  // client (H1); the client value is only a cross-check (1-centavo tolerance).
+  // financial.amount is centavos; order total is reais -> centavos.
+  const expectedCentavos = isOrder
+    ? Math.round(orderExpectedTotalReais(recData) * 100)
+    : (Number(recData.amount) || 0);
+  if (Math.abs(expectedCentavos - amount) > 1) {
+    throw new HttpsError('invalid-argument',
+      `Amount (${amount}) does not match expected amount (${expectedCentavos})`);
+  }
+  // transaction_amount is always REAIS for MP.
+  const transactionAmount = expectedCentavos / 100;
   const token = await getMpAccessToken(academyId);
   const cpf = String(payerCpf || '').replace(/\D/g, '');
   const nameParts = String(studentName || '').trim().split(/\s+/);
@@ -2586,6 +2648,39 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
   };
 });
 
+// ---- Cancel an open MP PIX (H4) -------------------------------------------
+// When an admin marks a charge paid offline, the already-sent PIX must be
+// killed so it stays unpayable (no double payment). Best-effort: the client
+// calls this after the local mark-paid; failure here never blocks mark-paid.
+// Requires the academy admin. Only cancels payments still in a cancellable
+// state (pending/in_process) — never touches an already-approved one.
+exports.cancelMpPix = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
+  const { academyId, paymentId } = request.data || {};
+  if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
+  if (!academyId || !paymentId) {
+    throw new HttpsError('invalid-argument', 'Missing required fields');
+  }
+  await requireAdminOf(request, academyId);
+
+  const token = await getMpAccessToken(academyId);
+  try {
+    const current = await mpRequest('GET', `/v1/payments/${paymentId}`, { token });
+    // Only pending/in_process payments can be cancelled. If it already settled
+    // we must NOT cancel (that would be a refund path, out of scope).
+    if (current.status !== 'pending' && current.status !== 'in_process') {
+      return { cancelled: false, status: current.status };
+    }
+    const updated = await mpRequest('POST', `/v1/payments/${paymentId}`, {
+      token,
+      body: { status: 'cancelled' },
+    });
+    return { cancelled: updated.status === 'cancelled', status: updated.status };
+  } catch (e) {
+    console.error('[cancelMpPix] erro', e.message);
+    throw new HttpsError('internal', 'Falha ao cancelar a cobranca PIX.');
+  }
+});
+
 /** Parses `${academyId}:fin:${id}` / `${academyId}:order:${id}`. */
 function mpMktParseRef(ref) {
   const parts = String(ref || '').split(':');
@@ -2606,8 +2701,14 @@ exports.mercadoPagoMarketplaceWebhook = onRequest(
     );
 
     // x-signature HMAC validation (same scheme as the paywall webhook).
+    // FAIL CLOSED: if the secret is not configured we cannot authenticate the
+    // caller — refuse to process (do NOT settle on an unverified webhook).
     const secret = process.env.MP_MKT_WEBHOOK_SECRET;
-    if (secret) {
+    if (!secret) {
+      console.error('[mpMktWebhook] MP_MKT_WEBHOOK_SECRET not configured — refusing');
+      return res.status(401).json({ error: 'webhook secret not configured' });
+    }
+    {
       const xSignature = req.header('x-signature') || '';
       const xRequestId = req.header('x-request-id') || '';
       let ts = ''; let v1 = '';
@@ -2661,6 +2762,16 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
     const orderRef = db.doc(`academies/${academyId}/storeOrders/${docId}`);
     const snap = await orderRef.get();
     if (!snap.exists || snap.data().status === 'paid') return; // idempotent
+    // SECURITY: refuse to settle if the paid amount differs from the order
+    // total (reais, 1-centavo tolerance). Protects against a tampered or
+    // mismatched MP payment flipping the order to paid for the wrong value.
+    const expectedReais = orderExpectedTotalReais(snap.data());
+    const paidReais = Number(payment.transaction_amount) || 0;
+    if (Math.abs(expectedReais - paidReais) > 0.01) {
+      console.error('[mpMktSettle] amount mismatch order', docId,
+        'expected', expectedReais, 'paid', paidReais);
+      return; // do NOT settle
+    }
     await orderRef.update({
       status: 'paid',
       paidAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2697,6 +2808,15 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
   const finRef = db.doc(`academies/${academyId}/financials/${docId}`);
   const snap = await finRef.get();
   if (!snap.exists || snap.data().status === 'paid') return; // idempotent
+  // SECURITY: refuse to settle if the paid amount differs from the stored
+  // financial amount (centavos -> reais, 1-centavo tolerance).
+  const expectedFinReais = (Number(snap.data().amount) || 0) / 100;
+  const paidFinReais = Number(payment.transaction_amount) || 0;
+  if (Math.abs(expectedFinReais - paidFinReais) > 0.01) {
+    console.error('[mpMktSettle] amount mismatch fin', docId,
+      'expected', expectedFinReais, 'paid', paidFinReais);
+    return; // do NOT settle
+  }
   await finRef.update({
     status: 'paid',
     paymentDate: admin.firestore.FieldValue.serverTimestamp(),

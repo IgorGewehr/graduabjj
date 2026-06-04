@@ -81,7 +81,9 @@ class MercadoPagoService {
     }
   }
 
-  /// PIX for a store order. [amount] in REAIS (CF uses it directly).
+  /// PIX for a store order. [amount] in REAIS (converted to CENTAVOS for the
+  /// CF — the CF divides by 100, matching the tuition contract; the value is
+  /// only a cross-check since the CF derives the charge from the stored order).
   Future<PaymentLink?> createStoreOrderPayment({
     required double amount,
     required String orderId,
@@ -94,7 +96,7 @@ class MercadoPagoService {
       final result =
           await _functions.httpsCallable('createMpOrderPixPayment').call({
         'academyId': academyId,
-        'amount': amount.round(), // reais (CF uses directly)
+        'amount': (amount * 100).round(), // centavos (CF derives & cross-checks)
         'description': description ?? 'Pedido da Loja',
         'orderId': orderId,
         'studentId': studentId,
@@ -135,7 +137,8 @@ class MercadoPagoService {
     );
   }
 
-  /// Card payment for a store order. [amount] in REAIS (CF uses directly).
+  /// Card payment for a store order. [amount] in REAIS (converted to CENTAVOS
+  /// for the CF, matching the PIX contract; the CF derives & cross-checks).
   Future<CardPaymentResult> createStoreOrderCardPayment({
     required double amount,
     required String orderId,
@@ -146,7 +149,7 @@ class MercadoPagoService {
     int installments = 1,
   }) {
     return _chargeCard(
-      amount: amount.round(), // reais
+      amount: (amount * 100).round(), // centavos (CF derives & cross-checks)
       idKey: 'orderId',
       idValue: orderId,
       studentId: studentId,
