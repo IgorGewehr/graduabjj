@@ -9,7 +9,6 @@ import '../../core/theme.dart';
 import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
 import '../../providers/auth_provider.dart';
-import '../../widgets/loading_button.dart';
 import '../../widgets/polish/polish.dart';
 
 /// Portal Cart Screen
@@ -21,8 +20,6 @@ class PortalCartScreen extends ConsumerStatefulWidget {
 }
 
 class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
-  bool _isLoading = false;
-
   @override
   Widget build(BuildContext context) {
     final cart = ref.watch(cartProvider);
@@ -166,15 +163,14 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
                   ),
                 ),
 
-                // Checkout Button — uses LoadingButton helper for consistent
-                // inline spinner + disabled state.
+                // Checkout Button — hands off to the multi-step checkout, so it
+                // is a plain (instant) navigation action.
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: SizedBox(
                       width: double.infinity,
-                      child: LoadingButton(
-                        isLoading: _isLoading,
+                      child: ElevatedButton(
                         onPressed: _checkout,
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 16),
@@ -212,10 +208,9 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
     );
   }
 
-  Future<void> _checkout() async {
+  void _checkout() {
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     final cart = ref.read(cartProvider);
-    final cartNotifier = ref.read(cartProvider.notifier);
 
     if (currentUser == null || currentUser.studentId == null) {
       context.showWarning('Voce precisa estar vinculado a um aluno');
@@ -227,43 +222,11 @@ class _PortalCartScreenState extends ConsumerState<PortalCartScreen> {
       return;
     }
 
+    // Hand off to the multi-step checkout (review -> payment). The order is
+    // created there (server re-prices/validates) so the cart is never charged
+    // straight from this screen.
     HapticFeedback.selectionClick();
-    setState(() => _isLoading = true);
-
-    try {
-      final service = ref.read(storeServiceProvider);
-      if (service == null) {
-        context.showError('Erro ao acessar a loja');
-        return;
-      }
-      // Server validates prices and stock
-      await service.createOrder(
-        studentId: currentUser.studentId!,
-        studentName: currentUser.displayName,
-        items: cart,
-      );
-
-      // Clear cart after successful order
-      cartNotifier.clear();
-
-      // Show success and navigate to orders
-      if (mounted) {
-        HapticFeedback.heavyImpact();
-        Celebration.confetti(context);
-        context.showSuccess('Pedido criado com sucesso!');
-        context.push('/portal/loja/pedidos');
-      }
-    } catch (e) {
-      if (mounted) {
-        // Show specific error from server validation
-        final errorMessage = e.toString().replaceFirst('Exception: ', '');
-        context.showError(errorMessage);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
+    context.push('/portal/loja/checkout');
   }
 }
 

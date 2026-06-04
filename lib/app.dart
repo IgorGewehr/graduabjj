@@ -43,7 +43,9 @@ import 'screens/portal/notifications_screen.dart';
 import 'screens/portal/behavior_screen.dart';
 import 'screens/portal/store_screen.dart';
 import 'screens/portal/cart_screen.dart';
+import 'screens/portal/store_checkout_screen.dart';
 import 'screens/portal/store_orders_screen.dart';
+import 'screens/admin/store_orders_admin_screen.dart';
 // Academy management screens
 import 'screens/portal/academies_screen.dart';
 import 'screens/portal/add_academy_screen.dart';
@@ -719,6 +721,14 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
+            path: '/portal/loja/checkout',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const StoreCheckoutScreen(),
+            ),
+          ),
+          GoRoute(
             path: '/portal/loja/pedidos',
             pageBuilder: (context, state) => _buildPageWithPushTransition(
               context: context,
@@ -1105,7 +1115,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) => _buildPageWithPushTransition(
               context: context,
               state: state,
-              child: const PortalStoreOrdersScreen(),
+              child: const StoreOrdersAdminScreen(),
             ),
           ),
         ],

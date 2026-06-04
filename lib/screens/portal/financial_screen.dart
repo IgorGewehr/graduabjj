@@ -7,29 +7,29 @@ import 'package:intl/intl.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../core/validators.dart';
 import '../../providers/providers.dart';
+import '../../providers/payment_providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
 import '../../services/abacate_pay_service.dart';
 import '../../services/asaas_payment_service.dart';
 import '../../services/mercado_pago_service.dart';
+import '../../services/payment/payment_gateway_resolver.dart';
 import '../../models/student.dart';
-import '../../widgets/payment_sheets.dart';
+import '../../widgets/payment/payment_method_sheet.dart';
+import '../../widgets/payment/payment_target.dart';
 import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
-/// PIX payment enabled provider (Mercado Pago, AbacatePay or Asaas).
+/// PIX payment enabled provider — true when any gateway is connected.
+///
+/// Derived from [currentPaymentGatewayProvider] (the single source of truth for
+/// the MP > Asaas > AbacatePay precedence) via the [PaymentGatewayCapabilities]
+/// `pixEnabled` flag, preserving the previous "PIX available?" semantics.
 final abacatePayEnabledProvider = FutureProvider<bool>((ref) async {
-  final academyId = FirebaseService.academyId;
-
-  if (await MercadoPagoService(academyId).isEnabled()) return true;
-
-  final service = AbacatePayService(academyId);
-  final abacateEnabled = await service.isEnabled();
-  if (abacateEnabled) return true;
-
-  final settingsService = SettingsService(academyId);
-  return settingsService.isAsaasEnabled();
+  final gateway = await ref.watch(currentPaymentGatewayProvider.future);
+  return gateway.pixEnabled;
 });
 
 /// One section per dependent: their OPEN charges with a pay button. Hidden when
@@ -109,77 +109,124 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
 
   Future<void> _showPixPaymentDialog(
     Payment payment,
-    String studentName,
+    Student payer,
   ) async {
     final academyId = FirebaseService.academyId;
+    final studentName = payer.fullName;
     final description = payment.description ??
         'Mensalidade - ${payment.referenceMonth ?? ''}';
 
-    // Resolve the connected gateway up front so we know whether the payer CPF
-    // must be captured (Mercado Pago requires it for PIX). Precedence:
-    // Mercado Pago (connected) > Asaas > AbacatePay.
-    final mp = MercadoPagoService(academyId);
-    final asaasService = AsaasPaymentService(academyId);
-
-    bool useMp = false;
-    bool useAsaas = false;
-    try {
-      useMp = await mp.isEnabled();
-      useAsaas = !useMp && await asaasService.isEnabled();
-    } catch (_) {
-      // Treat resolution failure as the default (AbacatePay) fallback.
-    }
+    // Resolve the connected gateway up front (single source of truth) so we
+    // know whether the payer CPF must be captured (Mercado Pago requires it for
+    // PIX). Precedence: Mercado Pago > Asaas > AbacatePay.
+    final gateway =
+        await ref.read(paymentGatewayProvider(academyId).future);
 
     if (!mounted) return;
 
+    // One-tap checkout: if Mercado Pago needs the CPF and the payer already has
+    // a VALID one saved on their student doc, skip the CPF form and generate the
+    // PIX straight away with it. The saved value is used only to build the
+    // charge (sent to the CF/MP) — it is never re-exposed beyond the field.
+    final savedCpf = (payer.cpf ?? '').replaceAll(RegExp(r'\D'), '');
+    final hasSavedCpf =
+        savedCpf.length == 11 && Validators.cpf(savedCpf) == null;
+    final needsCpf = gateway.requireCpf && !hasSavedCpf;
+
     // Builds the PIX link on the resolved gateway. Only Mercado Pago forwards
-    // the payer CPF; Asaas/AbacatePay createPix* do not accept it.
+    // the payer CPF; Asaas/AbacatePay createPix* do not accept it. When a CPF is
+    // typed in the form (first payment), persist it to the student doc so the
+    // next payment becomes a single tap.
     Future<PaymentLink?> generate(String? cpf) async {
-      if (useMp) {
-        return mp.createPixPayment(
-          amount: payment.value,
-          financialId: payment.id,
-          studentId: payment.studentId,
-          studentName: studentName,
-          description: description,
-          cpf: cpf,
-        );
-      } else if (useAsaas) {
-        return asaasService.createPixPayment(
-          amount: payment.value,
-          financialId: payment.id,
-          studentId: payment.studentId,
-          studentName: studentName,
-          description: description,
-        );
+      switch (gateway) {
+        case PaymentGateway.mercadoPago:
+          // Prefer the just-typed CPF (form), else the one saved on the doc.
+          final effectiveCpf = (cpf != null && cpf.isNotEmpty)
+              ? cpf.replaceAll(RegExp(r'\D'), '')
+              : (hasSavedCpf ? savedCpf : null);
+          // Persist a freshly captured, valid CPF for next time (best-effort —
+          // a failure here must never block the payment).
+          if (!hasSavedCpf &&
+              effectiveCpf != null &&
+              effectiveCpf.length == 11 &&
+              effectiveCpf != savedCpf) {
+            await _persistPayerCpf(payer, effectiveCpf);
+          }
+          return MercadoPagoService(academyId).createPixPayment(
+            amount: payment.value,
+            financialId: payment.id,
+            studentId: payment.studentId,
+            studentName: studentName,
+            description: description,
+            cpf: effectiveCpf,
+          );
+        case PaymentGateway.asaas:
+          return AsaasPaymentService(academyId).createPixPayment(
+            amount: payment.value,
+            financialId: payment.id,
+            studentId: payment.studentId,
+            studentName: studentName,
+            description: description,
+          );
+        case PaymentGateway.abacatePay:
+        case PaymentGateway.none:
+          return AbacatePayService(academyId).createPixPayment(
+            amount: payment.value,
+            financialId: payment.id,
+            studentId: payment.studentId,
+            studentName: studentName,
+            description: description,
+          );
       }
-      return AbacatePayService(academyId).createPixPayment(
-        amount: payment.value,
-        financialId: payment.id,
-        studentId: payment.studentId,
-        studentName: studentName,
-        description: description,
-      );
     }
+
+    // Tuition target: PIX is always offered; Cartao only when the gateway can
+    // charge a card (Mercado Pago). The store-only card flag never gates tuition.
+    final target = PaymentTarget.tuition(
+      financialId: payment.id,
+      amount: payment.value,
+      description: description,
+      studentId: payment.studentId,
+      studentName: studentName,
+    );
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) => PixPaymentSheet(
-        amount: payment.value,
-        financialId: payment.id,
-        description: description,
-        // MP needs a validated CPF before generating; other gateways generate
-        // immediately via onRegenerate's "Gerar PIX" prompt.
-        requireCpf: useMp,
-        onGenerateWithCpf: useMp ? (cpf) => generate(cpf) : null,
-        onRegenerate: (cpf) => generate(cpf),
-        onPaymentConfirmed: () {
+      builder: (sheetContext) => PaymentMethodSheet(
+        target: target,
+        gateway: gateway,
+        // CPF form only when MP needs it AND none is saved; otherwise the PIX
+        // generates in one tap from the saved CPF.
+        requireCpf: needsCpf,
+        // MP forwards the (typed or saved) CPF; Asaas/AbacatePay ignore it.
+        createPix: (cpf) => generate(cpf),
+        onSettled: () {
           ref.invalidate(studentPaymentsProvider(payment.studentId));
         },
       ),
     );
+  }
+
+  /// Persists a validated, digits-only [cpf] on the payer's student doc so the
+  /// next checkout is a single tap. Best-effort: errors are swallowed (the
+  /// payment already succeeded and the CPF will simply be asked again). The CPF
+  /// is never logged. Invalidates the relevant student provider so the in-memory
+  /// model reflects the saved value.
+  Future<void> _persistPayerCpf(Student payer, String cpf) async {
+    try {
+      await StudentService(FirebaseService.academyId).update(
+        payer.id,
+        {'cpf': cpf},
+      );
+      if (!mounted) return;
+      // Refresh whichever view this payer maps to.
+      ref.invalidate(currentStudentProvider);
+      ref.invalidate(dependentsProvider);
+    } catch (_) {
+      // Saving the CPF for next time is a convenience, not a requirement.
+    }
   }
 
   @override
@@ -309,7 +356,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                             onCopyPix: () => _copyPixKey(pixKey),
                             onPayPix: () => _showPixPaymentDialog(
                               entry.value,
-                              student.fullName,
+                              student,
                             ),
                           ).entrance(index: entry.key),
                         ),
@@ -334,7 +381,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                                 abacatePayEnabled: abacatePayEnabled,
                                 formatCurrency: _formatCurrency,
                                 onPayPix: (payment) =>
-                                    _showPixPaymentDialog(payment, dep.fullName),
+                                    _showPixPaymentDialog(payment, dep),
                               ),
                             )
                             .toList(),
@@ -883,8 +930,8 @@ class _PaymentCard extends StatelessWidget {
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: onPayPix,
-                icon: const Icon(LucideIcons.qrCode, size: 18),
-                label: const Text('Pagar com PIX'),
+                icon: const Icon(LucideIcons.wallet, size: 18),
+                label: const Text('Pagar mensalidade'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primary,
                   foregroundColor: Colors.white,

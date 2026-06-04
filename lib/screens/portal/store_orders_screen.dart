@@ -5,19 +5,26 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
-import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../services/store_service.dart';
 import '../../services/abacate_pay_service.dart';
 import '../../services/asaas_payment_service.dart';
 import '../../services/mercado_pago_service.dart';
 import '../../services/firebase_service.dart';
+import '../../services/payment/payment_gateway_resolver.dart';
+import '../../providers/payment_providers.dart';
+import '../../providers/portal_providers.dart';
 import '../../providers/store_provider.dart';
 import '../../providers/auth_provider.dart';
-import '../../widgets/payment_sheets.dart';
+import '../../widgets/payment/payment_method_sheet.dart';
+import '../../widgets/payment/payment_target.dart';
 import '../../widgets/polish/polish.dart';
+import '../../widgets/store/order_status_timeline.dart';
 
-/// Portal Store Orders Screen - Student's Orders or All Orders for Admin/Instructor
+/// Portal Store Orders Screen - the student's own orders.
+///
+/// Admin/instructor order management lives in `StoreOrdersAdminScreen`
+/// (`/admin/loja/pedidos`); this screen is intentionally student-only.
 class PortalStoreOrdersScreen extends ConsumerWidget {
   const PortalStoreOrdersScreen({super.key});
 
@@ -25,12 +32,9 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
     final studentId = currentUser?.studentId;
-    final isAdminOrInstructor =
-        currentUser?.isAdmin == true || currentUser?.isInstructor == true;
 
-    // For students without studentId, show error
-    // For admin/instructor, show all orders
-    if (studentId == null && !isAdminOrInstructor) {
+    // Students must be linked to a student record to see their orders.
+    if (studentId == null) {
       return Scaffold(
         backgroundColor: AppTheme.background,
         body: Center(
@@ -57,15 +61,10 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
       );
     }
 
-    // Use all orders for admin/instructor, student orders for students
-    final ordersAsync = isAdminOrInstructor
-        ? ref.watch(ordersProvider)
-        : ref.watch(studentOrdersProvider(studentId!));
+    final ordersAsync = ref.watch(studentOrdersProvider(studentId));
 
-    final title = isAdminOrInstructor ? 'Pedidos da Loja' : 'Meus Pedidos';
-    final subtitle = isAdminOrInstructor
-        ? 'Gerencie os pedidos recebidos'
-        : 'Acompanhe seus pedidos';
+    const title = 'Meus Pedidos';
+    const subtitle = 'Acompanhe seus pedidos';
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -73,11 +72,7 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
         color: Theme.of(context).colorScheme.primary,
         onRefresh: () async {
           HapticFeedback.mediumImpact();
-          if (isAdminOrInstructor) {
-            ref.invalidate(ordersProvider);
-          } else {
-            ref.invalidate(studentOrdersProvider(studentId!));
-          }
+          ref.invalidate(studentOrdersProvider(studentId));
         },
         child: CustomScrollView(
           slivers: [
@@ -140,13 +135,8 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                           order: orders[index],
                           onTap: () {
                             HapticFeedback.lightImpact();
-                            _showOrderDetails(
-                              context,
-                              orders[index],
-                              isAdminView: isAdminOrInstructor,
-                            );
+                            _showOrderDetails(context, orders[index]);
                           },
-                          showStudentName: isAdminOrInstructor,
                         ),
                       ).entrance(index: index),
                       childCount: orders.length,
@@ -184,13 +174,8 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
                       ),
                       const SizedBox(height: 8),
                       TextButton(
-                        onPressed: () {
-                          if (isAdminOrInstructor) {
-                            ref.invalidate(ordersProvider);
-                          } else {
-                            ref.invalidate(studentOrdersProvider(studentId!));
-                          }
-                        },
+                        onPressed: () =>
+                            ref.invalidate(studentOrdersProvider(studentId)),
                         child: const Text('Tentar novamente'),
                       ),
                     ],
@@ -207,17 +192,12 @@ class PortalStoreOrdersScreen extends ConsumerWidget {
     );
   }
 
-  void _showOrderDetails(
-    BuildContext context,
-    StoreOrder order, {
-    bool isAdminView = false,
-  }) {
+  void _showOrderDetails(BuildContext context, StoreOrder order) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) =>
-          _OrderDetailsSheet(order: order, isAdminView: isAdminView),
+      builder: (context) => _OrderDetailsSheet(order: order),
     );
   }
 }
@@ -242,13 +222,8 @@ class _EmptyState extends StatelessWidget {
 class _OrderCard extends StatelessWidget {
   final StoreOrder order;
   final VoidCallback onTap;
-  final bool showStudentName;
 
-  const _OrderCard({
-    required this.order,
-    required this.onTap,
-    this.showStudentName = false,
-  });
+  const _OrderCard({required this.order, required this.onTap});
 
   Color _getStatusColor() {
     switch (order.status) {
@@ -383,16 +358,6 @@ class _OrderCard extends StatelessWidget {
                             color: AppTheme.textSecondary,
                           ),
                         ),
-                        if (showStudentName) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            order.studentName,
-                            style: AppTheme.bodySmall.copyWith(
-                              color: AppTheme.primary,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -521,100 +486,34 @@ class _OrderCardSkeleton extends StatelessWidget {
 /// Order Details Bottom Sheet
 class _OrderDetailsSheet extends ConsumerStatefulWidget {
   final StoreOrder order;
-  final bool isAdminView;
 
-  const _OrderDetailsSheet({required this.order, this.isAdminView = false});
+  const _OrderDetailsSheet({required this.order});
 
   @override
   ConsumerState<_OrderDetailsSheet> createState() => _OrderDetailsSheetState();
 }
 
 class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
-  bool _isUpdatingStatus = false;
-
   /// Resolved payment gateway for this academy. Loaded lazily for the student
   /// view so we can gate the PIX/Card buttons (and only forward the CPF to
-  /// Mercado Pago). `null` while loading, `_Gateway.none` when nothing is
+  /// Mercado Pago). `null` while loading, [PaymentGateway.none] when nothing is
   /// connected (we then tell the student to arrange payment with the academy).
-  _Gateway? _gateway;
+  PaymentGateway? _gateway;
 
   @override
   void initState() {
     super.initState();
-    // Only the student view (pending order) needs the gateway resolution.
-    if (!widget.isAdminView &&
-        widget.order.status == StoreOrderStatus.pendingPayment) {
+    // Only a pending order needs the gateway resolution (to offer payment).
+    if (widget.order.status == StoreOrderStatus.pendingPayment) {
       _resolveGateway();
     }
   }
 
   Future<void> _resolveGateway() async {
-    final academyId = FirebaseService.academyId;
-    // Precedence: Mercado Pago (mpConnected) > Asaas > AbacatePay.
-    _Gateway resolved;
-    try {
-      if (await MercadoPagoService(academyId).isEnabled()) {
-        resolved = _Gateway.mercadoPago;
-      } else if (await AsaasPaymentService(academyId).isEnabled()) {
-        resolved = _Gateway.asaas;
-      } else if (await AbacatePayService(academyId).isEnabled()) {
-        resolved = _Gateway.abacatePay;
-      } else {
-        resolved = _Gateway.none;
-      }
-    } catch (_) {
-      resolved = _Gateway.none;
-    }
+    // Single source of truth (cached per academy): MP > Asaas > AbacatePay.
+    final resolved = await ref
+        .read(paymentGatewayProvider(FirebaseService.academyId).future);
     if (mounted) setState(() => _gateway = resolved);
-  }
-
-  Future<void> _updateStatus(StoreOrderStatus newStatus) async {
-    final academyId = FirebaseService.academyId;
-
-    setState(() => _isUpdatingStatus = true);
-
-    try {
-      final storeService = StoreService(academyId);
-      await storeService.updateOrderStatus(widget.order.id, newStatus);
-      if (mounted) {
-        Navigator.pop(context);
-        context.showSuccess('Status atualizado!');
-        ref.invalidate(ordersProvider);
-      }
-    } catch (e) {
-      if (mounted) {
-        context.showError('Erro ao atualizar status: $e');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isUpdatingStatus = false);
-      }
-    }
-  }
-
-  Future<void> _cancelOrder() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancelar Pedido'),
-        content: const Text('Tem certeza que deseja cancelar este pedido?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Nao'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
-            child: const Text('Sim, Cancelar'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      await _updateStatus(StoreOrderStatus.cancelled);
-    }
   }
 
   Color _getStatusColor() {
@@ -648,7 +547,7 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
     final studentId = currentUser.studentId ?? '';
 
     switch (_gateway) {
-      case _Gateway.mercadoPago:
+      case PaymentGateway.mercadoPago:
         return MercadoPagoService(academyId).createStoreOrderPayment(
           amount: widget.order.total,
           orderId: widget.order.id,
@@ -657,7 +556,7 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
           description: _orderDescription,
           cpf: cpf,
         );
-      case _Gateway.asaas:
+      case PaymentGateway.asaas:
         return AsaasPaymentService(academyId).createStoreOrderPayment(
           amount: widget.order.total,
           orderId: widget.order.id,
@@ -665,7 +564,7 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
           studentName: currentUser.displayName,
           description: _orderDescription,
         );
-      case _Gateway.abacatePay:
+      case PaymentGateway.abacatePay:
         return AbacatePayService(academyId).createStoreOrderPayment(
           amount: widget.order.total,
           orderId: widget.order.id,
@@ -673,7 +572,7 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
           studentName: currentUser.displayName,
           description: _orderDescription,
         );
-      case _Gateway.none:
+      case PaymentGateway.none:
       case null:
         return null;
     }
@@ -688,47 +587,38 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
     ref.invalidate(ordersProvider);
   }
 
-  void _openPixSheet() {
+  /// Opens the shared [PaymentMethodSheet] (animated PIX/Cartao picker) for this
+  /// pending order. The store credit-card option is gated centrally inside the
+  /// sheet via `storeCreditCardEnabled && gateway.cardSupported` — we just read
+  /// the academy flag here and forward it. The sheet then opens the existing
+  /// PIX/Card sheets; no charge logic is rebuilt.
+  Future<void> _openPaymentSheet() async {
     final gateway = _gateway;
-    if (gateway == null || gateway == _Gateway.none) return;
-    final requireCpf = gateway == _Gateway.mercadoPago;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => PixPaymentSheet(
-        amount: widget.order.total,
-        orderId: widget.order.id,
-        description: _orderDescription,
-        // Mercado Pago: capture CPF first, then create the PIX with it.
-        requireCpf: requireCpf,
-        onGenerateWithCpf:
-            requireCpf ? (cpf) => _createOrderPix(cpf: cpf) : null,
-        // Allow regeneration after expiry / failed generation for every gateway.
-        onRegenerate: (cpf) => _createOrderPix(cpf: cpf),
-        onPaymentConfirmed: _onPaymentSettled,
-      ),
-    );
-  }
-
-  void _openCardSheet() {
-    final gateway = _gateway;
-    if (gateway == null || gateway == _Gateway.none) return;
+    if (gateway == null || !gateway.pixEnabled) return;
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     if (currentUser == null) return;
 
+    // Store-card gate: only offer the card when the academy enabled it.
+    final settings = await ref.read(academySettingsProvider.future);
+    if (!mounted) return;
+    final storeCreditCardEnabled = settings?.storeCreditCardEnabled ?? false;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => CardPaymentSheet(
-        amount: widget.order.total,
-        description: _orderDescription,
-        orderId: widget.order.id,
-        studentId: currentUser.studentId ?? '',
-        studentName: currentUser.displayName,
-        onPaymentSuccess: _onPaymentSettled,
+      builder: (_) => PaymentMethodSheet(
+        target: PaymentTarget.order(
+          orderId: widget.order.id,
+          amount: widget.order.total,
+          description: _orderDescription,
+          studentId: currentUser.studentId ?? '',
+          studentName: currentUser.displayName,
+        ),
+        gateway: gateway,
+        storeCreditCardEnabled: storeCreditCardEnabled,
+        createPix: (cpf) => _createOrderPix(cpf: cpf),
+        onSettled: _onPaymentSettled,
       ),
     );
   }
@@ -755,7 +645,7 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
       ];
     }
 
-    if (gateway == _Gateway.none) {
+    if (gateway == PaymentGateway.none) {
       return [
         Container(
           padding: const EdgeInsets.all(16),
@@ -786,13 +676,17 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
     }
 
     return [
-      // PIX Button
+      // Single entry point: the shared PaymentMethodSheet handles the
+      // PIX/Cartao choice (and the centralized store-card gate).
       SizedBox(
         width: double.infinity,
         child: ElevatedButton.icon(
-          onPressed: _openPixSheet,
-          icon: const Icon(LucideIcons.qrCode),
-          label: const Text('Pagar com PIX'),
+          onPressed: () {
+            HapticFeedback.selectionClick();
+            _openPaymentSheet();
+          },
+          icon: const Icon(LucideIcons.wallet),
+          label: const Text('Pagar pedido'),
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 16),
             backgroundColor: AppTheme.primary,
@@ -803,87 +697,7 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
           ),
         ),
       ),
-      const SizedBox(height: 12),
-      // Card Button
-      SizedBox(
-        width: double.infinity,
-        child: OutlinedButton.icon(
-          onPressed: _openCardSheet,
-          icon: const Icon(LucideIcons.creditCard),
-          label: const Text('Pagar com Cartao'),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            foregroundColor: AppTheme.primary,
-            side: BorderSide(color: AppTheme.primary.withValues(alpha: 0.5)),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        ),
-      ),
     ];
-  }
-
-  Widget _buildAdminActionButton({
-    required String label,
-    required IconData icon,
-    required Color color,
-    required VoidCallback onPressed,
-    bool outlined = false,
-  }) {
-    if (outlined) {
-      return SizedBox(
-        width: double.infinity,
-        child: OutlinedButton.icon(
-          onPressed: _isUpdatingStatus ? null : onPressed,
-          icon: _isUpdatingStatus
-              ? SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: color,
-                  ),
-                )
-              : Icon(icon, color: color),
-          label: Text(label),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            foregroundColor: color,
-            side: BorderSide(color: color.withValues(alpha: 0.5)),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: _isUpdatingStatus ? null : onPressed,
-        icon: _isUpdatingStatus
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
-            : Icon(icon),
-        label: Text(label),
-        style: ElevatedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          backgroundColor: color,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
-    );
   }
 
   @override
@@ -979,7 +793,7 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Status Timeline
-                    _StatusTimeline(order: order),
+                    OrderStatusTimeline(order: order),
                     const SizedBox(height: 24),
                     // Items
                     Text(
@@ -1084,122 +898,8 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
                       Text(order.notes!),
                     ],
 
-                    // ADMIN VIEW: Customer info and status actions
-                    if (widget.isAdminView) ...[
-                      const SizedBox(height: 24),
-                      // Customer Info
-                      Text(
-                        'Cliente',
-                        style: AppTheme.titleSmall.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppTheme.surfaceVariant,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 48,
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color: AppTheme.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                              child: const Icon(
-                                LucideIcons.user,
-                                color: AppTheme.primary,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    order.studentName,
-                                    style: AppTheme.titleSmall.copyWith(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  if (order.studentId.isNotEmpty)
-                                    Text(
-                                      'ID: ${order.studentId.substring(0, order.studentId.length.clamp(0, 8))}...',
-                                      style: AppTheme.bodySmall.copyWith(
-                                        color: AppTheme.textSecondary,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Status Actions for Admin
-                      if (order.status != StoreOrderStatus.delivered &&
-                          order.status != StoreOrderStatus.cancelled) ...[
-                        const SizedBox(height: 24),
-                        Text(
-                          'Acoes',
-                          style: AppTheme.titleSmall.copyWith(
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Next status button based on current status
-                        if (order.status == StoreOrderStatus.pendingPayment)
-                          _buildAdminActionButton(
-                            label: 'Marcar como Pago',
-                            icon: LucideIcons.checkCircle,
-                            color: Colors.green,
-                            onPressed: () =>
-                                _updateStatus(StoreOrderStatus.paid),
-                          ),
-                        if (order.status == StoreOrderStatus.paid)
-                          _buildAdminActionButton(
-                            label: 'Iniciar Preparo',
-                            icon: LucideIcons.package,
-                            color: Colors.purple,
-                            onPressed: () =>
-                                _updateStatus(StoreOrderStatus.preparing),
-                          ),
-                        if (order.status == StoreOrderStatus.preparing)
-                          _buildAdminActionButton(
-                            label: 'Marcar como Pronto',
-                            icon: LucideIcons.packageCheck,
-                            color: Colors.green,
-                            onPressed: () =>
-                                _updateStatus(StoreOrderStatus.ready),
-                          ),
-                        if (order.status == StoreOrderStatus.ready)
-                          _buildAdminActionButton(
-                            label: 'Marcar como Entregue',
-                            icon: LucideIcons.truck,
-                            color: Colors.blue,
-                            onPressed: () =>
-                                _updateStatus(StoreOrderStatus.delivered),
-                          ),
-
-                        const SizedBox(height: 12),
-                        // Cancel button
-                        _buildAdminActionButton(
-                          label: 'Cancelar Pedido',
-                          icon: LucideIcons.xCircle,
-                          color: AppTheme.error,
-                          outlined: true,
-                          onPressed: _cancelOrder,
-                        ),
-                      ],
-                    ]
-                    // STUDENT VIEW: Payment Buttons for pending orders
-                    else if (order.status ==
-                        StoreOrderStatus.pendingPayment) ...[
+                    // Payment options for pending orders.
+                    if (order.status == StoreOrderStatus.pendingPayment) ...[
                       const SizedBox(height: 24),
                       Text(
                         'Formas de Pagamento',
@@ -1220,161 +920,3 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
     );
   }
 }
-
-/// Status Timeline Widget
-class _StatusTimeline extends StatelessWidget {
-  final StoreOrder order;
-
-  const _StatusTimeline({required this.order});
-
-  @override
-  Widget build(BuildContext context) {
-    final steps = [
-      _TimelineStep(
-        label: 'Criado',
-        status: StoreOrderStatus.pendingPayment,
-        isCompleted: true,
-        isActive: order.status == StoreOrderStatus.pendingPayment,
-      ),
-      _TimelineStep(
-        label: 'Pago',
-        status: StoreOrderStatus.paid,
-        isCompleted: order.isPaid,
-        isActive: order.status == StoreOrderStatus.paid,
-      ),
-      _TimelineStep(
-        label: 'Preparando',
-        status: StoreOrderStatus.preparing,
-        isCompleted:
-            order.status == StoreOrderStatus.preparing ||
-            order.status == StoreOrderStatus.ready ||
-            order.status == StoreOrderStatus.delivered,
-        isActive: order.status == StoreOrderStatus.preparing,
-      ),
-      _TimelineStep(
-        label: 'Pronto',
-        status: StoreOrderStatus.ready,
-        isCompleted:
-            order.status == StoreOrderStatus.ready ||
-            order.status == StoreOrderStatus.delivered,
-        isActive: order.status == StoreOrderStatus.ready,
-      ),
-      _TimelineStep(
-        label: 'Entregue',
-        status: StoreOrderStatus.delivered,
-        isCompleted: order.status == StoreOrderStatus.delivered,
-        isActive: order.status == StoreOrderStatus.delivered,
-      ),
-    ];
-
-    if (order.status == StoreOrderStatus.cancelled) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppTheme.errorLight,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            const Icon(LucideIcons.xCircle, color: AppTheme.error),
-            const SizedBox(width: 12),
-            Text(
-              'Pedido cancelado',
-              style: AppTheme.titleSmall.copyWith(color: AppTheme.error),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Row(
-      children: steps.asMap().entries.map((entry) {
-        final index = entry.key;
-        final step = entry.value;
-        final isLast = index == steps.length - 1;
-
-        return Expanded(
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    Container(
-                      width: 24,
-                      height: 24,
-                      decoration: BoxDecoration(
-                        color: step.isCompleted || step.isActive
-                            ? AppTheme.primary
-                            : AppTheme.surfaceVariant,
-                        shape: BoxShape.circle,
-                      ),
-                      child: step.isCompleted
-                          ? const Icon(
-                              LucideIcons.check,
-                              size: 14,
-                              color: Colors.white,
-                            )
-                          : step.isActive
-                          ? Container(
-                              margin: const EdgeInsets.all(6),
-                              decoration: const BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                              ),
-                            )
-                          : null,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      step.label,
-                      style: AppTheme.labelSmall.copyWith(
-                        color: step.isCompleted || step.isActive
-                            ? AppTheme.textPrimary
-                            : AppTheme.textSecondary,
-                        fontWeight: step.isActive
-                            ? FontWeight.w600
-                            : FontWeight.w500,
-                        fontSize: 9,
-                      ),
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              if (!isLast)
-                Container(
-                  width: 16,
-                  height: 2,
-                  margin: const EdgeInsets.only(bottom: 20),
-                  color: step.isCompleted
-                      ? AppTheme.primary
-                      : AppTheme.surfaceVariant,
-                ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
-}
-
-class _TimelineStep {
-  final String label;
-  final StoreOrderStatus status;
-  final bool isCompleted;
-  final bool isActive;
-
-  _TimelineStep({
-    required this.label,
-    required this.status,
-    required this.isCompleted,
-    required this.isActive,
-  });
-}
-
-/// Payment gateway resolved for the academy, in precedence order
-/// (Mercado Pago > Asaas > AbacatePay). [_Gateway.none] means no gateway is
-/// connected, so payment must be arranged directly with the academy.
-enum _Gateway { mercadoPago, asaas, abacatePay, none }
