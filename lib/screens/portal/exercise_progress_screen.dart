@@ -199,7 +199,7 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
         Text('Histórico (${_history.length})',
             style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
-        for (final e in _history) _sessionCard(e),
+        for (final e in _history) _sessionCard(e, prLoad),
       ],
     );
   }
@@ -219,7 +219,8 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
         ),
       );
 
-  Widget _sessionCard(WorkoutExecution e) {
+  Widget _sessionCard(WorkoutExecution e, double prLoad) {
+    final isPR = prLoad > 0 && e.bestLoadKg >= prLoad;
     final sets = e.sets
         .map((s) =>
             '${s.reps}×${fmtNum(s.load)}${s.rpe != null ? ' @${s.rpe}' : ''}')
@@ -230,7 +231,8 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(
+            color: isPR ? AppTheme.success.withValues(alpha: 0.5) : AppTheme.divider),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -240,11 +242,17 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
               Text(DateFormat('dd/MM/yyyy').format(e.date),
                   style: AppTheme.bodySmall
                       .copyWith(fontWeight: FontWeight.w600)),
+              if (isPR) ...[
+                const SizedBox(width: 6),
+                Text('🏆',
+                    style: AppTheme.labelSmall.copyWith(fontSize: 12)),
+              ],
               const Spacer(),
               if (e.bestLoadKg > 0)
                 Text('melhor ${fmtNum(e.bestLoadKg)} kg',
-                    style: AppTheme.labelSmall
-                        .copyWith(color: AppTheme.textSecondary)),
+                    style: AppTheme.labelSmall.copyWith(
+                        color:
+                            isPR ? AppTheme.success : AppTheme.textSecondary)),
             ],
           ),
           if (sets.isNotEmpty) ...[

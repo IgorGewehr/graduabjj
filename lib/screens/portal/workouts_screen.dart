@@ -638,8 +638,29 @@ class _RegisterExecutionSheetState extends State<_RegisterExecutionSheet> {
       createdAt: now,
     );
     try {
-      await WorkoutExecutionService(widget.academyId).upsert(exec);
+      final service = WorkoutExecutionService(widget.academyId);
+      // PR anterior (excluindo o registro de hoje que está sendo salvo).
+      final todayId = WorkoutExecution.docId(widget.studentId, widget.planId,
+          widget.dayIndex, widget.exerciseIndex, exec.date);
+      double prevLoad = 0;
+      try {
+        final hist = await service.getHistoryForExercise(
+            widget.studentId, widget.exerciseName);
+        for (final h in hist) {
+          if (h.id == todayId) continue;
+          if (h.bestLoadKg > prevLoad) prevLoad = h.bestLoadKg;
+        }
+      } catch (_) {/* sem PR detection se a leitura falhar */}
+      final isPR = exec.bestLoadKg > 0 && exec.bestLoadKg > prevLoad;
+
+      await service.upsert(exec);
       if (!mounted) return;
+      if (isPR) {
+        context.showSuccess(
+            '🎉 Novo recorde! ${fmtNum(exec.bestLoadKg)} kg em ${widget.exerciseName}.');
+      } else {
+        context.showSuccess('Treino registrado!');
+      }
       Navigator.of(context).pop(exec);
     } catch (e) {
       if (mounted) {
