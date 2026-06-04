@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/number_format.dart';
 import '../../core/theme.dart';
 import '../../models/workout_plan.dart';
 import '../../providers/providers.dart';
@@ -451,7 +452,7 @@ class _WorkoutPlanDetailScreenState
     if (e == null || e.sets.isEmpty) return const SizedBox.shrink();
     final best = e.bestLoadKg;
     final txt = '${e.sets.length} série(s)'
-        '${best > 0 ? ' · melhor ${best.toStringAsFixed(best == best.roundToDouble() ? 0 : 1)} kg' : ''}';
+        '${best > 0 ? ' · melhor ${fmtNum(best)} kg' : ''}';
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Row(
