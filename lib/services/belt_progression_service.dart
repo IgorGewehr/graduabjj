@@ -1046,6 +1046,8 @@ class BeltProgressionService {
           'totalClasses': totalClasses,
           'eligibility': eligibility,
           'sportId': sportVal,
+          // Para notificar o aluno ("apto a graduar"); null se sem conta vinculada.
+          'linkedUserId': data['linkedUserId'],
         });
       }
     }

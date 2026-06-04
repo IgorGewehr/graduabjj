@@ -247,21 +247,79 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
       );
     }
 
+    final notifiableCount = _eligibleStudents
+        .where((d) => ((d['linkedUserId'] as String?) ?? '').isNotEmpty)
+        .length;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         key: const ValueKey('eligible'),
-        children: _eligibleStudents.map((data) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: _EligibleStudentCard(
-              data: data,
-              onPromote: () => _showPromotionSheet(data),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (notifiableCount > 1) ...[
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _notifyAllEligible,
+                icon: const Icon(LucideIcons.bell, size: 16),
+                label: Text('Avisar todos ($notifiableCount)'),
+              ),
             ),
-          );
-        }).toList(),
+            const SizedBox(height: 4),
+          ],
+          ..._eligibleStudents.map((data) {
+            final uid = (data['linkedUserId'] as String?) ?? '';
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _EligibleStudentCard(
+                data: data,
+                onPromote: () => _showPromotionSheet(data),
+                onNotify: uid.isEmpty ? null : () => _notifyEligible(data),
+              ),
+            );
+          }),
+        ],
       ),
     );
+  }
+
+  Future<void> _notifyEligible(Map<String, dynamic> data) async {
+    final uid = (data['linkedUserId'] as String?) ?? '';
+    if (uid.isEmpty) return;
+    try {
+      await NotificationDispatcher(FirebaseService.academyId)
+          .notifyGraduationEligible(
+        userId: uid,
+        studentName: (data['fullName'] as String?) ?? '',
+        attendanceCount: (data['totalClasses'] as int?) ?? 0,
+        studentId: data['id'] as String?,
+      );
+      if (mounted) context.showSuccess('Aluno avisado: apto a graduar!');
+    } catch (e) {
+      if (mounted) context.showError('Nao foi possivel avisar: $e');
+    }
+  }
+
+  Future<void> _notifyAllEligible() async {
+    final list = _eligibleStudents
+        .where((d) => ((d['linkedUserId'] as String?) ?? '').isNotEmpty)
+        .toList();
+    if (list.isEmpty) return;
+    final dispatcher = NotificationDispatcher(FirebaseService.academyId);
+    var ok = 0;
+    for (final data in list) {
+      try {
+        await dispatcher.notifyGraduationEligible(
+          userId: data['linkedUserId'] as String,
+          studentName: (data['fullName'] as String?) ?? '',
+          attendanceCount: (data['totalClasses'] as int?) ?? 0,
+          studentId: data['id'] as String?,
+        );
+        ok++;
+      } catch (_) {/* best-effort */}
+    }
+    if (mounted) context.showSuccess('$ok aluno(s) avisado(s).');
   }
 
   Widget _buildHistoryTab() {
@@ -680,7 +738,7 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
 
                   // Notes
                   Text(
-                    'Observacoes (opcional)',
+                    'Observacoes / banca / exame (opcional)',
                     style: AppTheme.labelSmall.copyWith(
                       color: AppTheme.textSecondary,
                       fontWeight: FontWeight.w500,
@@ -697,7 +755,7 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                       controller: notesController,
                       maxLines: 2,
                       decoration: InputDecoration(
-                        hintText: 'Adicione uma observacao...',
+                        hintText: 'Ex.: banca, resultado do exame, observacao...',
                         hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.textDisabled),
                         prefixIcon: Icon(LucideIcons.fileText, color: AppTheme.textSecondary, size: 20),
                         border: InputBorder.none,
@@ -892,10 +950,12 @@ class _StatCard extends StatelessWidget {
 class _EligibleStudentCard extends StatelessWidget {
   final Map<String, dynamic> data;
   final VoidCallback onPromote;
+  final VoidCallback? onNotify;
 
   const _EligibleStudentCard({
     required this.data,
     required this.onPromote,
+    this.onNotify,
   });
 
   @override
@@ -984,27 +1044,44 @@ class _EligibleStudentCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: onPromote,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.textPrimary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+          Row(
+            children: [
+              if (onNotify != null) ...[
+                OutlinedButton.icon(
+                  onPressed: onNotify,
+                  icon: const Icon(LucideIcons.bell, size: 16),
+                  label: const Text('Avisar'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: onPromote,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.textPrimary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(LucideIcons.award, size: 18),
+                      const SizedBox(width: 8),
+                      const Text('Graduar'),
+                    ],
+                  ),
                 ),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(LucideIcons.award, size: 18),
-                  const SizedBox(width: 8),
-                  const Text('Graduar'),
-                ],
-              ),
-            ),
+            ],
           ),
         ],
       ),
