@@ -10,6 +10,7 @@ import '../../models/workout_plan.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 import '../../widgets/common/sport_chip.dart';
+import 'exercise_progress_screen.dart';
 
 /// Student-facing list of workout plans assigned to them (academy-wide,
 /// their-sport library, or personal). Tapping a plan opens a native detail
@@ -434,6 +435,15 @@ class _WorkoutPlanDetailScreenState
                                 : 'Registrar',
                           ),
                         ),
+                        TextButton.icon(
+                          onPressed: () => _openProgress(ex.name),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          icon: const Icon(Icons.show_chart, size: 16),
+                          label: const Text('Progresso'),
+                        ),
                       ],
                     ),
                   ],
@@ -504,6 +514,15 @@ class _WorkoutPlanDetailScreenState
   Future<void> _openVideo(String url) async {
     final uri = Uri.tryParse(url);
     if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  void _openProgress(String exerciseName) {
+    final sid = _studentId;
+    if (sid == null) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ExerciseProgressScreen(
+          studentId: sid, exerciseName: exerciseName),
+    ));
   }
 }
 
