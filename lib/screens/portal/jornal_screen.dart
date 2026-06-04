@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../models/academy_event.dart';
 import '../../providers/portal_providers.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/feature_disabled_state.dart';
 import '../../widgets/polish/polish.dart';
 
 /// Student-facing "Jornal da Academia" feed: every published post
@@ -255,26 +256,10 @@ class _JornalUnavailableState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: const [
-            Icon(LucideIcons.newspaper, size: 48, color: AppTheme.textDisabled),
-            SizedBox(height: 16),
-            Text(
-              'O Jornal não está disponível no momento.',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return const FeatureDisabledState(
+      icon: LucideIcons.newspaper,
+      title: 'Jornal indisponível',
+      subtitle: 'Sua academia não está usando o Jornal da Academia.',
     );
   }
 }

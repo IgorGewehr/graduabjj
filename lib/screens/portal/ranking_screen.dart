@@ -9,6 +9,7 @@ import '../../models/ranking_entry.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/ranking_providers.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/feature_disabled_state.dart';
 import '../../widgets/polish/polish.dart';
 
 /// Student-facing attendance leaderboard. Pick an audience (Geral / Adulto /
@@ -337,10 +338,10 @@ class _RankingUnavailableState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const PolishedEmptyState(
-      icon: LucideIcons.trophy,
+    return const FeatureDisabledState(
+      icon: LucideIcons.medal,
       title: 'Ranking indisponível',
-      subtitle: 'O ranking não está disponível no momento.',
+      subtitle: 'Sua academia não está usando o Ranking de Turmas.',
     );
   }
 }

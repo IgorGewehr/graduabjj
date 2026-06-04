@@ -12,6 +12,7 @@ import '../../providers/store_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/feature_disabled_state.dart';
 import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
@@ -59,43 +60,12 @@ class _PortalStoreScreenState extends ConsumerState<PortalStoreScreen> {
     final welcomeMessage = settings?.storeWelcomeMessage;
 
     if (!isStorePublished) {
-      return Scaffold(
+      return const Scaffold(
         backgroundColor: AppTheme.background,
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    LucideIcons.store,
-                    size: 48,
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'Loja Indisponivel',
-                  style: AppTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'A loja da academia esta temporariamente fechada.',
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
+        body: FeatureDisabledState(
+          icon: LucideIcons.store,
+          title: 'Loja indisponível',
+          subtitle: 'Sua academia não está usando a Loja.',
         ),
       );
     }

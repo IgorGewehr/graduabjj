@@ -15,6 +15,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
+import '../../core/navigation/nav_catalog.dart';
 import '../../core/formatters.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
@@ -29,7 +30,11 @@ import 'team_tab_content.dart';
 
 /// Admin Settings Screen - Fintech style matching webapp
 class AdminSettingsScreen extends ConsumerStatefulWidget {
-  const AdminSettingsScreen({super.key});
+  /// When set (via deep-link `?feature=<id>`), the screen opens on the relevant
+  /// tab, scrolls to that feature's card and highlights it briefly.
+  final FeatureId? focusFeature;
+
+  const AdminSettingsScreen({super.key, this.focusFeature});
 
   @override
   ConsumerState<AdminSettingsScreen> createState() =>
@@ -76,6 +81,16 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _studentCheckinEnabled = false;
   bool _journalVisibleToStudents = true;
   bool _rankingVisibleToStudents = true;
+  bool _workoutPlansEnabled = true;
+  bool _trainingVideosEnabled = true;
+
+  // Deep-link (?feature=<id>) → scroll + temporary highlight on the target card.
+  final Map<FeatureId, GlobalKey> _featureKeys = {
+    for (final f in FeatureId.values) f: GlobalKey(),
+  };
+  FeatureId? _highlightedFeature;
+  bool _deepLinkHandled = false;
+  Timer? _highlightTimer;
 
   // Musculação check-in (schedule-less)
   String _musculacaoCheckinMode = 'manual'; // 'manual' | 'qr' | 'button'
@@ -169,6 +184,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _studentCheckinEnabled,
       _journalVisibleToStudents,
       _rankingVisibleToStudents,
+      _workoutPlansEnabled,
+      _trainingVideosEnabled,
       _musculacaoCheckinMode,
       hours,
       _muaythaiGradeSystem,
@@ -207,6 +224,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     _storeMinAmountController.dispose();
     _autoGraduationAttendancesController.dispose();
     _minSkillPctController.dispose();
+    _highlightTimer?.cancel();
     super.dispose();
   }
 
@@ -245,6 +263,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _studentCheckinEnabled = settings.studentCheckinEnabled;
           _journalVisibleToStudents = settings.journalVisibleToStudents;
           _rankingVisibleToStudents = settings.rankingVisibleToStudents;
+          _workoutPlansEnabled = settings.workoutPlansEnabled;
+          _trainingVideosEnabled = settings.trainingVideosEnabled;
           _musculacaoCheckinMode = settings.musculacaoCheckinMode;
           _operatingHours
             ..clear()
@@ -277,8 +297,66 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _savedSnapshot = _snapshot();
       _lastDirty = false;
       setState(() => _isLoading = false);
+      _maybeHandleDeepLink();
     } catch (e) {
       setState(() => _isLoading = false);
+    }
+  }
+
+  /// Consume the deep-link feature (once): select its tab, scroll to its card
+  /// and trigger a temporary highlight.
+  void _maybeHandleDeepLink() {
+    final feature = widget.focusFeature;
+    if (feature == null || _deepLinkHandled || !mounted) return;
+    _deepLinkHandled = true;
+
+    // Wallet anchors on the Financeiro tab (MP card); the rest live in
+    // Funcionalidades.
+    setState(() {
+      _selectedTabIndex = feature == FeatureId.wallet ? 1 : 2;
+      _highlightedFeature = feature;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _featureKeys[feature]?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 400),
+          alignment: 0.1,
+        );
+      }
+    });
+
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(milliseconds: 2500), () {
+      if (mounted) setState(() => _highlightedFeature = null);
+    });
+  }
+
+  /// Unified inline-save for the standalone feature toggles in the
+  /// Funcionalidades tab (Jornal, Ranking, Treinos, Vídeos). Optimistically
+  /// flips the local flag, persists it, refreshes the settings provider and
+  /// re-baselines the unsaved-changes snapshot — so a single toggle never gets
+  /// lost behind the "Salvar" button. [apply] mutates local state; [persist]
+  /// writes the change.
+  Future<void> _inlineSaveFeature({
+    required void Function() apply,
+    required Future<void> Function(SettingsService service) persist,
+  }) async {
+    setState(apply);
+    try {
+      final service = SettingsService(FirebaseService.academyId);
+      await persist(service);
+      if (!mounted) return;
+      ref.invalidate(academySettingsProvider);
+      setState(() {
+        _savedSnapshot = _snapshot();
+        _lastDirty = false;
+      });
+      context.showSuccess('Configuracoes salvas!');
+    } catch (e) {
+      if (mounted) context.showError('Erro: $e');
     }
   }
 
@@ -1030,6 +1108,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
   Widget _buildMercadoPagoCard() {
     return _SettingsCard(
+      cardKey: _featureKeys[FeatureId.wallet],
+      highlighted: _highlightedFeature == FeatureId.wallet,
       title: 'Mercado Pago',
       icon: LucideIcons.creditCard,
       child: Column(
@@ -1472,6 +1552,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           // Auto-graduation settings
           _SettingsCard(
+            cardKey: _featureKeys[FeatureId.graduation],
+            highlighted: _highlightedFeature == FeatureId.graduation,
             title: 'Graduacao por Presencas',
             icon: LucideIcons.award,
             child: Column(
@@ -1620,6 +1702,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           // Musculação check-in (schedule-less modality)
           _SettingsCard(
+            cardKey: _featureKeys[FeatureId.musculacao],
+            highlighted: _highlightedFeature == FeatureId.musculacao,
             title: 'Check-in da Musculacao',
             icon: Icons.fitness_center,
             child: Column(
@@ -1731,6 +1815,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           // Jornal da Academia (student-facing feed visibility)
           _SettingsCard(
+            cardKey: _featureKeys[FeatureId.journal],
+            highlighted: _highlightedFeature == FeatureId.journal,
             title: 'Jornal da Academia',
             icon: LucideIcons.newspaper,
             child: _ModernSwitch(
@@ -1738,18 +1824,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
               subtitle:
                   'Controla o feed de noticias, seminarios e novidades exibido no portal do aluno',
               value: _journalVisibleToStudents,
-              onChanged: (value) async {
-                setState(() => _journalVisibleToStudents = value);
-                final service = SettingsService(FirebaseService.academyId);
-                await service.updateJournalVisibility(value);
-                if (!mounted) return;
-                ref.invalidate(academySettingsProvider);
-                setState(() {
-                  _savedSnapshot = _snapshot();
-                  _lastDirty = false;
-                });
-                context.showSuccess('Configuracoes salvas!');
-              },
+              onChanged: (value) => _inlineSaveFeature(
+                apply: () => _journalVisibleToStudents = value,
+                persist: (s) => s.updateJournalVisibility(value),
+              ),
               icon: LucideIcons.newspaper,
               iconColor: AppTheme.primary,
             ),
@@ -1759,6 +1837,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           // Ranking de Turmas (student-facing leaderboard visibility)
           _SettingsCard(
+            cardKey: _featureKeys[FeatureId.ranking],
+            highlighted: _highlightedFeature == FeatureId.ranking,
             title: 'Ranking de Turmas',
             icon: LucideIcons.trophy,
             child: _ModernSwitch(
@@ -1766,19 +1846,54 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
               subtitle:
                   'Controla o placar de presencas por turma exibido no portal do aluno',
               value: _rankingVisibleToStudents,
-              onChanged: (value) async {
-                setState(() => _rankingVisibleToStudents = value);
-                final service = SettingsService(FirebaseService.academyId);
-                await service.updateRankingVisibility(value);
-                if (!mounted) return;
-                ref.invalidate(academySettingsProvider);
-                setState(() {
-                  _savedSnapshot = _snapshot();
-                  _lastDirty = false;
-                });
-                context.showSuccess('Configuracoes salvas!');
-              },
+              onChanged: (value) => _inlineSaveFeature(
+                apply: () => _rankingVisibleToStudents = value,
+                persist: (s) => s.updateRankingVisibility(value),
+              ),
               icon: LucideIcons.trophy,
+              iconColor: AppTheme.primary,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Treinos (structured workout plans feature)
+          _SettingsCard(
+            cardKey: _featureKeys[FeatureId.workouts],
+            highlighted: _highlightedFeature == FeatureId.workouts,
+            title: 'Treinos',
+            icon: Icons.assignment_outlined,
+            child: _ModernSwitch(
+              title: 'Habilitar Treinos',
+              subtitle:
+                  'Planos de treino estruturados para alunos e equipe',
+              value: _workoutPlansEnabled,
+              onChanged: (value) => _inlineSaveFeature(
+                apply: () => _workoutPlansEnabled = value,
+                persist: (s) => s.updateWorkoutPlansEnabled(value),
+              ),
+              icon: Icons.assignment_outlined,
+              iconColor: AppTheme.primary,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Vídeos (training video library feature)
+          _SettingsCard(
+            cardKey: _featureKeys[FeatureId.videos],
+            highlighted: _highlightedFeature == FeatureId.videos,
+            title: 'Vídeos',
+            icon: Icons.play_circle_outline,
+            child: _ModernSwitch(
+              title: 'Habilitar Vídeos',
+              subtitle: 'Biblioteca de videos de tecnicas e aulas',
+              value: _trainingVideosEnabled,
+              onChanged: (value) => _inlineSaveFeature(
+                apply: () => _trainingVideosEnabled = value,
+                persist: (s) => s.updateTrainingVideosEnabled(value),
+              ),
+              icon: Icons.play_circle_outline,
               iconColor: AppTheme.primary,
             ),
           ),
@@ -1787,6 +1902,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           // Store Settings
           _SettingsCard(
+            cardKey: _featureKeys[FeatureId.store],
+            highlighted: _highlightedFeature == FeatureId.store,
             title: 'Loja',
             icon: LucideIcons.shoppingBag,
             child: Column(
@@ -1951,20 +2068,46 @@ class _SettingsCard extends StatelessWidget {
   final IconData icon;
   final Widget child;
 
+  /// Optional key attached to the outer container, used by the deep-link
+  /// `Scrollable.ensureVisible` mechanism to scroll this card into view.
+  final Key? cardKey;
+
+  /// When true, the card shows a temporary primary-colored highlight
+  /// (border + soft glow) — used right after a feature deep-link.
+  final bool highlighted;
+
   const _SettingsCard({
     required this.title,
     required this.icon,
     required this.child,
+    this.cardKey,
+    this.highlighted = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return AnimatedContainer(
+      key: cardKey,
+      duration: const Duration(milliseconds: 250),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: highlighted
+            ? AppTheme.primary.withValues(alpha: 0.06)
+            : AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
+        border: Border.all(
+          color: highlighted ? AppTheme.primary : AppTheme.divider,
+          width: highlighted ? 2 : 1,
+        ),
+        boxShadow: highlighted
+            ? [
+                BoxShadow(
+                  color: AppTheme.primary.withValues(alpha: 0.18),
+                  blurRadius: 16,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

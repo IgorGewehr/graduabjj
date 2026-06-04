@@ -204,6 +204,14 @@ class AcademySettings {
   /// unavailable state. Defaults to true for new and legacy academies.
   final bool rankingVisibleToStudents;
 
+  /// Whether the structured workout plans feature is available (admin "Treinos"
+  /// e portal "/portal/treinos"). Defaults to true for new and legacy academies.
+  final bool workoutPlansEnabled;
+
+  /// Whether the training videos feature is available (admin "Vídeos" e portal
+  /// "/portal/videos"). Defaults to true for new and legacy academies.
+  final bool trainingVideosEnabled;
+
   // Musculação (schedule-less) check-in.
   /// 'manual' → staff records presence (works with current rules, no Cloud
   /// Function); 'qr' → student scans a fixed QR; 'button' → student taps a
@@ -268,6 +276,8 @@ class AcademySettings {
     this.studentCheckinEnabled = false,
     this.journalVisibleToStudents = true,
     this.rankingVisibleToStudents = true,
+    this.workoutPlansEnabled = true,
+    this.trainingVideosEnabled = true,
     this.musculacaoCheckinMode = 'manual',
     this.operatingHours = OperatingHours.empty,
     this.muaythaiGradeSystem = 'cbmt',
@@ -343,6 +353,8 @@ class AcademySettings {
       studentCheckinEnabled: data['studentCheckinEnabled'] ?? false,
       journalVisibleToStudents: data['journalVisibleToStudents'] ?? true,
       rankingVisibleToStudents: data['rankingVisibleToStudents'] ?? true,
+      workoutPlansEnabled: data['workoutPlansEnabled'] ?? true,
+      trainingVideosEnabled: data['trainingVideosEnabled'] ?? true,
       musculacaoCheckinMode:
           (data['musculacaoCheckinMode'] as String?) ?? 'manual',
       operatingHours: OperatingHours.fromMap(
@@ -663,6 +675,26 @@ class SettingsService {
   Future<void> updateRankingVisibility(bool value) async {
     await _academyRef.set({
       'rankingVisibleToStudents': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Toggle Workout Plans Feature
+  // ============================================
+  Future<void> updateWorkoutPlansEnabled(bool value) async {
+    await _academyRef.set({
+      'workoutPlansEnabled': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Toggle Training Videos Feature
+  // ============================================
+  Future<void> updateTrainingVideosEnabled(bool value) async {
+    await _academyRef.set({
+      'trainingVideosEnabled': value,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }

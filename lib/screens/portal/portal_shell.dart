@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/navigation/nav_catalog.dart';
+import '../../core/navigation/nav_resolver.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
@@ -88,105 +90,6 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     ];
   }
 
-  /// Catalog of secondary items reached via the Menu sheet. Each entry
-  /// declares the section it lives in plus its activation gate.
-  static const List<_PortalMenuEntry> _menuCatalog = [
-    // Treinos — academic life
-    _PortalMenuEntry(
-      label: 'Horarios',
-      icon: LucideIcons.calendar,
-      path: '/portal/horarios',
-      section: 'Treinos',
-      hideWhen: _PortalGate.monitor, // monitors already have it elsewhere? no
-    ),
-    _PortalMenuEntry(
-      label: 'Presencas',
-      icon: LucideIcons.clipboardCheck,
-      path: '/portal/presencas',
-      section: 'Treinos',
-    ),
-    _PortalMenuEntry(
-      label: 'Jornada',
-      icon: LucideIcons.history,
-      path: '/portal/linha-do-tempo',
-      section: 'Treinos',
-    ),
-    _PortalMenuEntry(
-      label: 'Evolução',
-      icon: LucideIcons.trendingUp,
-      path: '/portal/evolucao',
-      section: 'Treinos',
-    ),
-    _PortalMenuEntry(
-      label: 'Graduação',
-      icon: LucideIcons.award,
-      path: '/portal/graduacao',
-      section: 'Treinos',
-      requiresGraduationVisible: true,
-    ),
-    _PortalMenuEntry(
-      label: 'Minhas Modalidades',
-      icon: LucideIcons.dumbbell,
-      path: '/portal/minhas-modalidades',
-      section: 'Treinos',
-    ),
-    _PortalMenuEntry(
-      label: 'Treinos',
-      icon: Icons.fitness_center,
-      path: '/portal/treinos',
-      section: 'Treinos',
-    ),
-    _PortalMenuEntry(
-      label: 'Vídeos',
-      icon: Icons.play_circle_outline,
-      path: '/portal/videos',
-      section: 'Treinos',
-    ),
-    // Comunidade
-    _PortalMenuEntry(
-      label: 'Ranking',
-      icon: LucideIcons.trophy,
-      path: '/portal/ranking',
-      section: 'Comunidade',
-      requiresRankingVisible: true,
-    ),
-    // Conquistas
-    _PortalMenuEntry(
-      label: 'Competicoes',
-      icon: LucideIcons.trophy,
-      path: '/portal/competicoes',
-      section: 'Conquistas',
-    ),
-    _PortalMenuEntry(
-      label: 'Comportamento',
-      icon: LucideIcons.star,
-      path: '/portal/comportamento',
-      section: 'Conquistas',
-      requiresKidsCategory: true,
-    ),
-    // Conta
-    _PortalMenuEntry(
-      label: 'Financeiro',
-      icon: LucideIcons.dollarSign,
-      path: '/portal/financeiro',
-      section: 'Conta',
-      requiresPlan: true,
-    ),
-    _PortalMenuEntry(
-      label: 'Loja',
-      icon: LucideIcons.store,
-      path: '/portal/loja',
-      section: 'Conta',
-      requiresStorePublished: true,
-    ),
-    _PortalMenuEntry(
-      label: 'Academias',
-      icon: LucideIcons.school,
-      path: '/portal/academias',
-      section: 'Conta',
-    ),
-  ];
-
   int _getSelectedIndex(String location, List<_NavItem> items) {
     final menuIndex = items.length - 1;
     // Check bottom nav items (except the Menu slot).
@@ -199,9 +102,9 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       }
     }
 
-    // Any deeper portal route → highlight Menu
-    for (final entry in _menuCatalog) {
-      if (location == entry.path || location.startsWith('${entry.path}/')) {
+    // Any deeper portal route (declared in the catalog) → highlight Menu.
+    for (final entry in kPortalNavCatalog) {
+      if (location == entry.route || location.startsWith('${entry.route}/')) {
         return menuIndex;
       }
     }
@@ -249,18 +152,24 @@ class _PortalShellState extends ConsumerState<PortalShell> {
 
     final graduationVisible =
         settings?.graduationProgressVisibleToStudents ?? false;
-    // Defaults to true (visible) for legacy academies, mirroring the screen gate.
-    final rankingVisible = settings?.rankingVisibleToStudents ?? true;
 
-    final entries = _menuCatalog.where((e) {
-      if (e.requiresKidsCategory && !isKids) return false;
-      if (e.requiresStorePublished && !isStorePublished) return false;
-      if (e.requiresPlan && !hasPlan) return false;
-      if (e.requiresGraduationVisible && !graduationVisible) return false;
-      if (e.requiresRankingVisible && !rankingVisible) return false;
-      if (e.hideWhen == _PortalGate.monitor && (isMonitor || hasAttendancePermMenu)) return false;
-      return true;
-    }).toList();
+    // Resolve the portal catalog (feature flags + contextual gates). The portal
+    // model is simple: a feature OFF or an unmet gate => the entry is hidden
+    // (the student never sees a "locked" entry — discovery is admin-only).
+    final ctx = PortalNavContext(
+      isKids: isKids,
+      isMonitorOrAttendance: isMonitor || hasAttendancePermMenu,
+      hasPlan: hasPlan,
+      storePublished: isStorePublished,
+      graduationProgressVisible: graduationVisible,
+    );
+    final resolved = resolvePortalCatalog(
+      catalog: kPortalNavCatalog,
+      settings: settings,
+      ctx: ctx,
+    );
+    final entries =
+        resolved.where((r) => r.isVisible).map((r) => r.entry).toList();
 
     showModalBottomSheet(
       context: context,
@@ -274,9 +183,9 @@ class _PortalShellState extends ConsumerState<PortalShell> {
               (e) => MoreMenuItem(
                 label: e.label,
                 icon: e.icon,
-                path: e.path,
-                isActive: currentLocation == e.path,
-                category: e.section,
+                path: e.route,
+                isActive: currentLocation == e.route,
+                category: e.section.label,
               ),
             )
             .toList(),
@@ -401,37 +310,6 @@ class _NavItem {
     required this.label,
     required this.icon,
     required this.path,
-  });
-}
-
-/// Optional gate to hide an entry for a specific portal role.
-enum _PortalGate { monitor }
-
-/// One entry in the portal "Menu" sheet catalog. Gates compose: if any one
-/// of the *requires* flags is false, the entry is filtered out at render.
-class _PortalMenuEntry {
-  final String label;
-  final IconData icon;
-  final String path;
-  final String section;
-  final bool requiresKidsCategory;
-  final bool requiresStorePublished;
-  final bool requiresPlan;
-  final bool requiresGraduationVisible;
-  final bool requiresRankingVisible;
-  final _PortalGate? hideWhen;
-
-  const _PortalMenuEntry({
-    required this.label,
-    required this.icon,
-    required this.path,
-    required this.section,
-    this.requiresKidsCategory = false,
-    this.requiresGraduationVisible = false,
-    this.requiresStorePublished = false,
-    this.requiresPlan = false,
-    this.requiresRankingVisible = false,
-    this.hideWhen,
   });
 }
 

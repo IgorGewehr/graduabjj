@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/navigation/nav_catalog.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -101,7 +103,7 @@ class _MusculacaoAdminScreenState extends ConsumerState<MusculacaoAdminScreen> {
               ? _buildQr()
               : _mode == 'button'
                   ? _buildButtonInfo()
-                  : _buildRoster(),
+                  : _buildRoster(context),
     );
   }
 
@@ -175,12 +177,23 @@ class _MusculacaoAdminScreenState extends ConsumerState<MusculacaoAdminScreen> {
     );
   }
 
-  Widget _buildRoster() {
+  Widget _buildRoster(BuildContext context) {
     if (_students.isEmpty) {
-      return const PolishedEmptyState(
-        icon: Icons.fitness_center,
-        title: 'Nenhum aluno de musculacao ativo',
-        subtitle: 'Alunos com a modalidade musculacao aparecem aqui.',
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const PolishedEmptyState(
+            icon: Icons.fitness_center,
+            title: 'Nenhum aluno de musculacao ativo',
+            subtitle: 'Alunos com a modalidade musculacao aparecem aqui.',
+          ),
+          TextButton.icon(
+            onPressed: () =>
+                context.go(settingsDeepLinkFor(FeatureId.musculacao)),
+            icon: const Icon(Icons.settings_outlined, size: 18),
+            label: const Text('Configurar em Funcionalidades'),
+          ),
+        ],
       );
     }
     return RefreshIndicator(

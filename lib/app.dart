@@ -7,6 +7,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 
 import 'core/theme.dart';
 import 'core/constants.dart';
+import 'core/navigation/nav_catalog.dart';
 import 'providers/auth_provider.dart';
 import 'services/push_notification_service.dart';
 import 'screens/auth/login_screen.dart';
@@ -1032,7 +1033,11 @@ final routerProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,
               state: state,
-              child: const AdminSettingsScreen(),
+              child: AdminSettingsScreen(
+                focusFeature: FeatureIdX.fromId(
+                  state.uri.queryParameters['feature'],
+                ),
+              ),
             ),
           ),
           GoRoute(

@@ -5,8 +5,11 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/navigation/nav_catalog.dart';
+import '../../core/navigation/nav_resolver.dart';
 import '../../core/theme.dart';
 import '../../models/academy_event.dart';
+import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
 import '../../providers/selected_academy_provider.dart';
@@ -132,6 +135,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
 
             const SizedBox(height: 24),
+
+            // Quick-access grid — surfaces the features that are actually
+            // enabled for this academy/student, reusing the exact portal
+            // catalog gating (no duplicated gate logic).
+            const _QuickAccessSection(),
 
             // Dynamic Cards Section
             student.when(
@@ -739,6 +747,168 @@ class _DynamicCardsSection extends ConsumerWidget {
         // Upcoming Events (calendar-focused: only postType==event)
         _EventsSection(onTap: onTap),
       ],
+    );
+  }
+}
+
+/// Quick-access grid surfacing the portal features currently enabled for this
+/// academy/student. Gating is delegated 1:1 to [resolvePortalCatalog] (the same
+/// resolver consumed by [PortalShell]'s "Menu" sheet), so a feature only ever
+/// appears here when it would also appear in the menu — no duplicated gate
+/// logic. Each tile deep-links to the corresponding portal route.
+class _QuickAccessSection extends ConsumerWidget {
+  const _QuickAccessSection();
+
+  /// Subset of the portal catalog surfaced as quick-access shortcuts. We only
+  /// promote the discovery-worthy destinations (ranking, treinos, vídeos, loja,
+  /// financeiro, jornal, evolução, modalidades) — not every menu entry — while
+  /// still honoring whatever gate the catalog applies to each.
+  static const Set<String> _quickKeys = {
+    'portal_ranking',
+    'portal_treinos',
+    'portal_videos',
+    'portal_loja',
+    'portal_financeiro',
+    'portal_evolucao',
+    'portal_modalidades',
+  };
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(academySettingsProvider).valueOrNull;
+    final student = ref.watch(currentStudentProvider).valueOrNull;
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+
+    // Same context construction as PortalShell._showMoreMenu — kept in sync so
+    // the quick-access grid mirrors the menu's visibility decisions exactly.
+    final isKids = student?.category == StudentCategory.kids;
+
+    final studentId = currentUser?.studentId;
+    final linkedStudentIds = currentUser?.linkedStudentIds ?? const <String>[];
+    final allStudentIds = studentId != null
+        ? [studentId, ...linkedStudentIds]
+        : linkedStudentIds;
+    final monitorIds = settings?.monitorIds ?? const <String>[];
+    final isMonitor = allStudentIds.any(monitorIds.contains);
+    final hasAttendancePerm =
+        currentUser?.hasPermission('attendance:take') == true;
+
+    final studentDocId = student?.id;
+    final hasPlan = studentDocId != null &&
+        ref.watch(studentPlanProvider(studentDocId)).valueOrNull != null;
+
+    final graduationVisible =
+        settings?.graduationProgressVisibleToStudents ?? false;
+
+    final ctx = PortalNavContext(
+      isKids: isKids,
+      isMonitorOrAttendance: isMonitor || hasAttendancePerm,
+      hasPlan: hasPlan,
+      storePublished: settings?.storePublished ?? false,
+      graduationProgressVisible: graduationVisible,
+    );
+
+    final resolved = resolvePortalCatalog(
+      catalog: kPortalNavCatalog,
+      settings: settings,
+      ctx: ctx,
+    );
+
+    final entries = resolved
+        .where((r) => r.isVisible && _quickKeys.contains(r.entry.key))
+        .map((r) => r.entry)
+        .toList(growable: false);
+
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(
+              LucideIcons.zap,
+              size: 16,
+              color: AppTheme.textSecondary,
+            ),
+            const SizedBox(width: 6),
+            const Text(
+              'Acessos rapidos',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textPrimary,
+                letterSpacing: 0.1,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        GridView.count(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: 4,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 0.82,
+          children: [
+            for (final entry in entries)
+              _QuickAccessTile(
+                icon: entry.icon,
+                label: entry.label,
+                onTap: () => context.go(entry.route),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+}
+
+/// Single quick-access tile: a Lucide icon chip over a short label, wrapped in
+/// the standard PolishCard press feedback.
+class _QuickAccessTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _QuickAccessTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PolishCard(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, size: 20, color: AppTheme.primary),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: AppTheme.labelSmall.copyWith(
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textPrimary,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
     );
   }
 }

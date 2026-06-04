@@ -3,8 +3,10 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/navigation/nav_catalog.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -84,7 +86,7 @@ class _WorkoutPlansScreenState extends ConsumerState<WorkoutPlansScreen> {
               child: PolishSkeleton.list(count: 5, itemHeight: 80),
             )
           : _plans.isEmpty
-              ? _empty()
+              ? _empty(context)
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView.separated(
@@ -135,11 +137,21 @@ class _WorkoutPlansScreenState extends ConsumerState<WorkoutPlansScreen> {
     );
   }
 
-  Widget _empty() {
-    return const PolishedEmptyState(
-      icon: Icons.fitness_center,
-      title: 'Nenhum treino criado ainda',
-      subtitle: 'Crie planos de treino e entregue aos alunos.',
+  Widget _empty(BuildContext context) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const PolishedEmptyState(
+          icon: Icons.fitness_center,
+          title: 'Nenhum treino criado ainda',
+          subtitle: 'Crie planos de treino e entregue aos alunos.',
+        ),
+        TextButton.icon(
+          onPressed: () => context.go(settingsDeepLinkFor(FeatureId.workouts)),
+          icon: const Icon(Icons.settings_outlined, size: 18),
+          label: const Text('Configurar em Funcionalidades'),
+        ),
+      ],
     );
   }
 }

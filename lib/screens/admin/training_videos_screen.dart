@@ -2,9 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/navigation/nav_catalog.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -83,7 +85,7 @@ class _TrainingVideosScreenState extends ConsumerState<TrainingVideosScreen> {
               child: PolishSkeleton.list(count: 5, itemHeight: 72),
             )
           : _videos.isEmpty
-              ? _empty()
+              ? _empty(context)
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView.separated(
@@ -141,11 +143,21 @@ class _TrainingVideosScreenState extends ConsumerState<TrainingVideosScreen> {
     );
   }
 
-  Widget _empty() {
-    return const PolishedEmptyState(
-      icon: Icons.video_library_outlined,
-      title: 'Nenhum video ainda',
-      subtitle: 'Cole um link (YouTube/Vimeo) ou suba um arquivo.',
+  Widget _empty(BuildContext context) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const PolishedEmptyState(
+          icon: Icons.video_library_outlined,
+          title: 'Nenhum video ainda',
+          subtitle: 'Cole um link (YouTube/Vimeo) ou suba um arquivo.',
+        ),
+        TextButton.icon(
+          onPressed: () => context.go(settingsDeepLinkFor(FeatureId.videos)),
+          icon: const Icon(Icons.settings_outlined, size: 18),
+          label: const Text('Configurar em Funcionalidades'),
+        ),
+      ],
     );
   }
 }

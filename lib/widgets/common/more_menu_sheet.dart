@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/navigation/nav_catalog.dart';
 import '../../core/theme.dart';
 import '../polish/polish.dart';
 
@@ -15,6 +16,15 @@ class MoreMenuItem {
   final String? subtitle;
   final Color? accent;
 
+  /// When true the item renders in the discovery/locked state (dimmed icon,
+  /// padlock + "Ative" badge) and a tap routes to settings instead of the
+  /// destination. Defaults to false (preserves the current appearance).
+  final bool locked;
+
+  /// Feature backing a [locked] item — used by [MoreMenuSheet.onLockedTap] for
+  /// the settings deep-link. null for unlocked items.
+  final FeatureId? feature;
+
   const MoreMenuItem({
     required this.label,
     required this.icon,
@@ -23,6 +33,8 @@ class MoreMenuItem {
     this.category,
     this.subtitle,
     this.accent,
+    this.locked = false,
+    this.feature,
   });
 }
 
@@ -41,6 +53,11 @@ class MoreMenuSheet extends StatelessWidget {
   final String? headerTitle;
   final String? headerSubtitle;
 
+  /// Called when a [MoreMenuItem.locked] item is tapped (deep-link to settings
+  /// for the backing feature). When null, locked items fall back to
+  /// [onNavigate] so callers that don't opt in keep working.
+  final void Function(FeatureId feature)? onLockedTap;
+
   const MoreMenuSheet({
     super.key,
     required this.items,
@@ -48,7 +65,17 @@ class MoreMenuSheet extends StatelessWidget {
     required this.onNavigate,
     this.headerTitle,
     this.headerSubtitle,
+    this.onLockedTap,
   });
+
+  /// Routes a tap on [item] to the locked deep-link or normal navigation.
+  void _handleTap(MoreMenuItem item) {
+    if (item.locked && item.feature != null && onLockedTap != null) {
+      onLockedTap!(item.feature!);
+    } else {
+      onNavigate(item.path);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -164,7 +191,7 @@ class MoreMenuSheet extends StatelessWidget {
         for (final entry in items.asMap().entries)
           _MenuItemTile(
             item: entry.value,
-            onTap: () => onNavigate(entry.value.path),
+            onTap: () => _handleTap(entry.value),
           ).entrance(index: entry.key),
       ],
     );
@@ -198,7 +225,7 @@ class MoreMenuSheet extends StatelessWidget {
       );
       sections.add(_SectionGrid(
         items: sectionItems,
-        onNavigate: onNavigate,
+        onTap: _handleTap,
       ));
     });
 
@@ -214,9 +241,9 @@ class MoreMenuSheet extends StatelessWidget {
 /// tappable; they're more scannable than a stack of full-width rows.
 class _SectionGrid extends StatelessWidget {
   final List<MoreMenuItem> items;
-  final void Function(String path) onNavigate;
+  final void Function(MoreMenuItem item) onTap;
 
-  const _SectionGrid({required this.items, required this.onNavigate});
+  const _SectionGrid({required this.items, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -233,7 +260,7 @@ class _SectionGrid extends StatelessWidget {
                 width: tileWidth,
                 child: _SectionTile(
                   item: entry.value,
-                  onTap: () => onNavigate(entry.value.path),
+                  onTap: () => onTap(entry.value),
                 ).entrance(index: entry.key),
               ),
           ],
@@ -253,6 +280,7 @@ class _SectionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = item.accent ?? AppTheme.primary;
     final isActive = item.isActive;
+    final locked = item.locked;
     return Material(
       color: isActive
           ? accent.withValues(alpha: 0.12)
@@ -267,25 +295,43 @@ class _SectionTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: isActive ? accent : accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  item.icon,
-                  color: isActive ? Colors.white : accent,
-                  size: 20,
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: locked
+                          ? AppTheme.textDisabled.withValues(alpha: 0.12)
+                          : isActive
+                              ? accent
+                              : accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      item.icon,
+                      color: locked
+                          ? AppTheme.textDisabled
+                          : isActive
+                              ? Colors.white
+                              : accent,
+                      size: 20,
+                    ),
+                  ),
+                  if (locked) const _LockedBadge(),
+                ],
               ),
               const SizedBox(height: 10),
               Text(
                 item.label,
                 style: AppTheme.bodyMedium.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: isActive ? accent : AppTheme.textPrimary,
+                  color: locked
+                      ? AppTheme.textDisabled
+                      : isActive
+                          ? accent
+                          : AppTheme.textPrimary,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -309,6 +355,37 @@ class _SectionTile extends StatelessWidget {
   }
 }
 
+/// Small "Ative" pill with a padlock, shown on locked discovery entries.
+class _LockedBadge extends StatelessWidget {
+  const _LockedBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppTheme.warning.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(LucideIcons.lock, size: 11, color: AppTheme.warning),
+          const SizedBox(width: 4),
+          Text(
+            'Ative',
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.warning,
+              fontWeight: FontWeight.w700,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Flat-mode tile (legacy + the logout button). Same look as before so
 /// callers that haven't migrated to categories don't visually regress.
 class _MenuItemTile extends StatelessWidget {
@@ -325,6 +402,7 @@ class _MenuItemTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isActive = item.isActive;
+    final locked = item.locked && !isLogout;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -346,21 +424,25 @@ class _MenuItemTile extends StatelessWidget {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: isActive
-                        ? Colors.white.withValues(alpha: 0.15)
-                        : isLogout
-                            ? AppTheme.errorLight
-                            : AppTheme.surface,
+                    color: locked
+                        ? AppTheme.textDisabled.withValues(alpha: 0.12)
+                        : isActive
+                            ? Colors.white.withValues(alpha: 0.15)
+                            : isLogout
+                                ? AppTheme.errorLight
+                                : AppTheme.surface,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(
                     item.icon,
                     size: 20,
-                    color: isActive
-                        ? Colors.white
-                        : isLogout
-                            ? AppTheme.error
-                            : AppTheme.textSecondary,
+                    color: locked
+                        ? AppTheme.textDisabled
+                        : isActive
+                            ? Colors.white
+                            : isLogout
+                                ? AppTheme.error
+                                : AppTheme.textSecondary,
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -368,24 +450,29 @@ class _MenuItemTile extends StatelessWidget {
                   child: Text(
                     item.label,
                     style: AppTheme.titleMedium.copyWith(
-                      color: isActive
-                          ? Colors.white
-                          : isLogout
-                              ? AppTheme.error
-                              : AppTheme.textPrimary,
+                      color: locked
+                          ? AppTheme.textDisabled
+                          : isActive
+                              ? Colors.white
+                              : isLogout
+                                  ? AppTheme.error
+                                  : AppTheme.textPrimary,
                       fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                     ),
                   ),
                 ),
-                Icon(
-                  LucideIcons.chevronRight,
-                  size: 18,
-                  color: isActive
-                      ? Colors.white
-                      : isLogout
-                          ? AppTheme.error
-                          : AppTheme.textDisabled,
-                ),
+                if (locked)
+                  const _LockedBadge()
+                else
+                  Icon(
+                    LucideIcons.chevronRight,
+                    size: 18,
+                    color: isActive
+                        ? Colors.white
+                        : isLogout
+                            ? AppTheme.error
+                            : AppTheme.textDisabled,
+                  ),
               ],
             ),
           ),

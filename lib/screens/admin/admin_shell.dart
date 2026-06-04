@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/navigation/nav_catalog.dart';
+import '../../core/navigation/nav_resolver.dart';
 import '../../core/theme.dart';
 import '../../models/academy.dart';
 import '../../providers/auth_provider.dart';
@@ -289,24 +291,17 @@ class AdminSidebar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settingsAsync = ref.watch(academySettingsProvider);
     final settings = settingsAsync.valueOrNull;
-    final isStoreEnabled = settings?.storeEnabled ?? false;
-    final isGraduationEnabled = settings?.autoGraduationEnabled ?? false;
     final currentUser = ref.watch(currentUserProvider);
     final user = currentUser.valueOrNull;
-    // Permission gates. Admins always pass; instructors need the explicit
-    // extraPermissions entry granted at promotion time.
-    final isAdminUser = user?.isAdmin == true;
-    final canTakeAttendance =
-        isAdminUser || user?.hasPermission('attendance:take') == true;
-    final canSeeStudents =
-        isAdminUser ||
-        user?.hasPermission('students:create') == true ||
-        user?.hasPermission('students:delete') == true;
-    final canSeeFinancial = user?.hasPermission('financial:view') == true;
-    final canSeeReports = user?.hasPermission('reports:view') == true;
-    final canManageGraduation = user?.hasPermission('graduation:manage') == true;
-    final canManageCompetitions =
-        isAdminUser || user?.hasPermission('competitions:create') == true;
+
+    // Single source of truth: resolve the admin catalog and render every
+    // non-hidden entry grouped by section. `locked` entries surface in the
+    // discovery state and deep-link to settings on tap.
+    final resolved = resolveAdminCatalog(
+      catalog: kAdminNavCatalog,
+      settings: settings,
+      user: user,
+    ).where((r) => !r.isHidden).toList();
 
     return Container(
       width: 250,
@@ -365,112 +360,12 @@ class AdminSidebar extends ConsumerWidget {
           ).fadeInQuick(),
           const Divider(height: 1),
 
-          // Navigation Items
+          // Navigation Items — rendered from the resolved catalog, grouped by
+          // section with uppercase headers. Same set as the mobile menu.
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              children: [
-                _NavItem(
-                  icon: Icons.dashboard_outlined,
-                  activeIcon: Icons.dashboard,
-                  label: 'Dashboard',
-                  path: '/admin',
-                  currentPath: currentPath,
-                ),
-                if (canSeeStudents)
-                  _NavItem(
-                    icon: Icons.people_outline,
-                    activeIcon: Icons.people,
-                    label: 'Alunos',
-                    path: '/admin/alunos',
-                    currentPath: currentPath,
-                  ),
-                // 'Chamada' abre a chamada normal. O FAB 'Chamada por QR'
-                // dentro da propria tela leva pra projecao — sem precisar
-                // de duas entradas na sidebar.
-                if (canTakeAttendance)
-                  _NavItem(
-                    icon: Icons.check_circle_outline,
-                    activeIcon: Icons.check_circle,
-                    label: 'Chamada',
-                    path: '/admin/chamada',
-                    currentPath: currentPath,
-                  ),
-                _NavItem(
-                  icon: Icons.calendar_month_outlined,
-                  activeIcon: Icons.calendar_month,
-                  label: 'Turmas',
-                  path: '/admin/turmas',
-                  currentPath: currentPath,
-                ),
-                if (isGraduationEnabled && canManageGraduation)
-                  _NavItem(
-                    icon: Icons.military_tech_outlined,
-                    activeIcon: Icons.military_tech,
-                    label: 'Graduação',
-                    path: '/admin/graduacao',
-                    currentPath: currentPath,
-                  ),
-                if (canManageCompetitions)
-                  _NavItem(
-                    icon: Icons.emoji_events_outlined,
-                    activeIcon: Icons.emoji_events,
-                    label: 'Campeonatos',
-                    path: '/admin/campeonatos',
-                    currentPath: currentPath,
-                  ),
-                if (canSeeFinancial)
-                  _NavItem(
-                    icon: Icons.attach_money_outlined,
-                    activeIcon: Icons.attach_money,
-                    label: 'Financeiro',
-                    path: '/admin/financeiro',
-                    currentPath: currentPath,
-                  ),
-                if (canSeeFinancial)
-                  _NavItem(
-                    icon: Icons.receipt_long_outlined,
-                    activeIcon: Icons.receipt_long,
-                    label: 'Cobranca',
-                    path: '/admin/cobranca',
-                    currentPath: currentPath,
-                  ),
-                if (canSeeReports)
-                  _NavItem(
-                    icon: Icons.bar_chart_outlined,
-                    activeIcon: Icons.bar_chart,
-                    label: 'Relatorios',
-                    path: '/admin/relatorios',
-                    currentPath: currentPath,
-                  ),
-                if (isStoreEnabled)
-                  _NavItem(
-                    icon: Icons.store_outlined,
-                    activeIcon: Icons.store,
-                    label: 'Loja',
-                    path: '/admin/loja',
-                    currentPath: currentPath,
-                  ),
-                // Configurações + código de equipe are admin-only — instructors
-                // never touch academy-wide settings or generate invites.
-                if (isAdminUser) ...[
-                  const Divider(),
-                  _NavItem(
-                    icon: Icons.settings_outlined,
-                    activeIcon: Icons.settings,
-                    label: 'Configurações',
-                    path: '/admin/configuracoes',
-                    currentPath: currentPath,
-                  ),
-                  _NavItem(
-                    icon: Icons.key_outlined,
-                    activeIcon: Icons.key,
-                    label: 'Código de equipe',
-                    path: '/codigo-equipe',
-                    currentPath: currentPath,
-                  ),
-                ],
-              ],
+              children: _buildSidebarChildren(context, resolved),
             ),
           ),
 
@@ -519,6 +414,61 @@ class AdminSidebar extends ConsumerWidget {
       ),
     );
   }
+
+  /// Builds the sidebar body from the resolved catalog: a section header
+  /// (uppercase) before each new section, then the entries. `Conta` is
+  /// preceded by a divider to preserve the old account-area separation.
+  List<Widget> _buildSidebarChildren(
+    BuildContext context,
+    List<ResolvedNavEntry> resolved,
+  ) {
+    final children = <Widget>[];
+    NavSection? lastSection;
+    for (final r in resolved) {
+      final entry = r.entry;
+      if (entry.section != lastSection) {
+        if (entry.section == NavSection.conta) {
+          children.add(const Divider());
+        }
+        children.add(_SidebarSectionHeader(label: entry.section.label));
+        lastSection = entry.section;
+      }
+      children.add(
+        _NavItem(
+          icon: entry.icon,
+          activeIcon: entry.activeIcon ?? entry.icon,
+          label: entry.label,
+          path: entry.route,
+          currentPath: currentPath,
+          locked: r.isLocked,
+          feature: entry.feature,
+        ),
+      );
+    }
+    return children;
+  }
+}
+
+/// Uppercase section label rendered above each group in the sidebar.
+class _SidebarSectionHeader extends StatelessWidget {
+  final String label;
+
+  const _SidebarSectionHeader({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 16, 6),
+      child: Text(
+        label.toUpperCase(),
+        style: AppTheme.labelSmall.copyWith(
+          color: AppTheme.textSecondary,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
 }
 
 /// Navigation Item Widget
@@ -529,41 +479,96 @@ class _NavItem extends StatelessWidget {
   final String path;
   final String currentPath;
 
+  /// When true the item renders dimmed with a padlock/"Ative" badge and a tap
+  /// deep-links to settings for [feature] instead of navigating to [path].
+  final bool locked;
+  final FeatureId? feature;
+
   const _NavItem({
     required this.icon,
     required this.activeIcon,
     required this.label,
     required this.path,
     required this.currentPath,
+    this.locked = false,
+    this.feature,
   });
 
   bool get isActive => currentPath == path || currentPath.startsWith('$path/');
 
   @override
   Widget build(BuildContext context) {
+    final Color iconColor = locked
+        ? AppTheme.textDisabled
+        : isActive
+            ? AppTheme.primary
+            : AppTheme.textSecondary;
+    final Color labelColor = locked
+        ? AppTheme.textDisabled
+        : isActive
+            ? AppTheme.primary
+            : AppTheme.textPrimary;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: ListTile(
         leading: Icon(
-          isActive ? activeIcon : icon,
-          color: isActive ? AppTheme.primary : AppTheme.textSecondary,
+          locked ? icon : (isActive ? activeIcon : icon),
+          color: iconColor,
         ),
         title: Text(
           label,
           style: TextStyle(
-            color: isActive ? AppTheme.primary : AppTheme.textPrimary,
+            color: labelColor,
             fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
           ),
         ),
-        selected: isActive,
+        trailing: locked ? const _SidebarLockBadge() : null,
+        selected: isActive && !locked,
         selectedTileColor: AppTheme.primary.withValues(alpha: 0.1),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         onTap: () {
           if (Navigator.canPop(context)) {
             Navigator.pop(context); // Close drawer on mobile
           }
-          context.go(path);
+          if (locked && feature != null) {
+            context.go(settingsDeepLinkFor(feature!));
+          } else {
+            context.go(path);
+          }
         },
+      ),
+    );
+  }
+}
+
+/// "Ative" pill with padlock, shown on the trailing edge of a locked sidebar
+/// item (discovery state for an OFF feature).
+class _SidebarLockBadge extends StatelessWidget {
+  const _SidebarLockBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppTheme.warning.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(LucideIcons.lock, size: 11, color: AppTheme.warning),
+          const SizedBox(width: 4),
+          Text(
+            'Ative',
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.warning,
+              fontWeight: FontWeight.w700,
+              height: 1,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -632,112 +637,6 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     return items;
   }
 
-  /// Catalog of everything that lives behind the "Menu" tile, tagged by
-  /// section and tagged with the permission needed to see it. The shell
-  /// applies the filter at render time so each role only sees what's
-  /// actually theirs.
-  static const List<_AdminMenuEntry> _menuCatalog = [
-    // Gestão — primary academy operations
-    _AdminMenuEntry(
-      label: 'Turmas',
-      icon: LucideIcons.calendar,
-      path: '/admin/turmas',
-      section: 'Gestão',
-    ),
-    _AdminMenuEntry(
-      label: 'Graduação',
-      icon: LucideIcons.award,
-      path: '/admin/graduacao',
-      section: 'Gestão',
-      requiresGraduation: true,
-      requiresPermission: 'graduation:manage',
-    ),
-    _AdminMenuEntry(
-      label: 'Campeonatos',
-      icon: LucideIcons.trophy,
-      path: '/admin/campeonatos',
-      section: 'Gestão',
-      requiresPermission: 'competitions:create',
-    ),
-    _AdminMenuEntry(
-      label: 'Musculação',
-      icon: Icons.fitness_center,
-      path: '/admin/musculacao',
-      section: 'Gestão',
-    ),
-    _AdminMenuEntry(
-      label: 'Jornal da Academia',
-      icon: LucideIcons.newspaper,
-      path: '/admin/jornal',
-      section: 'Gestão',
-      requiresPermission: 'events:manage',
-    ),
-    _AdminMenuEntry(
-      label: 'Importar alunos',
-      icon: Icons.upload_file,
-      path: '/admin/importar-alunos',
-      section: 'Gestão',
-    ),
-    // Financeiro
-    _AdminMenuEntry(
-      label: 'Cobrança',
-      icon: LucideIcons.receipt,
-      path: '/admin/cobranca',
-      section: 'Financeiro',
-      requiresPermission: 'financial:view',
-    ),
-    _AdminMenuEntry(
-      label: 'Carteira',
-      icon: LucideIcons.wallet,
-      path: '/admin/carteira',
-      section: 'Financeiro',
-      requiresPermission: 'financial:view',
-      requiresPayment: true,
-    ),
-    _AdminMenuEntry(
-      label: 'Relatórios',
-      icon: LucideIcons.barChart3,
-      path: '/admin/relatorios',
-      section: 'Financeiro',
-      requiresPermission: 'reports:view',
-    ),
-    // Conteúdo
-    _AdminMenuEntry(
-      label: 'Treinos',
-      icon: Icons.assignment_outlined,
-      path: '/admin/treinos',
-      section: 'Conteúdo',
-    ),
-    _AdminMenuEntry(
-      label: 'Vídeos',
-      icon: Icons.play_circle_outline,
-      path: '/admin/videos',
-      section: 'Conteúdo',
-    ),
-    _AdminMenuEntry(
-      label: 'Loja',
-      icon: LucideIcons.store,
-      path: '/admin/loja',
-      section: 'Conteúdo',
-      requiresStore: true,
-    ),
-    // Conta — admin-only
-    _AdminMenuEntry(
-      label: 'Configurações',
-      icon: LucideIcons.settings,
-      path: '/admin/configuracoes',
-      section: 'Conta',
-      adminOnly: true,
-    ),
-    _AdminMenuEntry(
-      label: 'Código de equipe',
-      icon: LucideIcons.key,
-      path: '/codigo-equipe',
-      section: 'Conta',
-      adminOnly: true,
-    ),
-  ];
-
   int _getSelectedIndex(List<_AdminNavItem> items) {
     final location = widget.currentPath;
 
@@ -752,9 +651,9 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
       }
     }
 
-    // Check if any menu entry is active
-    for (final entry in _menuCatalog) {
-      if (location == entry.path || location.startsWith('${entry.path}/')) {
+    // Check if any catalog entry is active (it lives behind the "Menu" tile).
+    for (final entry in kAdminNavCatalog) {
+      if (location == entry.route || location.startsWith('${entry.route}/')) {
         return items.length - 1; // "Menu" index
       }
     }
@@ -770,29 +669,16 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     }
   }
 
-  /// Resolves the menu catalog against the current user/settings and returns
-  /// only the entries this role is allowed to see.
-  List<_AdminMenuEntry> _visibleMenuEntries() {
+  /// Resolves the admin catalog against the current user/settings and returns
+  /// the entries this role can see (visible + locked); hidden ones are dropped.
+  List<ResolvedNavEntry> _visibleMenuEntries() {
     final settings = ref.read(academySettingsProvider).valueOrNull;
-    final isStoreEnabled = settings?.storeEnabled ?? false;
-    final isGraduationEnabled = settings?.autoGraduationEnabled ?? false;
-    final isPaymentEnabled =
-        (settings?.abacatePayEnabled ?? false) ||
-        (settings?.asaasEnabled ?? false);
     final user = ref.read(currentUserProvider).valueOrNull;
-    final isAdminUser = user?.isAdmin == true;
-
-    return _menuCatalog.where((e) {
-      if (e.adminOnly && !isAdminUser) return false;
-      if (e.requiresStore && !isStoreEnabled) return false;
-      if (e.requiresGraduation && !isGraduationEnabled) return false;
-      if (e.requiresPayment && !isPaymentEnabled) return false;
-      if (e.requiresPermission != null &&
-          user?.hasPermission(e.requiresPermission!) != true) {
-        return false;
-      }
-      return true;
-    }).toList();
+    return resolveAdminCatalog(
+      catalog: kAdminNavCatalog,
+      settings: settings,
+      user: user,
+    ).where((r) => !r.isHidden).toList();
   }
 
   void _showMoreMenu() {
@@ -810,12 +696,14 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
         headerSubtitle: settings?.name ?? 'Administração',
         items: entries
             .map(
-              (e) => MoreMenuItem(
-                label: e.label,
-                icon: e.icon,
-                path: e.path,
-                isActive: currentLocation == e.path,
-                category: e.section,
+              (r) => MoreMenuItem(
+                label: r.entry.label,
+                icon: r.entry.icon,
+                path: r.entry.route,
+                isActive: currentLocation == r.entry.route && !r.isLocked,
+                category: r.entry.section.label,
+                locked: r.isLocked,
+                feature: r.entry.feature,
               ),
             )
             .toList(),
@@ -835,6 +723,10 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
         onNavigate: (path) {
           Navigator.pop(sheetContext);
           navigator.go(path);
+        },
+        onLockedTap: (feature) {
+          Navigator.pop(sheetContext);
+          navigator.go(settingsDeepLinkFor(feature));
         },
       ),
     );
@@ -881,32 +773,6 @@ class _AdminNavItem {
     required this.label,
     required this.icon,
     required this.path,
-  });
-}
-
-/// One entry in the admin "Menu" sheet catalog. Each entry declares the
-/// section it belongs to plus the gates required to surface it.
-class _AdminMenuEntry {
-  final String label;
-  final IconData icon;
-  final String path;
-  final String section;
-  final bool adminOnly;
-  final bool requiresStore;
-  final bool requiresGraduation;
-  final bool requiresPayment;
-  final String? requiresPermission;
-
-  const _AdminMenuEntry({
-    required this.label,
-    required this.icon,
-    required this.path,
-    required this.section,
-    this.adminOnly = false,
-    this.requiresStore = false,
-    this.requiresGraduation = false,
-    this.requiresPayment = false,
-    this.requiresPermission,
   });
 }
 
