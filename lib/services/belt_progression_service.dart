@@ -423,6 +423,32 @@ class BeltProgressionService {
     return forSport.first.baselineCount;
   }
 
+  /// Fatores de técnica (B2) da [gradeId] de [studentId] em [sportId]: lê o
+  /// currículo da faixa + o progresso do aluno e aplica a política da academia.
+  Future<GraduationSkillFactors> _skillFactorsForGrade(
+    String studentId,
+    SportId sportId,
+    String gradeId,
+    AcademyGraduationConfig cfg, {
+    List<SyllabusTechnique>? techniquesHint,
+  }) async {
+    final techniques = techniquesHint ??
+        await SyllabusService(academyId).getBySport(sportId.value);
+    final gradeTechs = techniques.where((t) => t.gradeId == gradeId).toList();
+    final progress = await SkillProgressService(academyId)
+        .getByStudent(studentId, sport: sportId.value);
+    final progMap = {for (final p in progress) p.techniqueId: p};
+    final dominated = gradeTechs
+        .where((t) => progMap[t.id]?.level.isMastered ?? false)
+        .length;
+    return computeSkillFactors(
+      dominatedCount: dominated,
+      totalForGrade: gradeTechs.length,
+      policy: cfg.skillPolicy,
+      minSkillPct: cfg.minSkillPct,
+    );
+  }
+
   /// Sums Attendance.weight (defaulting to 1 for legacy docs) for a student.
   /// Use when [AcademyGraduationConfig.useClassWeights] is true.
   Future<int> getWeightedAttendanceCount(String studentId) async {
@@ -530,22 +556,7 @@ class BeltProgressionService {
 
     // Requisitos compostos (B2): % de técnicas dominadas na faixa atual +
     // tempo-em-faixa. Bloqueia a elegibilidade só quando a política é 'required'.
-    final techniques =
-        await SyllabusService(academyId).getBySport(sportId.value);
-    final gradeTechs =
-        techniques.where((t) => t.gradeId == currentBelt).toList();
-    final progress = await SkillProgressService(academyId)
-        .getByStudent(studentId, sport: sportId.value);
-    final progMap = {for (final p in progress) p.techniqueId: p};
-    final dominated = gradeTechs
-        .where((t) => progMap[t.id]?.level.isMastered ?? false)
-        .length;
-    final factors = computeSkillFactors(
-      dominatedCount: dominated,
-      totalForGrade: gradeTechs.length,
-      policy: cfg.skillPolicy,
-      minSkillPct: cfg.minSkillPct,
-    );
+    final factors = await _skillFactorsForGrade(studentId, sportId, currentBelt, cfg);
     final days = daysInBelt(
       lastPromotion: lastPromoDate,
       startDate: (data['startDate'] as Timestamp?)?.toDate(),
@@ -576,6 +587,8 @@ class BeltProgressionService {
   /// list renders no progress/badge for them. Used by the admin students list.
   Future<List<EligibilitySnapshotEntry>> getEligibilitySnapshot() async {
     final cfg = await loadAcademyConfig();
+    // Cache de currículo por modalidade (só usado sob política 'required').
+    final sylCache = <String, List<SyllabusTechnique>>{};
     final snap = await _studentsRef.where('status', isEqualTo: 'active').get();
 
     // Pre-fetch ALL promotions once, then index the latest baseline per
@@ -655,10 +668,21 @@ class BeltProgressionService {
         category: category,
         config: cfg,
       );
+      // Política 'required': um aluno elegível por presença ainda precisa do
+      // % mínimo de técnicas — alinha a lista ao detalhe e à auto-promoção.
+      // O currículo por modalidade é lido uma vez e reaproveitado (cache).
+      var eligible = e.eligible;
+      if (eligible && cfg.skillPolicy == graduationSkillRequired) {
+        sylCache[sportId.value] ??=
+            await SyllabusService(academyId).getBySport(sportId.value);
+        final f = await _skillFactorsForGrade(doc.id, sportId, currentBelt, cfg,
+            techniquesHint: sylCache[sportId.value]);
+        eligible = f.met;
+      }
       results.add(
         EligibilitySnapshotEntry(
           studentId: doc.id,
-          eligible: e.eligible,
+          eligible: eligible,
           currentClasses: e.currentClasses,
           requiredClasses: e.requiredClasses,
           missingClasses: e.missingClasses,
@@ -965,6 +989,8 @@ class BeltProgressionService {
   Future<List<Map<String, dynamic>>> getEligibleStudents() async {
     final snapshot = await _studentsRef.where('status', isEqualTo: 'active').get();
     final eligibleStudents = <Map<String, dynamic>>[];
+    final cfg = await loadAcademyConfig();
+    final sylCache = <String, List<SyllabusTechnique>>{};
 
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
@@ -1001,7 +1027,17 @@ class BeltProgressionService {
         category: category,
       );
 
-      if (eligibility.eligible) {
+      var isEligible = eligibility.eligible;
+      // Política 'required': exige o % mínimo de técnicas além da presença.
+      if (isEligible && cfg.skillPolicy == graduationSkillRequired) {
+        sylCache[sportId.value] ??=
+            await SyllabusService(academyId).getBySport(sportId.value);
+        final f = await _skillFactorsForGrade(doc.id, sportId, currentBelt, cfg,
+            techniquesHint: sylCache[sportId.value]);
+        isEligible = f.met;
+      }
+
+      if (isEligible) {
         eligibleStudents.add({
           'id': doc.id,
           'fullName': data['fullName'],
