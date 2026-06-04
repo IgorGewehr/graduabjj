@@ -38,9 +38,12 @@ class ProfileScreen extends ConsumerWidget {
           return _buildEmptyState();
         }
 
-        final attendanceCountAsync = ref.watch(
-          studentAttendanceCountProvider(student.id),
-        );
+        // Total de treinos = presenças no sistema (chamada + autocheck-in) +
+        // a base histórica lançada manualmente pela academia
+        // (initialAttendanceCount). É o mesmo número exibido no perfil público
+        // (student.totalAttendanceCount); a contagem antiga ignorava a base
+        // histórica, então treinos anteriores ao sistema não apareciam.
+        final totalTreinos = student.totalAttendanceCount;
         final plansAsync = ref.watch(studentPlansProvider(student.id));
         final startDate = student.jiujitsuStartDate ?? student.startDate;
         final trainingTime = _formatTrainingTime(startDate);
@@ -50,7 +53,6 @@ class ProfileScreen extends ConsumerWidget {
           onRefresh: () async {
             HapticFeedback.mediumImpact();
             ref.invalidate(currentStudentProvider);
-            ref.invalidate(studentAttendanceCountProvider(student.id));
           },
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -68,8 +70,8 @@ class ProfileScreen extends ConsumerWidget {
                   children: [
                     _StatCard(
                       icon: LucideIcons.clipboardCheck,
-                      value: '${attendanceCountAsync.valueOrNull ?? 0}',
-                      countValue: attendanceCountAsync.valueOrNull ?? 0,
+                      value: '$totalTreinos',
+                      countValue: totalTreinos,
                       label: 'presencas',
                     ),
                     const SizedBox(width: 12),

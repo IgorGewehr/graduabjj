@@ -103,6 +103,21 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen>
             title: 'Perfil nao disponivel',
           );
         }
+        // Respeita o botão "Perfil público" do aluno: quando desligado, só o
+        // próprio dono vê o conteúdo (preview). Para os demais alunos o perfil
+        // fica privado — antes a flag era apenas decorativa (cadeado no nome).
+        final viewerStudentId =
+            ref.read(currentUserProvider).valueOrNull?.studentId;
+        final isOwner =
+            viewerStudentId != null && viewerStudentId == widget.studentId;
+        if (!profile.student.isProfilePublic && !isOwner) {
+          return _buildMessage(
+            icon: LucideIcons.lock,
+            title: 'Perfil privado',
+            subtitle:
+                'Este aluno optou por manter o perfil visível apenas para si.',
+          );
+        }
         return _buildProfile(profile);
       },
     );
