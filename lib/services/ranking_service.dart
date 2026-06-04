@@ -3,18 +3,24 @@ import '../models/student.dart';
 import 'attendance_service.dart';
 import 'student_service.dart';
 
-/// Computes per-class attendance rankings over a [RankingPeriod].
+/// Computes attendance rankings over a [RankingPeriod], optionally scoped to a
+/// set of classes (e.g. all kids classes, or all adult classes).
 ///
-/// Data layer only — no UI. The ranking is derived from a single ranged
-/// attendance query per class (equality on `classId` + range on `date`),
-/// which uses the existing composite index `attendance (classId ASC,
-/// date DESC)` declared in `firestore.indexes.json`.
+/// Data layer only — no UI. The ranking is derived from a single ranged,
+/// date-only attendance query for the whole academy (range on `date`, served
+/// by Firestore's auto single-field index), then filtered in memory to the
+/// requested classes. A single window-bounded query keeps this to one round
+/// trip whether the caller wants one category or everything.
 class RankingService {
   final String academyId;
 
   RankingService(this.academyId);
 
-  /// Returns the ranking for [classId] over [period], highest attendance first.
+  /// Returns the ranking over [period], highest attendance first.
+  ///
+  /// [classIds] scopes which classes count: `null` aggregates every class in
+  /// the academy (the "Geral" view); a set restricts to attendance in those
+  /// classes (the "Adulto" / "Kids" views). An empty set yields no ranking.
   ///
   /// Period window (local time):
   /// - [RankingPeriod.week]  → current week, Monday 00:00 .. now.
@@ -24,19 +30,21 @@ class RankingService {
   /// 1-based, ties broken by most-recent attendance (desc). At most [limit]
   /// entries are returned.
   Future<List<RankingEntry>> getRanking({
-    required String classId,
     required RankingPeriod period,
+    Set<String>? classIds,
     int limit = 100,
   }) async {
+    if (classIds != null && classIds.isEmpty) return const [];
+
     final now = DateTime.now();
     final (start, end) = periodRange(period, now);
 
-    // Single ranged query for the class: equality(classId) + range(date).
-    final attendance = await AttendanceService(academyId).getByDateRange(
-      start,
-      end,
-      classId: classId,
-    );
+    // Single date-only ranged query for the academy, then scope to the
+    // requested classes in memory (null = keep all = "Geral").
+    final all = await AttendanceService(academyId).getByDateRange(start, end);
+    final attendance = classIds == null
+        ? all
+        : all.where((a) => classIds.contains(a.classId)).toList();
 
     // Reduce to raw (studentId, date) pairs and rank in a pure, testable step.
     final ranked = rankFromPairs(
@@ -83,16 +91,17 @@ class RankingService {
     return hydrated;
   }
 
-  /// 1-based rank of [studentId] in the [classId] ranking for [period], or
-  /// null when the student has no attendance in the period.
+  /// 1-based rank of [studentId] in the ranking for [period] (scoped to
+  /// [classIds], or every class when null), or null when the student has no
+  /// attendance in the period.
   Future<int?> getStudentRank({
-    required String classId,
     required String studentId,
     required RankingPeriod period,
+    Set<String>? classIds,
   }) async {
     // Use a large limit so the target student is never truncated out.
     final ranking = await getRanking(
-      classId: classId,
+      classIds: classIds,
       period: period,
       limit: 100000,
     );

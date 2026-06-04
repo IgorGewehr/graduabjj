@@ -7,6 +7,36 @@ enum RankingPeriod {
   month,
 }
 
+/// Audience filter for the attendance ranking.
+///
+/// Grouping is by the *class* category ([BJJClass.category]): kids and adult
+/// classes are distinct classes, so this matches the student's age category in
+/// practice. Classes with no category set (legacy) fall into the [adult]
+/// bucket (most academies are adult-default).
+enum RankingCategory {
+  /// Every class in the academy.
+  general,
+
+  /// Only classes tagged `StudentCategory.adult`.
+  adult,
+
+  /// Only classes tagged `StudentCategory.kids`.
+  kids,
+}
+
+extension RankingCategoryExtension on RankingCategory {
+  String get label {
+    switch (this) {
+      case RankingCategory.general:
+        return 'Geral';
+      case RankingCategory.adult:
+        return 'Adulto';
+      case RankingCategory.kids:
+        return 'Kids';
+    }
+  }
+}
+
 /// A single row in a class attendance ranking.
 ///
 /// Plain value object built by [RankingService] from grouped attendance

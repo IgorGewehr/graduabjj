@@ -3,12 +3,40 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/competition_photo.dart';
 import '../models/public_student_profile.dart';
 import '../models/ranking_entry.dart';
+import '../models/student.dart';
 import '../services/achievement_service.dart';
+import '../services/class_service.dart';
 import '../services/competition_photo_service.dart';
 import '../services/competition_service.dart';
 import '../services/ranking_service.dart';
 import '../services/student_service.dart';
 import 'auth_provider.dart';
+import 'portal_providers.dart';
+
+/// Resolves the class ids that make up a [RankingCategory], or null for
+/// [RankingCategory.general] (which aggregates every class). "Kids" matches only
+/// classes explicitly tagged kids; "Adulto" matches adult-tagged classes plus
+/// untagged (legacy) classes, since most academies are adult-default.
+Set<String>? _classIdsForCategory(
+  List<BJJClass> classes,
+  RankingCategory category,
+) {
+  switch (category) {
+    case RankingCategory.general:
+      return null;
+    case RankingCategory.adult:
+      // Adult-tagged + untagged (legacy) classes default to the adult bucket.
+      return classes
+          .where((c) => c.category != StudentCategory.kids)
+          .map((c) => c.id)
+          .toSet();
+    case RankingCategory.kids:
+      return classes
+          .where((c) => c.category == StudentCategory.kids)
+          .map((c) => c.id)
+          .toSet();
+  }
+}
 
 /// Ranking service bound to the current user's academy (null when unauthed
 /// or before an academy is resolved). Mirrors the other `*ServiceProvider`s.
@@ -18,25 +46,29 @@ final rankingServiceProvider = Provider<RankingService?>((ref) {
   return RankingService(currentUser!.academyId!);
 });
 
-/// Attendance ranking for a class over a period.
+/// Attendance ranking for a category (Geral / Adulto / Kids) over a period.
 final classRankingProvider = FutureProvider.family<List<RankingEntry>,
-    ({String classId, RankingPeriod period})>((ref, args) async {
+    ({RankingCategory category, RankingPeriod period})>((ref, args) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return const [];
+  final classes = await ref.watch(classesProvider.future);
+  final classIds = _classIdsForCategory(classes, args.category);
   return RankingService(currentUser!.academyId!).getRanking(
-    classId: args.classId,
+    classIds: classIds,
     period: args.period,
   );
 });
 
-/// 1-based rank of a student in a class ranking (null if no attendance).
+/// 1-based rank of a student in a category ranking (null if no attendance).
 final studentRankProvider = FutureProvider.family<int?,
-    ({String classId, String studentId, RankingPeriod period})>(
+    ({RankingCategory category, String studentId, RankingPeriod period})>(
         (ref, args) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return null;
+  final classes = await ref.watch(classesProvider.future);
+  final classIds = _classIdsForCategory(classes, args.category);
   return RankingService(currentUser!.academyId!).getStudentRank(
-    classId: args.classId,
+    classIds: classIds,
     studentId: args.studentId,
     period: args.period,
   );

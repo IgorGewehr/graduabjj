@@ -6,16 +6,14 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
 import '../../models/ranking_entry.dart';
-import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/ranking_providers.dart';
-import '../../providers/student_provider.dart';
-import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/polish/polish.dart';
 
-/// Student-facing class attendance leaderboard. Pick a turma + period and see
-/// who trained the most. Each row links to that student's public profile.
+/// Student-facing attendance leaderboard. Pick an audience (Geral / Adulto /
+/// Kids) + period and see who trained the most. Each row links to that
+/// student's public profile.
 class RankingScreen extends ConsumerStatefulWidget {
   const RankingScreen({super.key});
 
@@ -24,23 +22,8 @@ class RankingScreen extends ConsumerStatefulWidget {
 }
 
 class _RankingScreenState extends ConsumerState<RankingScreen> {
-  /// Selected class id. Null until the classes list resolves and we default to
-  /// a class the current student belongs to (else the first class).
-  String? _classId;
+  RankingCategory _category = RankingCategory.general;
   RankingPeriod _period = RankingPeriod.week;
-
-  /// Picks the initial class once the list is available: the first class the
-  /// current student belongs to, otherwise the first class overall.
-  String? _defaultClassId(List<BJJClass> classes, Student? student) {
-    if (classes.isEmpty) return null;
-    final studentId = student?.id;
-    if (studentId != null) {
-      for (final c in classes) {
-        if (c.studentIds.contains(studentId)) return c.id;
-      }
-    }
-    return classes.first.id;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -63,50 +46,21 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
   }
 
   Widget _buildContent() {
-    final classesAsync = ref.watch(classesProvider);
-    final student = ref.watch(currentStudentProvider).valueOrNull;
-
-    return classesAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, _) => const _RankingMessageState(
-        icon: LucideIcons.alertCircle,
-        message: 'Nao foi possivel carregar as turmas.',
-      ),
-      data: (classes) {
-        if (classes.isEmpty) {
-          return const _RankingMessageState(
-            icon: LucideIcons.users,
-            message: 'Nenhuma turma cadastrada.',
-          );
-        }
-
-        // Resolve the selected class, defaulting on first build (and dropping a
-        // stale selection if that class no longer exists).
-        final selectedId = (_classId != null &&
-                classes.any((c) => c.id == _classId))
-            ? _classId!
-            : _defaultClassId(classes, student)!;
-
-        return Column(
-          children: [
-            _RankingHeader(
-              classes: classes,
-              selectedClassId: selectedId,
-              period: _period,
-              onClassChanged: (id) {
-                if (id != null) setState(() => _classId = id);
-              },
-              onPeriodChanged: (p) => setState(() => _period = p),
-            ),
-            Expanded(child: _buildLeaderboard(selectedId)),
-          ],
-        );
-      },
+    return Column(
+      children: [
+        _RankingHeader(
+          category: _category,
+          period: _period,
+          onCategoryChanged: (c) => setState(() => _category = c),
+          onPeriodChanged: (p) => setState(() => _period = p),
+        ),
+        Expanded(child: _buildLeaderboard()),
+      ],
     );
   }
 
-  Widget _buildLeaderboard(String classId) {
-    final key = (classId: classId, period: _period);
+  Widget _buildLeaderboard() {
+    final key = (category: _category, period: _period);
     final rankingAsync = ref.watch(classRankingProvider(key));
 
     return RefreshIndicator(
@@ -135,7 +89,7 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
                 PolishedEmptyState(
                   icon: LucideIcons.trophy,
                   title: 'Nenhuma presença registrada',
-                  subtitle: 'Treine nesta turma para aparecer no ranking.',
+                  subtitle: 'Treine no período para aparecer no ranking.',
                 ),
               ],
             );
@@ -160,19 +114,17 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
   }
 }
 
-/// Sticky header: turma picker + period segmented control.
+/// Sticky header: audience (Geral / Adulto / Kids) + period segmented controls.
 class _RankingHeader extends StatelessWidget {
-  final List<BJJClass> classes;
-  final String selectedClassId;
+  final RankingCategory category;
   final RankingPeriod period;
-  final ValueChanged<String?> onClassChanged;
+  final ValueChanged<RankingCategory> onCategoryChanged;
   final ValueChanged<RankingPeriod> onPeriodChanged;
 
   const _RankingHeader({
-    required this.classes,
-    required this.selectedClassId,
+    required this.category,
     required this.period,
-    required this.onClassChanged,
+    required this.onCategoryChanged,
     required this.onPeriodChanged,
   });
 
@@ -187,38 +139,25 @@ class _RankingHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Turma picker
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.divider),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: selectedClassId,
-                isExpanded: true,
-                icon: const Icon(LucideIcons.chevronDown, size: 18),
-                borderRadius: BorderRadius.circular(12),
-                items: classes
-                    .map(
-                      (c) => DropdownMenuItem<String>(
-                        value: c.id,
-                        child: Text(
-                          c.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTheme.bodyMedium.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    )
-                    .toList(),
-                onChanged: onClassChanged,
+          // Audience segmented control
+          SegmentedButton<RankingCategory>(
+            segments: const [
+              ButtonSegment(
+                value: RankingCategory.general,
+                label: Text('Geral'),
               ),
-            ),
+              ButtonSegment(
+                value: RankingCategory.adult,
+                label: Text('Adulto'),
+              ),
+              ButtonSegment(
+                value: RankingCategory.kids,
+                label: Text('Kids'),
+              ),
+            ],
+            selected: {category},
+            showSelectedIcon: false,
+            onSelectionChanged: (set) => onCategoryChanged(set.first),
           ),
           const SizedBox(height: 12),
           // Period segmented control
