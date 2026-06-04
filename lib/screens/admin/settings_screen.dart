@@ -89,6 +89,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _useClassWeights = false;
   String _graduationMode = 'manual'; // 'manual' | 'auto'
   bool _graduationProgressVisibleToStudents = false;
+  // Requisitos compostos (B2): política de técnicas + % mínimo.
+  String _graduationSkillPolicy = 'informative'; // 'informative' | 'required'
+  final _minSkillPctController = TextEditingController(text: '80');
   final _autoGraduationAttendancesController = TextEditingController(
     text: '70',
   );
@@ -203,6 +206,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     _storeWelcomeController.dispose();
     _storeMinAmountController.dispose();
     _autoGraduationAttendancesController.dispose();
+    _minSkillPctController.dispose();
     super.dispose();
   }
 
@@ -251,6 +255,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _graduationMode = settings.graduationMode;
           _graduationProgressVisibleToStudents =
               settings.graduationProgressVisibleToStudents;
+          _graduationSkillPolicy = settings.graduationSkillPolicy;
+          _minSkillPctController.text = '${settings.graduationMinSkillPct}';
           if (settings.autoGraduationAttendances != null) {
             _autoGraduationAttendancesController.text = settings
                 .autoGraduationAttendances
@@ -345,6 +351,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           mode: _graduationMode,
           progressVisibleToStudents: _graduationProgressVisibleToStudents,
           requirementsBySport: _graduationRequirementsBySport,
+          skillPolicy: _graduationSkillPolicy,
+          minSkillPct: int.tryParse(_minSkillPctController.text.trim()),
         ),
         service.updateUseClassWeights(_useClassWeights),
       ];
@@ -1509,6 +1517,28 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                     icon: LucideIcons.eye,
                     iconColor: AppTheme.info,
                   ),
+                  const SizedBox(height: 16),
+                  _ModernSwitch(
+                    title: 'Exigir tecnicas do curriculo',
+                    subtitle:
+                        'Bloqueia a promocao ate o aluno dominar o % minimo das '
+                        'tecnicas da faixa. Desligado = so informativo.',
+                    value: _graduationSkillPolicy == 'required',
+                    onChanged: (v) => setState(() => _graduationSkillPolicy =
+                        v ? 'required' : 'informative'),
+                    icon: LucideIcons.clipboardCheck,
+                    iconColor: AppTheme.primary,
+                  ),
+                  if (_graduationSkillPolicy == 'required') ...[
+                    const SizedBox(height: 16),
+                    _ModernTextField(
+                      controller: _minSkillPctController,
+                      label: '% minimo de tecnicas dominadas',
+                      hint: '80',
+                      icon: LucideIcons.percent,
+                      keyboardType: TextInputType.number,
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.all(12),
