@@ -2472,7 +2472,9 @@ async function createMpPix({ academyId, transactionAmount, description, external
         date_of_expiration: expiresAt.toISOString(),
         external_reference: externalReference,
         notification_url: `${mpMktWebhookUrl()}?acad=${encodeURIComponent(academyId)}`,
-        application_fee: 0,
+        // NÃO enviar application_fee: o MP rejeita `0` ("must be positive").
+        // A academia recebe direto na própria conta (0% de taxa), então o
+        // atributo deve ser OMITIDO — só se inclui quando há split positivo.
         payer: {
           // Never send a fake placeholder domain — Mercado Pago rejects it.
           // A real email is enforced by the callers (createMpPixPayment).
@@ -2735,9 +2737,10 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
         binary_mode: false,
         external_reference: externalReference,
         notification_url: `${mpMktWebhookUrl()}?acad=${encodeURIComponent(academyId)}`,
-        application_fee: 0,
+        // NÃO enviar application_fee: o MP rejeita `0` ("must be positive").
+        // Liquidação direta na conta da academia (0% de taxa) → omitir.
         payer: {
-          email: payerEmail || 'sememail@bjjeasy.com.br',
+          email: payerEmail || undefined,
           first_name: nameParts[0] || undefined,
           last_name: nameParts.length > 1 ? nameParts.slice(1).join(' ') : undefined,
           identification: cpf.length >= 11 ? { type: 'CPF', number: cpf } : undefined,
