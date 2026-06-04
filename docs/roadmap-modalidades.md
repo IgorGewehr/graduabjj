@@ -74,16 +74,24 @@
 
 > O recurso mais citado por TODO software de artes marciais. Hoje a graduação é
 > **só contagem de presença**; isto adiciona a camada pedagógica.
+>
+> ✅ **B1–B4 CONCLUÍDOS (6 fases)** em `feat/evolucao-modulos` — ver
+> `docs/plano-graduacao-pedagogica.md`. Pendente: teste manual + merge p/ produção.
 
-- [ ] **B1. Currículo/syllabus por nível** — checklist de técnicas exigidas por
-      faixa/grau (posições no BJJ/LL, golpes no MT/KB, **kata** no Karatê,
-      **nage-waza/katame-waza/kata** no Judô), com vídeo opcional por técnica.
-- [ ] **B2. Requisitos de graduação compostos** — presença mínima **+ tempo-em-faixa
-      + skills marcadas como dominadas** (não só presença). Evolui `belt_progression_service`.
-- [ ] **B3. Elegibilidade automática + exame** — identificar quem está apto,
-      lembrete de graduação, agendar/registrar eventos de grading.
-- [ ] **B4. Feedback do instrutor por técnica + progresso visível** — aluno/responsável
-      vê o quanto falta pro próximo grau. Evolui a avaliação 1-5 atual.
+- [x] **B1. Currículo/syllabus por nível** ✅ — montador admin (técnicas por
+      modalidade/faixa, categoria, ordem, vídeo opcional), variante MT + toggle
+      Adulto/Kids (BJJ), template BJJ básico opcional. Coleção `syllabus`.
+- [x] **B2. Requisitos de graduação compostos** ✅ — elegibilidade soma presença
+      **+ % de técnicas dominadas + tempo-em-faixa**, configurável por academia
+      (`graduationSkillPolicy` informative|required + `minSkillPct`). Default
+      informativo não altera a auto-promoção. Enforça no detalhe, listas e auto.
+- [x] **B3. Elegibilidade automática + exame** ✅ — listas refletem requisitos
+      compostos; lembrete "apto a graduar" (botão Avisar / Avisar todos, reusa
+      `notifyGraduationEligible`); registro de exame/banca nas notas da promoção.
+- [x] **B4. Feedback do instrutor por técnica + progresso visível** ✅ — aba
+      "Currículo" no aluno (marcar Aprendendo/Praticando/Dominado + nota por
+      técnica, % dominado) e portal "Minha Graduação" (read-only, gateado).
+      Coleção `skillProgress`.
 
 ---
 
