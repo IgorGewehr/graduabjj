@@ -168,13 +168,29 @@ class _WorkoutPlanDetailScreenState
     extends ConsumerState<_WorkoutPlanDetailScreen> {
   final Set<String> _done = {};
   String? _studentId;
+  // Catálogo (A5) por id → para mostrar "Ver demonstração" nos exercícios linkados.
+  Map<String, Exercise> _exercisesById = {};
 
   WorkoutPlan get plan => widget.plan;
 
   @override
   void initState() {
     super.initState();
-    if (!plan.isFile) _loadLog();
+    if (!plan.isFile) {
+      _loadLog();
+      _loadCatalog();
+    }
+  }
+
+  Future<void> _loadCatalog() async {
+    // Só carrega se algum exercício do plano está vinculado ao catálogo.
+    final hasLinked = plan.days
+        .any((d) => d.exercises.any((e) => (e.exerciseId ?? '').isNotEmpty));
+    if (!hasLinked) return;
+    try {
+      final list = await ExerciseService(FirebaseService.academyId).listAll();
+      if (mounted) setState(() => _exercisesById = {for (final e in list) e.id: e});
+    } catch (_) {/* não-fatal: sem botão de vídeo */}
   }
 
   Future<void> _loadLog() async {
@@ -375,6 +391,19 @@ class _WorkoutPlanDetailScreenState
                             .copyWith(color: AppTheme.textSecondary),
                       ),
                     ],
+                    if (_videoUrlFor(ex) != null)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () => _openVideo(_videoUrlFor(ex)!),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          icon: const Icon(Icons.play_circle_outline, size: 16),
+                          label: const Text('Ver demonstracao'),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -383,5 +412,18 @@ class _WorkoutPlanDetailScreenState
         ),
       ),
     );
+  }
+
+  /// URL de vídeo do exercício do catálogo vinculado (ou null).
+  String? _videoUrlFor(WorkoutExercise ex) {
+    final id = ex.exerciseId;
+    if (id == null || id.isEmpty) return null;
+    final url = _exercisesById[id]?.videoUrl;
+    return (url == null || url.isEmpty) ? null : url;
+  }
+
+  Future<void> _openVideo(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 }

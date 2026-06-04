@@ -772,12 +772,15 @@ class _WorkoutPlanBuilderScreenState
     final loadC = TextEditingController(text: existing?.load ?? '');
     final restC = TextEditingController(text: existing?.rest ?? '');
     final notesC = TextEditingController(text: existing?.notes ?? '');
+    // Vínculo opcional com o catálogo (A5).
+    String? exerciseId = existing?.exerciseId;
 
     final result = await showModalBottomSheet<WorkoutExercise>(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppTheme.surface,
       builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setSheet) {
         return Padding(
           padding: EdgeInsets.only(
             left: 16,
@@ -794,6 +797,38 @@ class _WorkoutPlanBuilderScreenState
                 style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
+              // Picker do catálogo (preenche o nome + linka exerciseId).
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final picked = await _pickExerciseFromCatalog();
+                  if (picked != null) {
+                    nameC.text = picked.name;
+                    setSheet(() => exerciseId = picked.id);
+                  }
+                },
+                icon: const Icon(Icons.fitness_center, size: 16),
+                label: const Text('Escolher do catalogo'),
+              ),
+              if (exerciseId != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: [
+                      Icon(Icons.link, size: 14, color: AppTheme.primary),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text('Vinculado ao catalogo',
+                            style: AppTheme.labelSmall
+                                .copyWith(color: AppTheme.primary)),
+                      ),
+                      TextButton(
+                        onPressed: () => setSheet(() => exerciseId = null),
+                        child: const Text('Desvincular'),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 8),
               TextField(
                 controller: nameC,
                 decoration: const InputDecoration(
@@ -874,6 +909,7 @@ class _WorkoutPlanBuilderScreenState
                       load: loadC.text.trim(),
                       rest: restC.text.trim(),
                       notes: notesC.text.trim(),
+                      exerciseId: exerciseId,
                     ),
                   );
                 },
@@ -882,6 +918,7 @@ class _WorkoutPlanBuilderScreenState
             ],
           ),
         );
+        });
       },
     );
 
@@ -892,5 +929,120 @@ class _WorkoutPlanBuilderScreenState
     restC.dispose();
     notesC.dispose();
     return result;
+  }
+
+  Future<Exercise?> _pickExerciseFromCatalog() {
+    return showModalBottomSheet<Exercise>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) =>
+          _ExerciseCatalogPicker(academyId: FirebaseService.academyId),
+    );
+  }
+}
+
+/// Modal de seleção de exercício do catálogo (busca + lista). Retorna o
+/// [Exercise] escolhido, ou null se cancelado.
+class _ExerciseCatalogPicker extends StatefulWidget {
+  final String academyId;
+  const _ExerciseCatalogPicker({required this.academyId});
+
+  @override
+  State<_ExerciseCatalogPicker> createState() => _ExerciseCatalogPickerState();
+}
+
+class _ExerciseCatalogPickerState extends State<_ExerciseCatalogPicker> {
+  List<Exercise> _all = [];
+  String _query = '';
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final list = await ExerciseService(widget.academyId).listAll();
+      if (mounted) setState(() { _all = list; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _query.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? _all
+        : _all.where((e) => e.name.toLowerCase().contains(q)).toList();
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        ),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.6,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Escolher do catalogo',
+                  style:
+                      AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 12),
+              TextField(
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Buscar exercicio...',
+                  prefixIcon: Icon(Icons.search),
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (v) => setState(() => _query = v),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _all.isEmpty
+                        ? Center(
+                            child: Text(
+                                'Catalogo vazio. Cadastre em Treinos -> Catalogo.',
+                                textAlign: TextAlign.center,
+                                style: AppTheme.bodySmall.copyWith(
+                                    color: AppTheme.textSecondary)),
+                          )
+                        : ListView.builder(
+                            itemCount: filtered.length,
+                            itemBuilder: (_, i) {
+                              final e = filtered[i];
+                              final parts = [
+                                e.muscleGroupLabel,
+                                if (e.equipmentLabel != null) e.equipmentLabel!,
+                              ].join(' · ');
+                              return ListTile(
+                                title: Text(e.name),
+                                subtitle: Text(parts),
+                                trailing: (e.videoUrl ?? '').isNotEmpty
+                                    ? Icon(Icons.videocam,
+                                        size: 18, color: AppTheme.textSecondary)
+                                    : null,
+                                onTap: () => Navigator.pop(context, e),
+                              );
+                            },
+                          ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
