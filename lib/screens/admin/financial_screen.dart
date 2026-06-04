@@ -2416,7 +2416,7 @@ class _GenerateTuitionsSheet extends StatefulWidget {
   final List<Plan> plans;
   final List<Student> students;
   final List<Payment> payments;
-  final void Function(String? planId) onGenerate;
+  final Future<void> Function(String? planId) onGenerate;
 
   const _GenerateTuitionsSheet({
     required this.month,
@@ -2434,6 +2434,7 @@ class _GenerateTuitionsSheet extends StatefulWidget {
 class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
   String _filterType = 'all'; // 'all' or 'specific'
   String? _selectedPlanId;
+  bool _generating = false;
 
   List<Plan> get _activePlans => widget.plans.where((p) => p.isActive).toList();
 
@@ -2743,12 +2744,19 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: stats.willReceive == 0 ||
+                    onPressed: _generating ||
+                            stats.willReceive == 0 ||
                             (_filterType == 'specific' && _selectedPlanId == null)
                         ? null
-                        : () => widget.onGenerate(
-                            _filterType == 'specific' ? _selectedPlanId : null,
-                          ),
+                        : () async {
+                            setState(() => _generating = true);
+                            await widget.onGenerate(
+                              _filterType == 'specific' ? _selectedPlanId : null,
+                            );
+                            // Parent pops the sheet on success; on error it stays
+                            // open, so re-enable the button.
+                            if (mounted) setState(() => _generating = false);
+                          },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primary,
                       disabledBackgroundColor: AppTheme.divider,
@@ -2757,7 +2765,17 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: Text('Gerar ${stats.willReceive}'),
+                    child: _generating
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : Text('Gerar ${stats.willReceive}'),
                   ),
                 ),
               ],

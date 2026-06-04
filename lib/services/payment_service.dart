@@ -117,6 +117,11 @@ class Payment {
   final String? description;
   final String? referenceMonth;
   final String? externalId; // For AbacatePay integration
+  /// Settling gateway: 'mercadopago' | 'abacatepay' | 'manual'. Canonical field
+  /// written by every paid path (webhook, inline settle, manual mark-paid).
+  final String? paymentGateway;
+  /// Gateway-side charge id for the settlement (MP/AbacatePay payment id).
+  final String? gatewayPaymentId;
   final String? pixCode;
   final String? pixQrCode;
   final String? planId;
@@ -135,6 +140,8 @@ class Payment {
     this.description,
     this.referenceMonth,
     this.externalId,
+    this.paymentGateway,
+    this.gatewayPaymentId,
     this.pixCode,
     this.pixQrCode,
     this.planId,
@@ -164,6 +171,8 @@ class Payment {
       description: data['description'],
       referenceMonth: data['referenceMonth'],
       externalId: data['externalId'],
+      paymentGateway: data['paymentGateway'],
+      gatewayPaymentId: data['gatewayPaymentId'],
       pixCode: data['pixCode'],
       pixQrCode: data['pixQrCode'],
       planId: data['planId'],
@@ -520,6 +529,10 @@ class PaymentService {
     final payment = await update(id, {
       'status': PaymentStatus.paid.value,
       'method': method.value,
+      // Offline mark-paid has no settling gateway integration — tag it 'manual'
+      // (canonical field, read by the Payment model). The pre-read above still
+      // holds the prior gateway/charge id for the PIX cancellation below.
+      'paymentGateway': 'manual',
       'paymentDate': Timestamp.fromDate(paidAt),
       // Kill the live PIX on the doc (mirrors mpMktSettle): an admin marking
       // the charge paid offline must invalidate the already-sent code.
@@ -745,14 +758,22 @@ class PaymentService {
       }).where((s) => s.value > 0).toList();
     }
 
+    // Prefetch this month's charges ONCE for the monthly-plan dedup, instead of
+    // one Firestore query per student (the N+1 that made bulk generation hang).
+    // Non-monthly plans still use the per-student period check below.
+    final monthCharges = (await getByMonth(referenceMonth))
+        .where((p) => p.status != PaymentStatus.cancelled)
+        .toList();
+
     for (final student in studentList) {
       final period = student.billingPeriod;
       bool shouldGenerate;
 
       if (period == BillingPeriod.monthly) {
-        // Existing monthly logic: skip if active payment already exists this month
-        final existing = await getByMonth(referenceMonth, studentId: student.id);
-        final activeExisting = existing.where((p) => p.status != PaymentStatus.cancelled).toList();
+        // Skip if an active charge already exists this month for this student
+        // (matched against the plan, mirroring the prior per-student query).
+        final activeExisting =
+            monthCharges.where((p) => p.studentId == student.id).toList();
         if (student.planId != null) {
           shouldGenerate = !activeExisting.any((p) => p.planId == student.planId);
         } else {
@@ -796,7 +817,13 @@ class PaymentService {
   // Mark Overdue Payments (batch job)
   // ============================================
   Future<int> markOverduePayments({bool sendNotifications = true}) async {
-    final snapshot = await _paymentsRef.get();
+    // Only scan pending payments server-side (single-field index, auto-created)
+    // instead of reading the whole payments history. Overdue is then derived in
+    // memory from dueDate. Cuts this from a full-collection scan to just the
+    // open charges — the dominant cost when opening the financial screen.
+    final snapshot = await _paymentsRef
+        .where('status', isEqualTo: PaymentStatus.pending.value)
+        .get();
     int count = 0;
 
     for (final doc in snapshot.docs) {

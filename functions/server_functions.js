@@ -333,10 +333,10 @@ async function generateReminderPix(academyId, financial) {
       // fall through with whatever we have
     }
 
-    // amount is stored in CENTAVOS; createMpPix takes REAIS.
+    // financials.amount is stored in REAIS (canonical); createMpPix takes REAIS.
     const pix = await createMpPix({
       academyId,
-      transactionAmount: (Number(financial.amount) || 0) / 100,
+      transactionAmount: Number(financial.amount) || 0,
       description: financial.description || 'Mensalidade',
       externalReference: `${academyId}:fin:${financialId}`,
       payer: { email: payerEmail, cpf: payerCpf, name: payerName },
@@ -401,10 +401,17 @@ async function sendBillingReminderWhatsApp(
     }
     if (!phone || String(phone).trim() === '') return;
 
+    // Stage-level dedup: each reminder stage (D+0, D+1, D+3, ...) goes out at
+    // most once per charge, so a charge sitting overdue (or due-soon) for days
+    // doesn't WhatsApp the student every single day the cron runs. Only an
+    // actual send marks the stage as covered (below), so an INERT run with no
+    // WHATSAPP_API_KEY still delivers once the key is later configured.
+    if (financial.lastReminderStage === stage) return;
+
     const dueDate = financial.dueDate && typeof financial.dueDate.toDate === 'function'
       ? financial.dueDate.toDate()
       : new Date();
-    const valor = formatBrlAmount((Number(financial.amount) || 0) / 100);
+    const valor = formatBrlAmount(Number(financial.amount) || 0);
     const vencimento = formatBrDate(dueDate);
     const dias = daysOverdue || 0;
 
@@ -427,7 +434,19 @@ async function sendBillingReminderWhatsApp(
     });
     const msg = mpInjectPaymentInfo(filled, pix.pixCode, pix.ticketUrl);
 
-    await sendWhatsAppServer(phone, msg, academyId);
+    const result = await sendWhatsAppServer(phone, msg, academyId);
+    // Persist the dedup marker ONLY when the message actually went out (not on
+    // the INERT no_key path), so re-enabling WhatsApp later still delivers.
+    if (result && result.sent && financial.id) {
+      try {
+        await db.doc(`academies/${academyId}/financials/${financial.id}`).update({
+          lastReminderStage: stage,
+          lastReminderAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } catch (_) {
+        // best-effort: the dedup marker is non-critical.
+      }
+    }
   } catch (e) {
     console.error('[S7] sendBillingReminderWhatsApp failed:', e && e.message);
   }
@@ -538,7 +557,7 @@ exports.onFinancialCreated = functions.firestore
     // Send notification to student
     const dueDate = financial.dueDate.toDate();
     const formattedDate = dueDate.toLocaleDateString('pt-BR');
-    const formattedAmount = (financial.amount / 100).toFixed(2);
+    const formattedAmount = (Number(financial.amount) || 0).toFixed(2);
 
     // Push notification
     await sendToUser(
@@ -908,7 +927,7 @@ exports.scheduledOverdueCheck = functions.pubsub
             await sendToUser(
               userId,
               'Pagamento Atrasado',
-              `Sua mensalidade de R$ ${(financial.amount / 100).toFixed(2)} esta atrasada ha ${daysOverdue} dias.`,
+              `Sua mensalidade de R$ ${(Number(financial.amount) || 0).toFixed(2)} esta atrasada ha ${daysOverdue} dias.`,
               {
                 type: 'financial',
                 id: financialDoc.id,
@@ -917,7 +936,7 @@ exports.scheduledOverdueCheck = functions.pubsub
             );
             await createInternalNotification(academyId, userId, 'financial', 'high',
               'Pagamento Atrasado',
-              `Sua mensalidade de R$ ${(financial.amount / 100).toFixed(2)} está atrasada há ${daysOverdue} dias.`,
+              `Sua mensalidade de R$ ${(Number(financial.amount) || 0).toFixed(2)} está atrasada há ${daysOverdue} dias.`,
               { actionUrl: '/portal/financeiro', actionLabel: 'Regularizar',
                 financialId: financialDoc.id, expiresInDays: 30 }
             );
@@ -939,7 +958,7 @@ exports.scheduledOverdueCheck = functions.pubsub
       // Notify admin about overdue summary (push + internal)
       if (overdueCount > 0) {
         const adminId = academy.ownerId || academy.adminUserId;
-        const totalFormatted = (totalOverdueAmount / 100).toFixed(2);
+        const totalFormatted = (Number(totalOverdueAmount) || 0).toFixed(2);
         const summaryMsg = `Voce tem ${overdueCount} pagamento(s) atrasado(s) totalizando R$ ${totalFormatted}.`;
         await sendToUser(
           adminId,
@@ -1000,13 +1019,12 @@ exports.scheduledDueSoonReminder = functions.pubsub
 
         // Check if due within 3 days (but not overdue)
         if (dueDate > now && dueDate <= threeDaysFromNow) {
+          const daysUntilDue = Math.ceil(
+            (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+          );
           const userId = await getBillingRecipientUid(financial.studentId, academyId);
           if (userId) {
-            const daysUntilDue = Math.ceil(
-              (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-            );
-
-            const amtFormatted = (financial.amount / 100).toFixed(2);
+            const amtFormatted = (Number(financial.amount) || 0).toFixed(2);
             const reminderMsg = `Sua mensalidade de R$ ${amtFormatted} vence em ${daysUntilDue} dia(s).`;
             await sendToUser(
               userId,
@@ -1027,18 +1045,21 @@ exports.scheduledDueSoonReminder = functions.pubsub
             console.log(`Sent due soon reminder to user ${userId} for financial ${financialDoc.id}`);
           }
 
-          // S7: additionally send the autonomous WhatsApp + PIX courtesy
-          // reminder for the due-today/due-soon stage ('D+0'). Sent even when
-          // there is no linked app user (recipient is the student's phone).
-          // INERT until WHATSAPP_API_KEY is set (gate in sendWhatsAppServer).
-          await sendBillingReminderWhatsApp(
-            academyId,
-            academyName,
-            billingSettings,
-            { ...financial, id: financialDoc.id },
-            'D+0',
-            0
-          );
+          // S7: the WhatsApp 'D+0' courtesy text reads "vence hoje", so only send
+          // it on the due date itself (<= 1 day out), not across the whole 1-3 day
+          // window — otherwise the student gets a "due today" message up to 3 days
+          // early. The 2-3 day window keeps only the internal push/notification
+          // above. INERT until WHATSAPP_API_KEY is set (gate in sendWhatsAppServer).
+          if (daysUntilDue <= 1) {
+            await sendBillingReminderWhatsApp(
+              academyId,
+              academyName,
+              billingSettings,
+              { ...financial, id: financialDoc.id },
+              'D+0',
+              0
+            );
+          }
         }
       }
     }
@@ -1800,6 +1821,10 @@ exports.createCardPayment = onCall(async (request) => {
         status: 'paid',
         paymentDate: admin.firestore.FieldValue.serverTimestamp(),
         method: 'card',
+        // Canonical gateway fields (read by the Dart Payment model), alongside
+        // the legacy AbacatePay-specific fields kept for back-compat.
+        paymentGateway: 'abacatepay',
+        gatewayPaymentId: responseData.id,
         paidViaAbacatePay: true,
         abacatePayTransactionId: responseData.id,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2482,13 +2507,12 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
   }
 
   // SECURITY: never trust the client amount. The charge is DERIVED from the
-  // stored financial amount (centavos). If a client amount is supplied it must
-  // match within a 1-centavo tolerance, else reject (mirrors
-  // createOrderPixPayment:1487 for AbacatePay).
-  const expectedAmount = Number(fin.amount) || 0;
-  if (Math.abs(expectedAmount - amount) > 1) {
+  // stored financial amount (REAIS, canonical). The client sends CENTAVOS, so
+  // compare in centavos within a 1-centavo tolerance, else reject.
+  const expectedCentavos = Math.round((Number(fin.amount) || 0) * 100);
+  if (Math.abs(expectedCentavos - amount) > 1) {
     throw new HttpsError('invalid-argument',
-      `Amount (${amount}) does not match financial amount (${expectedAmount})`);
+      `Amount (${amount}) does not match financial amount (${expectedCentavos})`);
   }
 
   // Idempotency: reuse a still-valid PIX so the kid and the responsible adult
@@ -2507,7 +2531,7 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
 
   const pix = await createMpPix({
     academyId,
-    transactionAmount: expectedAmount / 100, // server-derived centavos -> reais
+    transactionAmount: Number(fin.amount) || 0, // server-derived REAIS
     description: sanitizeString(description) || 'Mensalidade',
     externalReference: `${academyId}:fin:${financialId}`,
     payer: { email: payerEmail, cpf: payerCpf, name: studentName },
@@ -2634,17 +2658,19 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
   if (recData.status === 'paid') {
     throw new HttpsError('already-exists', 'Already paid');
   }
-  if (!isOrder && recData.studentId !== studentId) {
+  // Ownership: both financial and storeOrder docs carry studentId; require it to
+  // match the authenticated payer for BOTH (orders were previously unchecked).
+  if (recData.studentId !== studentId) {
     throw new HttpsError('permission-denied', 'Record does not belong to this student');
   }
 
   // SECURITY: never trust the client amount. DERIVE the charge server-side from
-  // the stored record. Both order and financial now carry CENTAVOS from the
-  // client (H1); the client value is only a cross-check (1-centavo tolerance).
-  // financial.amount is centavos; order total is reais -> centavos.
+  // the stored record. The client sends CENTAVOS; the client value is only a
+  // cross-check (1-centavo tolerance). financial.amount is REAIS (canonical);
+  // order total is reais -> both normalized to centavos here.
   const expectedCentavos = isOrder
     ? Math.round(orderExpectedTotalReais(recData) * 100)
-    : (Number(recData.amount) || 0);
+    : Math.round((Number(recData.amount) || 0) * 100);
   if (Math.abs(expectedCentavos - amount) > 1) {
     throw new HttpsError('invalid-argument',
       `Amount (${amount}) does not match expected amount (${expectedCentavos})`);
@@ -2861,8 +2887,8 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
   const snap = await finRef.get();
   if (!snap.exists || snap.data().status === 'paid') return; // idempotent
   // SECURITY: refuse to settle if the paid amount differs from the stored
-  // financial amount (centavos -> reais, 1-centavo tolerance).
-  const expectedFinReais = (Number(snap.data().amount) || 0) / 100;
+  // financial amount (REAIS, canonical; 1-centavo tolerance).
+  const expectedFinReais = Number(snap.data().amount) || 0;
   const paidFinReais = Number(payment.transaction_amount) || 0;
   if (Math.abs(expectedFinReais - paidFinReais) > 0.01) {
     console.error('[mpMktSettle] amount mismatch fin', docId,
