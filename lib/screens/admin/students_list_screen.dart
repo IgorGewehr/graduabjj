@@ -12,6 +12,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
@@ -63,7 +64,13 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final service = StudentService(FirebaseService.academyId);
+      // Source the academy from the authenticated user (single source of truth),
+      // NOT the mutable global static FirebaseService.academyId (which could be
+      // stale/'default' and silently query the wrong/empty academy → "0 alunos").
+      final user = await ref.read(currentUserProvider.future);
+      final academyId = user?.academyId ?? FirebaseService.academyId;
+
+      final service = StudentService(academyId);
       final students = await service.getAll();
 
       // Eligibility snapshot — only loaded when the academy has auto-graduation
@@ -72,7 +79,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       final settings = ref.read(academySettingsProvider).valueOrNull;
       Map<String, EligibilitySnapshotEntry> eligibility = {};
       if (settings?.autoGraduationEnabled == true) {
-        final beltService = BeltProgressionService(FirebaseService.academyId);
+        final beltService = BeltProgressionService(academyId);
         final snapshot = await beltService.getEligibilitySnapshot();
         eligibility = {for (final e in snapshot) e.studentId: e};
       }
@@ -84,6 +91,8 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      // Surface the failure instead of masquerading as "0 alunos".
+      debugPrint('[StudentsList] load failed (academy=${FirebaseService.academyId}): $e');
       setState(() => _isLoading = false);
     }
   }

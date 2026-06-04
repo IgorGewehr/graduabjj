@@ -385,6 +385,21 @@ class PaymentService {
     return payments;
   }
 
+  /// Live stream of a month's payments — so the admin screen reflects a webhook
+  /// flip to `paid` in real time (the one-shot getByMonth went stale, showing a
+  /// just-paid charge as still open).
+  Stream<List<Payment>> streamByMonth(String referenceMonth) {
+    return _paymentsRef
+        .where('referenceMonth', isEqualTo: referenceMonth)
+        .snapshots()
+        .map((snap) {
+      final payments =
+          snap.docs.map((d) => Payment.fromFirestore(d)).toList();
+      payments.sort((a, b) => b.dueDate.compareTo(a.dueDate));
+      return payments;
+    });
+  }
+
   // ============================================
   // Get Payment Summary (all students)
   // ============================================

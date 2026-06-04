@@ -347,12 +347,13 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
       barrierDismissible: false,
       barrierColor: Colors.black54,
       transitionDuration: const Duration(milliseconds: 300),
-      pageBuilder: (_, __, ___) => _SuccessDialog(
+      pageBuilder: (dialogContext, __, ___) => _SuccessDialog(
         onClose: () {
-          Navigator.pop(context); // Close dialog
-          if (mounted) {
-            Navigator.pop(context); // Close sheet
-          }
+          // Pop the dialog by ITS OWN route (never the sheet's State context),
+          // then the sheet exactly once — guarded — so we never walk past the
+          // navigator root (which blanked the screen / crashed).
+          Navigator.of(dialogContext).pop();
+          if (mounted) Navigator.of(context).pop();
           widget.onClose?.call();
         },
       ),
@@ -1140,6 +1141,9 @@ class _SuccessDialog extends StatefulWidget {
 
 class _SuccessDialogState extends State<_SuccessDialog> {
   late final ConfettiController _confetti;
+  // Re-entrancy guard: a double-tap during the close transition must not fire
+  // onClose twice (which would pop an extra route → black screen).
+  bool _closing = false;
 
   @override
   void initState() {
@@ -1184,7 +1188,6 @@ class _SuccessDialogState extends State<_SuccessDialog> {
   }
 
   Widget _buildCard(BuildContext context) {
-    final onClose = widget.onClose;
     return Container(
         margin: const EdgeInsets.all(32),
         padding: const EdgeInsets.all(32),
@@ -1259,7 +1262,12 @@ class _SuccessDialogState extends State<_SuccessDialog> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: onClose,
+                onPressed: _closing
+                    ? null
+                    : () {
+                        setState(() => _closing = true);
+                        widget.onClose();
+                      },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.success,
                   foregroundColor: Colors.white,

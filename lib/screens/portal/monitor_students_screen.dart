@@ -9,6 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/belt_badge.dart';
@@ -61,7 +62,11 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final service = StudentService(FirebaseService.academyId);
+      // Resolve the academy from the authenticated user, not the mutable global
+      // static (which could be stale/'default' → silently empty list, "0 alunos").
+      final user = await ref.read(currentUserProvider.future);
+      final academyId = user?.academyId ?? FirebaseService.academyId;
+      final service = StudentService(academyId);
       final students = await service.getAll();
       setState(() {
         _students = students;
@@ -69,6 +74,7 @@ class _MonitorStudentsScreenState extends ConsumerState<MonitorStudentsScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      debugPrint('[MonitorStudents] load failed (academy=${FirebaseService.academyId}): $e');
       setState(() => _isLoading = false);
     }
   }

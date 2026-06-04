@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../providers/auth_provider.dart';
 import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/polish/polish.dart';
 import '../../core/theme.dart';
@@ -33,6 +36,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   // State
   DateTime _selectedMonth = DateTime.now();
   late TabController _tabController;
+  StreamSubscription<List<Payment>>? _paymentsSub;
 
   // Payments filter state
   String _paymentFilter = 'all'; // all, paid, pending, overdue, cancelled
@@ -47,8 +51,43 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
   @override
   void dispose() {
+    _paymentsSub?.cancel();
     _tabController.dispose();
     super.dispose();
+  }
+
+  /// Recomputes the monthly summary buckets from a payments list (mirrors
+  /// PaymentService.getMonthlySummary) so the live stream keeps the stat cards
+  /// in sync without an extra query.
+  Map<String, dynamic> _summaryFromPayments(List<Payment> payments) {
+    double totalExpected = 0, totalPaid = 0, totalPending = 0, totalOverdue = 0;
+    int countPaid = 0, countPending = 0, countOverdue = 0, countCancelled = 0;
+    for (final p in payments) {
+      if (p.status == PaymentStatus.cancelled) {
+        countCancelled++;
+        continue;
+      }
+      totalExpected += p.value;
+      if (p.status == PaymentStatus.paid) {
+        totalPaid += p.value;
+        countPaid++;
+      } else if (p.isOverdue || p.status == PaymentStatus.overdue) {
+        totalOverdue += p.value;
+        countOverdue++;
+      } else if (p.status == PaymentStatus.pending) {
+        totalPending += p.value;
+        countPending++;
+      }
+    }
+    return {
+      'referenceMonth': _currentMonthKey,
+      'totalExpected': totalExpected,
+      'paid': {'value': totalPaid, 'count': countPaid},
+      'pending': {'value': totalPending, 'count': countPending},
+      'overdue': {'value': totalOverdue, 'count': countOverdue},
+      'cancelled': countCancelled,
+      'collectionRate': totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0,
+    };
   }
 
   String get _currentMonthKey => DateFormat('yyyy-MM').format(_selectedMonth);
@@ -57,7 +96,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     setState(() => _isLoading = true);
 
     try {
-      final academyId = FirebaseService.academyId;
+      // Resolve the academy from the authenticated user (not the mutable global
+      // static, which could be stale and read the wrong academy).
+      final user = await ref.read(currentUserProvider.future);
+      final academyId = user?.academyId ?? FirebaseService.academyId;
       final paymentService = PaymentService(academyId);
 
       // Reconcile overdue statuses before reading. Without this, dueDate-passed
@@ -72,12 +114,25 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         paymentService.getMonthlySummary(_currentMonthKey),
       ]);
 
+      if (!mounted) return;
       setState(() {
         _allPayments = results[0] as List<Payment>;
         _plans = results[1] as List<Plan>;
         _students = results[2] as List<Student>;
         _monthlySummary = results[3] as Map<String, dynamic>;
         _isLoading = false;
+      });
+
+      // Live updates: reflect a webhook flip to `paid` in real time (the
+      // one-shot read above could otherwise show a just-paid charge as open).
+      _paymentsSub?.cancel();
+      _paymentsSub =
+          paymentService.streamByMonth(_currentMonthKey).listen((payments) {
+        if (!mounted) return;
+        setState(() {
+          _allPayments = payments;
+          _monthlySummary = _summaryFromPayments(payments);
+        });
       });
     } catch (e) {
       setState(() => _isLoading = false);
