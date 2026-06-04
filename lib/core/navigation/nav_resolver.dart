@@ -15,7 +15,7 @@ bool isFeatureEnabled(FeatureId f, AcademySettings? s) {
       return s?.journalVisibleToStudents ?? true;
     case FeatureId.graduation:
       return s?.autoGraduationEnabled ?? false;
-    case FeatureId.wallet:
+    case FeatureId.payments:
       return s?.isPaymentEnabled ?? false;
     case FeatureId.musculacao:
       return true; // sem flag

@@ -13,6 +13,8 @@ import '../../providers/ranking_providers.dart';
 import '../../services/achievement_service.dart' show Achievement, AchievementType;
 import '../../services/competition_service.dart' show CompetitionResult;
 import '../../widgets/cached_image.dart';
+import '../../widgets/common/animated_belt.dart';
+import '../../widgets/common/belt_badge.dart';
 import '../../widgets/common/grade_badge.dart';
 import '../../widgets/competitions/photo_card.dart';
 import '../../widgets/competitions/photo_fullscreen_viewer.dart';
@@ -255,11 +257,22 @@ class _ProfileHeader extends StatelessWidget {
           ],
           if (grade != null) ...[
             const SizedBox(height: 12),
-            GradeBadge(
-              sportId: sport,
-              grade: grade.currentGrade,
+            // Belt hero — animated "evolution morph" (white 0° → current
+            // belt/graus) played once when the public profile opens.
+            AnimatedBelt(
+              belt: grade.currentGrade,
               stripes: grade.currentStripes,
+              size: BeltSize.large,
+              highlight: true,
             ),
+            if (sport != SportId.bjj) ...[
+              const SizedBox(height: 8),
+              GradeBadge(
+                sportId: sport,
+                grade: grade.currentGrade,
+                stripes: grade.currentStripes,
+              ),
+            ],
           ],
           const SizedBox(height: 20),
           Row(

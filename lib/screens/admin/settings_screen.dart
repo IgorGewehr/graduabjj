@@ -310,10 +310,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     if (feature == null || _deepLinkHandled || !mounted) return;
     _deepLinkHandled = true;
 
-    // Wallet anchors on the Financeiro tab (MP card); the rest live in
+    // Payments anchors on the Financeiro tab (MP card); the rest live in
     // Funcionalidades.
     setState(() {
-      _selectedTabIndex = feature == FeatureId.wallet ? 1 : 2;
+      _selectedTabIndex = feature == FeatureId.payments ? 1 : 2;
       _highlightedFeature = feature;
     });
 
@@ -1108,8 +1108,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
   Widget _buildMercadoPagoCard() {
     return _SettingsCard(
-      cardKey: _featureKeys[FeatureId.wallet],
-      highlighted: _highlightedFeature == FeatureId.wallet,
+      cardKey: _featureKeys[FeatureId.payments],
+      highlighted: _highlightedFeature == FeatureId.payments,
       title: 'Mercado Pago',
       icon: LucideIcons.creditCard,
       child: Column(

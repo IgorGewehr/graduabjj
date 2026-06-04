@@ -75,8 +75,8 @@ void main() {
     test('settingsDeepLinkFor builds the canonical highlight URL', () {
       expect(settingsDeepLinkFor(FeatureId.store),
           '/admin/configuracoes?feature=store');
-      expect(settingsDeepLinkFor(FeatureId.wallet),
-          '/admin/configuracoes?feature=wallet');
+      expect(settingsDeepLinkFor(FeatureId.payments),
+          '/admin/configuracoes?feature=payments');
     });
   });
 
@@ -85,7 +85,7 @@ void main() {
       // OFF-by-default features.
       expect(isFeatureEnabled(FeatureId.store, null), isFalse);
       expect(isFeatureEnabled(FeatureId.graduation, null), isFalse);
-      expect(isFeatureEnabled(FeatureId.wallet, null), isFalse);
+      expect(isFeatureEnabled(FeatureId.payments, null), isFalse);
       // ON-by-default features.
       expect(isFeatureEnabled(FeatureId.ranking, null), isTrue);
       expect(isFeatureEnabled(FeatureId.journal, null), isTrue);
@@ -95,16 +95,17 @@ void main() {
       expect(isFeatureEnabled(FeatureId.musculacao, null), isTrue);
     });
 
-    test('wallet is enabled when ANY payment provider is connected', () {
-      expect(isFeatureEnabled(FeatureId.wallet, _settings(mpConnected: true)),
+    test('payments is enabled when ANY payment provider is connected', () {
+      expect(isFeatureEnabled(FeatureId.payments, _settings(mpConnected: true)),
           isTrue);
       expect(
           isFeatureEnabled(
-              FeatureId.wallet, _settings(abacatePayEnabled: true)),
+              FeatureId.payments, _settings(abacatePayEnabled: true)),
           isTrue);
-      expect(isFeatureEnabled(FeatureId.wallet, _settings(asaasEnabled: true)),
+      expect(
+          isFeatureEnabled(FeatureId.payments, _settings(asaasEnabled: true)),
           isTrue);
-      expect(isFeatureEnabled(FeatureId.wallet, _settings()), isFalse);
+      expect(isFeatureEnabled(FeatureId.payments, _settings()), isFalse);
     });
 
     test('every FeatureId is handled (exhaustive switch, no throw)', () {

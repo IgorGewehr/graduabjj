@@ -129,25 +129,38 @@ class AppCachedAvatar extends StatelessWidget {
     this.foregroundColor,
   });
 
+  /// Initials/placeholder avatar — shown when there is no photo, while it loads,
+  /// or if it fails. Never drawn OVER a loaded photo.
+  Widget _fallback() {
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: backgroundColor,
+      foregroundColor: foregroundColor,
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final url = imageUrl;
     if (url == null || url.isEmpty) {
-      return CircleAvatar(
-        radius: radius,
-        backgroundColor: backgroundColor,
-        foregroundColor: foregroundColor,
-        child: child,
-      );
+      return _fallback();
     }
 
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: backgroundColor ?? AppTheme.surfaceVariant,
-      foregroundColor: foregroundColor,
-      backgroundImage: CachedNetworkImageProvider(url),
-      onBackgroundImageError: (_, _) {},
-      child: child,
+    // Render the photo as the WHOLE avatar (clipped to a circle). The initials
+    // [child] are only the placeholder/error fallback — passing them as
+    // CircleAvatar.child alongside backgroundImage painted them ON TOP of the
+    // photo (the reported "initial overlapping the profile photo" bug).
+    final diameter = radius * 2;
+    return ClipOval(
+      child: CachedNetworkImage(
+        imageUrl: url,
+        width: diameter,
+        height: diameter,
+        fit: BoxFit.cover,
+        placeholder: (_, _) => _fallback(),
+        errorWidget: (_, _, _) => _fallback(),
+      ),
     );
   }
 }

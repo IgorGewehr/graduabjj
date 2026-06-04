@@ -424,9 +424,20 @@ class _OverlayProgressStep extends StatelessWidget {
 /// Global Navigator Key for push notifications deep linking
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
+/// Tracks whether the current signed-in session has already "landed" on its
+/// post-login destination (portal/admin). Once landed, a transient re-fetch of
+/// the user/settings/student providers (e.g. the selected-academy id flipping
+/// from null to the primary id on first boot) must NOT bounce the user back to
+/// the splash — that round-trip is exactly the "home flashes then reloads"
+/// glitch. Reset on logout so the next session re-gates from scratch.
+bool _sessionLanded = false;
+
 /// Router Provider
 final routerProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authStateProvider);
+  // Watch the coarse bootstrap status (auth + user + academy settings + linked
+  // student). This is the single source of truth for "is the session ready to
+  // render its shell without a follow-up loading flicker".
+  final bootstrap = ref.watch(appBootstrapProvider);
   final currentUser = ref.watch(currentUserProvider);
   final isCreatingAccount = ref.watch(isCreatingAccountProvider);
 
@@ -435,15 +446,16 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: '/',
     debugLogDiagnostics: true,
     redirect: (context, state) {
-      final isLoggedIn = authState.valueOrNull != null;
       final isLoggingIn = state.matchedLocation == '/login';
       final isRegistering = state.matchedLocation == '/register';
       final isLinkCode = state.matchedLocation == '/link-code';
       final isCreatingAcademy = state.matchedLocation == '/criar-academia';
       final isSplash = state.matchedLocation == '/';
+      final isAuthRoute =
+          isLoggingIn || isRegistering || isLinkCode || isCreatingAcademy;
 
       print(
-        '[ROUTER] matchedLocation: ${state.matchedLocation}, isLoggedIn: $isLoggedIn, authLoading: ${authState.isLoading}, userLoading: ${currentUser.isLoading}, isCreatingAccount: $isCreatingAccount',
+        '[ROUTER] matchedLocation: ${state.matchedLocation}, bootstrap: $bootstrap, isCreatingAccount: $isCreatingAccount, landed: $_sessionLanded',
       );
 
       // Don't redirect while account creation is in progress
@@ -452,28 +464,27 @@ final routerProvider = Provider<GoRouter>((ref) {
         return null;
       }
 
-      // Show splash while loading auth state
-      if (authState.isLoading) {
-        return isSplash ? null : '/';
-      }
-
-      // If not logged in, redirect to login
-      if (!isLoggedIn) {
-        if (isLoggingIn || isRegistering || isLinkCode || isCreatingAcademy) {
-          return null;
-        }
+      // Not logged in: reset the landing latch and route to the auth flow.
+      if (bootstrap == AppBootstrapStatus.unauthenticated) {
+        _sessionLanded = false;
+        if (isAuthRoute) return null;
         return '/login';
       }
 
-      // If logged in, wait for user data to load before redirecting
-      if (currentUser.isLoading) {
-        print('[ROUTER] Waiting for user data to load...');
+      // Logged in but the session context is still resolving for the FIRST
+      // time. Keep a single, stable splash until everything is ready. Once the
+      // user has already landed (latch set), a transient reload must keep them
+      // where they are instead of bouncing back to the splash.
+      if (bootstrap == AppBootstrapStatus.loading) {
+        print('[ROUTER] Bootstrap loading...');
+        if (_sessionLanded) return null;
         return isSplash ? null : '/';
       }
 
+      // bootstrap == ready
       final user = currentUser.valueOrNull;
       print(
-        '[ROUTER] User loaded: ${user?.displayName}, role: ${user?.role}, isAdmin: ${user?.isAdmin}, isInstructor: ${user?.isInstructor}',
+        '[ROUTER] Ready: ${user?.displayName}, role: ${user?.role}, isAdmin: ${user?.isAdmin}, isInstructor: ${user?.isInstructor}',
       );
 
       // Inform notification service of user role for correct routing
@@ -483,12 +494,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         );
       }
 
-      // If logged in and on auth pages, redirect based on role
-      if (isLoggingIn ||
-          isRegistering ||
-          isLinkCode ||
-          isCreatingAcademy ||
-          isSplash) {
+      // If ready and sitting on an auth/splash page, redirect based on role.
+      if (isAuthRoute || isSplash) {
         if (user != null) {
           // Admins always go to AdminShell.
           if (user.isAdmin) {
@@ -520,6 +527,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         return '/portal';
       }
 
+      // Ready AND already sitting on a post-login route → we've landed. Latch
+      // so any subsequent transient reload keeps the user here (no splash
+      // bounce). Stay put.
+      _sessionLanded = true;
       return null;
     },
     routes: [
@@ -1093,23 +1104,7 @@ final routerProvider = Provider<GoRouter>((ref) {
               ),
             ),
           ),
-          GoRoute(
-            path: '/admin/carteira',
-            pageBuilder: (context, state) => _buildPageWithCrossfade(
-              context: context,
-              state: state,
-              child: const AdminWalletScreen(),
-            ),
-          ),
           // Sub-pages
-          GoRoute(
-            path: '/admin/carteira/2fa-setup',
-            pageBuilder: (context, state) => _buildPageWithPushTransition(
-              context: context,
-              state: state,
-              child: const TotpSetupScreen(),
-            ),
-          ),
           GoRoute(
             path: '/admin/loja/pedidos',
             pageBuilder: (context, state) => _buildPageWithPushTransition(

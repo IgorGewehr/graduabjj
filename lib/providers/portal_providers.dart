@@ -160,6 +160,58 @@ final academySettingsProvider = FutureProvider<AcademySettings?>((ref) async {
   return await service.getAcademySettings();
 });
 
+// ============================================
+// App Bootstrap (post-login gate)
+// ============================================
+
+/// Coarse state used by the router to decide between the splash and the
+/// landed shell. The point is to surface a SINGLE, stable splash until the
+/// whole session context (user + academy settings + linked student) is ready
+/// — so the home never flashes before its data resolves.
+enum AppBootstrapStatus { loading, unauthenticated, ready }
+
+/// Aggregates every async dependency needed before the portal/admin shell can
+/// render without a follow-up loading flicker.
+///
+/// Returns:
+///   * [AppBootstrapStatus.unauthenticated] — no signed-in firebase user;
+///   * [AppBootstrapStatus.loading]         — auth/user/settings/student still
+///     resolving for the first time;
+///   * [AppBootstrapStatus.ready]           — everything resolved.
+///
+/// IMPORTANT: This does NOT latch. Latching (so a transient re-fetch after the
+/// user has already landed does not bounce them back to the splash) is handled
+/// in the router redirect via [_LandingLatch], which is the only place that
+/// knows whether the user is currently sitting on a post-login route.
+final appBootstrapProvider = Provider<AppBootstrapStatus>((ref) {
+  final auth = ref.watch(authStateProvider);
+
+  // Still resolving the auth stream → loading.
+  if (auth.isLoading) return AppBootstrapStatus.loading;
+  if (auth.valueOrNull == null) return AppBootstrapStatus.unauthenticated;
+
+  // Logged in: the user document must resolve first (it determines academy
+  // context for the providers below).
+  final userAsync = ref.watch(currentUserProvider);
+  if (userAsync.isLoading) return AppBootstrapStatus.loading;
+  final user = userAsync.valueOrNull;
+
+  // Free users (no academy) have no academy-scoped context to wait on.
+  if (user == null || user.academyId == null) {
+    return AppBootstrapStatus.ready;
+  }
+
+  // Academy-scoped users: wait for settings AND the linked student so the
+  // shell + home render fully populated on first paint.
+  final settingsAsync = ref.watch(academySettingsProvider);
+  if (settingsAsync.isLoading) return AppBootstrapStatus.loading;
+
+  final studentAsync = ref.watch(currentStudentProvider);
+  if (studentAsync.isLoading) return AppBootstrapStatus.loading;
+
+  return AppBootstrapStatus.ready;
+});
+
 /// Academy name provider
 final academyNameProvider = FutureProvider<String>((ref) async {
   final settings = await ref.watch(academySettingsProvider.future);

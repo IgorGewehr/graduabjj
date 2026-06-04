@@ -65,8 +65,13 @@ class HomeHeroCard extends ConsumerWidget {
         final schedule = data?.schedule;
         final nextDate = data?.nextDate;
 
-        // 1) Check-in disponível → highest-priority green hero.
+        // 1) Check-in disponível → highest-priority hero.
+        // Only offer check-in for a class the student can actually check into
+        // (enrolled, or a genuinely open class) — never for a class they are
+        // not matriculated in. Reuses the domain rule [acceptsCheckinFrom].
         final canCheckin = checkinEnabled &&
+            classInfo != null &&
+            classInfo.acceptsCheckinFrom(studentId) &&
             nextDate != null &&
             schedule != null &&
             isInCheckinWindow(
@@ -76,7 +81,7 @@ class HomeHeroCard extends ConsumerWidget {
             );
         if (canCheckin) {
           return _CheckinHero(
-            className: classInfo?.name ?? 'Sua aula',
+            className: classInfo.name,
             startTime: schedule.startTime,
             onTap: () => context.go('/portal/horarios'),
           ).fadeInQuick();
@@ -112,8 +117,8 @@ class HomeHeroCard extends ConsumerWidget {
   }
 }
 
-/// Green, shimmering hero shown when the student is inside a class check-in
-/// window. Navigates to Horários — never marks attendance directly.
+/// Sober black, shimmering hero shown when the student is inside a class
+/// check-in window. Navigates to Horários — never marks attendance directly.
 class _CheckinHero extends StatelessWidget {
   final String className;
   final String startTime;
@@ -131,10 +136,10 @@ class _CheckinHero extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
+        gradient: const LinearGradient(
           colors: [
-            AppTheme.success,
-            AppTheme.success.withValues(alpha: 0.82),
+            AppTheme.primaryLight,
+            AppTheme.primaryDark,
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -142,7 +147,7 @@ class _CheckinHero extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.success.withValues(alpha: 0.28),
+            color: AppTheme.primaryDark.withValues(alpha: 0.30),
             blurRadius: 18,
             offset: const Offset(0, 6),
           ),

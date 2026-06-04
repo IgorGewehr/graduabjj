@@ -18,6 +18,8 @@ import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
 import '../../services/belt_progression_service.dart';
 import '../../services/services.dart';
+import '../../widgets/common/animated_belt.dart';
+import '../../widgets/common/belt_badge.dart';
 import '../../widgets/common/profile_photo_picker.dart';
 import '../../widgets/common/sport_chip.dart';
 import '../../widgets/polish/polish.dart';
@@ -422,7 +424,12 @@ class _AdminStudentDetailScreenState
                                     : Colors.white,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 10),
+                            // Belt hero — animated "evolution morph" (white 0° →
+                            // current belt/graus) played once when the detail
+                            // opens. Uses the student's primary-sport grade.
+                            _buildAnimatedBeltHero(),
+                            const SizedBox(height: 8),
                             Row(
                               children: [
                                 _buildBeltBadge(),
@@ -440,6 +447,20 @@ class _AdminStudentDetailScreenState
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedBeltHero() {
+    final primarySport = _student!.getPrimarySport();
+    final grade = _student!.getGrade(primarySport);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: AnimatedBelt(
+        belt: grade?.currentGrade ?? 'white',
+        stripes: grade?.currentStripes ?? 0,
+        size: BeltSize.medium,
+        highlight: true,
       ),
     );
   }

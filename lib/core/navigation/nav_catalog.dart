@@ -9,7 +9,7 @@ enum FeatureId {
   ranking, // Ranking       -> AcademySettings.rankingVisibleToStudents
   journal, // Jornal        -> AcademySettings.journalVisibleToStudents
   graduation, // Graduação  -> AcademySettings.autoGraduationEnabled
-  wallet, // Carteira (MP)  -> AcademySettings.isPaymentEnabled
+  payments, // Mercado Pago -> AcademySettings.isPaymentEnabled
   musculacao, // Musculação -> sempre visível (sem flag)
   workouts, // Treinos      -> AcademySettings.workoutPlansEnabled
   videos, // Vídeos         -> AcademySettings.trainingVideosEnabled
@@ -18,7 +18,7 @@ enum FeatureId {
 extension FeatureIdX on FeatureId {
   /// Stable id used in the deep-link query string (`?feature=<id>`).
   /// MUST match [FeatureId.name] (store, ranking, journal, graduation,
-  /// wallet, musculacao, workouts, videos).
+  /// payments, musculacao, workouts, videos).
   String get id => name;
 
   static FeatureId? fromId(String? raw) => raw == null
@@ -220,17 +220,6 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     icon: LucideIcons.receipt,
     route: '/admin/cobranca',
     section: NavSection.financeiro,
-    requiresPermission: 'financial:view',
-    adminBypassesPermission: false,
-  ),
-  NavEntry(
-    key: 'admin_carteira',
-    label: 'Carteira',
-    icon: LucideIcons.wallet,
-    route: '/admin/carteira',
-    section: NavSection.financeiro,
-    feature: FeatureId.wallet,
-    lockable: true,
     requiresPermission: 'financial:view',
     adminBypassesPermission: false,
   ),

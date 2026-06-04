@@ -237,7 +237,6 @@ void main() {
       expect(visibleKeys.contains('admin_config'), isFalse);
       expect(visibleKeys.contains('admin_codigo_equipe'), isFalse);
       expect(visibleKeys.contains('admin_cobranca'), isFalse);
-      expect(visibleKeys.contains('admin_carteira'), isFalse);
       expect(visibleKeys.contains('admin_relatorios'), isFalse);
       expect(visibleKeys.contains('admin_graduacao'), isFalse);
       expect(visibleKeys.contains('admin_alunos'), isFalse);

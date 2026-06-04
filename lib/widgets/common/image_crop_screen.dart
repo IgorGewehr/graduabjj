@@ -7,7 +7,7 @@ import 'package:crop_your_image/crop_your_image.dart';
 class ImageCropScreen extends StatefulWidget {
   final File imageFile;
 
-  const ImageCropScreen({Key? key, required this.imageFile}) : super(key: key);
+  const ImageCropScreen({super.key, required this.imageFile});
 
   @override
   State<ImageCropScreen> createState() => _ImageCropScreenState();
@@ -52,94 +52,104 @@ class _ImageCropScreenState extends State<ImageCropScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Footer padding must clear the bottom gesture/home indicator inset so the
+    // primary action is always fully visible and tappable.
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+
     return Scaffold(
       backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Title
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 16),
-              child: Text(
-                'Ajustar Foto',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-
-            // Crop area
-            Expanded(
-              child: _imageData != null
-                  ? Crop(
-                      image: _imageData!,
-                      controller: _cropController,
-                      onCropped: _onCropped,
-                      aspectRatio: 1,
-                      withCircleUi: true,
-                      baseColor: Colors.black,
-                      maskColor: Colors.black.withValues(alpha: 0.7),
-                      initialSize: 0.8,
-                    )
-                  : const Center(
-                      child: CircularProgressIndicator(color: Colors.white),
-                    ),
-            ),
-
-            // Buttons at the bottom
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed:
-                          _isCropping ? null : () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Colors.white70),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('Cancelar'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isCropping
-                          ? null
-                          : () {
-                              setState(() => _isCropping = true);
-                              _cropController.crop();
-                            },
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: _isCropping
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text('Confirmar'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+      // AppBar respects the status bar automatically — the title and Cancel
+      // action can never sit under the status bar icons.
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Cancelar',
+          onPressed: _isCropping ? null : () => Navigator.pop(context),
         ),
+        title: const Text(
+          'Ajustar Foto',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        centerTitle: true,
+      ),
+      body: Column(
+        children: [
+          // Crop area
+          Expanded(
+            child: _imageData != null
+                ? Crop(
+                    image: _imageData!,
+                    controller: _cropController,
+                    onCropped: _onCropped,
+                    aspectRatio: 1,
+                    withCircleUi: true,
+                    baseColor: Colors.black,
+                    maskColor: Colors.black.withValues(alpha: 0.7),
+                    initialSize: 0.8,
+                  )
+                : const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  ),
+          ),
+
+          // Footer action: always visible above the bottom system inset.
+          Padding(
+            padding: EdgeInsets.fromLTRB(20, 12, 20, 12 + bottomInset),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed:
+                        _isCropping ? null : () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white70),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Cancelar'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _isCropping
+                        ? null
+                        : () {
+                            setState(() => _isCropping = true);
+                            _cropController.crop();
+                          },
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: _isCropping
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text('Confirmar'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

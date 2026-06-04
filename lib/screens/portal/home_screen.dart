@@ -13,15 +13,13 @@ import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
 import '../../providers/selected_academy_provider.dart';
-import '../../services/checkin_service.dart';
 import '../../core/sports.dart';
 import '../../widgets/cached_image.dart';
-import '../../widgets/common/grade_display.dart';
+import '../../widgets/common/animated_belt.dart';
+import '../../widgets/common/belt_badge.dart' show BeltSize;
 import '../../widgets/polish/polish.dart';
 import '../../widgets/portal/home_hero_card.dart';
 import '../../widgets/portal/musculacao_checkin_card.dart';
-import '../../widgets/portal/recent_milestones_strip.dart';
-import 'timeline_screen.dart' show studentBeltProgressionsProvider;
 import '../../widgets/skeletons/skeletons.dart';
 import '../../widgets/sport_tab_bar.dart';
 
@@ -67,9 +65,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ref.invalidate(studentStreakProvider(studentId));
           ref.invalidate(studentMonthlyAttendanceProvider(studentId));
           ref.invalidate(studentNextClassProvider(studentId));
-          // "Ultimos marcos" strip sources — keep it fresh on pull-to-refresh.
-          ref.invalidate(studentAchievementsProvider(studentId));
-          ref.invalidate(studentBeltProgressionsProvider(studentId));
         }
       },
       child: SingleChildScrollView(
@@ -155,18 +150,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               error: (_, __) => const SizedBox.shrink(),
             ),
 
-            // Ultimos marcos — compact, additive strip of the three most recent
-            // journey milestones. Reuses the shared timeline motor; reads only
-            // providers the portal already observes; self-hides when empty and
-            // navigates (never acts) on tap.
-            const RecentMilestonesStrip(),
-
             const SizedBox(height: 24),
-
-            // Quick-access grid — surfaces the features that are actually
-            // enabled for this academy/student, reusing the exact portal
-            // catalog gating (no duplicated gate logic).
-            const _QuickAccessSection(),
 
             // Dynamic Cards Section
             student.when(
@@ -189,6 +173,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
               error: (_, __) => const SizedBox.shrink(),
             ),
+
+            const SizedBox(height: 24),
+
+            // Quick-access grid — the LAST thing on the home. Surfaces the
+            // features actually enabled for this academy/student, reusing the
+            // exact portal catalog gating (no duplicated gate logic).
+            const _QuickAccessSection(),
 
             const SizedBox(height: 80), // Bottom padding for nav bar
           ],
@@ -300,13 +291,6 @@ class _WelcomeHeaderWithBeltState
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(width: 12),
-            GradeDisplay(
-              sportId: selectedSport,
-              grade: grade?.currentGrade ?? 'white',
-              stripes: grade?.currentStripes ?? 0,
-              size: GradeDisplaySize.small,
-            ),
             if (multiSport) ...[
               const SizedBox(width: 8),
               _MultiSportPill(
@@ -316,6 +300,19 @@ class _WelcomeHeaderWithBeltState
               ),
             ],
           ],
+        ),
+        const SizedBox(height: 16),
+        // Belt in evidence — the morph animation sweeps from white up to the
+        // student's current belt on entering the home. Keyed by sport+belt so
+        // switching modalidade re-runs the morph for the new grade.
+        AnimatedBelt(
+          key: ValueKey(
+            '${selectedSport.name}-${grade?.currentGrade ?? 'white'}-${grade?.currentStripes ?? 0}',
+          ),
+          belt: grade?.currentGrade ?? 'white',
+          stripes: grade?.currentStripes ?? 0,
+          size: BeltSize.large,
+          highlight: true,
         ),
         if (multiSport && _selectorOpen) ...[
           const SizedBox(height: 12),
@@ -521,19 +518,7 @@ class _DynamicCardsSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final nextClassAsync = ref.watch(studentNextClassProvider(studentId));
-    final streakAsync = ref.watch(studentStreakProvider(studentId));
-    final monthlyAttendanceAsync = ref.watch(
-      studentMonthlyAttendanceProvider(studentId),
-    );
     final upcomingCompetitionsAsync = ref.watch(upcomingCompetitionsProvider);
-    // Only depend on the single boolean we actually consume — avoids
-    // rebuilding when other settings fields change.
-    final checkinEnabled = ref.watch(
-      academySettingsProvider.select(
-        (s) => s.valueOrNull?.studentCheckinEnabled ?? false,
-      ),
-    );
     // Musculação self check-in — shown to students who practice musculação
     // when the academy picked the 'button' or 'qr' mode.
     final musculacaoMode = ref.watch(
@@ -565,103 +550,10 @@ class _DynamicCardsSection extends ConsumerWidget {
           const SizedBox(height: 12),
         ],
 
-        // Next Class Card (Featured)
-        nextClassAsync.when(
-          data: (data) {
-            if (data == null || data.classInfo == null) {
-              return _NextClassCard(
-                className: null,
-                schedule: null,
-                nextDate: null,
-                checkinEnabled: false,
-                canCheckin: false,
-                onTap: () => onTap('/portal/horarios'),
-              );
-            }
-
-            // Check if within check-in window
-            final canCheckin =
-                checkinEnabled &&
-                data.nextDate != null &&
-                data.schedule != null &&
-                isInCheckinWindow(
-                  startTime: data.schedule!.startTime,
-                  endTime: data.schedule!.endTime,
-                  date: data.nextDate!,
-                );
-
-            return _NextClassCard(
-              className: data.classInfo!.name,
-              schedule: data.schedule,
-              nextDate: data.nextDate,
-              checkinEnabled: checkinEnabled,
-              canCheckin: canCheckin,
-              onTap: () => onTap('/portal/horarios'),
-            );
-          },
-          loading: () => _NextClassCard(
-            className: null,
-            schedule: null,
-            nextDate: null,
-            isLoading: true,
-            checkinEnabled: false,
-            canCheckin: false,
-            onTap: () => onTap('/portal/horarios'),
-          ),
-          error: (_, __) => _NextClassCard(
-            className: null,
-            schedule: null,
-            nextDate: null,
-            checkinEnabled: false,
-            canCheckin: false,
-            onTap: () => onTap('/portal/horarios'),
-          ),
-        ).entrance(index: 0),
-
-        const SizedBox(height: 12),
-
-        // Row with Streak and Monthly Stats
-        Row(
-          children: [
-            Expanded(
-              child: streakAsync.when(
-                data: (streak) => _StreakCard(
-                  streak: streak,
-                  onTap: () => onTap('/portal/presencas'),
-                ),
-                loading: () => _StreakCard(
-                  streak: 0,
-                  isLoading: true,
-                  onTap: () => onTap('/portal/presencas'),
-                ),
-                error: (_, __) => _StreakCard(
-                  streak: 0,
-                  onTap: () => onTap('/portal/presencas'),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: monthlyAttendanceAsync.when(
-                data: (count) => _MonthlyCard(
-                  count: count,
-                  onTap: () => onTap('/portal/presencas'),
-                ),
-                loading: () => _MonthlyCard(
-                  count: 0,
-                  isLoading: true,
-                  onTap: () => onTap('/portal/presencas'),
-                ),
-                error: (_, __) => _MonthlyCard(
-                  count: 0,
-                  onTap: () => onTap('/portal/presencas'),
-                ),
-              ),
-            ),
-          ],
-        ).entrance(index: 1),
-
-        const SizedBox(height: 12),
+        // Check-in & "próxima aula" now live exclusively in the top
+        // HomeHeroCard (single source of truth, enrollment-gated), and the
+        // streak / monthly-attendance figures are already surfaced by the
+        // stats carousel — so neither is duplicated here anymore.
 
         // Next Competition Card
         upcomingCompetitionsAsync.when(
@@ -851,358 +743,6 @@ class _QuickAccessTile extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Self check-in card for musculação students (button mode). Calls the
-/// selfCheckin Cloud Function; the server enforces operating hours, active
-/// status and one-per-day dedup. Local state flips to "done" after success or
-/// when the server reports today's check-in already exists.
-/// Next Class Card (Featured)
-class _NextClassCard extends StatelessWidget {
-  final String? className;
-  final dynamic schedule;
-  final DateTime? nextDate;
-  final bool isLoading;
-  final bool checkinEnabled;
-  final bool canCheckin;
-  final VoidCallback onTap;
-
-  const _NextClassCard({
-    required this.className,
-    required this.schedule,
-    required this.nextDate,
-    this.isLoading = false,
-    required this.checkinEnabled,
-    required this.canCheckin,
-    required this.onTap,
-  });
-
-  String _formatNextClass() {
-    if (nextDate == null || schedule == null) return '';
-
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final classDay = DateTime(nextDate!.year, nextDate!.month, nextDate!.day);
-    final difference = classDay.difference(today).inDays;
-
-    String dayLabel;
-    if (difference == 0) {
-      dayLabel = 'Hoje';
-    } else if (difference == 1) {
-      dayLabel = 'Amanha';
-    } else {
-      dayLabel = DateFormat('EEEE', 'pt_BR').format(nextDate!);
-      dayLabel = dayLabel[0].toUpperCase() + dayLabel.substring(1);
-    }
-
-    return '$dayLabel as ${schedule.startTime}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hasClass = className != null && !isLoading;
-    // Use success color when check-in is available
-    final cardColor = canCheckin
-        ? AppTheme.success
-        : (hasClass ? AppTheme.textPrimary : AppTheme.surface);
-
-    return Material(
-      color: cardColor,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: hasClass ? null : Border.all(color: AppTheme.divider),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: hasClass
-                      ? Colors.white.withValues(alpha: 0.15)
-                      : AppTheme.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(
-                  canCheckin ? LucideIcons.userCheck : LucideIcons.calendar,
-                  size: 28,
-                  color: hasClass ? Colors.white : AppTheme.primary,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      canCheckin ? 'CHECK-IN DISPONIVEL' : 'PROXIMA AULA',
-                      style: AppTheme.labelSmall.copyWith(
-                        color: hasClass
-                            ? Colors.white.withValues(alpha: 0.7)
-                            : AppTheme.textSecondary,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    if (isLoading)
-                      Text(
-                        'Carregando...',
-                        style: AppTheme.titleMedium.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                      )
-                    else if (hasClass) ...[
-                      Text(
-                        className!,
-                        style: AppTheme.titleMedium.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        _formatNextClass(),
-                        style: AppTheme.bodySmall.copyWith(
-                          color: Colors.white.withValues(alpha: 0.8),
-                        ),
-                      ),
-                    ] else
-                      Text(
-                        'Ver horarios disponiveis',
-                        style: AppTheme.titleMedium.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              if (canCheckin)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Card only routes to Horários (check-in happens there),
-                      // so the label reflects navigation, not a one-tap action.
-                      Text(
-                        'Ver check-in',
-                        style: AppTheme.labelSmall.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(
-                        LucideIcons.chevronRight,
-                        size: 16,
-                        color: Colors.white,
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Icon(
-                  LucideIcons.chevronRight,
-                  size: 20,
-                  color: hasClass
-                      ? Colors.white.withValues(alpha: 0.5)
-                      : AppTheme.textSecondary,
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Streak Card
-class _StreakCard extends StatelessWidget {
-  final int streak;
-  final bool isLoading;
-  final VoidCallback onTap;
-
-  const _StreakCard({
-    required this.streak,
-    this.isLoading = false,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final hasStreak = streak > 0;
-
-    return Material(
-      color: AppTheme.surface,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.divider),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    hasStreak ? '🔥' : '💪',
-                    style: const TextStyle(fontSize: 24),
-                  ),
-                  const Spacer(),
-                  if (hasStreak)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.warning.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        'Em alta!',
-                        style: AppTheme.labelSmall.copyWith(
-                          color: AppTheme.warning,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              if (isLoading)
-                Text(
-                  '...',
-                  style: AppTheme.headlineSmall.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                )
-              else
-                Text(
-                  hasStreak ? '$streak dias' : 'Comece hoje!',
-                  style: AppTheme.headlineSmall.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              Text(
-                'Sequencia',
-                style: AppTheme.bodySmall.copyWith(
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Monthly Attendance Card
-class _MonthlyCard extends StatelessWidget {
-  final int count;
-  final bool isLoading;
-  final VoidCallback onTap;
-
-  const _MonthlyCard({
-    required this.count,
-    this.isLoading = false,
-    required this.onTap,
-  });
-
-  String get _monthName {
-    final now = DateTime.now();
-    final month = DateFormat('MMMM', 'pt_BR').format(now);
-    return month[0].toUpperCase() + month.substring(1);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppTheme.surface,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.divider),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Text('📅', style: TextStyle(fontSize: 24)),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.info.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      _monthName,
-                      style: AppTheme.labelSmall.copyWith(
-                        color: AppTheme.info,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              if (isLoading)
-                Text(
-                  '...',
-                  style: AppTheme.headlineSmall.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                )
-              else
-                Text(
-                  '$count treinos',
-                  style: AppTheme.headlineSmall.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              Text(
-                'Este mes',
-                style: AppTheme.bodySmall.copyWith(
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
