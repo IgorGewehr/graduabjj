@@ -8,6 +8,7 @@
 library;
 
 export 'animated_count_up.dart';
+export 'animated_progress.dart';
 export 'celebration.dart';
 export 'entrance.dart';
 export 'polish_card.dart';
@@ -15,3 +16,4 @@ export 'polish_tokens.dart';
 export 'polished_empty_state.dart';
 export 'pressable.dart';
 export 'skeleton_helpers.dart';
+export 'stat_tile.dart';

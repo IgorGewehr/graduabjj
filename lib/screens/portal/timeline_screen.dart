@@ -14,88 +14,6 @@ import '../../services/services.dart';
 import '../../widgets/polish/polish.dart';
 import '../../widgets/sport_tab_bar.dart';
 
-/// Timeline event types
-enum TimelineEventType {
-  graduation,
-  stripe,
-  competition,
-  milestone,
-  start,
-  attendanceStreak,
-  rankingPosition,
-  trainingPr,
-}
-
-/// Timeline event model
-class _TimelineEvent {
-  final String id;
-  final DateTime date;
-  final TimelineEventType type;
-  final String title;
-  final String? description;
-  final String? position;
-  final String? belt;
-  final int? stripes;
-  final String? academyName;
-  /// Modalidade do evento (define cor/label da faixa). Default BJJ.
-  final SportId sportId;
-
-  _TimelineEvent({
-    required this.id,
-    required this.date,
-    required this.type,
-    required this.title,
-    this.description,
-    this.position,
-    this.belt,
-    this.stripes,
-    this.academyName,
-    this.sportId = SportId.bjj,
-  });
-}
-
-/// Reads sportData[sport.value]['startDate'] defensively (DateTime, ISO string
-/// or Firestore Timestamp). Returns null when absent or of an unexpected type —
-/// never throws. Mirrors MySportsScreen so the per-sport origin date agrees.
-DateTime? _sportStartDate(Student student, SportId sport) {
-  final raw = student.sportData?[sport.value];
-  if (raw is! Map) return null;
-  final value = raw['startDate'];
-  if (value is DateTime) return value;
-  if (value is String && value.isNotEmpty) return DateTime.tryParse(value);
-  try {
-    final dynamic dyn = value;
-    if (dyn != null) {
-      final maybe = dyn.toDate();
-      if (maybe is DateTime) return maybe;
-    }
-  } catch (_) {/* unexpected type — ignore */}
-  return null;
-}
-
-/// Maps an [AchievementType] coming from the achievement store onto its
-/// [TimelineEventType] for rendering. Graduation/stripe are intentionally
-/// excluded here because those events are sourced from belt progressions (to
-/// avoid duplicates). Returns null for types the timeline should skip.
-TimelineEventType? _timelineTypeForAchievement(AchievementType type) {
-  switch (type) {
-    case AchievementType.competition:
-      return TimelineEventType.competition;
-    case AchievementType.milestone:
-      return TimelineEventType.milestone;
-    case AchievementType.attendanceStreak:
-      return TimelineEventType.attendanceStreak;
-    case AchievementType.rankingPosition:
-      return TimelineEventType.rankingPosition;
-    case AchievementType.trainingPr:
-      return TimelineEventType.trainingPr;
-    case AchievementType.graduation:
-    case AchievementType.stripe:
-      // Sourced from belt progressions — skip to avoid duplicate entries.
-      return null;
-  }
-}
-
 /// Belt progressions provider for timeline
 final studentBeltProgressionsProvider =
     FutureProvider.family<List<BeltProgression>, String>((
@@ -245,89 +163,16 @@ class TimelineScreen extends ConsumerWidget {
     final achievements = achievementsAsync.valueOrNull ?? [];
     final progressions = progressionsAsync.valueOrNull ?? [];
 
-    // Build unified timeline events
-    final events = <_TimelineEvent>[];
-
-    // Add start event. Tag it to whichever sport is being viewed (sportFilter
-    // when a multi-sport student selected a tab) so every sport tab keeps a
-    // "Inicio da Jornada" origin marker. Single-sport / unfiltered views fall
-    // back to the primary sport. When a per-sport startDate exists in
-    // sportData it takes precedence, mirroring MySportsScreen.
-    final startSport = sportFilter ?? student.getPrimarySport();
-    events.add(
-      _TimelineEvent(
-        id: 'start',
-        date: _sportStartDate(student, startSport) ??
-            student.jiujitsuStartDate ??
-            student.startDate,
-        type: TimelineEventType.start,
-        title: 'Inicio da Jornada',
-        description: 'Primeiro treino na academia',
-        belt: 'white',
-        academyName: academyName,
-        sportId: startSport,
-      ),
+    // Build the unified, ordered+filtered timeline via the shared motor
+    // (lib/services/timeline_builder.dart). Same precedence/ordering/filter as
+    // before — no widget-level synthesis here anymore.
+    final filteredEvents = buildTimelineEvents(
+      student: student,
+      achievements: achievements,
+      progressions: progressions,
+      academyName: academyName,
+      sportFilter: sportFilter,
     );
-
-    // Add belt progressions
-    for (final p in progressions) {
-      events.add(
-        _TimelineEvent(
-          id: 'progression_${p.id}',
-          date: p.promotionDate,
-          type: p.isBeltChange
-              ? TimelineEventType.graduation
-              : TimelineEventType.stripe,
-          title: p.isBeltChange
-              ? 'Faixa ${getGradeLabel(p.getSport(), p.newBelt)}'
-              : '${p.newStripes}o Grau',
-          description: p.notes,
-          belt: p.newBelt,
-          stripes: p.newStripes,
-          academyName: academyName,
-          sportId: p.getSport(),
-        ),
-      );
-    }
-
-    // Add achievements. Graduations/stripes come from belt progressions, so we
-    // render the remaining achievement-store types: competitions, generic
-    // milestones, and the gamification markers (attendance streak, ranking
-    // position, training PR). Unknown/legacy types map to a generic milestone.
-    for (final a in achievements) {
-      final mapped = _timelineTypeForAchievement(a.type);
-      if (mapped == null) continue;
-      events.add(
-        _TimelineEvent(
-          id: 'achievement_${a.id}',
-          date: a.date,
-          type: mapped,
-          title: a.title,
-          description: a.description,
-          position: a.position?.value,
-          academyName: academyName,
-          // Respect the achievement's stored sport so multi-sport students
-          // see markers under the correct tab. Legacy records without a sport
-          // fall back to the primary sport.
-          sportId: a.sport != null
-              ? SportId.fromString(a.sport!)
-              : student.getPrimarySport(),
-        ),
-      );
-    }
-
-    // Sort by date ascending (oldest first)
-    events.sort((a, b) => a.date.compareTo(b.date));
-
-    // Client-side sport filter. Only applied for multi-sport students
-    // (sportFilter != null). _TimelineEvent.sportId defaults to BJJ, so
-    // legacy/null-sport events are already grouped under BJJ.
-    // NOTE: this filters the in-memory list — no extra Firestore query and no
-    // composite index. A server-side sport-filtered query would be a future
-    // optimization if a single student ever exceeds ~365 records.
-    final filteredEvents = sportFilter == null
-        ? events
-        : events.where((e) => e.sportId == sportFilter).toList();
 
     if (filteredEvents.isEmpty) {
       return _buildTimelineEmptyState();
@@ -844,7 +689,7 @@ class _MedalBadge extends StatelessWidget {
 
 /// Timeline Item with enhanced vertical line
 class _TimelineItem extends StatelessWidget {
-  final _TimelineEvent event;
+  final TimelineEvent event;
   final bool isLast;
 
   const _TimelineItem({required this.event, required this.isLast});

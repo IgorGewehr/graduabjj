@@ -14,12 +14,14 @@ import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
 import '../../providers/selected_academy_provider.dart';
 import '../../services/checkin_service.dart';
-import '../../services/musculacao_checkin_service.dart';
-import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/polish/polish.dart';
+import '../../widgets/portal/home_hero_card.dart';
+import '../../widgets/portal/musculacao_checkin_card.dart';
+import '../../widgets/portal/recent_milestones_strip.dart';
+import 'timeline_screen.dart' show studentBeltProgressionsProvider;
 import '../../widgets/skeletons/skeletons.dart';
 import '../../widgets/sport_tab_bar.dart';
 
@@ -65,6 +67,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ref.invalidate(studentStreakProvider(studentId));
           ref.invalidate(studentMonthlyAttendanceProvider(studentId));
           ref.invalidate(studentNextClassProvider(studentId));
+          // "Ultimos marcos" strip sources — keep it fresh on pull-to-refresh.
+          ref.invalidate(studentAchievementsProvider(studentId));
+          ref.invalidate(studentBeltProgressionsProvider(studentId));
         }
       },
       child: SingleChildScrollView(
@@ -107,6 +112,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
             const SizedBox(height: 24),
 
+            // Hero do Dia — one prioritized, additive CTA (check-in window →
+            // next class countdown → musculação → streak). Purely visual: only
+            // reads providers the home already observes and never triggers an
+            // aula check-in directly (it only navigates).
+            student.when(
+              data: (s) {
+                if (s == null) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  child: HomeHeroCard(studentId: s.id),
+                );
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+
             // Stats Carousel
             student.when(
               data: (s) {
@@ -133,6 +154,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               loading: () => const SizedBox.shrink(),
               error: (_, __) => const SizedBox.shrink(),
             ),
+
+            // Ultimos marcos — compact, additive strip of the three most recent
+            // journey milestones. Reuses the shared timeline motor; reads only
+            // providers the portal already observes; self-hides when empty and
+            // navigates (never acts) on tap.
+            const RecentMilestonesStrip(),
 
             const SizedBox(height: 24),
 
@@ -395,7 +422,7 @@ class _StatsCarousel extends ConsumerWidget {
             children: [
               // Training count card
               attendanceCountAsync.when(
-                data: (count) => _StatCarouselCard(
+                data: (count) => StatTile(
                   emoji: '🔥',
                   value: count.toString(),
                   countValue: count,
@@ -403,38 +430,38 @@ class _StatsCarousel extends ConsumerWidget {
                   sublabel: 'Total de presencas',
                   color: AppTheme.warning,
                 ),
-                loading: () => _StatCarouselCard(
+                loading: () => StatTile(
                   emoji: '🔥',
                   value: '...',
                   label: 'Treinos',
                   sublabel: 'Total de presencas',
                   color: AppTheme.warning,
                 ),
-                error: (_, __) => _StatCarouselCard(
+                error: (_, __) => StatTile(
                   emoji: '🔥',
                   value: '-',
                   label: 'Treinos',
                   sublabel: 'Total de presencas',
                   color: AppTheme.warning,
                 ),
-              ),
+              ).entrance(index: 0),
 
               // Months on mat card
-              _StatCarouselCard(
+              StatTile(
                 emoji: '📅',
                 value: monthsOnMat > 0 ? monthsOnMat.toString() : '0',
                 countValue: monthsOnMat > 0 ? monthsOnMat : 0,
                 label: 'Meses de Tatame',
                 sublabel: 'Tempo de jornada',
                 color: AppTheme.info,
-              ),
+              ).entrance(index: 1),
 
               // Medals card — the source counts only podium finishes
               // (gold/silver/bronze), so the label matches the value.
               medalCountAsync.when(
                 data: (medals) {
                   final total = medals['total'] ?? 0;
-                  return _StatCarouselCard(
+                  return StatTile(
                     emoji: '🏆',
                     value: total.toString(),
                     countValue: total,
@@ -443,21 +470,21 @@ class _StatsCarousel extends ConsumerWidget {
                     color: Colors.purple,
                   );
                 },
-                loading: () => _StatCarouselCard(
+                loading: () => StatTile(
                   emoji: '🏆',
                   value: '...',
                   label: 'Medalhas',
                   sublabel: 'Pódios conquistados',
                   color: Colors.purple,
                 ),
-                error: (_, __) => _StatCarouselCard(
+                error: (_, __) => StatTile(
                   emoji: '🏆',
                   value: '0',
                   label: 'Medalhas',
                   sublabel: 'Pódios conquistados',
                   color: Colors.purple,
                 ),
-              ),
+              ).entrance(index: 2),
             ],
           ),
         ),
@@ -481,90 +508,6 @@ class _StatsCarousel extends ConsumerWidget {
           }),
         ),
       ],
-    );
-  }
-}
-
-/// Individual stat carousel card
-class _StatCarouselCard extends StatelessWidget {
-  final String emoji;
-  final String value;
-  final String label;
-  final String sublabel;
-  final Color color;
-
-  /// When non-null the value renders as an animated count-up (data states);
-  /// loading/error states pass null and fall back to the literal [value].
-  final num? countValue;
-
-  const _StatCarouselCard({
-    required this.emoji,
-    required this.value,
-    required this.label,
-    required this.sublabel,
-    required this.color,
-    this.countValue,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(right: 8),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Center(
-              child: Text(emoji, style: const TextStyle(fontSize: 28)),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                countValue != null
-                    ? AnimatedCountUp(
-                        value: countValue!,
-                        style: AppTheme.displayMedium.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      )
-                    : Text(
-                        value,
-                        style: AppTheme.displayMedium.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                Text(
-                  label,
-                  style: AppTheme.titleMedium.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  sublabel,
-                  style: AppTheme.bodySmall.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -618,7 +561,7 @@ class _DynamicCardsSection extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (showMusculacaoCheckin) ...[
-          _MusculacaoCheckinCard(qrMode: musculacaoMode == 'qr'),
+          MusculacaoCheckinCard(qrMode: musculacaoMode == 'qr'),
           const SizedBox(height: 12),
         ],
 
@@ -852,12 +795,12 @@ class _QuickAccessSection extends ConsumerWidget {
           crossAxisSpacing: 12,
           childAspectRatio: 0.82,
           children: [
-            for (final entry in entries)
+            for (final (i, entry) in entries.indexed)
               _QuickAccessTile(
                 icon: entry.icon,
                 label: entry.label,
                 onTap: () => context.go(entry.route),
-              ),
+              ).entrance(index: i),
           ],
         ),
         const SizedBox(height: 4),
@@ -917,137 +860,6 @@ class _QuickAccessTile extends StatelessWidget {
 /// selfCheckin Cloud Function; the server enforces operating hours, active
 /// status and one-per-day dedup. Local state flips to "done" after success or
 /// when the server reports today's check-in already exists.
-class _MusculacaoCheckinCard extends ConsumerStatefulWidget {
-  /// When true the academy uses the fixed-QR mode: tapping opens the scanner
-  /// instead of calling the function directly.
-  final bool qrMode;
-
-  const _MusculacaoCheckinCard({required this.qrMode});
-
-  @override
-  ConsumerState<_MusculacaoCheckinCard> createState() =>
-      _MusculacaoCheckinCardState();
-}
-
-class _MusculacaoCheckinCardState
-    extends ConsumerState<_MusculacaoCheckinCard> {
-  bool _loading = false;
-  bool _doneToday = false;
-
-  Future<void> _checkin() async {
-    if (widget.qrMode) {
-      final result = await context.push<bool>('/portal/musculacao-checkin');
-      if (result == true && mounted) setState(() => _doneToday = true);
-      return;
-    }
-    setState(() => _loading = true);
-    try {
-      await MusculacaoCheckinService().checkIn();
-      if (!mounted) return;
-      setState(() => _doneToday = true);
-      context.showSuccess('Presenca registrada!');
-    } on MusculacaoCheckinException catch (e) {
-      if (!mounted) return;
-      if (e.message.toLowerCase().contains('registrou presen')) {
-        setState(() => _doneToday = true);
-      }
-      context.showError(e.message);
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final done = _doneToday;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: done
-              ? [AppTheme.success, AppTheme.success.withValues(alpha: 0.85)]
-              : [AppTheme.primary, AppTheme.primary.withValues(alpha: 0.85)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                done ? Icons.check_circle : Icons.fitness_center,
-                color: Colors.white,
-                size: 22,
-              ),
-              const SizedBox(width: 10),
-              Text(
-                done ? 'Presenca de hoje registrada' : 'Treino de musculacao',
-                style: AppTheme.titleMedium.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            done
-                ? 'Bom treino! Volte amanha para registrar de novo.'
-                : widget.qrMode
-                    ? 'Escaneie o QR da recepcao para registrar presenca.'
-                    : 'Chegou na academia? Registre sua presenca.',
-            style: AppTheme.bodyMedium.copyWith(
-              color: Colors.white.withValues(alpha: 0.9),
-            ),
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: (_loading || done) ? null : _checkin,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: done ? AppTheme.success : AppTheme.primary,
-                disabledBackgroundColor: Colors.white.withValues(alpha: 0.7),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              icon: _loading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Icon(
-                      done
-                          ? Icons.check
-                          : widget.qrMode
-                              ? Icons.qr_code_scanner
-                              : Icons.location_on,
-                      size: 18,
-                    ),
-              label: Text(
-                done
-                    ? 'Check-in feito'
-                    : widget.qrMode
-                        ? 'Escanear QR'
-                        : 'Cheguei',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Next Class Card (Featured)
 class _NextClassCard extends StatelessWidget {
   final String? className;
@@ -1626,7 +1438,7 @@ class _GraduationProgressCard extends ConsumerWidget {
 }
 
 /// Progress card for a single sport, fed by the sport-filtered eligibility.
-class _SportProgressCard extends ConsumerWidget {
+class _SportProgressCard extends ConsumerStatefulWidget {
   final String studentId;
   final SportId sport;
   final String graduationMode;
@@ -1637,14 +1449,46 @@ class _SportProgressCard extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_SportProgressCard> createState() => _SportProgressCardState();
+}
+
+class _SportProgressCardState extends ConsumerState<_SportProgressCard> {
+  /// Ephemeral, session-only guard: did we already celebrate this card's
+  /// graduation eligibility? Never persisted, never written to a CF/Firestore.
+  /// Prevents the confetti from re-firing on rebuilds or while staying
+  /// eligible.
+  bool _celebrated = false;
+
+  @override
+  Widget build(BuildContext context) {
+    // React to eligibility transitions WITHOUT firing inside build (which would
+    // loop/re-fire on every rebuild). [ref.listen] only runs on actual changes.
+    ref.listen(
+      studentSportEligibilityProvider(
+        (studentId: widget.studentId, sport: widget.sport),
+      ),
+      (prev, next) {
+        final wasEligible = prev?.valueOrNull?.eligible ?? false;
+        final isEligible = next.valueOrNull?.eligible ?? false;
+        // Fire once, only on the false → true transition, only the first time
+        // this session.
+        if (!wasEligible && isEligible && !_celebrated) {
+          _celebrated = true;
+          if (mounted) Celebration.confetti(context);
+        }
+      },
+    );
+
     final e = ref
         .watch(studentSportEligibilityProvider(
-          (studentId: studentId, sport: sport),
+          (studentId: widget.studentId, sport: widget.sport),
         ))
         .valueOrNull;
     // No configured requirement for this sport → nothing meaningful to show.
     if (e == null || e.requiredClasses <= 0) return const SizedBox.shrink();
+
+    final graduationMode = widget.graduationMode;
+    final sport = widget.sport;
 
     final eligible = e.eligible;
     final total = e.currentClasses;
@@ -1700,24 +1544,21 @@ class _SportProgressCard extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 12),
-            ClipRRect(
+            AnimatedProgressBar(
+              value: progress,
+              minHeight: 8,
               borderRadius: BorderRadius.circular(8),
-              child: LinearProgressIndicator(
-                value: progress,
-                minHeight: 8,
-                backgroundColor: eligible
-                    ? Colors.white.withValues(alpha: 0.25)
-                    : AppTheme.divider,
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  eligible ? Colors.white : AppTheme.primary,
-                ),
-              ),
+              color: eligible ? Colors.white : AppTheme.primary,
+              backgroundColor: eligible
+                  ? Colors.white.withValues(alpha: 0.25)
+                  : AppTheme.divider,
             ),
             const SizedBox(height: 10),
             Row(
               children: [
-                Text(
-                  '$total / $threshold $unit',
+                AnimatedCountUp(
+                  value: total,
+                  suffix: ' / $threshold $unit',
                   style: AppTheme.bodyMedium.copyWith(
                     color: eligible ? Colors.white : AppTheme.textPrimary,
                     fontWeight: FontWeight.w600,
