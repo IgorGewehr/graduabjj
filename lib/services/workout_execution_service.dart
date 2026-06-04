@@ -18,15 +18,19 @@ class WorkoutExecutionService {
 
   CollectionReference get _ref => _collections.workoutExecutions;
 
-  /// Cria/atualiza o registro. Retorna o id (novo no create).
-  Future<String> create(WorkoutExecution e) async {
-    final data = e.toFirestore()..['createdAt'] = FieldValue.serverTimestamp();
-    final doc = await _ref.add(data);
-    return doc.id;
+  /// Upsert idempotente do registro de execução de um exercício no dia.
+  /// Usa o id determinístico `WorkoutExecution.docId(...)`, então re-registrar
+  /// o mesmo exercício no mesmo dia ATUALIZA em vez de duplicar. Retorna o id.
+  Future<String> upsert(WorkoutExecution e) async {
+    final id = WorkoutExecution.docId(
+        e.studentId, e.planId, e.dayIndex, e.exerciseIndex, e.date);
+    // `date`/`updatedAt` (no toFirestore) são o que importa; sem createdAt
+    // para o merge não reescrever a cada edição.
+    await _collections
+        .workoutExecution(id)
+        .set(e.toFirestore(), SetOptions(merge: true));
+    return id;
   }
-
-  Future<void> update(String id, WorkoutExecution e) =>
-      _collections.workoutExecution(id).update(e.toFirestore());
 
   Future<void> delete(String id) =>
       _collections.workoutExecution(id).delete();

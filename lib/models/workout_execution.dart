@@ -54,6 +54,17 @@ class WorkoutExecution {
     required this.createdAt,
   });
 
+  /// Id determinístico por (aluno, plano, dia, exercício, DIA) — um registro de
+  /// execução por exercício por dia (o array `sets` guarda todas as séries).
+  /// Evita duplicatas ao re-registrar; espelha o padrão do checklist diário.
+  static String docId(String studentId, String planId, int dayIndex,
+      int exerciseIndex, DateTime date) {
+    final d = '${date.year}'
+        '${date.month.toString().padLeft(2, '0')}'
+        '${date.day.toString().padLeft(2, '0')}';
+    return '${studentId}_${planId}_${dayIndex}_${exerciseIndex}_$d';
+  }
+
   factory WorkoutExecution.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>? ?? {};
     return WorkoutExecution(
