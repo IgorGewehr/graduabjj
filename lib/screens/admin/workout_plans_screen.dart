@@ -990,7 +990,10 @@ class _ExerciseCatalogPickerState extends State<_ExerciseCatalogPicker> {
           bottom: MediaQuery.of(context).viewInsets.bottom + 16,
         ),
         child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.6,
+          // Desconta o teclado para a altura caber acima dele (sem overflow).
+          height: (MediaQuery.of(context).size.height -
+                  MediaQuery.of(context).viewInsets.bottom) *
+              0.7,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
