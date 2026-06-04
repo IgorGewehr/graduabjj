@@ -40,6 +40,7 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
 
   List<WorkoutExecution> _history = []; // mais recente primeiro
   bool _loading = true;
+  bool _error = false;
   String _metricKey = 'load';
 
   @override
@@ -49,12 +50,16 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
   }
 
   Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = false;
+    });
     try {
       final h = await WorkoutExecutionService(FirebaseService.academyId)
           .getHistoryForExercise(widget.studentId, widget.exerciseName);
       if (mounted) setState(() { _history = h; _loading = false; });
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() { _error = true; _loading = false; });
     }
   }
 
@@ -69,11 +74,35 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _history.isEmpty
-              ? _empty()
-              : _content(),
+          : _error
+              ? _errorState()
+              : _history.isEmpty
+                  ? _empty()
+                  : _content(),
     );
   }
+
+  Widget _errorState() => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.alertTriangle,
+                  size: 48, color: AppTheme.textSecondary),
+              const SizedBox(height: 16),
+              Text('Erro ao carregar o progresso',
+                  style: AppTheme.titleMedium, textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _load,
+                icon: const Icon(LucideIcons.refreshCw, size: 16),
+                label: const Text('Tentar novamente'),
+              ),
+            ],
+          ),
+        ),
+      );
 
   Widget _empty() => Center(
         child: Padding(
