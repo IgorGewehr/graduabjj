@@ -304,18 +304,19 @@ class _NextClassHeroState extends State<_NextClassHero> {
         width: double.infinity,
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              AppTheme.primary.withValues(alpha: 0.14),
-              AppTheme.surface,
-            ],
+          gradient: const LinearGradient(
+            colors: [AppTheme.primaryLight, AppTheme.primaryDark],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: AppTheme.primary.withValues(alpha: 0.22),
-          ),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primaryDark.withValues(alpha: 0.30),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
         child: Row(
           children: [
@@ -323,13 +324,13 @@ class _NextClassHeroState extends State<_NextClassHero> {
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.12),
+                color: Colors.white.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: const Icon(
                 LucideIcons.calendarClock,
                 size: 28,
-                color: AppTheme.primary,
+                color: Colors.white,
               ),
             ),
             const SizedBox(width: 16),
@@ -340,7 +341,7 @@ class _NextClassHeroState extends State<_NextClassHero> {
                   Text(
                     'PROXIMA AULA',
                     style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.textSecondary,
+                      color: Colors.white.withValues(alpha: 0.7),
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.6,
                     ),
@@ -350,6 +351,7 @@ class _NextClassHeroState extends State<_NextClassHero> {
                     widget.className,
                     style: AppTheme.titleMedium.copyWith(
                       fontWeight: FontWeight.w700,
+                      color: Colors.white,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -361,13 +363,13 @@ class _NextClassHeroState extends State<_NextClassHero> {
                       vertical: 3,
                     ),
                     decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.10),
+                      color: Colors.white.withValues(alpha: 0.16),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
                       _countdown,
                       style: AppTheme.labelSmall.copyWith(
-                        color: AppTheme.primary,
+                        color: Colors.white,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -375,10 +377,10 @@ class _NextClassHeroState extends State<_NextClassHero> {
                 ],
               ),
             ),
-            const Icon(
+            Icon(
               LucideIcons.chevronRight,
               size: 20,
-              color: AppTheme.textSecondary,
+              color: Colors.white.withValues(alpha: 0.7),
             ),
           ],
         ),
@@ -485,10 +487,10 @@ class _StreakHero extends ConsumerWidget {
                 ],
               ),
             ),
-            const Icon(
+            Icon(
               LucideIcons.chevronRight,
               size: 20,
-              color: AppTheme.textSecondary,
+              color: Colors.white.withValues(alpha: 0.7),
             ),
           ],
         ),

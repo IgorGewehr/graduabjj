@@ -402,6 +402,12 @@ exports.redeemInstructorCode = onCall(async (request) => {
 exports.promoteToInstructor = onCall(async (request) => {
   const adminUid = requireAuth(request);
   const {userId, academyId, extraPermissions} = request.data || {};
+  // Optional: studentId selected by the admin in the promote UI. Used to resolve
+  // legacy monitors (consented via academy.monitorIds) that have no stale
+  // linkedUserId casamento on their student record.
+  const selectedStudentId =
+      typeof (request.data || {}).studentId === 'string' ?
+          request.data.studentId : null;
   if (!userId || !academyId) {
     throw new HttpsError('invalid-argument', 'userId e academyId são obrigatórios.');
   }
@@ -413,13 +419,11 @@ exports.promoteToInstructor = onCall(async (request) => {
   const academyUserRef = db
       .collection('academies').doc(academyId)
       .collection('users').doc(userId);
+  const academyRef = db.collection('academies').doc(academyId);
 
   await db.runTransaction(async (tx) => {
     const mappingSnap = await tx.get(mappingRef);
-    if (!mappingSnap.exists) {
-      throw new HttpsError('not-found', 'Usuário não encontrado.');
-    }
-    const data = mappingSnap.data() || {};
+    const data = mappingSnap.exists ? (mappingSnap.data() || {}) : {};
     const details = data.academyDetails || {};
     const hasEntry = !!details[academyId];
 
@@ -429,6 +433,8 @@ exports.promoteToInstructor = onCall(async (request) => {
     // (previously this threw failed-precondition — the reported promote error).
     // All reads must precede writes in a transaction.
     let studentId = hasEntry ? (details[academyId].studentId || null) : null;
+    // A monitor whose student record we'll need to stamp linkedUserId onto.
+    let monitorStudentRef = null;
     if (!hasEntry) {
       const studentsSnap = await tx.get(
           db.collection('academies').doc(academyId)
@@ -439,9 +445,31 @@ exports.promoteToInstructor = onCall(async (request) => {
       studentId = studentsSnap.empty ? null : studentsSnap.docs[0].id;
 
       // Consent guard: never synthesise a membership from scratch. The target
-      // must already belong to the academy (linked student record above, or an
-      // existing academies/{id}/users/{userId} doc). Otherwise an admin could
-      // inject an arbitrary uid into someone else's mapping without consent.
+      // must already belong to the academy. We accept membership proven by, in
+      // order: a linked student record (above), an explicitly-selected
+      // studentId that is a confirmed monitor (monitorIds), or an existing
+      // academies/{id}/users/{userId} doc. Otherwise an admin could inject an
+      // arbitrary uid into someone else's mapping without consent.
+      if (studentId === null && selectedStudentId) {
+        const candidateRef = academyRef
+            .collection('students').doc(selectedStudentId);
+        const [candidateSnap, academySnap] = await Promise.all([
+          tx.get(candidateRef),
+          tx.get(academyRef),
+        ]);
+        const monitorIds = academySnap.exists ?
+            (academySnap.data() || {}).monitorIds : null;
+        const isConsentedMonitor = candidateSnap.exists &&
+            Array.isArray(monitorIds) &&
+            monitorIds.includes(selectedStudentId);
+        if (isConsentedMonitor) {
+          // Legitimate legacy monitor: adopt the selected studentId and stamp
+          // linkedUserId onto the student record so future reads resolve.
+          studentId = selectedStudentId;
+          monitorStudentRef = candidateRef;
+        }
+      }
+
       if (studentId === null) {
         const academyUserSnap = await tx.get(academyUserRef);
         if (!academyUserSnap.exists) {
@@ -449,29 +477,60 @@ exports.promoteToInstructor = onCall(async (request) => {
               'failed-precondition', 'Usuário não é membro desta academia.');
         }
       }
+    } else if (!mappingSnap.exists) {
+      // Defensive: hasEntry can only be true when the mapping exists.
+      throw new HttpsError('not-found', 'Usuário não encontrado.');
     }
 
-    // One field-path update: creates the entry when missing (keeping studentId
-    // so the user stays linked to their student record), otherwise just flips
-    // role → instructor. Distinct leaf paths never conflict.
-    const update = {
-      [`academyDetails.${academyId}.role`]: 'instructor',
-      [`academyDetails.${academyId}.status`]: 'active',
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-    if (!hasEntry) {
-      update.academyIds = FieldValue.arrayUnion(academyId);
-      update.primaryAcademyId = data.primaryAcademyId || academyId;
-      update[`academyDetails.${academyId}.studentId`] = studentId;
-      update[`academyDetails.${academyId}.joinedAt`] = FieldValue.serverTimestamp();
+    const sanitizedPerms = Array.isArray(extraPermissions) ?
+        sanitizeExtraPermissions(extraPermissions) : null;
+
+    if (mappingSnap.exists) {
+      // One field-path update: creates the entry when missing (keeping
+      // studentId so the user stays linked to their student record), otherwise
+      // just flips role → instructor. Distinct leaf paths never conflict.
+      const update = {
+        [`academyDetails.${academyId}.role`]: 'instructor',
+        [`academyDetails.${academyId}.status`]: 'active',
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      if (!hasEntry) {
+        update.academyIds = FieldValue.arrayUnion(academyId);
+        update.primaryAcademyId = data.primaryAcademyId || academyId;
+        update[`academyDetails.${academyId}.studentId`] = studentId;
+        update[`academyDetails.${academyId}.joinedAt`] =
+            FieldValue.serverTimestamp();
+      }
+      if (sanitizedPerms !== null) {
+        update[`academyDetails.${academyId}.extraPermissions`] = sanitizedPerms;
+      }
+      tx.update(mappingRef, update);
+    } else {
+      // No mapping doc yet — only reachable for a consented monitor (membership
+      // proven via monitorIds above). Create it via merge with a nested object,
+      // since dotted field-paths are literal keys under set().
+      const entry = {
+        role: 'instructor',
+        status: 'active',
+        studentId: studentId,
+        joinedAt: FieldValue.serverTimestamp(),
+      };
+      if (sanitizedPerms !== null) {
+        entry.extraPermissions = sanitizedPerms;
+      }
+      tx.set(mappingRef, {
+        academyIds: FieldValue.arrayUnion(academyId),
+        primaryAcademyId: academyId,
+        academyDetails: {[academyId]: entry},
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
     }
-    // Clamp to the server allowlist before persisting (defense in depth even
-    // though only admins reach here).
-    if (Array.isArray(extraPermissions)) {
-      update[`academyDetails.${academyId}.extraPermissions`] =
-          sanitizeExtraPermissions(extraPermissions);
+
+    // Stamp linkedUserId onto the monitor's student record so future promotes
+    // (and member listings) resolve the link without relying on monitorIds.
+    if (monitorStudentRef !== null) {
+      tx.update(monitorStudentRef, {linkedUserId: userId});
     }
-    tx.update(mappingRef, update);
 
     tx.set(academyUserRef, {
       role: 'instructor',

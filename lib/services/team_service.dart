@@ -94,15 +94,20 @@ class TeamService {
   }
 
   /// Admin promoting an existing member of their academy to instructor.
+  ///
+  /// [studentId] lets the server resolve legacy monitors (consented via
+  /// academy.monitorIds) whose student record has no linkedUserId yet.
   Future<void> promoteToInstructor({
     required String userId,
     required String academyId,
     List<String> extraPermissions = const [],
+    String? studentId,
   }) async {
     await _functions.httpsCallable('promoteToInstructor').call({
       'userId': userId,
       'academyId': academyId,
       'extraPermissions': extraPermissions,
+      if (studentId != null && studentId.isNotEmpty) 'studentId': studentId,
     });
   }
 

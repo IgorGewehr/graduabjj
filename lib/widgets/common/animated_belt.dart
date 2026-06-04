@@ -1,17 +1,25 @@
 import 'package:flutter/material.dart';
 
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import 'belt_badge.dart';
 
 // ============================================
-// AnimatedBelt — "evolution morph" belt widget
+// AnimatedBelt — "evolution morph" belt widget (multi-sport)
 // ============================================
 //
-// On mount, the belt starts as WHITE / 0 stripes and animates progressively up
-// to the student's current belt: it sweeps the adult belt colors in order
-// (white → blue → purple → brown → black), stopping on the student's belt, with
-// a smooth crossfade between each color. Once the color has settled, the stripes
-// pop in one-by-one, quickly.
+// On mount, the belt starts as the FIRST grade of the student's sport (white /
+// 0 stripes) and animates progressively up to the student's current grade: it
+// sweeps the sport's grade-ladder colors in order (e.g. for BJJ
+// white → blue → purple → brown → black), stopping on the student's grade, with
+// a smooth crossfade between each color. Once the color has settled, the
+// degrees/stripes pop in one-by-one, quickly.
+//
+// It is sport-aware: pass [sportId] and the widget reads that sport's grade
+// ladder (from core/sports.dart) — so a Muay Thai student morphs through the
+// prajied colors and shows the "ponta" adornment, a Judô/Luta Livre student
+// morphs through their own colors, etc. For Muay Thai the right federation
+// variant is resolved from the stored grade id, so CBMT vs CBMTT both render.
 //
 // The animation plays exactly once on first appearance (no infinite loops).
 // Set [animate] to false to render the final state immediately (e.g. for tests
@@ -20,32 +28,26 @@ import 'belt_badge.dart';
 // Usable both compact (home) and in evidence (profile) via [size] and
 // [highlight].
 
-/// Adult belt color progression, in graduation order. The morph sweeps through
-/// this list up to (and including) the student's belt. Belts outside this list
-/// (kids colors, coral/red master ranks) skip the sweep and simply fade in at
-/// their own color.
-const List<String> _beltProgression = ['white', 'blue', 'purple', 'brown', 'black'];
-
 class AnimatedBelt extends StatefulWidget {
-  /// The student's current belt key (e.g. 'white', 'blue', 'black', 'grey-white').
+  /// The student's current grade key (e.g. 'white', 'blue', 'black',
+  /// 'grey-white', or a Muay Thai 'red-lightblue').
   final String belt;
 
   /// Number of degrees/stripes on the belt.
   final int stripes;
+
+  /// The sport whose grade ladder drives the colors, ordering and adornments.
+  /// Defaults to BJJ for backward compatibility.
+  final SportId sportId;
 
   /// Visual size of the belt. Defaults to [BeltSize.large] since this widget is
   /// meant to be a focal point; use [BeltSize.small]/[BeltSize.medium] for
   /// compact placements (e.g. the home header).
   final BeltSize size;
 
-  /// When true, the belt is rendered "in evidence": a slightly larger scale, a
-  /// soft glow in the belt's own color, and the label shown below. Ideal for
-  /// the profile hero. When false, renders flat & compact (good for the home).
+  /// When true, the belt is rendered "in evidence": a slightly larger scale.
+  /// Ideal for the profile/home hero. When false, renders flat & compact.
   final bool highlight;
-
-  /// Whether to show the textual label (belt name + degrees) below the belt.
-  /// Defaults to following [highlight].
-  final bool? showLabel;
 
   /// When false, skips the morph and renders the final belt immediately.
   final bool animate;
@@ -57,11 +59,11 @@ class AnimatedBelt extends StatefulWidget {
     super.key,
     required this.belt,
     this.stripes = 0,
+    this.sportId = SportId.bjj,
     this.size = BeltSize.large,
     this.highlight = false,
-    this.showLabel,
     this.animate = true,
-    this.sweepDuration = const Duration(milliseconds: 1400),
+    this.sweepDuration = const Duration(milliseconds: 1600),
   });
 
   @override
@@ -72,10 +74,10 @@ class _AnimatedBeltState extends State<AnimatedBelt>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
-  /// The ordered list of belt keys the color sweep walks through, ending on the
-  /// student's belt. For belts in [_beltProgression] this is the prefix up to
-  /// the belt; for any other belt (kids/coral) it's just `['white', belt]` so we
-  /// still get a graceful fade-in.
+  /// The ordered list of grade ids the color sweep walks through, ending on the
+  /// student's current grade. It's the prefix of the sport's ladder up to (and
+  /// including) the student's grade; for an unknown/above-black grade we still
+  /// get a graceful fade-in from the first grade into the real color.
   late List<String> _sweepStops;
 
   /// Fraction of the controller [0..1] reserved for the color sweep; the
@@ -93,8 +95,8 @@ class _AnimatedBeltState extends State<AnimatedBelt>
     );
 
     if (widget.animate) {
-      // Defer to the next frame so the white/0 initial state is painted first,
-      // then morph once.
+      // Defer to the next frame so the first-grade/0 initial state is painted
+      // first, then morph once.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _controller.forward();
       });
@@ -103,13 +105,31 @@ class _AnimatedBeltState extends State<AnimatedBelt>
     }
   }
 
+  /// The ordered grade ids for the student's sport (resolving the right Muay
+  /// Thai federation variant from the stored grade). Excludes above-black
+  /// master ranks from the sweep PATH so the morph doesn't walk through coral/
+  /// red on its way to a normal grade — but the target grade itself, even if
+  /// above-black, is always honored as the final stop.
+  List<String> _sportLadder() {
+    final grades = getGradesForSport(
+      widget.sportId,
+      muaythaiVariant: widget.sportId == SportId.muaythai
+          ? resolveMuaythaiVariant(widget.belt)
+          : null,
+    );
+    return grades.map((g) => g.id).toList();
+  }
+
   void _buildTimeline() {
-    final targetIndex = _beltProgression.indexOf(widget.belt);
+    final ladder = _sportLadder();
+    final targetIndex = ladder.indexOf(widget.belt);
     if (targetIndex >= 0) {
-      _sweepStops = _beltProgression.sublist(0, targetIndex + 1);
+      _sweepStops = ladder.sublist(0, targetIndex + 1);
     } else {
-      // Kids / coral / unknown belts: just fade from white into the real color.
-      _sweepStops = ['white', widget.belt];
+      // Unknown grade for this sport: fade from the first grade into the real
+      // color so we still get a graceful morph.
+      final first = ladder.isNotEmpty ? ladder.first : 'white';
+      _sweepStops = first == widget.belt ? [widget.belt] : [first, widget.belt];
     }
 
     // Split the controller timeline: most of it is the color sweep, a short tail
@@ -137,6 +157,7 @@ class _AnimatedBeltState extends State<AnimatedBelt>
     super.didUpdateWidget(old);
     if (old.belt != widget.belt ||
         old.stripes != widget.stripes ||
+        old.sportId != widget.sportId ||
         old.sweepDuration != widget.sweepDuration) {
       _buildTimeline();
       _controller.duration = _totalDuration();
@@ -157,26 +178,33 @@ class _AnimatedBeltState extends State<AnimatedBelt>
     super.dispose();
   }
 
+  /// Resolve the body color of a grade id within the student's sport.
+  Color _gradeColor(String gradeId) =>
+      getGradeColor(widget.sportId, gradeId);
+
   /// Resolve the belt color shown at the current sweep progress [t] in [0..1].
-  /// We linearly interpolate (lerp) between adjacent belt colors so the sweep
-  /// crossfades elegantly instead of hard-cutting.
+  /// We linearly interpolate (lerp) between adjacent grade colors so the sweep
+  /// crossfades elegantly across the intermediate colors instead of
+  /// hard-cutting. A smooth ease softens each crossover.
   Color _sweepColor(double t) {
     if (_sweepStops.length == 1) {
-      return AppTheme.getBeltColor(_sweepStops.first);
+      return _gradeColor(_sweepStops.first);
     }
     final segments = _sweepStops.length - 1;
     final scaled = (t.clamp(0.0, 1.0)) * segments;
     final i = scaled.floor().clamp(0, segments - 1);
     final local = scaled - i;
-    final from = AppTheme.getBeltColor(_sweepStops[i]);
-    final to = AppTheme.getBeltColor(_sweepStops[i + 1]);
-    return Color.lerp(from, to, Curves.easeInOut.transform(local)) ?? to;
+    final from = _gradeColor(_sweepStops[i]);
+    final to = _gradeColor(_sweepStops[i + 1]);
+    // easeInOutCubic gives a calmer, more elegant settle on each color than a
+    // linear crossfade.
+    return Color.lerp(from, to, Curves.easeInOutCubic.transform(local)) ?? to;
   }
 
-  /// Which belt key is "current" at sweep progress [t] — used to drive the
-  /// white-belt border, the black-belt red stripes, and combo middle-stripes
-  /// so they appear only once the sweep has reached that belt.
-  String _currentBeltKey(double t) {
+  /// Which grade id is "current" at sweep progress [t] — used to drive the
+  /// adornments (white/black middle stripes, tip "ponta" color) so they appear
+  /// only once the sweep has reached that grade.
+  String _currentGradeKey(double t) {
     if (_sweepStops.length == 1) return _sweepStops.first;
     final segments = _sweepStops.length - 1;
     final scaled = (t.clamp(0.0, 1.0)) * segments;
@@ -186,21 +214,24 @@ class _AnimatedBeltState extends State<AnimatedBelt>
 
   @override
   Widget build(BuildContext context) {
-    final showLabel = widget.showLabel ?? widget.highlight;
-    final finalColor = AppTheme.getBeltColor(widget.belt);
-
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        final v = _controller.value;
+        final raw = _controller.value;
+        // Ease the whole controller so both the sweep and the stripe phase feel
+        // refined — but keep the stripe pop's own easeOutBack character by only
+        // smoothing the sweep portion.
         // Sweep progress in [0..1] over the color phase, then stripe progress.
-        final sweepT = (_sweepEnd <= 0) ? 1.0 : (v / _sweepEnd).clamp(0.0, 1.0);
+        final sweepRaw =
+            (_sweepEnd <= 0) ? 1.0 : (raw / _sweepEnd).clamp(0.0, 1.0);
+        final sweepT = Curves.easeInOutCubic.transform(sweepRaw);
         final stripeT = _sweepEnd >= 1.0
             ? 0.0
-            : ((v - _sweepEnd) / (1 - _sweepEnd)).clamp(0.0, 1.0);
+            : ((raw - _sweepEnd) / (1 - _sweepEnd)).clamp(0.0, 1.0);
 
         final beltColor = _sweepColor(sweepT);
-        final beltKey = _currentBeltKey(sweepT);
+        final gradeKey = _currentGradeKey(sweepT);
+        final gradeDef = getGradeDefinition(widget.sportId, gradeKey);
 
         // How many stripes are currently visible, and the fractional pop of the
         // newest one (for a tiny scale-in on the leading stripe).
@@ -210,17 +241,13 @@ class _AnimatedBeltState extends State<AnimatedBelt>
 
         return _BeltVisual(
           beltColor: beltColor,
-          beltKey: beltKey,
-          finalBeltKey: widget.belt,
+          gradeKey: gradeKey,
+          gradeDef: gradeDef,
           size: widget.size,
           highlight: widget.highlight,
           fullStripes: fullStripes.clamp(0, widget.stripes),
           partialStripeFraction: partial.clamp(0.0, 1.0),
           totalStripes: widget.stripes,
-          showLabel: showLabel,
-          glowColor: finalColor,
-          // Glow fades in as the sweep completes (only when highlighting).
-          glowStrength: widget.highlight ? sweepT : 0.0,
         );
       },
     );
@@ -232,40 +259,53 @@ class _AnimatedBeltState extends State<AnimatedBelt>
 // ============================================
 class _BeltVisual extends StatelessWidget {
   final Color beltColor;
-  final String beltKey;
-  final String finalBeltKey;
+  final String gradeKey;
+  final GradeDefinition? gradeDef;
   final BeltSize size;
   final bool highlight;
   final int fullStripes;
   final double partialStripeFraction;
   final int totalStripes;
-  final bool showLabel;
-  final Color glowColor;
-  final double glowStrength;
 
   const _BeltVisual({
     required this.beltColor,
-    required this.beltKey,
-    required this.finalBeltKey,
+    required this.gradeKey,
+    required this.gradeDef,
     required this.size,
     required this.highlight,
     required this.fullStripes,
     required this.partialStripeFraction,
     required this.totalStripes,
-    required this.showLabel,
-    required this.glowColor,
-    required this.glowStrength,
   });
 
   @override
   Widget build(BuildContext context) {
     final config = _beltSizeConfig(size);
-    final isWhiteBelt = beltKey == 'white';
-    final isBlackBelt = beltKey == 'black';
-    final showWhiteStripe = beltKey.endsWith('-white') || beltKey == 'coral';
-    final showBlackStripe = beltKey.endsWith('-black');
+    // A light body (white, prata, ouro, "...e branca") needs a border to stand
+    // out from the page; keyed off luminance so every sport's grades are
+    // covered (BJJ white, Muay Thai branca, etc.).
+    final isLightBody = beltColor.computeLuminance() > 0.7;
+    final isBlackBelt = gradeDef?.isBlackBelt ?? (gradeKey == 'black');
+
+    // The grade's "ponta" adornment color (Muay Thai prajied tip, BJJ/Judô
+    // coral red, Luta Livre DAN tip). When present, the belt tip is drawn in
+    // this color instead of the default black tip.
+    final tipColor = gradeDef?.tipColor;
+
+    // Compound grade ids without an explicit tipColor still carry a middle
+    // stripe convention shared across sports: '-white' / 'coral' → white
+    // stripe, '-black' → black stripe.
+    final showWhiteStripe =
+        tipColor == null && (gradeKey.endsWith('-white') || gradeKey == 'coral');
+    final showBlackStripe = tipColor == null && gradeKey.endsWith('-black');
 
     final scale = highlight ? 1.12 : 1.0;
+
+    // The tip that holds the graus: a grade's own "ponta" color when it has one
+    // (so the adornment reads as part of the belt), otherwise the classic black
+    // tip. Black belts get a slightly lighter charcoal so red graus pop.
+    final Color holderColor = tipColor ??
+        (isBlackBelt ? const Color(0xFF2D2D2D) : const Color(0xFF171717));
 
     Widget belt = Container(
       width: config.width,
@@ -273,20 +313,14 @@ class _BeltVisual extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(2),
         boxShadow: [
+          // Subtle, flat depth only — no distracting colored glow.
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            blurRadius: 3,
+            color: Colors.black.withValues(alpha: 0.10),
+            blurRadius: 2,
             offset: const Offset(0, 1),
           ),
-          // Soft colored glow when in evidence.
-          if (highlight && glowStrength > 0)
-            BoxShadow(
-              color: glowColor.withValues(alpha: 0.45 * glowStrength),
-              blurRadius: 18 * glowStrength,
-              spreadRadius: 1 * glowStrength,
-            ),
         ],
-        border: isWhiteBelt
+        border: isLightBody
             ? Border.all(color: AppTheme.divider, width: 1)
             : null,
       ),
@@ -322,17 +356,16 @@ class _BeltVisual extends StatelessWidget {
             ),
           ),
 
-          // Black tip (ponta preta) — full height — holds the stripes.
+          // Tip (ponta) — full height — holds the stripes. Coloured by the
+          // grade's adornment when present, else the classic black tip.
           Container(
             width: config.tipWidth,
             height: config.height,
-            color: isBlackBelt
-                ? const Color(0xFF2D2D2D)
-                : const Color(0xFF171717),
+            color: holderColor,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.center,
-              children: _buildStripes(config, isBlackBelt, isWhiteBelt),
+              children: _buildStripes(config, isBlackBelt, isLightBody),
             ),
           ),
         ],
@@ -340,33 +373,13 @@ class _BeltVisual extends StatelessWidget {
     );
 
     belt = Transform.scale(scale: scale, child: belt);
-
-    if (!showLabel) return belt;
-
-    final label = getBeltLabel(finalBeltKey);
-    final shownStripes = fullStripes;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        belt,
-        SizedBox(height: highlight ? 10 : 4),
-        Text(
-          shownStripes > 0 ? '$label  $shownStripes°' : label,
-          style: TextStyle(
-            fontSize: highlight ? config.fontSize + 2 : config.fontSize,
-            color: AppTheme.textSecondary,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.3,
-          ),
-        ),
-      ],
-    );
+    return belt;
   }
 
   List<Widget> _buildStripes(
     _BeltSizeConfig config,
     bool isBlackBelt,
-    bool isWhiteBelt,
+    bool isLightBody,
   ) {
     final visible = fullStripes;
     if (visible <= 0 && partialStripeFraction <= 0) return const [];
@@ -376,12 +389,12 @@ class _BeltVisual extends StatelessWidget {
 
     final widgets = <Widget>[];
     for (var index = 0; index < visible; index++) {
-      widgets.add(_stripe(config, stripeColor, isWhiteBelt, 1.0));
+      widgets.add(_stripe(config, stripeColor, isLightBody, 1.0));
     }
     // Leading (newest) stripe scaling in.
     if (partialStripeFraction > 0 && visible < totalStripes) {
       final t = Curves.easeOutBack.transform(partialStripeFraction);
-      widgets.add(_stripe(config, stripeColor, isWhiteBelt, t));
+      widgets.add(_stripe(config, stripeColor, isLightBody, t));
     }
     return widgets;
   }
@@ -389,7 +402,7 @@ class _BeltVisual extends StatelessWidget {
   Widget _stripe(
     _BeltSizeConfig config,
     Color color,
-    bool isWhiteBelt,
+    bool isLightBody,
     double scale,
   ) {
     return Transform.scale(
@@ -403,7 +416,7 @@ class _BeltVisual extends StatelessWidget {
           decoration: BoxDecoration(
             color: color,
             borderRadius: BorderRadius.circular(1),
-            boxShadow: isWhiteBelt
+            boxShadow: isLightBody
                 ? [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.3),
@@ -461,11 +474,11 @@ _BeltSizeConfig _beltSizeConfig(BeltSize size) {
       );
     case BeltSize.large:
       return const _BeltSizeConfig(
-        width: 140,
-        height: 28,
-        tipWidth: 38,
-        stripeWidth: 5,
-        stripeGap: 2.5,
+        width: 168,
+        height: 34,
+        tipWidth: 44,
+        stripeWidth: 5.5,
+        stripeGap: 3,
         fontSize: 13,
       );
   }

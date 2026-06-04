@@ -207,18 +207,25 @@ class _WelcomeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '$_greeting,',
-          style: AppTheme.bodyLarge.copyWith(color: AppTheme.textSecondary),
-        ),
-        Text(
-          userName.split(' ').first,
-          style: AppTheme.displaySmall.copyWith(fontWeight: FontWeight.w700),
-        ),
-      ],
+    // Greeting + first name on a SINGLE line ("Boa noite, Igor").
+    return RichText(
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        style: AppTheme.headlineSmall.copyWith(color: AppTheme.textPrimary),
+        children: [
+          TextSpan(
+            text: '$_greeting, ',
+            style: AppTheme.headlineSmall.copyWith(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          TextSpan(
+            text: userName.split(' ').first,
+            style: AppTheme.headlineSmall.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
     ).fadeInQuick();
   }
 }
@@ -274,20 +281,35 @@ class _WelcomeHeaderWithBeltState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '$_greeting,',
-          style: AppTheme.bodyLarge.copyWith(color: AppTheme.textSecondary),
-        ),
-        const SizedBox(height: 4),
+        // Greeting + first name on a SINGLE line ("Boa noite, Igor"), with the
+        // multi-sport pill (when applicable) trailing on the same row.
         Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
           children: [
             Flexible(
-              child: Text(
-                widget.userName.split(' ').first,
-                style: AppTheme.displaySmall.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+              child: RichText(
                 overflow: TextOverflow.ellipsis,
+                text: TextSpan(
+                  style: AppTheme.headlineSmall.copyWith(
+                    color: AppTheme.textPrimary,
+                  ),
+                  children: [
+                    TextSpan(
+                      text: '$_greeting, ',
+                      style: AppTheme.headlineSmall.copyWith(
+                        color: AppTheme.textSecondary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    TextSpan(
+                      text: widget.userName.split(' ').first,
+                      style: AppTheme.headlineSmall.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             if (multiSport) ...[
@@ -301,15 +323,18 @@ class _WelcomeHeaderWithBeltState
           ],
         ),
         const SizedBox(height: 16),
-        // Belt in evidence — the morph animation sweeps from white up to the
-        // student's current belt on entering the home. Keyed by sport+belt so
-        // switching modalidade re-runs the morph for the new grade.
+        // Belt in evidence — the morph animation sweeps from the first grade up
+        // to the student's current grade on entering the home, in the sport's
+        // own color ladder (BJJ belts, Muay Thai prajied, etc.). Keyed by
+        // sport+grade so switching modalidade re-runs the morph for the new
+        // grade.
         AnimatedBelt(
           key: ValueKey(
             '${selectedSport.name}-${grade?.currentGrade ?? 'white'}-${grade?.currentStripes ?? 0}',
           ),
           belt: grade?.currentGrade ?? 'white',
           stripes: grade?.currentStripes ?? 0,
+          sportId: selectedSport,
           size: BeltSize.large,
           highlight: true,
         ),

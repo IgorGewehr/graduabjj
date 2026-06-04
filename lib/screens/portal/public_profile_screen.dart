@@ -257,11 +257,13 @@ class _ProfileHeader extends StatelessWidget {
           ],
           if (grade != null) ...[
             const SizedBox(height: 12),
-            // Belt hero — animated "evolution morph" (white 0° → current
-            // belt/graus) played once when the public profile opens.
+            // Belt hero — animated "evolution morph" (first grade 0° → current
+            // grade/graus) played once when the public profile opens, in the
+            // sport's own color ladder + adornments.
             AnimatedBelt(
               belt: grade.currentGrade,
               stripes: grade.currentStripes,
+              sportId: sport,
               size: BeltSize.large,
               highlight: true,
             ),

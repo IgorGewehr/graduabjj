@@ -19,7 +19,6 @@ import '../../widgets/cached_image.dart';
 import '../../widgets/common/animated_belt.dart';
 import '../../widgets/common/belt_badge.dart';
 import '../../widgets/common/delete_account_helper.dart';
-import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/profile_photo_picker.dart';
 import '../../widgets/loading_button.dart';
 import '../../widgets/polish/polish.dart';
@@ -479,23 +478,25 @@ class _HeroHeader extends ConsumerWidget {
           overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 12),
-        // Belt hero — animated "evolution morph" (white 0° → current belt/graus)
-        // played once on entry, in evidence. For non-BJJ primary sports the
-        // sport-aware GradeDisplay below carries the true color/label.
+        // Belt hero — animated "evolution morph" (first grade 0° → current
+        // grade/graus) played once on entry, in evidence, in the primary
+        // sport's own color ladder + adornments (BJJ belts, Muay Thai prajied,
+        // etc.). For non-BJJ sports the label below names the grade.
         AnimatedBelt(
           belt: grade?.currentGrade ?? 'white',
           stripes: grade?.currentStripes ?? 0,
+          sportId: primarySport,
           size: BeltSize.large,
           highlight: true,
         ),
         if (primarySport != SportId.bjj) ...[
           const SizedBox(height: 8),
-          GradeDisplay(
-            sportId: primarySport,
-            grade: grade?.currentGrade ?? 'white',
-            stripes: grade?.currentStripes ?? 0,
-            size: GradeDisplaySize.large,
-            showLabel: true,
+          Text(
+            getGradeLabel(primarySport, grade?.currentGrade ?? 'white'),
+            style: AppTheme.bodyMedium.copyWith(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
         const SizedBox(height: 8),

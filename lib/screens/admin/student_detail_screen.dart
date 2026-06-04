@@ -459,6 +459,7 @@ class _AdminStudentDetailScreenState
       child: AnimatedBelt(
         belt: grade?.currentGrade ?? 'white',
         stripes: grade?.currentStripes ?? 0,
+        sportId: primarySport,
         size: BeltSize.medium,
         highlight: true,
       ),

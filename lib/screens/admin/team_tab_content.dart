@@ -7,6 +7,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/portal_providers.dart';
 import '../../services/instructor_link_code_service.dart';
 import '../../services/student_service.dart';
 import '../../services/team_service.dart';
@@ -149,6 +150,46 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
     }
   }
 
+  Future<void> _promoteMonitor(AcademyMember m) async {
+    if (_academyId == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Promover a instrutor?'),
+        content: Text(
+          '${m.displayName.isEmpty ? m.email : m.displayName} passará de monitor '
+          'a instrutor, com acesso aos recursos de instrutor.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Promover'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await teamService.promoteToInstructor(
+        userId: m.userId,
+        academyId: _academyId!,
+        studentId: m.studentId,
+      );
+      if (!mounted) return;
+      context.showSuccess(
+        '${m.displayName.isEmpty ? m.email : m.displayName} agora é instrutor.',
+      );
+      _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      context.showError('Não foi possível promover: $e');
+    }
+  }
+
   Future<void> _openInviteDialog() async {
     final user = ref.read(currentUserProvider).valueOrNull;
     if (user == null || _service == null) return;
@@ -207,6 +248,16 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
 
   @override
   Widget build(BuildContext context) {
+    // Monitors are students whose studentId is in the academy's monitorIds.
+    // Surface them as their own group so admins can see and promote them.
+    final monitorIds =
+        ref.watch(academySettingsProvider).valueOrNull?.monitorIds ??
+            const <String>[];
+    final monitors = monitorIds.isEmpty
+        ? const <AcademyMember>[]
+        : _members.students
+            .where((s) => s.studentId != null && monitorIds.contains(s.studentId))
+            .toList();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: SingleChildScrollView(
@@ -271,9 +322,11 @@ class _TeamTabContentState extends ConsumerState<TeamTabContent> {
               loading: _loading,
               admins: _members.admins,
               instructors: _members.instructors,
+              monitors: monitors,
               onDemote: _demoteMember,
               onRevoke: _revokeMember,
               onEditPermissions: _openEditPermissionsDialog,
+              onPromoteMonitor: _promoteMonitor,
               currentUserId: ref.read(currentUserProvider).valueOrNull?.id,
             ),
             const SizedBox(height: 24),
@@ -663,6 +716,7 @@ class _PromoteDialogState extends ConsumerState<_PromoteDialog> {
         extraPermissions: _extras.toList(),
         email: _selected!.email,
         displayName: _selected!.fullName,
+        studentId: _selected!.id,
       );
       if (!mounted) return;
       context.showSuccess('${_selected!.fullName} promovido a instrutor.');
@@ -843,18 +897,22 @@ class _TeamMembersSection extends StatelessWidget {
   final bool loading;
   final List<AcademyMember> admins;
   final List<AcademyMember> instructors;
+  final List<AcademyMember> monitors;
   final ValueChanged<AcademyMember> onDemote;
   final ValueChanged<AcademyMember> onRevoke;
   final ValueChanged<AcademyMember> onEditPermissions;
+  final ValueChanged<AcademyMember> onPromoteMonitor;
   final String? currentUserId;
 
   const _TeamMembersSection({
     required this.loading,
     required this.admins,
     required this.instructors,
+    required this.monitors,
     required this.onDemote,
     required this.onRevoke,
     required this.onEditPermissions,
+    required this.onPromoteMonitor,
     required this.currentUserId,
   });
 
@@ -863,7 +921,7 @@ class _TeamMembersSection extends StatelessWidget {
     if (loading) {
       return PolishSkeleton.list(count: 2, itemHeight: 72);
     }
-    if (admins.isEmpty && instructors.isEmpty) {
+    if (admins.isEmpty && instructors.isEmpty && monitors.isEmpty) {
       return const PolishedEmptyState(
         icon: LucideIcons.users,
         title: 'Ainda nao ha equipe cadastrada',
@@ -911,6 +969,34 @@ class _TeamMembersSection extends StatelessWidget {
                     ),
                   ],
           ).entrance(index: ++memberIndex),
+        if (monitors.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'MONITORES',
+              style: AppTheme.labelSmall.copyWith(
+                color: AppTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          for (final m in monitors)
+            _MemberRow(
+              member: m,
+              badgeLabel: 'Monitor',
+              badgeColor: AppTheme.success,
+              actions: [
+                _MemberAction(
+                  icon: LucideIcons.arrowUpCircle,
+                  label: 'Promover a instrutor',
+                  color: AppTheme.info,
+                  onTap: () => onPromoteMonitor(m),
+                ),
+              ],
+            ).entrance(index: ++memberIndex),
+        ],
       ],
     );
   }

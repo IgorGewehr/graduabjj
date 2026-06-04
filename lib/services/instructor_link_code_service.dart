@@ -195,11 +195,13 @@ Future<void> promoteUserToInstructor({
   required List<String> extraPermissions,
   String? email,
   String? displayName,
+  String? studentId,
 }) async {
   await teamService.promoteToInstructor(
     userId: userId,
     academyId: academyId,
     extraPermissions: extraPermissions,
+    studentId: studentId,
   );
 }
 
