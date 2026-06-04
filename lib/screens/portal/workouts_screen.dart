@@ -651,7 +651,8 @@ class _RegisterExecutionSheetState extends State<_RegisterExecutionSheet> {
           if (h.bestLoadKg > prevLoad) prevLoad = h.bestLoadKg;
         }
       } catch (_) {/* sem PR detection se a leitura falhar */}
-      final isPR = exec.bestLoadKg > 0 && exec.bestLoadKg > prevLoad;
+      // PR de verdade = bater um recorde ANTERIOR (não celebra o 1º registro).
+      final isPR = prevLoad > 0 && exec.bestLoadKg > prevLoad;
 
       await service.upsert(exec);
       if (!mounted) return;
