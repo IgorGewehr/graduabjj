@@ -28,6 +28,16 @@
 | Competições (inscrição, resultados, galeria) | `competition_service.dart` |
 | Capacidade da turma (`maxStudents`, hoje só informativa) | `class_service.dart` |
 
+> **Mergeado em 2026-06 (sprint do amigo, ex-`cobranca-pix-whatsapp`):** features
+> novas que não estavam no roadmap A–F, agora na nossa branch —
+> **Cobrança PIX por WhatsApp** (S1–S7, cron 9h, inerte sem `WHATSAPP_API_KEY`),
+> **Jornal da Academia** (ver Z1), **Ranking de frequência** (ver A4),
+> **Perfil público do aluno** (coleção `publicProfiles` + Cloud Function
+> `mirrorStudentPublicProfile` — *precisa deploy de Functions p/ funcionar*),
+> **SportTabBar + "Minhas Modalidades"** (UI multi-esporte; infra útil p/ B1),
+> e **rework do BackButtonHandler** (com testes). Pendências da síntese em
+> `docs/plano-graduacao-pedagogica.md` não afetadas.
+
 ---
 
 ## A. Transversais — beneficiam TODAS as modalidades (maior ROI)
@@ -45,8 +55,10 @@
       + progresso, notificação, lembrete de reavaliação e export PDF. Ver
       `docs/plano-avaliacao-fisica.md` e `docs/roteiro-teste-avaliacao-fisica.md`.
       _Pendente: teste manual + merge p/ produção._
-- [ ] **A4. Gamificação/engajamento** — streaks, metas de frequência mensal,
-      badges. Já há base em conquistas/timeline. _(todas)_
+- [~] **A4. Gamificação/engajamento** — **PARCIAL**: **Ranking de frequência**
+      (leaderboard por turma, semanal/mensal) entregue na branch `cobranca-pix-whatsapp`
+      (já mergeada na nossa). **Faltam**: streaks, metas de frequência mensal, badges.
+      _(todas)_
 - [ ] **A5. Biblioteca de exercícios com vídeo demonstrativo** — catálogo curado
       que o montador de planilha seleciona; cada exercício linka vídeo/GIF.
       Reaproveita a infra de vídeo. _(todas — alimenta condicionamento de qualquer arte
@@ -149,28 +161,26 @@
 > Ideias capturadas pra não perder, **abaixo** dos módulos (A–F). São apostas de
 > engajamento, não dor latente.
 
-### Z1. Mural da Academia (feed enxuto) — aposta
-Decisão (2026-06): **NÃO** fazer feed social estilo Facebook com **post de aluno
-/ curtidas / comentários** — motivos: risco de *feed morto* (público pequeno por
-academia), compete com WhatsApp/Instagram já adotados, e post de aluno gera
-imposto de UGC (moderação + exigências Apple/Google). Se for fazer, só a versão
-enxuta:
+### Z1. Mural da Academia (feed enxuto) — **PARCIAL (Jornal da Academia)**
+> ✅ Entregue pelo **Jornal da Academia** (sprint do amigo, branch
+> `cobranca-pix-whatsapp`, já mergeada): feed cronológico (evento/notícia/seminário)
+> com CRUD admin + **push ao publicar** (`sendAcademyNotification`) + o **canal de
+> aviso livre do mestre** — que era "o único pedaço realmente novo" que esta nota pedia.
 
-- [ ] Tela "Mural" no portal, cronológica, agregando:
-  - Avisos do mestre (post simples: texto + imagem opcional, **só instrutor**) —
-    único pedaço realmente novo (hoje não há canal de aviso livre no app).
-  - **Auto-posts** do que já existe: graduações/vitórias (conquistas),
-    campeonatos/aulas especiais (eventos `academy_event`), resultado de competição.
-- [ ] Push quando sai post novo.
-- **Pulo do gato:** os auto-posts mantêm o mural vivo mesmo se o mestre nunca
-  escrever → elimina o risco de feed morto (que é o que mataria a ideia).
-- Evolução só com tração: reações 1-toque (👏/🔥) → comentários → post de aluno
-  (provavelmente nunca / só com aprovação do mestre).
+Decisão original (2026-06): **NÃO** fazer feed social estilo Facebook com **post de
+aluno / curtidas / comentários** (risco de feed morto, compete com WhatsApp/Instagram,
+imposto de UGC). Versão enxuta entregue:
 
-### Z2. Atalho pra testar o apetite ANTES do mural (mínimo esforço)
-- [ ] "Enviar comunicado" pro mestre → gera notificação/push (reusa
-  `sendAcademyNotification`) + opcionalmente um Evento.
-- [ ] Destacar conquistas/eventos recentes na home do portal.
+- [x] Tela do **Jornal** no portal, cronológica, com avisos do mestre (texto + imagem,
+      só instrutor). + headline na home.
+- [ ] **Auto-posts** do que já existe (graduações/conquistas, eventos, competições) —
+      **ainda falta** (hoje os posts são manuais do mestre).
+- [x] Push quando sai post novo.
+- [ ] Evolução só com tração: reações 1-toque (👏/🔥) → comentários → post de aluno.
+
+### Z2. Atalho pra testar o apetite ANTES do mural — **DONE (parcial)**
+- [x] "Enviar comunicado" pro mestre → CRUD de evento + notificação/push (dispatcher).
+- [ ] Destacar conquistas/eventos recentes na home do portal — **ainda falta**.
 - Entrega ~80% do valor com fração do esforço; só vira mural (Z1) se houver uso.
 
 > Já cobre parte disso: **Eventos** (`academy_event`/`event_service`),
