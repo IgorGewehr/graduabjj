@@ -19,7 +19,6 @@ import '../../widgets/common/animated_belt.dart';
 import '../../widgets/common/belt_badge.dart' show BeltSize;
 import '../../widgets/polish/polish.dart';
 import '../../widgets/portal/home_hero_card.dart';
-import '../../widgets/portal/musculacao_checkin_card.dart';
 import '../../widgets/skeletons/skeletons.dart';
 import '../../widgets/sport_tab_bar.dart';
 
@@ -519,21 +518,6 @@ class _DynamicCardsSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final upcomingCompetitionsAsync = ref.watch(upcomingCompetitionsProvider);
-    // Musculação self check-in — shown to students who practice musculação
-    // when the academy picked the 'button' or 'qr' mode.
-    final musculacaoMode = ref.watch(
-      academySettingsProvider.select(
-        (s) => s.valueOrNull?.musculacaoCheckinMode ?? 'manual',
-      ),
-    );
-    final practicesMusculacao = ref
-            .watch(currentStudentProvider)
-            .valueOrNull
-            ?.getSports()
-            .contains(SportId.musculacao) ??
-        false;
-    final showMusculacaoCheckin = practicesMusculacao &&
-        (musculacaoMode == 'button' || musculacaoMode == 'qr');
     // Jornal headline visibility — admins can hide the student feed. Loading/null
     // resolves to true so legacy academies never flicker the tile hidden.
     final journalVisible = ref.watch(
@@ -545,15 +529,9 @@ class _DynamicCardsSection extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (showMusculacaoCheckin) ...[
-          MusculacaoCheckinCard(qrMode: musculacaoMode == 'qr'),
-          const SizedBox(height: 12),
-        ],
-
-        // Check-in & "próxima aula" now live exclusively in the top
-        // HomeHeroCard (single source of truth, enrollment-gated), and the
-        // streak / monthly-attendance figures are already surfaced by the
-        // stats carousel — so neither is duplicated here anymore.
+        // Check-in (aula E musculação), "próxima aula" e streak/presenças vivem
+        // exclusivamente no HomeHeroCard (fonte única, gateado por matrícula) e
+        // no carrossel de stats — nada disso é duplicado aqui.
 
         // Next Competition Card
         upcomingCompetitionsAsync.when(
