@@ -10,6 +10,15 @@
       ]
     },
     {
+      "//": "Jornal da Academia (student feed): EventService.listPublished filters isPublished==true ordered by startDate ASC.",
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isPublished", "order": "ASCENDING" },
+        { "fieldPath": "startDate", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "syllabus",
       "queryScope": "COLLECTION",
       "fields": [
