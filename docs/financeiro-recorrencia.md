@@ -1,5 +1,12 @@
 <!-- Gerado por .claude/workflows/financeiro-recorrencia-architecture.js -->
 
+
+## ✅ Decisões do dono (travadas)
+- **1ª cobrança da assinatura:** valor **cheio no dia da assinatura**, depois mensal no mesmo dia.
+- **Cancelamento no meio do período:** **sem reembolso** — para as próximas cobranças (estilo Netflix).
+- **"Somente cartão" + mensal ⇒ assinatura automática:** marcar um plano mensal como cartão-only **já ativa** o auto-charge recorrente (MP Preapproval), sem toggle extra.
+- **Seleção de método:** **por plano** (v1) — sem override por aluno nesta versão.
+
 # Blueprint Financeiro GraduaBJJ — Assinatura Recorrente + Seleção de Método + Avulsa
 
 Branch alvo: `firebase-production` (produção). Unidade monetária canônica: **REAIS** em `financials.amount` e `Subscription.recurringValue` (ver `financial_amount_unit`). Liquidação: **conta conectada da academia via OAuth** (0% de taxa, sem `application_fee`).
