@@ -235,6 +235,19 @@ class AcademySettings {
   /// system always resolve for display. See [muaythaiVariantCbmt] in sports.dart.
   final String muaythaiGradeSystem;
 
+  // Class booking (A1: reserva de aula com vaga + lista de espera).
+  /// Master toggle: when false students never see the "Reservar aula" entry and
+  /// the reserve callable rejects non-staff. Default false (opt-in per academy).
+  final bool bookingEnabled;
+  /// How far ahead (days) a student may reserve. Default 7.
+  final int bookingWindowDays;
+  /// Minutes before class start after which a student can no longer self-cancel
+  /// (staff always can). Default 60.
+  final int bookingCancelCutoffMinutes;
+  /// Max simultaneous active (confirmed+waitlist) future reservations per
+  /// student. Default 3.
+  final int maxActiveBookingsPerStudent;
+
   // Monitors (students with additional permissions)
   final List<String> monitorIds;
 
@@ -289,6 +302,10 @@ class AcademySettings {
     this.musculacaoCheckinMode = 'manual',
     this.operatingHours = OperatingHours.empty,
     this.muaythaiGradeSystem = 'cbmt',
+    this.bookingEnabled = false,
+    this.bookingWindowDays = 7,
+    this.bookingCancelCutoffMinutes = 60,
+    this.maxActiveBookingsPerStudent = 3,
     this.monitorIds = const [],
     this.updatedAt,
   });
@@ -371,6 +388,12 @@ class AcademySettings {
       ),
       muaythaiGradeSystem:
           (data['muaythaiGradeSystem'] as String?) ?? 'cbmt',
+      bookingEnabled: data['bookingEnabled'] ?? false,
+      bookingWindowDays: (data['bookingWindowDays'] as num?)?.toInt() ?? 7,
+      bookingCancelCutoffMinutes:
+          (data['bookingCancelCutoffMinutes'] as num?)?.toInt() ?? 60,
+      maxActiveBookingsPerStudent:
+          (data['maxActiveBookingsPerStudent'] as num?)?.toInt() ?? 3,
       monitorIds: List<String>.from(data['monitorIds'] ?? []),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );

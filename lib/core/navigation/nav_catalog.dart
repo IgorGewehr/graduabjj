@@ -13,6 +13,7 @@ enum FeatureId {
   musculacao, // Musculação -> AcademySettings.musculacaoEnabled
   workouts, // Treinos      -> AcademySettings.workoutPlansEnabled
   videos, // Vídeos         -> AcademySettings.trainingVideosEnabled
+  booking, // Reservar aula -> AcademySettings.bookingEnabled
 }
 
 extension FeatureIdX on FeatureId {
@@ -296,6 +297,15 @@ const List<NavEntry> kPortalNavCatalog = <NavEntry>[
     icon: LucideIcons.clipboardCheck,
     route: '/portal/presencas',
     section: NavSection.treinos,
+  ),
+  NavEntry(
+    key: 'portal_reservas',
+    label: 'Reservar aula',
+    icon: LucideIcons.calendarCheck,
+    route: '/portal/reservas',
+    section: NavSection.treinos,
+    feature: FeatureId.booking,
+    portalGate: PortalContextGate.hideForMonitor,
   ),
   NavEntry(
     key: 'portal_jornada',
