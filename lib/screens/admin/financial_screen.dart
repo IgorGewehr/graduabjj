@@ -879,6 +879,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     int? classesPerWeek;
     BillingPeriod billingPeriod = BillingPeriod.monthly;
     PaymentMethodPolicy paymentMethodPolicy = PaymentMethodPolicy.both;
+    final recurringMonthsController = TextEditingController();
 
     showModalBottomSheet(
       context: context,
@@ -947,6 +948,14 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   onChanged: (p) =>
                       setDialogState(() => paymentMethodPolicy = p),
                 ),
+                if (billingPeriod == BillingPeriod.monthly &&
+                    paymentMethodPolicy == PaymentMethodPolicy.cardOnly)
+                  _buildFormField(
+                    'Duração da assinatura (meses; vazio = sem fim)',
+                    recurringMonthsController,
+                    'Ex: 8',
+                    keyboardType: TextInputType.number,
+                  ),
                 const SizedBox(height: 16),
 
                 Text(
@@ -1018,6 +1027,18 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                                   int.tryParse(dueDayController.text) ?? 10,
                               classesPerWeek: classesPerWeek,
                               paymentMethodPolicy: paymentMethodPolicy,
+                              recurringMonths: (billingPeriod ==
+                                          BillingPeriod.monthly &&
+                                      paymentMethodPolicy ==
+                                          PaymentMethodPolicy.cardOnly)
+                                  ? int.tryParse(recurringMonthsController.text)
+                                  : null,
+                              billingDay: (billingPeriod ==
+                                          BillingPeriod.monthly &&
+                                      paymentMethodPolicy ==
+                                          PaymentMethodPolicy.cardOnly)
+                                  ? int.tryParse(dueDayController.text)
+                                  : null,
                             );
                             if (mounted) {
                               Navigator.pop(context);
@@ -1097,6 +1118,11 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     bool isActive = plan.isActive;
     BillingPeriod billingPeriod = plan.billingPeriod;
     PaymentMethodPolicy paymentMethodPolicy = plan.paymentMethodPolicy;
+    final recurringMonthsController = TextEditingController(
+      text: (plan.recurringMonths ?? 0) > 0
+          ? plan.recurringMonths.toString()
+          : '',
+    );
 
     showModalBottomSheet(
       context: context,
@@ -1164,6 +1190,14 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   onChanged: (p) =>
                       setDialogState(() => paymentMethodPolicy = p),
                 ),
+                if (billingPeriod == BillingPeriod.monthly &&
+                    paymentMethodPolicy == PaymentMethodPolicy.cardOnly)
+                  _buildFormField(
+                    'Duração da assinatura (meses; vazio = sem fim)',
+                    recurringMonthsController,
+                    'Ex: 8',
+                    keyboardType: TextInputType.number,
+                  ),
                 const SizedBox(height: 16),
 
                 Row(
@@ -1227,6 +1261,22 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                                   int.tryParse(dueDayController.text) ?? 10,
                               'classesPerWeek': classesPerWeek,
                               'isActive': isActive,
+                              // Recurring fields only meaningful for monthly +
+                              // card-only plans; clear otherwise.
+                              'recurringMonths': (billingPeriod ==
+                                          BillingPeriod.monthly &&
+                                      paymentMethodPolicy ==
+                                          PaymentMethodPolicy.cardOnly)
+                                  ? (int.tryParse(
+                                          recurringMonthsController.text) ??
+                                      0)
+                                  : 0,
+                              'billingDay': (billingPeriod ==
+                                          BillingPeriod.monthly &&
+                                      paymentMethodPolicy ==
+                                          PaymentMethodPolicy.cardOnly)
+                                  ? (int.tryParse(dueDayController.text) ?? 10)
+                                  : null,
                             });
                             if (mounted) {
                               Navigator.pop(context);

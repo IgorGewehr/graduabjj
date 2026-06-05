@@ -1297,6 +1297,11 @@ class CardPaymentSheet extends StatefulWidget {
   final String description;
   final String? orderId;
   final String? financialId;
+
+  /// When set, this sheet starts a recurring SUBSCRIPTION for the plan (Mercado
+  /// Pago only): one card entry, then automatic monthly charges. Mutually
+  /// exclusive with [orderId]/[financialId].
+  final String? subscriptionPlanId;
   final String studentId;
   final String studentName;
   final VoidCallback? onPaymentSuccess;
@@ -1308,11 +1313,14 @@ class CardPaymentSheet extends StatefulWidget {
     required this.description,
     this.orderId,
     this.financialId,
+    this.subscriptionPlanId,
     required this.studentId,
     required this.studentName,
     this.onPaymentSuccess,
     this.onClose,
   });
+
+  bool get isSubscription => subscriptionPlanId != null;
 
   @override
   State<CardPaymentSheet> createState() => _CardPaymentSheetState();
@@ -1475,7 +1483,22 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
       final isAsaas = !useMp && await asaasService.isEnabled();
 
       CardPaymentResult result;
-      if (widget.orderId != null) {
+      // Recurring subscription (MP only): tokenize once, then MP auto-charges
+      // the card monthly. No installments — it's a monthly preapproval.
+      if (widget.isSubscription) {
+        if (!useMp) {
+          setState(() => _errorMessage =
+              'Assinatura recorrente requer o Mercado Pago conectado.');
+          return;
+        }
+        final sub = await mp.createSubscription(
+          planId: widget.subscriptionPlanId!,
+          studentId: widget.studentId,
+          studentName: widget.studentName,
+          cardData: cardData,
+        );
+        result = CardPaymentResult(success: sub.success, message: sub.message);
+      } else if (widget.orderId != null) {
         if (useMp) {
           result = await mp.createStoreOrderCardPayment(
             amount: widget.amount,
@@ -1788,9 +1811,13 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                 ),
                 const SizedBox(height: 20),
 
-                // Installments selector (1x–6x).
-                _buildInstallmentsSelector(),
-                const SizedBox(height: 28),
+                // Installments selector (1x–6x). Hidden for subscriptions —
+                // a recurring preapproval is a single monthly charge.
+                if (!widget.isSubscription) ...[
+                  _buildInstallmentsSelector(),
+                  const SizedBox(height: 28),
+                ] else
+                  const SizedBox(height: 8),
 
                 // Submit Button
                 SizedBox(
@@ -1817,7 +1844,11 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                             ),
                           )
                         : Text(
-                            _errorMessage != null ? 'Tentar novamente' : 'Pagar Agora',
+                            _errorMessage != null
+                                ? 'Tentar novamente'
+                                : (widget.isSubscription
+                                    ? 'Assinar'
+                                    : 'Pagar Agora'),
                             style: const TextStyle(
                               fontWeight: FontWeight.w600,
                               fontSize: 16,
