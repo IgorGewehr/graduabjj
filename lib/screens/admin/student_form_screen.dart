@@ -46,6 +46,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   String _guardianRelationship = '';
   final _tuitionValueController = TextEditingController();
   final _tuitionDayController = TextEditingController();
+  final _monthlyGoalController = TextEditingController(); // A4 override (vazio = padrão)
   final _healthNotesController = TextEditingController();
   final _allergiesController = TextEditingController();
   // Body-composition goal (optional)
@@ -150,6 +151,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     _guardianCpfController.dispose();
     _tuitionValueController.dispose();
     _tuitionDayController.dispose();
+    _monthlyGoalController.dispose();
     _healthNotesController.dispose();
     _allergiesController.dispose();
     _targetWeightController.dispose();
@@ -205,6 +207,10 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     _guardianRelationship = student.guardian?.relationship ?? '';
     _tuitionValueController.text = student.tuitionValue.toStringAsFixed(2).replaceAll('.', ',');
     _tuitionDayController.text = student.tuitionDay.toString();
+    _monthlyGoalController.text =
+        (student.monthlyAttendanceGoal ?? 0) > 0
+            ? student.monthlyAttendanceGoal.toString()
+            : '';
     _healthNotesController.text = student.healthNotes ?? '';
     _targetWeightController.text = _numText(student.targetWeightKg);
     _targetBodyFatController.text = _numText(student.targetBodyFatPct);
@@ -843,6 +849,16 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
                     helperText: 'Em meses curtos, ajusta para o último dia',
                   ),
                 ],
+              ),
+              const SizedBox(height: 16),
+              InputField(
+                controller: _monthlyGoalController,
+                label: 'Meta de frequência mensal (Opcional)',
+                hintText: 'Vazio = padrão da academia',
+                prefixIcon: LucideIcons.target,
+                keyboardType: TextInputType.number,
+                helperText:
+                    'Sobrescreve a meta padrão da academia só para este aluno',
               ),
             ],
           ),
@@ -1626,6 +1642,10 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
             ? 10 
             : int.tryParse(_tuitionDayController.text) ?? 10,
         'healthNotes': _healthNotesController.text.trim().isEmpty ? null : _healthNotesController.text.trim(),
+        // A4: per-student monthly attendance goal override (empty/0 = use the
+        // academy default).
+        'monthlyAttendanceGoal':
+            int.tryParse(_monthlyGoalController.text.trim()),
       };
 
       // Emergency contact

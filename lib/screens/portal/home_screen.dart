@@ -19,6 +19,7 @@ import '../../widgets/common/animated_belt.dart';
 import '../../widgets/common/belt_badge.dart' show BeltSize;
 import '../../widgets/polish/polish.dart';
 import '../../widgets/portal/home_hero_card.dart';
+import '../../widgets/portal/gamification_section.dart';
 import '../../widgets/skeletons/skeletons.dart';
 import '../../widgets/sport_tab_bar.dart';
 
@@ -144,6 +145,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               data: (s) {
                 if (s == null) return const SizedBox.shrink();
                 return _GraduationProgressCard(student: s);
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+
+            // Gamificação (A4): meta do mês + ranking + conquistas recentes.
+            student.when(
+              data: (s) {
+                if (s == null) return const SizedBox.shrink();
+                return GamificationSection(student: s);
               },
               loading: () => const SizedBox.shrink(),
               error: (_, __) => const SizedBox.shrink(),

@@ -252,6 +252,10 @@ class AcademySettings {
   /// combinações). Opt-in per academy, default off.
   final bool strikingEnabled;
 
+  /// Default monthly attendance goal (A4) shown to every student unless they
+  /// have a per-student override. 0 = disabled (no goal shown).
+  final int monthlyAttendanceGoal;
+
   // Monitors (students with additional permissions)
   final List<String> monitorIds;
 
@@ -311,6 +315,7 @@ class AcademySettings {
     this.bookingCancelCutoffMinutes = 60,
     this.maxActiveBookingsPerStudent = 3,
     this.strikingEnabled = false,
+    this.monthlyAttendanceGoal = 0,
     this.monitorIds = const [],
     this.updatedAt,
   });
@@ -400,6 +405,8 @@ class AcademySettings {
       maxActiveBookingsPerStudent:
           (data['maxActiveBookingsPerStudent'] as num?)?.toInt() ?? 3,
       strikingEnabled: data['strikingEnabled'] ?? false,
+      monthlyAttendanceGoal:
+          (data['monthlyAttendanceGoal'] as num?)?.toInt() ?? 0,
       monitorIds: List<String>.from(data['monitorIds'] ?? []),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
@@ -763,6 +770,16 @@ class SettingsService {
       data['maxActiveBookingsPerStudent'] = maxActivePerStudent;
     }
     await _academyRef.set(data, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Gamificação (A4): meta de frequência mensal (padrão da academia)
+  // ============================================
+  Future<void> updateMonthlyAttendanceGoal(int value) async {
+    await _academyRef.set({
+      'monthlyAttendanceGoal': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   // ============================================

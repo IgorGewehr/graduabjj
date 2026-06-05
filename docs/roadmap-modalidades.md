@@ -63,10 +63,14 @@
       + progresso, notificação, lembrete de reavaliação e export PDF. Ver
       `docs/plano-avaliacao-fisica.md` e `docs/roteiro-teste-avaliacao-fisica.md`.
       _Pendente: teste manual + merge p/ produção._
-- [~] **A4. Gamificação/engajamento** — **PARCIAL**: **Ranking de frequência**
-      (leaderboard por turma, semanal/mensal) entregue na branch `cobranca-pix-whatsapp`
-      (já mergeada na nossa). **Faltam**: streaks, metas de frequência mensal, badges.
-      _(todas)_
+- [x] **A4. Gamificação/engajamento** ✅ — **streaks, badges/marcos e ranking** já
+      vieram completos no sprint do amigo (cálculo + cron `scheduledGamificationMilestones`
+      + timeline + hero na home). A4 "resto" fechou o gap real: **meta de frequência
+      mensal** (padrão da academia em Ajustes + override por aluno no cadastro; barra
+      de progresso "X/Y aulas" na home) + **surfacing na home** (posição no ranking do
+      mês + 3 conquistas recentes). Helper puro `gamification.dart` +8 testes. Sem
+      deploy (só campos em docs existentes + providers). Ver `docs/plano-gamificacao-a4.md`.
+      _(todas)_ _Pendente: teste manual + merge p/ produção._
 - [x] **A5. Biblioteca de exercícios com vídeo demonstrativo** ✅ — catálogo
       `exercises` por academia (grupo muscular/equipamento/vídeo) + seed; **picker
       no montador** (linka `exerciseId`, mantém texto livre); **"Ver demonstração"**

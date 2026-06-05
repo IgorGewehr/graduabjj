@@ -292,6 +292,10 @@ class Student {
   final int? initialAttendanceCount;
   final int? attendanceCount;
 
+  /// Per-student monthly attendance goal override (A4). When null/0 the academy
+  /// default applies.
+  final int? monthlyAttendanceGoal;
+
   // Status
   final StudentStatus status;
   final String? statusNote;
@@ -360,6 +364,7 @@ class Student {
     this.beltHistory,
     this.initialAttendanceCount,
     this.attendanceCount,
+    this.monthlyAttendanceGoal,
     required this.status,
     this.statusNote,
     this.planId,
@@ -422,6 +427,7 @@ class Student {
           : null,
       initialAttendanceCount: data['initialAttendanceCount'],
       attendanceCount: data['attendanceCount'],
+      monthlyAttendanceGoal: (data['monthlyAttendanceGoal'] as num?)?.toInt(),
       status: StudentStatusExtension.fromString(data['status'] ?? 'active'),
       statusNote: data['statusNote'],
       planId: data['planId'],
@@ -481,6 +487,7 @@ class Student {
       'beltHistory': beltHistory?.map((e) => e.toMap()).toList(),
       'initialAttendanceCount': initialAttendanceCount,
       'attendanceCount': attendanceCount,
+      'monthlyAttendanceGoal': monthlyAttendanceGoal,
       'status': status.value,
       'statusNote': statusNote,
       // planId is no longer written — plans are determined by plan.studentIds
@@ -601,6 +608,7 @@ class Student {
     List<BeltHistoryEntry>? beltHistory,
     int? initialAttendanceCount,
     int? attendanceCount,
+    int? monthlyAttendanceGoal,
     StudentStatus? status,
     String? statusNote,
     String? planId,
@@ -650,6 +658,8 @@ class Student {
       beltHistory: beltHistory ?? this.beltHistory,
       initialAttendanceCount: initialAttendanceCount ?? this.initialAttendanceCount,
       attendanceCount: attendanceCount ?? this.attendanceCount,
+      monthlyAttendanceGoal:
+          monthlyAttendanceGoal ?? this.monthlyAttendanceGoal,
       status: status ?? this.status,
       statusNote: statusNote ?? this.statusNote,
       planId: planId ?? this.planId,

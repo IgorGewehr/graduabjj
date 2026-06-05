@@ -93,6 +93,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   // Trocação (C1–C3)
   bool _strikingEnabled = false;
 
+  // Gamificação (A4): meta de frequência mensal padrão (0 = desligado)
+  int _monthlyAttendanceGoal = 0;
+
   // Deep-link (?feature=<id>) → scroll + temporary highlight on the target card.
   final Map<FeatureId, GlobalKey> _featureKeys = {
     for (final f in FeatureId.values) f: GlobalKey(),
@@ -281,6 +284,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _bookingCancelCutoffMinutes = settings.bookingCancelCutoffMinutes;
           _maxActiveBookingsPerStudent = settings.maxActiveBookingsPerStudent;
           _strikingEnabled = settings.strikingEnabled;
+          _monthlyAttendanceGoal = settings.monthlyAttendanceGoal;
           _musculacaoEnabled = settings.musculacaoEnabled;
           _musculacaoCheckinMode = settings.musculacaoCheckinMode;
           _operatingHours
@@ -386,6 +390,19 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         cancelCutoffMinutes: _bookingCancelCutoffMinutes,
         maxActivePerStudent: _maxActiveBookingsPerStudent,
       );
+      if (!mounted) return;
+      ref.invalidate(academySettingsProvider);
+    } catch (e) {
+      if (mounted) context.showError('Erro: $e');
+    }
+  }
+
+  /// Persists the academy-default monthly attendance goal (A4) and refreshes
+  /// the provider so the home progress updates.
+  Future<void> _saveMonthlyGoal() async {
+    try {
+      await SettingsService(FirebaseService.academyId)
+          .updateMonthlyAttendanceGoal(_monthlyAttendanceGoal);
       if (!mounted) return;
       ref.invalidate(academySettingsProvider);
     } catch (e) {
@@ -2067,6 +2084,37 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
               ),
               icon: Icons.sports_mma_outlined,
               iconColor: AppTheme.primary,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Gamificação (A4): meta de frequência mensal padrão
+          _SettingsCard(
+            title: 'Gamificação',
+            icon: LucideIcons.target,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Meta de frequência mensal padrão para os alunos. 0 = desligado. '
+                  'Pode ser sobrescrita por aluno no cadastro.',
+                  style: AppTheme.bodySmall
+                      .copyWith(color: AppTheme.textSecondary),
+                ),
+                _bookingStepper(
+                  label: 'Meta mensal',
+                  value: _monthlyAttendanceGoal,
+                  suffix: _monthlyAttendanceGoal == 0 ? 'off' : 'aulas',
+                  min: 0,
+                  max: 60,
+                  step: 1,
+                  onChanged: (v) {
+                    setState(() => _monthlyAttendanceGoal = v);
+                    _saveMonthlyGoal();
+                  },
+                ),
+              ],
             ),
           ),
 
