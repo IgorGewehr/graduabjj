@@ -50,8 +50,9 @@
       da espera com aviso; **corte de 1h**, **janela de 7 dias** e **limite/aluno**
       configuráveis; portal "Reservar aula" + admin "Reservas" (roster, add/remove,
       **no-show**). Reserva ≠ presença (check-in QR intacto). Ver
-      `docs/plano-reserva-aula.md` e `docs/roteiro-teste-reserva-aula.md`.
-      _Pendente: **deploy** (functions/rules/índices) + teste manual + merge p/ produção._
+      `docs/plano-reserva-aula.md`. **Deploy de functions/rules/índices: FEITO**
+      (additivo, não afeta a versão em produção).
+      _Pendente: teste manual + merge p/ produção._
 - [ ] **A2. Push notifications reais** — hoje é stub (sem tokens/APNs). Habilita
       lembrete de aula/treino, "nova planilha/vídeo", "você faltou esta semana",
       lembrete de graduação. _(todas)_ — depende de **F2**.
