@@ -157,6 +157,26 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "//": "Reserva de aula (A1): promocao da fila — cancelClassReservation busca o proximo waitlist por (occId + status==waitlist) ordenado por waitlistSeq ASC.",
+      "collectionGroup": "classBookings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "occId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "waitlistSeq", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Reserva de aula (A1): limite por aluno — reserveClassSlot conta reservas ativas futuras por (studentId + status in [confirmed,waitlist] + slotStart>=agora).",
+      "collectionGroup": "classBookings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "slotStart", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

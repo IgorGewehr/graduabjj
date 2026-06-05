@@ -896,6 +896,27 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Reserva de aula (A1) — capacidade + fila SERVER-AUTHORITATIVE.
+      // TODA escrita acontece nas Cloud Functions (reserveClassSlot /
+      // cancelClassReservation) via Admin SDK, que IGNORA estas regras. O
+      // cliente nunca escreve a vaga -> contador impossivel de fraudar.
+      // ============================================
+      match /classOccurrences/{occId} {
+        // Qualquer membro le as vagas (X/Y) para montar a tela de reserva.
+        allow read: if belongsToAcademy(academyId);
+        // Escrita so via callable (Admin SDK). Cliente nao escreve.
+        allow write: if false;
+      }
+
+      match /classBookings/{bookingId} {
+        allow read: if isStaffOrMonitor(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
+        // Escrita so via callable (Admin SDK). Cliente nao escreve.
+        allow write: if false;
+      }
+
+      // ============================================
       // Notifications
       // ============================================
       match /notifications/{notificationId} {
