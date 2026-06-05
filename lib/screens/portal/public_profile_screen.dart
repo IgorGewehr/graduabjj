@@ -9,6 +9,7 @@ import '../../models/competition_photo.dart';
 import '../../models/public_student_profile.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/portal_providers.dart';
 import '../../providers/ranking_providers.dart';
 import '../../services/achievement_service.dart' show Achievement, AchievementType;
 import '../../services/competition_service.dart' show CompetitionResult;
@@ -196,7 +197,7 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen>
 // ============================================
 // Header
 // ============================================
-class _ProfileHeader extends StatelessWidget {
+class _ProfileHeader extends ConsumerWidget {
   final Student student;
   final int medalCount;
 
@@ -210,7 +211,7 @@ class _ProfileHeader extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final sport = student.getPrimarySport();
     final grade = student.getGrade(sport);
     final age = student.age;
@@ -279,6 +280,10 @@ class _ProfileHeader extends StatelessWidget {
               belt: grade.currentGrade,
               stripes: grade.currentStripes,
               sportId: sport,
+              muaythaiVariant: ref
+                  .watch(academySettingsProvider)
+                  .valueOrNull
+                  ?.muaythaiGradeSystem,
               size: BeltSize.large,
               highlight: true,
             ),

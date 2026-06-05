@@ -32,7 +32,7 @@ class GradeBadge extends StatelessWidget {
 
     switch (sport.gradeSystem) {
       case GradeSystem.belt:
-        return BeltChip(belt: grade, stripes: stripes);
+        return BeltChip(belt: grade, stripes: stripes, sportId: sportId);
 
       case GradeSystem.armband:
         final color = getGradeColor(sportId, grade);

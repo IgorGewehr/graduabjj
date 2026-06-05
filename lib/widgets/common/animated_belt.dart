@@ -160,10 +160,23 @@ class _AnimatedBeltState extends State<AnimatedBelt>
       // ladder, then land on the master rank as the single final crossfade.
       _sweepStops = [...ladder, widget.belt];
     } else {
-      // Unknown grade for this sport: fade from the first grade into the real
-      // color so we still get a graceful morph.
-      final first = ladder.isNotEmpty ? ladder.first : 'white';
-      _sweepStops = first == widget.belt ? [widget.belt] : [first, widget.belt];
+      // Not on the adult ladder: it may be a kids-only grade (BJJ
+      // grey/yellow/orange/green, etc.). Resolve against the kids ladder so the
+      // sweep walks the full progression instead of a flat white→color fade.
+      // getGradesForSport(category: 'kids') is a no-op for sports without a kids
+      // ladder, so other sports fall through to the graceful 2-stop fade.
+      final kidsLadder = getGradesForSport(widget.sportId, category: 'kids')
+          .where((g) => !g.aboveBlack)
+          .map((g) => g.id)
+          .toList();
+      final kidsIndex = kidsLadder.indexOf(widget.belt);
+      if (kidsIndex >= 0) {
+        _sweepStops = kidsLadder.sublist(0, kidsIndex + 1);
+      } else {
+        final first = ladder.isNotEmpty ? ladder.first : 'white';
+        _sweepStops =
+            first == widget.belt ? [widget.belt] : [first, widget.belt];
+      }
     }
 
     // Split the controller timeline: most of it is the color sweep, a short tail
@@ -325,17 +338,21 @@ class _BeltVisual extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final config = _beltSizeConfig(size);
-    // A light body (white/branca, prata, ouro, pale yellow) needs a border to
-    // stand out from the white page. A bare 0.7 luminance cutoff only caught
-    // pure white and left prata (~0.36), ouro (~0.45), Muay Thai light-blue and
-    // the pale yellows (~0.58) borderless. Combine an honest luminance cutoff
-    // with the grade's own semantics so every light-bodied grade is framed.
+    // A light body (white/branca, prata, ouro, amarela, azul clara) needs a
+    // border to stand out from the white page. Luminance alone is unreliable
+    // here — standard yellow (~0.50) and Muay Thai light-blue (~0.36) read as
+    // "dark" yet blend into the page — so we combine an honest luminance cutoff
+    // with the grade's own label semantics. 'azul clara' is matched at the
+    // START of the label so the red-bodied 'Vermelha ponta azul clara' stays
+    // borderless.
     final luminance = beltColor.computeLuminance();
     final gradeLabel = gradeDef?.label.toLowerCase() ?? '';
     final isLightBody = luminance > 0.55 ||
         gradeLabel.contains('branca') ||
         gradeLabel.contains('prata') ||
-        gradeLabel.contains('ouro');
+        gradeLabel.contains('ouro') ||
+        gradeLabel.contains('amarela') ||
+        gradeLabel.startsWith('azul clara');
     final isBlackBelt = gradeDef?.isBlackBelt ?? (gradeKey == 'black');
 
     // The grade's "ponta" adornment color (Muay Thai prajied tip, BJJ/Judô

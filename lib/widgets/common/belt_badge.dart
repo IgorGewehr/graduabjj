@@ -295,16 +295,25 @@ class BeltChip extends StatelessWidget {
   final String belt;
   final int stripes;
 
+  /// When set, color and label resolve from this sport's grade ladder (so
+  /// non-BJJ belt sports — e.g. Luta Livre DAN 'black-red' — render their true
+  /// color/label); otherwise falls back to the legacy BJJ theme maps.
+  final SportId? sportId;
+
   const BeltChip({
     super.key,
     required this.belt,
     this.stripes = 0,
+    this.sportId,
   });
 
   @override
   Widget build(BuildContext context) {
-    final beltColor = AppTheme.getBeltColor(belt);
-    final beltLabel = getBeltLabel(belt);
+    final beltColor = sportId != null
+        ? getGradeColor(sportId!, belt)
+        : AppTheme.getBeltColor(belt);
+    final beltLabel =
+        sportId != null ? getGradeLabel(sportId!, belt) : getBeltLabel(belt);
     final isWhiteBelt = belt == 'white';
     final isBlackBelt = belt == 'black';
     final isLightBelt = belt == 'white' || belt == 'yellow';
