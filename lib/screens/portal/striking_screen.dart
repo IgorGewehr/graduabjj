@@ -10,6 +10,7 @@ import '../../services/firebase_service.dart';
 import '../../services/striking_session_service.dart';
 import '../../widgets/polish/polish.dart';
 import 'cartel_screen.dart';
+import 'combos_view_screen.dart';
 import 'striking_timer_screen.dart';
 
 const _strikingSports = [SportId.muaythai, SportId.boxing, SportId.kickboxing];
@@ -157,6 +158,21 @@ class _StrikingScreenState extends ConsumerState<StrikingScreen> {
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
                                 builder: (_) => const CartelScreen()),
+                          ),
+                        ),
+                      ),
+                      Card(
+                        margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                        child: ListTile(
+                          leading: const Icon(LucideIcons.list,
+                              color: AppTheme.primary),
+                          title: const Text('Combinações'),
+                          subtitle:
+                              const Text('Sequências de golpes por nível'),
+                          trailing: const Icon(LucideIcons.chevronRight),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const CombosViewScreen()),
                           ),
                         ),
                       ),

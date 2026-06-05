@@ -43,3 +43,4 @@ export 'workout_execution_service.dart';
 export 'class_booking_service.dart';
 export 'striking_session_service.dart';
 export 'fight_record_service.dart';
+export 'combo_service.dart';

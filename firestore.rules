@@ -942,6 +942,15 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Trocação (C2): biblioteca de combinações — staff escreve; qualquer
+      // membro le. Nao e sensivel. Espelha exercises/syllabus.
+      // ============================================
+      match /combos/{comboId} {
+        allow read: if belongsToAcademy(academyId);
+        allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
       // Notifications
       // ============================================
       match /notifications/{notificationId} {

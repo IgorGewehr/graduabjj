@@ -261,6 +261,14 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     lockable: true,
   ),
   NavEntry(
+    key: 'admin_combinacoes',
+    label: 'Combinações',
+    icon: Icons.sports_mma_outlined,
+    route: '/admin/combinacoes',
+    section: NavSection.conteudo,
+    feature: FeatureId.striking,
+  ),
+  NavEntry(
     key: 'admin_loja',
     label: 'Loja',
     icon: LucideIcons.store,

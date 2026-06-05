@@ -113,8 +113,10 @@
       configurável (rounds/duração/descanso) com vibração+som; registro do aluno
       (tipo saco/manoplas/sparring/clinch/técnica + rounds + RPE + notas) com
       histórico. Coleção `strikingSessions`. Helper puro +11 testes. _Deploy feito._
-- [ ] **C2. Biblioteca de combinações/golpes** — sequências (jab-cross-hook…) por
-      nível, com vídeo. _(parente de A5/B1, mas voltada a trocação)_ **← próximo.**
+- [x] **C2. Biblioteca de combinações/golpes** ✅ — catálogo `combos` por
+      modalidade + nível (iniciante/intermediário/avançado), sequência de golpes +
+      vídeo opcional; admin "Combinações" (CRUD + seed de modelos boxe/MT/kick) +
+      portal read-only por modalidade. Helper de nível +4 testes.
 - [x] **C3. Cartel/ficha de luta** ✅ — cartel oficial (só staff escreve, aluno vê):
       V/D/E + método (KO/TKO/Decisão/Finalização/DQ), evento, data, adversário,
       peso, rounds, vídeo, notas. Resumo "XV-YD-ZE (N nocautes)". Aba "Cartel" no
