@@ -3534,6 +3534,19 @@ exports.reserveClassSlot = onCall(async (request) => {
   if (!slot) throw new HttpsError('invalid-argument', 'No class slot at that day/time.');
 
   const now = Date.now();
+  const multiPerDay = bk_hasMultiPerDay(schedule);
+  const occId = bk_occurrenceId(classId, date, startTime, multiPerDay);
+  const occRef = db.doc(`academies/${academyId}/classOccurrences/${occId}`);
+  const bookingRef = db.doc(`academies/${academyId}/classBookings/${occId}__${studentId}`);
+
+  // Idempotency BEFORE the limit check: re-reserving an existing active booking
+  // is a no-op and must never trip the per-student limit (the booking is one of
+  // the counted ones). The transaction re-checks this authoritatively.
+  const existing = await bookingRef.get();
+  if (existing.exists && existing.data().status !== 'cancelled') {
+    return { status: existing.data().status, position: 0 };
+  }
+
   if (!perm.isStaff) {
     if (slotStartMillis <= now) {
       throw new HttpsError('failed-precondition', 'Class already started.');
@@ -3560,10 +3573,6 @@ exports.reserveClassSlot = onCall(async (request) => {
     }
   }
 
-  const multiPerDay = bk_hasMultiPerDay(schedule);
-  const occId = bk_occurrenceId(classId, date, startTime, multiPerDay);
-  const occRef = db.doc(`academies/${academyId}/classOccurrences/${occId}`);
-  const bookingRef = db.doc(`academies/${academyId}/classBookings/${occId}__${studentId}`);
   const stuSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
   const studentName = stuSnap.data()?.fullName || '';
   const maxStudents = Number.isFinite(cls.maxStudents) ? cls.maxStudents : null;
@@ -3629,11 +3638,18 @@ exports.cancelClassReservation = onCall(async (request) => {
   const perm = await bk_resolvePermission(auth.uid, academyId, studentId);
   const cfg = await bk_loadBookingConfig(academyId);
 
-  const classSnap = await db.doc(`academies/${academyId}/classes/${classId}`).get();
-  const schedule = classSnap.exists && Array.isArray(classSnap.data().schedule)
-    ? classSnap.data().schedule : [];
-  const multiPerDay = bk_hasMultiPerDay(schedule);
-  const occId = bk_occurrenceId(classId, date, startTime, multiPerDay);
+  // Trust the client-provided occId when present: cancel only ever targets the
+  // caller's OWN booking ({occId}__{studentId}, and studentId is permission-
+  // checked), so this is safe and survives the class/schedule being edited or
+  // deleted after the booking was made (recomputing could diverge). Fall back
+  // to recomputation for older clients.
+  let occId = data.occId;
+  if (!occId) {
+    const classSnap = await db.doc(`academies/${academyId}/classes/${classId}`).get();
+    const schedule = classSnap.exists && Array.isArray(classSnap.data().schedule)
+      ? classSnap.data().schedule : [];
+    occId = bk_occurrenceId(classId, date, startTime, bk_hasMultiPerDay(schedule));
+  }
   const occRef = db.doc(`academies/${academyId}/classOccurrences/${occId}`);
   const bookingRef = db.doc(`academies/${academyId}/classBookings/${occId}__${studentId}`);
 

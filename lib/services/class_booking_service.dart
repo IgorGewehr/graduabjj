@@ -70,6 +70,7 @@ class ClassBookingService {
     required String startTime,
     required String studentId,
     required int slotStartMillis,
+    String? occId, // exact stored occurrence id (survives schedule edits)
   }) async {
     final res = await _functions.httpsCallable('cancelClassReservation').call({
       'academyId': academyId,
@@ -78,6 +79,7 @@ class ClassBookingService {
       'startTime': startTime,
       'studentId': studentId,
       'slotStartMillis': slotStartMillis,
+      if (occId != null) 'occId': occId,
     });
     final data = Map<String, dynamic>.from(res.data as Map);
     return BookingActionResult(

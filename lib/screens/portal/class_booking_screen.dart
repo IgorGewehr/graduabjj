@@ -252,6 +252,7 @@ class _BookingBodyState extends ConsumerState<_BookingBody> {
         startTime: r.slot.startTime,
         studentId: widget.studentId,
         slotStartMillis: r.slot.slotStart.millisecondsSinceEpoch,
+        occId: r.occId,
       );
       _snack(res.promotedStudentId != null
           ? 'Reserva cancelada. A próxima pessoa da espera foi promovida.'

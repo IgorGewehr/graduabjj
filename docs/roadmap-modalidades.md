@@ -42,9 +42,16 @@
 
 ## A. Transversais — beneficiam TODAS as modalidades (maior ROI)
 
-- [ ] **A1. Reserva/agendamento de aula com vaga + lista de espera** — `maxStudents`
-      hoje é só informativo; falta booking pelo aluno, limite de vaga, cancelamento
-      e waitlist. Padrão em todo concorrente. _(beneficia: todas as modalidades com turma)_
+- [x] **A1. Reserva/agendamento de aula com vaga + lista de espera** ✅ **CONCLUÍDA
+      (4 fases)** em `feat/evolucao-modulos` — ocorrência datada sobre as turmas
+      recorrentes; capacidade real (`maxStudents`) + **fila de espera
+      server-authoritative** (callables `reserveClassSlot`/`cancelClassReservation`,
+      contador `classOccurrences` que o cliente não escreve); **auto-promoção** do 1º
+      da espera com aviso; **corte de 1h**, **janela de 7 dias** e **limite/aluno**
+      configuráveis; portal "Reservar aula" + admin "Reservas" (roster, add/remove,
+      **no-show**). Reserva ≠ presença (check-in QR intacto). Ver
+      `docs/plano-reserva-aula.md` e `docs/roteiro-teste-reserva-aula.md`.
+      _Pendente: **deploy** (functions/rules/índices) + teste manual + merge p/ produção._
 - [ ] **A2. Push notifications reais** — hoje é stub (sem tokens/APNs). Habilita
       lembrete de aula/treino, "nova planilha/vídeo", "você faltou esta semana",
       lembrete de graduação. _(todas)_ — depende de **F2**.
@@ -153,9 +160,9 @@
 2. ~~**A6 + A5 — Registro de treino + biblioteca de exercícios**~~ ✅ **FEITO**
    (6 fases; falta teste manual + merge). 1RM Epley cobre parte de E2.
 3. ~~**B1→B4 — Currículo + requisitos de graduação**~~ ✅ **FEITO** (6 fases).
-4. **A1 — Reserva de aula com vaga/waitlist** → operação (turmas lotando).
-   **← PRÓXIMO sugerido.**
-5. **A2 + F2 — Push real** → retenção (lembretes).
+4. ~~**A1 — Reserva de aula com vaga/waitlist**~~ ✅ **FEITO** (4 fases; falta
+   deploy + teste manual). Lembrete de aula fica p/ A2 (depende de push real).
+5. **A2 + F2 — Push real** → retenção (lembretes). **← PRÓXIMO sugerido.**
 6. **C1→C3 — Sparring/rounds/cartel** → diferenciador para trocação.
 7. **A4 — Gamificação** → camada de engajamento sobre o resto.
 8. **E* / D1 — Específicas** (periodização, 1RM, kata, weight cut) → refinamento.

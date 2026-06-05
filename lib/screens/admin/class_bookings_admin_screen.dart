@@ -311,6 +311,7 @@ class _OccurrenceRosterSheetState extends State<_OccurrenceRosterSheet> {
         startTime: b.startTime,
         studentId: b.studentId,
         slotStartMillis: widget.slot.slotStart.millisecondsSinceEpoch,
+        occId: widget.occId,
       );
       await _load();
     } catch (e) {
