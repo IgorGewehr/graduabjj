@@ -106,12 +106,19 @@
 
 ## C. Combate de trocação (Muay Thai · Kickboxing · Boxe)
 
-- [ ] **C1. Registro de sparring/rounds + timer de rounds** — log de sessões
-      (sacos, manoplas, sparring) e timer configurável (rounds/descanso).
+> Módulo "Trocação" gateado por `FeatureId.striking` (AcademySettings.strikingEnabled).
+> Ver `docs/plano-trocacao.md`. Ordem: C1 → C3 → C2.
+
+- [x] **C1. Registro de sparring/rounds + timer de rounds** ✅ — timer cheio
+      configurável (rounds/duração/descanso) com vibração+som; registro do aluno
+      (tipo saco/manoplas/sparring/clinch/técnica + rounds + RPE + notas) com
+      histórico. Coleção `strikingSessions`. Helper puro +11 testes. _Deploy feito._
 - [ ] **C2. Biblioteca de combinações/golpes** — sequências (jab-cross-hook…) por
-      nível, com vídeo. _(parente de A5/B1, mas voltada a trocação)_
-- [ ] **C3. Cartel/ficha de luta** — registro de lutas (V/D/KO, evento, data) além
-      do módulo de competições genérico.
+      nível, com vídeo. _(parente de A5/B1, mas voltada a trocação)_ **← próximo.**
+- [x] **C3. Cartel/ficha de luta** ✅ — cartel oficial (só staff escreve, aluno vê):
+      V/D/E + método (KO/TKO/Decisão/Finalização/DQ), evento, data, adversário,
+      peso, rounds, vídeo, notas. Resumo "XV-YD-ZE (N nocautes)". Aba "Cartel" no
+      aluno (admin) + portal "Meu cartel". Coleção `fightRecords`. Helper +7 testes.
 
 ---
 

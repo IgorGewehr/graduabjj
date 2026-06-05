@@ -931,6 +931,17 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Trocação (C3): cartel/ficha de luta — cartel OFICIAL: só staff escreve;
+      // aluno/responsavel le o seu. Espelha assessments (avaliacao tecnica).
+      // ============================================
+      match /fightRecords/{recordId} {
+        allow read: if isStaffOrMonitor(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
+        allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
       // Notifications
       // ============================================
       match /notifications/{notificationId} {

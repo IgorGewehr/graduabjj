@@ -66,6 +66,7 @@ class Collections {
   CollectionReference get classBookings => academy.collection('classBookings');
   CollectionReference get classOccurrences => academy.collection('classOccurrences');
   CollectionReference get strikingSessions => academy.collection('strikingSessions');
+  CollectionReference get fightRecords => academy.collection('fightRecords');
 
   // Individual document references
   DocumentReference student(String id) => students.doc(id);

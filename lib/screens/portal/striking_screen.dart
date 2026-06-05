@@ -9,6 +9,7 @@ import '../../providers/providers.dart';
 import '../../services/firebase_service.dart';
 import '../../services/striking_session_service.dart';
 import '../../widgets/polish/polish.dart';
+import 'cartel_screen.dart';
 import 'striking_timer_screen.dart';
 
 const _strikingSports = [SportId.muaythai, SportId.boxing, SportId.kickboxing];
@@ -145,6 +146,20 @@ class _StrikingScreenState extends ConsumerState<StrikingScreen> {
                     children: [
                       _actions(),
                       const SizedBox(height: 8),
+                      Card(
+                        margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                        child: ListTile(
+                          leading: const Icon(LucideIcons.swords,
+                              color: AppTheme.primary),
+                          title: const Text('Meu cartel'),
+                          subtitle: const Text('Sua ficha de luta oficial'),
+                          trailing: const Icon(LucideIcons.chevronRight),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const CartelScreen()),
+                          ),
+                        ),
+                      ),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                         child: Text('Histórico',

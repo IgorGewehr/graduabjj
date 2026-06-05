@@ -186,6 +186,15 @@
         { "fieldPath": "studentId", "order": "ASCENDING" },
         { "fieldPath": "date", "order": "DESCENDING" }
       ]
+    },
+    {
+      "//": "Trocação (C3): cartel do aluno — getByStudent por (studentId + date DESC).",
+      "collectionGroup": "fightRecords",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
