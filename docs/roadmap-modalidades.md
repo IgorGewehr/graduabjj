@@ -139,8 +139,15 @@
 ## E. Específicas de uma modalidade
 
 **🏋️ Musculação**
-- [ ] **E1. Periodização / mesociclos** — progressão planejada por semanas.
-- [ ] **E2. Calculadora de 1RM e metas de carga.**
+- [x] **E1. Periodização / mesociclos** ✅ — mesociclo simples: programa de N
+      semanas (foco + prescrição textual + deload), audiência academia/modalidade,
+      data de início opcional. Admin "Periodização" (CRUD + builder de semanas) +
+      portal (semana atual destacada). Coleção `mesocycles`. Helper `meso.dart`
+      (`currentMesoWeek`) +7 testes. Ver `docs/plano-musculacao-e1e2.md`.
+- [x] **E2. Calculadora de 1RM e metas de carga** ✅ — calculadora (Epley + tabela
+      de %1RM) na AppBar de Treinos; metas de carga por exercício (aluno define) com
+      progresso na tela de evolução. `strength_math` estendido +5 testes. Coleção
+      `strengthGoals`.
 - [x] **E3. Metas de objetivo** ✅ **coberto por A3** — meta numérica (peso-alvo /
       %gordura-alvo) no aluno + barra de progresso no portal, e objetivo categórico
       (hipertrofia/emagrecimento/condicionamento/manutenção) na avaliação.

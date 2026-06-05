@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/feedback_utils.dart';
 import 'one_rep_max_screen.dart';
+import 'mesocycle_view_screen.dart';
 import '../../core/number_format.dart';
 import '../../core/theme.dart';
 import '../../models/workout_plan.dart';
@@ -65,6 +66,13 @@ class _WorkoutsScreenState extends ConsumerState<WorkoutsScreen> {
         title: const Text('Treinos'),
         backgroundColor: AppTheme.surface,
         actions: [
+          IconButton(
+            tooltip: 'Periodização',
+            icon: const Icon(LucideIcons.calendarRange),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const MesocycleViewScreen()),
+            ),
+          ),
           IconButton(
             tooltip: 'Calculadora de 1RM',
             icon: const Icon(LucideIcons.calculator),

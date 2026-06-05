@@ -269,6 +269,14 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     feature: FeatureId.striking,
   ),
   NavEntry(
+    key: 'admin_periodizacao',
+    label: 'Periodização',
+    icon: LucideIcons.calendarRange,
+    route: '/admin/periodizacao',
+    section: NavSection.conteudo,
+    feature: FeatureId.workouts,
+  ),
+  NavEntry(
     key: 'admin_loja',
     label: 'Loja',
     icon: LucideIcons.store,

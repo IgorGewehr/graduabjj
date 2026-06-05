@@ -1010,6 +1010,19 @@ service cloud.firestore {
       // ============================================
       // Workout Plans (structured training — all modalities)
       // ============================================
+      // ============================================
+      // Mesociclos (E1) — mesmo modelo de audiência de workoutPlans.
+      // ============================================
+      match /mesocycles/{mesoId} {
+        allow read, write: if isAcademyStaff(academyId);
+        allow read: if belongsToAcademy(academyId)
+                    && (
+                      resource.data.audience == 'academy'
+                      || resource.data.audience == 'sport'
+                      || isAssignedStudent(academyId, resource.data.assignedStudentIds)
+                    );
+      }
+
       match /workoutPlans/{planId} {
         // Staff manage everything.
         allow read, write: if isAcademyStaff(academyId);
