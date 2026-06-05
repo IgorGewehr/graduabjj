@@ -213,6 +213,13 @@ class AcademySettings {
   final bool trainingVideosEnabled;
 
   // Musculação (schedule-less) check-in.
+  /// Whether the musculação feature is available at all for this academy. When
+  /// false the admin "Musculação" entry is hidden and students never see the
+  /// check-in card. Defaults to true for new and legacy academies (current
+  /// behaviour was always-on). The check-in MODE below only applies when this
+  /// is true.
+  final bool musculacaoEnabled;
+
   /// 'manual' → staff records presence (works with current rules, no Cloud
   /// Function); 'qr' → student scans a fixed QR; 'button' → student taps a
   /// check-in button. 'qr'/'button' route through the selfCheckin function.
@@ -278,6 +285,7 @@ class AcademySettings {
     this.rankingVisibleToStudents = true,
     this.workoutPlansEnabled = true,
     this.trainingVideosEnabled = true,
+    this.musculacaoEnabled = true,
     this.musculacaoCheckinMode = 'manual',
     this.operatingHours = OperatingHours.empty,
     this.muaythaiGradeSystem = 'cbmt',
@@ -355,6 +363,7 @@ class AcademySettings {
       rankingVisibleToStudents: data['rankingVisibleToStudents'] ?? true,
       workoutPlansEnabled: data['workoutPlansEnabled'] ?? true,
       trainingVideosEnabled: data['trainingVideosEnabled'] ?? true,
+      musculacaoEnabled: data['musculacaoEnabled'] ?? true,
       musculacaoCheckinMode:
           (data['musculacaoCheckinMode'] as String?) ?? 'manual',
       operatingHours: OperatingHours.fromMap(
@@ -695,6 +704,16 @@ class SettingsService {
   Future<void> updateTrainingVideosEnabled(bool value) async {
     await _academyRef.set({
       'trainingVideosEnabled': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Toggle Musculação Feature (master on/off)
+  // ============================================
+  Future<void> updateMusculacaoEnabled(bool value) async {
+    await _academyRef.set({
+      'musculacaoEnabled': value,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }

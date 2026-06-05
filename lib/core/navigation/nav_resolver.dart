@@ -18,7 +18,7 @@ bool isFeatureEnabled(FeatureId f, AcademySettings? s) {
     case FeatureId.payments:
       return s?.isPaymentEnabled ?? false;
     case FeatureId.musculacao:
-      return true; // sem flag
+      return s?.musculacaoEnabled ?? true;
     case FeatureId.workouts:
       return s?.workoutPlansEnabled ?? true;
     case FeatureId.videos:

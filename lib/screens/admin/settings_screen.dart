@@ -93,6 +93,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   Timer? _highlightTimer;
 
   // Musculação check-in (schedule-less)
+  bool _musculacaoEnabled = true; // master on/off for the whole feature
   String _musculacaoCheckinMode = 'manual'; // 'manual' | 'qr' | 'button'
   final Map<int, ({String open, String close})> _operatingHours = {};
 
@@ -186,6 +187,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _rankingVisibleToStudents,
       _workoutPlansEnabled,
       _trainingVideosEnabled,
+      _musculacaoEnabled,
       _musculacaoCheckinMode,
       hours,
       _muaythaiGradeSystem,
@@ -265,6 +267,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _rankingVisibleToStudents = settings.rankingVisibleToStudents;
           _workoutPlansEnabled = settings.workoutPlansEnabled;
           _trainingVideosEnabled = settings.trainingVideosEnabled;
+          _musculacaoEnabled = settings.musculacaoEnabled;
           _musculacaoCheckinMode = settings.musculacaoCheckinMode;
           _operatingHours
             ..clear()
@@ -418,6 +421,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         service.toggleStudentCheckin(_studentCheckinEnabled),
         service.updateJournalVisibility(_journalVisibleToStudents),
         service.updateRankingVisibility(_rankingVisibleToStudents),
+        service.updateMusculacaoEnabled(_musculacaoEnabled),
         service.updateMusculacaoCheckin(
           mode: _musculacaoCheckinMode,
           operatingHours: OperatingHours(Map.of(_operatingHours)),
@@ -1700,36 +1704,50 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           const SizedBox(height: 16),
 
-          // Musculação check-in (schedule-less modality)
+          // Musculação (schedule-less modality)
           _SettingsCard(
             cardKey: _featureKeys[FeatureId.musculacao],
             highlighted: _highlightedFeature == FeatureId.musculacao,
-            title: 'Check-in da Musculacao',
+            title: 'Musculacao',
             icon: Icons.fitness_center,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Como os alunos de musculacao (sem horario de aula) registram presenca.',
-                  style: AppTheme.labelSmall.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
+                _ModernSwitch(
+                  title: 'Habilitar musculacao',
+                  subtitle:
+                      'Modalidade sem horario de aula com check-in proprio. '
+                      'Quando desligado, some do app do aluno e do menu da academia.',
+                  value: _musculacaoEnabled,
+                  onChanged: (value) =>
+                      setState(() => _musculacaoEnabled = value),
+                  icon: Icons.fitness_center,
+                  iconColor: AppTheme.primary,
                 ),
-                const SizedBox(height: 12),
-                _MusculacaoCheckinModeSelector(
-                  value: _musculacaoCheckinMode,
-                  onChanged: (m) => setState(() => _musculacaoCheckinMode = m),
-                ),
-                if (_musculacaoCheckinMode != 'manual') ...[
-                  const SizedBox(height: 16),
-                  _OperatingHoursEditor(
-                    hours: _operatingHours,
-                    onChanged: (next) => setState(() {
-                      _operatingHours
-                        ..clear()
-                        ..addAll(next);
-                    }),
+                if (_musculacaoEnabled) ...[
+                  const Divider(height: 24),
+                  Text(
+                    'Como os alunos de musculacao (sem horario de aula) registram presenca.',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
+                  const SizedBox(height: 12),
+                  _MusculacaoCheckinModeSelector(
+                    value: _musculacaoCheckinMode,
+                    onChanged: (m) => setState(() => _musculacaoCheckinMode = m),
+                  ),
+                  if (_musculacaoCheckinMode != 'manual') ...[
+                    const SizedBox(height: 16),
+                    _OperatingHoursEditor(
+                      hours: _operatingHours,
+                      onChanged: (next) => setState(() {
+                        _operatingHours
+                          ..clear()
+                          ..addAll(next);
+                      }),
+                    ),
+                  ],
                 ],
               ],
             ),

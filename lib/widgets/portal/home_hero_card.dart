@@ -44,7 +44,13 @@ class HomeHeroCard extends ConsumerWidget {
     );
 
     // Musculação self check-in availability (same gate the dynamic section
-    // uses). Read here so it can act as a fallback action below.
+    // uses). Read here so it can act as a fallback action below. Gated first by
+    // the academy-level musculacaoEnabled master switch.
+    final musculacaoEnabled = ref.watch(
+      academySettingsProvider.select(
+        (s) => s.valueOrNull?.musculacaoEnabled ?? true,
+      ),
+    );
     final musculacaoMode = ref.watch(
       academySettingsProvider.select(
         (s) => s.valueOrNull?.musculacaoCheckinMode ?? 'manual',
@@ -56,7 +62,8 @@ class HomeHeroCard extends ConsumerWidget {
             ?.getSports()
             .contains(SportId.musculacao) ??
         false;
-    final showMusculacao = practicesMusculacao &&
+    final showMusculacao = musculacaoEnabled &&
+        practicesMusculacao &&
         (musculacaoMode == 'button' || musculacaoMode == 'qr');
 
     return nextClassAsync.when(

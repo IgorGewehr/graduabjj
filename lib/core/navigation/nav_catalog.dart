@@ -10,7 +10,7 @@ enum FeatureId {
   journal, // Jornal        -> AcademySettings.journalVisibleToStudents
   graduation, // Graduação  -> AcademySettings.autoGraduationEnabled
   payments, // Mercado Pago -> AcademySettings.isPaymentEnabled
-  musculacao, // Musculação -> sempre visível (sem flag)
+  musculacao, // Musculação -> AcademySettings.musculacaoEnabled
   workouts, // Treinos      -> AcademySettings.workoutPlansEnabled
   videos, // Vídeos         -> AcademySettings.trainingVideosEnabled
 }
