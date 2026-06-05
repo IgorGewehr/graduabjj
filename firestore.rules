@@ -951,6 +951,20 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Musculação (E2): metas de carga — o aluno escreve/le as suas; staff le.
+      // Espelha workoutExecutions.
+      // ============================================
+      match /strengthGoals/{goalId} {
+        allow read: if isStaffOrMonitor(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
+        allow create: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, request.resource.data.studentId);
+        allow update, delete: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, resource.data.studentId);
+      }
+
+      // ============================================
       // Notifications
       // ============================================
       match /notifications/{notificationId} {

@@ -41,4 +41,32 @@ void main() {
       expect(sessionVolume(const []), 0);
     });
   });
+
+  group('loadForPercent', () {
+    test('percentage of 1RM', () {
+      expect(loadForPercent(100, 80), closeTo(80, 0.0001));
+      expect(loadForPercent(120, 50), closeTo(60, 0.0001));
+    });
+    test('invalid -> 0', () {
+      expect(loadForPercent(0, 80), 0);
+      expect(loadForPercent(100, 0), 0);
+    });
+  });
+
+  group('percentTable', () {
+    test('descends 100..50 by step, with loads', () {
+      final t = percentTable(100, step: 10, minPct: 50);
+      expect(t.map((e) => e.pct).toList(), [100, 90, 80, 70, 60, 50]);
+      expect(t.first.load, closeTo(100, 0.0001));
+      expect(t.last.load, closeTo(50, 0.0001));
+    });
+    test('empty for non-positive 1RM', () {
+      expect(percentTable(0), isEmpty);
+    });
+    test('rep hint scales with intensity', () {
+      expect(repHintForPercent(95), '1-2 reps');
+      expect(repHintForPercent(70), '10-12 reps');
+      expect(repHintForPercent(50), '15+ reps');
+    });
+  });
 }
