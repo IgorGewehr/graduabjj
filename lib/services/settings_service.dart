@@ -205,12 +205,18 @@ class AcademySettings {
   final bool rankingVisibleToStudents;
 
   /// Whether the structured workout plans feature is available (admin "Treinos"
-  /// e portal "/portal/treinos"). Defaults to true for new and legacy academies.
+  /// e portal "/portal/treinos"). Opt-in: defaults to false; a backfill turns it
+  /// on for academies that already have workout data.
   final bool workoutPlansEnabled;
 
   /// Whether the training videos feature is available (admin "Vídeos" e portal
-  /// "/portal/videos"). Defaults to true for new and legacy academies.
+  /// "/portal/videos"). Opt-in: defaults to false; a backfill turns it on for
+  /// academies that already have video content.
   final bool trainingVideosEnabled;
+
+  /// Whether the physical-evolution (avaliações físicas) feature is available
+  /// for students (portal "/portal/evolucao"). Opt-in: defaults to false.
+  final bool physicalEvolutionEnabled;
 
   // Musculação (schedule-less) check-in.
   /// Whether the musculação feature is available at all for this academy. When
@@ -283,8 +289,9 @@ class AcademySettings {
     this.studentCheckinEnabled = false,
     this.journalVisibleToStudents = true,
     this.rankingVisibleToStudents = true,
-    this.workoutPlansEnabled = true,
-    this.trainingVideosEnabled = true,
+    this.workoutPlansEnabled = false,
+    this.trainingVideosEnabled = false,
+    this.physicalEvolutionEnabled = false,
     this.musculacaoEnabled = true,
     this.musculacaoCheckinMode = 'manual',
     this.operatingHours = OperatingHours.empty,
@@ -361,8 +368,9 @@ class AcademySettings {
       studentCheckinEnabled: data['studentCheckinEnabled'] ?? false,
       journalVisibleToStudents: data['journalVisibleToStudents'] ?? true,
       rankingVisibleToStudents: data['rankingVisibleToStudents'] ?? true,
-      workoutPlansEnabled: data['workoutPlansEnabled'] ?? true,
-      trainingVideosEnabled: data['trainingVideosEnabled'] ?? true,
+      workoutPlansEnabled: data['workoutPlansEnabled'] ?? false,
+      trainingVideosEnabled: data['trainingVideosEnabled'] ?? false,
+      physicalEvolutionEnabled: data['physicalEvolutionEnabled'] ?? false,
       musculacaoEnabled: data['musculacaoEnabled'] ?? true,
       musculacaoCheckinMode:
           (data['musculacaoCheckinMode'] as String?) ?? 'manual',
@@ -704,6 +712,16 @@ class SettingsService {
   Future<void> updateTrainingVideosEnabled(bool value) async {
     await _academyRef.set({
       'trainingVideosEnabled': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Toggle Physical Evolution (avaliações físicas) Feature
+  // ============================================
+  Future<void> updatePhysicalEvolutionEnabled(bool value) async {
+    await _academyRef.set({
+      'physicalEvolutionEnabled': value,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }

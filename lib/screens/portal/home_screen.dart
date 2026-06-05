@@ -656,6 +656,8 @@ class _QuickAccessSection extends ConsumerWidget {
       hasPlan: hasPlan,
       storePublished: settings?.storePublished ?? false,
       graduationProgressVisible: graduationVisible,
+      multiSport: (student?.getSports().length ?? 0) > 1,
+      hasMultipleAcademies: ref.watch(hasMultipleAcademiesProvider),
     );
 
     final resolved = resolvePortalCatalog(

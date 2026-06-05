@@ -20,9 +20,11 @@ bool isFeatureEnabled(FeatureId f, AcademySettings? s) {
     case FeatureId.musculacao:
       return s?.musculacaoEnabled ?? true;
     case FeatureId.workouts:
-      return s?.workoutPlansEnabled ?? true;
+      return s?.workoutPlansEnabled ?? false;
     case FeatureId.videos:
-      return s?.trainingVideosEnabled ?? true;
+      return s?.trainingVideosEnabled ?? false;
+    case FeatureId.evolution:
+      return s?.physicalEvolutionEnabled ?? false;
   }
 }
 
@@ -87,6 +89,8 @@ class PortalNavContext {
   final bool hasPlan;
   final bool storePublished;
   final bool graduationProgressVisible;
+  final bool multiSport; // student trains more than one modality
+  final bool hasMultipleAcademies; // student belongs to more than one academy
 
   const PortalNavContext({
     required this.isKids,
@@ -94,6 +98,8 @@ class PortalNavContext {
     required this.hasPlan,
     required this.storePublished,
     required this.graduationProgressVisible,
+    this.multiSport = false,
+    this.hasMultipleAcademies = false,
   });
 }
 
@@ -126,6 +132,16 @@ List<ResolvedNavEntry> resolvePortalCatalog({
         break;
       case PortalContextGate.hideForMonitor:
         if (ctx.isMonitorOrAttendance) {
+          return ResolvedNavEntry(entry, NavEntryState.hidden);
+        }
+        break;
+      case PortalContextGate.multiSport:
+        if (!ctx.multiSport) {
+          return ResolvedNavEntry(entry, NavEntryState.hidden);
+        }
+        break;
+      case PortalContextGate.multipleAcademies:
+        if (!ctx.hasMultipleAcademies) {
           return ResolvedNavEntry(entry, NavEntryState.hidden);
         }
         break;

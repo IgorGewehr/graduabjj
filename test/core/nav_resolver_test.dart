@@ -82,16 +82,19 @@ void main() {
 
   group('isFeatureEnabled defaults & flags', () {
     test('null settings → safe defaults', () {
-      // OFF-by-default features.
+      // OFF-by-default features (opt-in).
       expect(isFeatureEnabled(FeatureId.store, null), isFalse);
       expect(isFeatureEnabled(FeatureId.graduation, null), isFalse);
       expect(isFeatureEnabled(FeatureId.payments, null), isFalse);
+      // workouts/videos/evolution are opt-in: OFF until the academy enables
+      // them (a backfill turns workouts/videos on where data already exists).
+      expect(isFeatureEnabled(FeatureId.workouts, null), isFalse);
+      expect(isFeatureEnabled(FeatureId.videos, null), isFalse);
+      expect(isFeatureEnabled(FeatureId.evolution, null), isFalse);
       // ON-by-default features.
       expect(isFeatureEnabled(FeatureId.ranking, null), isTrue);
       expect(isFeatureEnabled(FeatureId.journal, null), isTrue);
-      expect(isFeatureEnabled(FeatureId.workouts, null), isTrue);
-      expect(isFeatureEnabled(FeatureId.videos, null), isTrue);
-      // musculacao has no flag — always on.
+      // musculacao defaults on (master flag, default true).
       expect(isFeatureEnabled(FeatureId.musculacao, null), isTrue);
     });
 
