@@ -732,6 +732,34 @@ class SettingsService {
   }
 
   // ============================================
+  // Reserva de aula (A1): master toggle + tunables
+  // ============================================
+  Future<void> updateBookingEnabled(bool value) async {
+    await _academyRef.set({
+      'bookingEnabled': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> updateBookingSettings({
+    int? windowDays,
+    int? cancelCutoffMinutes,
+    int? maxActivePerStudent,
+  }) async {
+    final data = <String, dynamic>{
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    if (windowDays != null) data['bookingWindowDays'] = windowDays;
+    if (cancelCutoffMinutes != null) {
+      data['bookingCancelCutoffMinutes'] = cancelCutoffMinutes;
+    }
+    if (maxActivePerStudent != null) {
+      data['maxActiveBookingsPerStudent'] = maxActivePerStudent;
+    }
+    await _academyRef.set(data, SetOptions(merge: true));
+  }
+
+  // ============================================
   // Toggle Musculação Feature (master on/off)
   // ============================================
   Future<void> updateMusculacaoEnabled(bool value) async {

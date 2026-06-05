@@ -170,6 +170,14 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     section: NavSection.gestao,
   ),
   NavEntry(
+    key: 'admin_reservas',
+    label: 'Reservas',
+    icon: LucideIcons.calendarCheck,
+    route: '/admin/reservas',
+    section: NavSection.gestao,
+    feature: FeatureId.booking,
+  ),
+  NavEntry(
     key: 'admin_graduacao',
     label: 'Graduação',
     icon: LucideIcons.award,

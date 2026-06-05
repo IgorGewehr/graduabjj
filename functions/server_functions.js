@@ -3565,7 +3565,7 @@ exports.reserveClassSlot = onCall(async (request) => {
   const occRef = db.doc(`academies/${academyId}/classOccurrences/${occId}`);
   const bookingRef = db.doc(`academies/${academyId}/classBookings/${occId}__${studentId}`);
   const stuSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
-  const studentName = stuSnap.data()?.name || '';
+  const studentName = stuSnap.data()?.fullName || '';
   const maxStudents = Number.isFinite(cls.maxStudents) ? cls.maxStudents : null;
   const slotStartTs = admin.firestore.Timestamp.fromMillis(slotStartMillis);
 
