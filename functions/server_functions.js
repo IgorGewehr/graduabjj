@@ -3228,6 +3228,325 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
   };
 });
 
+// ============================================================
+// Recurring subscriptions (Assinaturas / Mercado Pago Preapproval)
+// ============================================================
+// A monthly + card-only plan is billed as a true subscription: after the
+// student subscribes once (card tokenized client-side), MP auto-charges the
+// card every month on `billing_day`, with no further action. We enforce the
+// fixed N-month term ourselves (MP /preapproval has no native end): each
+// approved charge mints one paid `financials` doc and bumps `chargesPaid`;
+// when it reaches `months` we cancel the preapproval.
+
+const FV = admin.firestore.FieldValue;
+
+/** Settle ONE approved subscription charge: mint a paid financial for the cycle
+ * (idempotent by deterministic id), bump chargesPaid, and cancel the
+ * preapproval once the N-month term is reached. */
+async function mpSubSettleCycle(academyId, subscriptionId, token, { paymentId, amount }) {
+  const subRef = db.doc(`academies/${academyId}/subscriptions/${subscriptionId}`);
+  // Deterministic financial id → the same MP payment never settles twice.
+  const finId = `sub_${subscriptionId}_${paymentId}`;
+  const finRef = db.doc(`academies/${academyId}/financials/${finId}`);
+
+  const result = await db.runTransaction(async (tx) => {
+    const [subDoc, finDoc] = await Promise.all([tx.get(subRef), tx.get(finRef)]);
+    if (!subDoc.exists) return { ok: false };
+    if (finDoc.exists) return { ok: false }; // already settled this charge
+    const sub = subDoc.data();
+    const cycle = (sub.chargesPaid || 0) + 1;
+    const now = new Date();
+    const referenceMonth =
+      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    tx.set(finRef, {
+      academyId,
+      studentId: sub.studentId,
+      studentName: sub.studentName || '',
+      amount: amount > 0 ? amount : (Number(sub.recurringValue) || 0),
+      type: 'monthly_tuition',
+      status: 'paid',
+      description: 'Mensalidade (assinatura)',
+      referenceMonth,
+      planId: sub.planId || null,
+      subscriptionId,
+      recurringCycle: cycle,
+      paymentMethodPolicy: 'card_only',
+      paymentGateway: 'mercadopago',
+      method: 'card',
+      gatewayPaymentId: paymentId,
+      dueDate: admin.firestore.Timestamp.fromDate(now),
+      paymentDate: FV.serverTimestamp(),
+      createdAt: FV.serverTimestamp(),
+      updatedAt: FV.serverTimestamp(),
+    });
+    tx.update(subRef, {
+      chargesPaid: cycle,
+      lastPaymentId: paymentId,
+      status: 'authorized',
+      needsReauth: false,
+      lastEvent: 'payment_approved',
+      updatedAt: FV.serverTimestamp(),
+    });
+    return { ok: true, cycle, months: Number(sub.months) || 0,
+      preapprovalId: sub.mpPreapprovalId };
+  });
+
+  if (!result.ok) return;
+  // Term reached → cancel the preapproval so MP stops charging.
+  if (result.months > 0 && result.cycle >= result.months && result.preapprovalId) {
+    try {
+      await mpRequest('PUT', `/preapproval/${result.preapprovalId}`,
+        { token, body: { status: 'cancelled' } });
+    } catch (e) {
+      console.error('[mpSubSettleCycle] term cancel failed', e.message);
+    }
+    await subRef.update({ status: 'completed', updatedAt: FV.serverTimestamp() });
+  }
+  try {
+    await notifyAdminCF(academyId, 'payment_received', 'Mensalidade recebida',
+      `Assinatura: cobranca de R$ ${(amount || 0).toFixed(2)} recebida no cartao.`,
+      { subscriptionId });
+  } catch (_) { /* notify is best-effort */ }
+}
+
+/** Webhook: an authorized_payment event for a subscription. */
+async function mpSubHandleAuthorizedPayment(academyId, authPayId) {
+  const token = await getMpAccessToken(academyId);
+  const ap = await mpRequest('GET', `/authorized_payments/${authPayId}`, { token });
+  const preapprovalId = ap && ap.preapproval_id;
+  if (!preapprovalId) return;
+  const subSnap = await db.collection(`academies/${academyId}/subscriptions`)
+    .where('mpPreapprovalId', '==', String(preapprovalId)).limit(1).get();
+  if (subSnap.empty) return;
+  const subRef = subSnap.docs[0].ref;
+  const payStatus = ap.payment && ap.payment.status;
+  const paymentId = ap.payment && ap.payment.id ?
+    String(ap.payment.id) : `ap_${authPayId}`;
+  const amount = Number(ap.transaction_amount) || 0;
+  if (payStatus === 'approved') {
+    await mpSubSettleCycle(academyId, subRef.id, token, { paymentId, amount });
+  } else if (payStatus === 'rejected' || payStatus === 'cancelled') {
+    // Dunning: do NOT settle. The preapproval will move to paused; the sync
+    // handler flags needsReauth. Record the failed attempt for visibility.
+    await subRef.update({
+      lastEvent: `payment_${payStatus}`,
+      updatedAt: FV.serverTimestamp(),
+    });
+  }
+}
+
+/** Webhook: a preapproval status change (authorized/paused/cancelled). */
+async function mpSubSyncPreapproval(academyId, preapprovalId) {
+  const token = await getMpAccessToken(academyId);
+  const pa = await mpRequest('GET', `/preapproval/${preapprovalId}`, { token });
+  const subSnap = await db.collection(`academies/${academyId}/subscriptions`)
+    .where('mpPreapprovalId', '==', String(preapprovalId)).limit(1).get();
+  if (subSnap.empty) return;
+  const subRef = subSnap.docs[0].ref;
+  const current = subSnap.docs[0].data();
+  // Never downgrade a term-completed subscription back to cancelled.
+  if (current.status === 'completed') return;
+
+  const map = { authorized: 'authorized', paused: 'paused',
+    cancelled: 'cancelled', pending: 'pending' };
+  const newStatus = map[pa.status] || pa.status;
+  const update = {
+    status: newStatus,
+    lastEvent: `preapproval_${pa.status}`,
+    updatedAt: FV.serverTimestamp(),
+  };
+  if (pa.next_payment_date) {
+    update.nextBillingDate =
+      admin.firestore.Timestamp.fromDate(new Date(pa.next_payment_date));
+  }
+  if (pa.status === 'paused') update.needsReauth = true;
+  if (pa.status === 'authorized') update.needsReauth = false;
+  await subRef.update(update);
+
+  if (pa.status === 'paused') {
+    try {
+      await notifyAdminCF(academyId, 'payment_overdue', 'Assinatura com falha',
+        'A cobranca recorrente de um aluno falhou (cartao recusado/expirado).',
+        { subscriptionId: subRef.id });
+    } catch (_) { /* best-effort */ }
+  }
+}
+
+// ---- createMpSubscription — start a recurring card subscription ------------
+exports.createMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
+  const { academyId, planId, studentId, studentName, cardToken, payerCpf,
+    payerEmail } = request.data || {};
+  if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
+  if (!academyId || !planId || !studentId || !cardToken) {
+    throw new HttpsError('invalid-argument', 'Missing required fields');
+  }
+  await assertCanPayFor(request, academyId, studentId);
+
+  const planSnap = await db.doc(`academies/${academyId}/plans/${planId}`).get();
+  if (!planSnap.exists) throw new HttpsError('not-found', 'Plano não encontrado.');
+  const plan = planSnap.data();
+  const isMonthly = (plan.billingPeriod || 'monthly') === 'monthly';
+  if (!isMonthly || plan.paymentMethodPolicy !== 'card_only') {
+    throw new HttpsError('failed-precondition',
+      'Este plano não é uma assinatura recorrente (mensal + somente cartão).');
+  }
+  // Derive the monthly amount SERVER-SIDE (custom value per student wins). Never
+  // trust a client-sent value.
+  const custom = plan.customValues && plan.customValues[studentId];
+  const monthlyValue = Number(custom != null ? custom : plan.monthlyValue) || 0;
+  if (monthlyValue <= 0) {
+    throw new HttpsError('failed-precondition', 'Valor do plano inválido.');
+  }
+  const months = Number(plan.recurringMonths) > 0 ? Number(plan.recurringMonths) : 0;
+  let billingDay = Number(plan.billingDay || plan.defaultDueDay || 5);
+  if (!(billingDay >= 1)) billingDay = 1;
+  if (billingDay > 28) billingDay = 28; // avoid short-month drift
+
+  const token = await getMpAccessToken(academyId);
+  const subRef = db.collection(`academies/${academyId}/subscriptions`).doc();
+  const subId = subRef.id;
+  const externalReference = `${academyId}:sub:${subId}`;
+
+  await subRef.set({
+    studentId,
+    studentName: studentName || '',
+    planId,
+    status: 'pending',
+    recurringValue: monthlyValue,
+    billingDay,
+    months,
+    chargesPaid: 0,
+    needsReauth: false,
+    createdAt: FV.serverTimestamp(),
+    updatedAt: FV.serverTimestamp(),
+  });
+
+  let pa;
+  try {
+    pa = await mpRequest('POST', '/preapproval', {
+      token,
+      idempotencyKey: `sub:${subId}`,
+      body: {
+        reason: sanitizeString(plan.name ? `Mensalidade ${plan.name}` : 'Mensalidade'),
+        external_reference: externalReference,
+        payer_email: payerEmail || undefined,
+        card_token_id: cardToken,
+        status: 'authorized', // auto-charge without a hosted page
+        back_url: 'https://arpjj-76350.web.app',
+        notification_url: `${mpMktWebhookUrl()}?acad=${encodeURIComponent(academyId)}`,
+        auto_recurring: {
+          frequency: 1,
+          frequency_type: 'months',
+          transaction_amount: Number(monthlyValue.toFixed(2)),
+          currency_id: 'BRL',
+          billing_day: billingDay,
+          billing_day_proportional: false, // 1ª cobrança cheia no dia da assinatura
+        },
+      },
+    });
+  } catch (e) {
+    console.error('[createMpSubscription] erro', e.message, e.data);
+    await subRef.update({
+      status: 'error', lastEvent: 'create_failed', updatedAt: FV.serverTimestamp(),
+    });
+    const text = `${e.data ? JSON.stringify(e.data) : ''} ${e.message || ''}`
+      .toLowerCase();
+    if (text.includes('card_token') || text.includes('token')) {
+      throw new HttpsError('failed-precondition',
+        'Não foi possível usar este cartão. Digite os dados do cartão novamente.');
+    }
+    throw new HttpsError('internal', 'Falha ao criar a assinatura.');
+  }
+
+  const status = pa.status === 'authorized' ? 'authorized' : (pa.status || 'pending');
+  const update = {
+    mpPreapprovalId: String(pa.id),
+    status,
+    updatedAt: FV.serverTimestamp(),
+  };
+  if (pa.next_payment_date) {
+    update.nextBillingDate =
+      admin.firestore.Timestamp.fromDate(new Date(pa.next_payment_date));
+  }
+  await subRef.update(update);
+
+  return {
+    subscriptionId: subId,
+    status,
+    nextPaymentDate: pa.next_payment_date || null,
+  };
+});
+
+// ---- cancel / pause / update-card -----------------------------------------
+async function _loadOwnedSubscription(request, academyId, subscriptionId) {
+  const subRef = db.doc(`academies/${academyId}/subscriptions/${subscriptionId}`);
+  const snap = await subRef.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Assinatura não encontrada.');
+  await assertCanPayFor(request, academyId, snap.data().studentId);
+  return { subRef, sub: snap.data() };
+}
+
+exports.cancelMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
+  const { academyId, subscriptionId } = request.data || {};
+  if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
+  if (!academyId || !subscriptionId) {
+    throw new HttpsError('invalid-argument', 'Missing required fields');
+  }
+  const { subRef, sub } = await _loadOwnedSubscription(request, academyId, subscriptionId);
+  if (sub.mpPreapprovalId) {
+    try {
+      const token = await getMpAccessToken(academyId);
+      await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+        { token, body: { status: 'cancelled' } });
+    } catch (e) {
+      console.error('[cancelMpSubscription] erro', e.message);
+    }
+  }
+  await subRef.update({ status: 'cancelled', updatedAt: FV.serverTimestamp() });
+  return { success: true };
+});
+
+exports.pauseMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
+  const { academyId, subscriptionId } = request.data || {};
+  if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
+  if (!academyId || !subscriptionId) {
+    throw new HttpsError('invalid-argument', 'Missing required fields');
+  }
+  const { subRef, sub } = await _loadOwnedSubscription(request, academyId, subscriptionId);
+  if (sub.mpPreapprovalId) {
+    const token = await getMpAccessToken(academyId);
+    await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+      { token, body: { status: 'paused' } });
+  }
+  await subRef.update({ status: 'paused', updatedAt: FV.serverTimestamp() });
+  return { success: true };
+});
+
+exports.updateSubscriptionCard = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
+  const { academyId, subscriptionId, cardToken } = request.data || {};
+  if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
+  if (!academyId || !subscriptionId || !cardToken) {
+    throw new HttpsError('invalid-argument', 'Missing required fields');
+  }
+  const { subRef, sub } = await _loadOwnedSubscription(request, academyId, subscriptionId);
+  if (!sub.mpPreapprovalId) {
+    throw new HttpsError('failed-precondition', 'Assinatura sem preapproval.');
+  }
+  const token = await getMpAccessToken(academyId);
+  try {
+    await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+      { token, body: { card_token_id: cardToken, status: 'authorized' } });
+  } catch (e) {
+    console.error('[updateSubscriptionCard] erro', e.message, e.data);
+    throw new HttpsError('failed-precondition',
+      'Não foi possível atualizar o cartão. Tente novamente.');
+  }
+  await subRef.update({
+    needsReauth: false, status: 'authorized', updatedAt: FV.serverTimestamp(),
+  });
+  return { success: true };
+});
+
 // ---- Cancel an open MP PIX (H4) -------------------------------------------
 // When an admin marks a charge paid offline, the already-sent PIX must be
 // killed so it stays unpayable (no double payment). Best-effort: the client
@@ -3309,16 +3628,41 @@ exports.mercadoPagoMarketplaceWebhook = onRequest(
 
     const type = String(req.query.type || req.query.topic ||
       (req.body && req.body.type) || '');
-    if (!dataId || !acad || (type && type !== 'payment')) {
-      return res.status(200).json({ received: true, skipped: type || 'no_id' });
+    if (!dataId || !acad) {
+      return res.status(200).json({ received: true, skipped: 'no_id' });
     }
 
     try {
+      // Recurring subscriptions (Assinaturas / Preapproval). These arrive on
+      // their own topics — handle them BEFORE the one-off payment path.
+      if (type === 'subscription_preapproval') {
+        await mpSubSyncPreapproval(acad, dataId);
+        return res.status(200).json({ success: true, kind: 'preapproval' });
+      }
+      if (type === 'subscription_authorized_payment') {
+        await mpSubHandleAuthorizedPayment(acad, dataId);
+        return res.status(200).json({ success: true, kind: 'authorized_payment' });
+      }
+      if (type && type !== 'payment') {
+        return res.status(200).json({ received: true, skipped: type });
+      }
+
       const token = await getMpAccessToken(acad);
       const payment = await mpRequest('GET', `/v1/payments/${dataId}`, { token });
       const parsed = mpMktParseRef(payment.external_reference);
       if (!parsed || parsed.academyId !== acad) {
         return res.status(200).json({ received: true, skipped: 'ref_mismatch' });
+      }
+      // A subscription payment that surfaces on the payment topic (defensive —
+      // normally it arrives as subscription_authorized_payment).
+      if (parsed.type === 'sub') {
+        if (payment.status === 'approved') {
+          await mpSubSettleCycle(acad, parsed.docId, token, {
+            paymentId: String(payment.id),
+            amount: Number(payment.transaction_amount) || 0,
+          });
+        }
+        return res.status(200).json({ success: true, kind: 'sub_payment' });
       }
       if (payment.status !== 'approved') {
         return res.status(200).json({ received: true, status: payment.status });
