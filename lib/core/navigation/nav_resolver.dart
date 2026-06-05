@@ -25,6 +25,8 @@ bool isFeatureEnabled(FeatureId f, AcademySettings? s) {
       return s?.trainingVideosEnabled ?? true;
     case FeatureId.booking:
       return s?.bookingEnabled ?? false;
+    case FeatureId.striking:
+      return s?.strikingEnabled ?? false;
   }
 }
 

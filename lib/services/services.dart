@@ -41,3 +41,4 @@ export 'skill_progress_service.dart';
 export 'exercise_service.dart';
 export 'workout_execution_service.dart';
 export 'class_booking_service.dart';
+export 'striking_session_service.dart';

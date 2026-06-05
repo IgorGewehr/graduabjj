@@ -14,6 +14,7 @@ enum FeatureId {
   workouts, // Treinos      -> AcademySettings.workoutPlansEnabled
   videos, // Vídeos         -> AcademySettings.trainingVideosEnabled
   booking, // Reservar aula -> AcademySettings.bookingEnabled
+  striking, // Trocação      -> AcademySettings.strikingEnabled
 }
 
 extension FeatureIdX on FeatureId {
@@ -350,6 +351,14 @@ const List<NavEntry> kPortalNavCatalog = <NavEntry>[
     route: '/portal/treinos',
     section: NavSection.treinos,
     feature: FeatureId.workouts,
+  ),
+  NavEntry(
+    key: 'portal_trocacao',
+    label: 'Trocação',
+    icon: Icons.sports_mma_outlined,
+    route: '/portal/trocacao',
+    section: NavSection.treinos,
+    feature: FeatureId.striking,
   ),
   NavEntry(
     key: 'portal_videos',

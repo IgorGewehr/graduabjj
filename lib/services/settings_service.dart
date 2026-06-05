@@ -248,6 +248,10 @@ class AcademySettings {
   /// student. Default 3.
   final int maxActiveBookingsPerStudent;
 
+  /// Striking module (C1–C3: timer de rounds, registro de sessão, cartel,
+  /// combinações). Opt-in per academy, default off.
+  final bool strikingEnabled;
+
   // Monitors (students with additional permissions)
   final List<String> monitorIds;
 
@@ -306,6 +310,7 @@ class AcademySettings {
     this.bookingWindowDays = 7,
     this.bookingCancelCutoffMinutes = 60,
     this.maxActiveBookingsPerStudent = 3,
+    this.strikingEnabled = false,
     this.monitorIds = const [],
     this.updatedAt,
   });
@@ -394,6 +399,7 @@ class AcademySettings {
           (data['bookingCancelCutoffMinutes'] as num?)?.toInt() ?? 60,
       maxActiveBookingsPerStudent:
           (data['maxActiveBookingsPerStudent'] as num?)?.toInt() ?? 3,
+      strikingEnabled: data['strikingEnabled'] ?? false,
       monitorIds: List<String>.from(data['monitorIds'] ?? []),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
@@ -757,6 +763,16 @@ class SettingsService {
       data['maxActiveBookingsPerStudent'] = maxActivePerStudent;
     }
     await _academyRef.set(data, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Trocação (C1–C3): master toggle
+  // ============================================
+  Future<void> updateStrikingEnabled(bool value) async {
+    await _academyRef.set({
+      'strikingEnabled': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   // ============================================

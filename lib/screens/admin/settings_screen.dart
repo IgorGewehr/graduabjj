@@ -90,6 +90,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   int _bookingCancelCutoffMinutes = 60;
   int _maxActiveBookingsPerStudent = 3;
 
+  // Trocação (C1–C3)
+  bool _strikingEnabled = false;
+
   // Deep-link (?feature=<id>) → scroll + temporary highlight on the target card.
   final Map<FeatureId, GlobalKey> _featureKeys = {
     for (final f in FeatureId.values) f: GlobalKey(),
@@ -277,6 +280,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _bookingWindowDays = settings.bookingWindowDays;
           _bookingCancelCutoffMinutes = settings.bookingCancelCutoffMinutes;
           _maxActiveBookingsPerStudent = settings.maxActiveBookingsPerStudent;
+          _strikingEnabled = settings.strikingEnabled;
           _musculacaoEnabled = settings.musculacaoEnabled;
           _musculacaoCheckinMode = settings.musculacaoCheckinMode;
           _operatingHours
@@ -2041,6 +2045,28 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                   ),
                 ],
               ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Trocação (C1–C3)
+          _SettingsCard(
+            cardKey: _featureKeys[FeatureId.striking],
+            highlighted: _highlightedFeature == FeatureId.striking,
+            title: 'Trocação',
+            icon: Icons.sports_mma_outlined,
+            child: _ModernSwitch(
+              title: 'Habilitar Trocação',
+              subtitle:
+                  'Timer de rounds + registro de sessões (sparring/saco/manoplas) para Muay Thai, Boxe e Kickboxing',
+              value: _strikingEnabled,
+              onChanged: (value) => _inlineSaveFeature(
+                apply: () => _strikingEnabled = value,
+                persist: (s) => s.updateStrikingEnabled(value),
+              ),
+              icon: Icons.sports_mma_outlined,
+              iconColor: AppTheme.primary,
             ),
           ),
 

@@ -917,6 +917,20 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Trocação (C1): registro de sessão de trocação — o aluno escreve/le os
+      // seus; staff/responsavel le. Espelha workoutExecutions.
+      // ============================================
+      match /strikingSessions/{sessionId} {
+        allow read: if isStaffOrMonitor(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
+        allow create: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, request.resource.data.studentId);
+        allow update, delete: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, resource.data.studentId);
+      }
+
+      // ============================================
       // Notifications
       // ============================================
       match /notifications/{notificationId} {

@@ -177,6 +177,15 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "slotStart", "order": "ASCENDING" }
       ]
+    },
+    {
+      "//": "Trocação (C1): histórico de sessões do aluno — getByStudent por (studentId + date DESC).",
+      "collectionGroup": "strikingSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

@@ -40,6 +40,7 @@ import 'screens/portal/my_sports_screen.dart';
 import 'screens/portal/student_graduation_screen.dart';
 import 'screens/portal/class_booking_screen.dart';
 import 'screens/admin/class_bookings_admin_screen.dart';
+import 'screens/portal/striking_screen.dart';
 import 'screens/portal/financial_screen.dart';
 import 'screens/portal/notifications_screen.dart';
 import 'screens/portal/behavior_screen.dart';
@@ -698,6 +699,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const ClassBookingScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/trocacao',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const StrikingScreen(),
             ),
           ),
           GoRoute(
