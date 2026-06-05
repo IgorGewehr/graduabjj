@@ -1187,78 +1187,93 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => Container(
-        padding: const EdgeInsets.all(20),
-        decoration: const BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.divider,
-                  borderRadius: BorderRadius.circular(2),
+      // Allow the sheet to grow past the default ~half-screen so the modality
+      // list can scroll instead of being clipped when there are many sports.
+      isScrollControlled: true,
+      builder: (sheetCtx) {
+        final media = MediaQuery.of(sheetCtx);
+        return Container(
+          constraints: BoxConstraints(maxHeight: media.size.height * 0.8),
+          padding: EdgeInsets.fromLTRB(20, 12, 20, 12 + media.viewPadding.bottom),
+          decoration: const BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Adicionar modalidade',
-              style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 12),
-            ...available.map((sport) {
-              final def = sports[sport]!;
-              final accent = sportChipColors[sport] ?? AppTheme.primary;
-              return ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(def.icon, color: accent, size: 18),
+              const SizedBox(height: 16),
+              Text(
+                'Adicionar modalidade',
+                style:
+                    AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 12),
+              // Scrollable so every modality is reachable on small screens.
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: available.map((sport) {
+                    final def = sports[sport]!;
+                    final accent = sportChipColors[sport] ?? AppTheme.primary;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(def.icon, color: accent, size: 18),
+                      ),
+                      title: Text(def.label,
+                          style: AppTheme.bodyMedium
+                              .copyWith(fontWeight: FontWeight.w600)),
+                      subtitle: Text(
+                        def.gradeSystem == GradeSystem.none
+                            ? 'Sem graduação'
+                            : 'Faixas iniciam em ${getGradesForSport(sport, category: _category.value, muaythaiVariant: sport == SportId.muaythai ? _muaythaiVariant : null).firstOrNull?.label ?? '-'}',
+                        style: AppTheme.labelSmall
+                            .copyWith(color: AppTheme.textSecondary),
+                      ),
+                      onTap: () {
+                        final grades = getGradesForSport(
+                          sport,
+                          category: _category.value,
+                          muaythaiVariant: sport == SportId.muaythai
+                              ? _muaythaiVariant
+                              : null,
+                        );
+                        final firstId =
+                            grades.isNotEmpty ? grades.first.id : 'white';
+                        setState(() {
+                          _grades[sport] = (belt: firstId, stripes: 0);
+                          // First sport added → becomes the primary by default.
+                          _primarySport ??= sport;
+                          _tabErrors['academy'] = false;
+                        });
+                        Navigator.pop(sheetCtx);
+                      },
+                    );
+                  }).toList(),
                 ),
-                title: Text(def.label,
-                    style: AppTheme.bodyMedium
-                        .copyWith(fontWeight: FontWeight.w600)),
-                subtitle: Text(
-                  def.gradeSystem == GradeSystem.none
-                      ? 'Sem graduação'
-                      : 'Faixas iniciam em ${getGradesForSport(sport, category: _category.value, muaythaiVariant: sport == SportId.muaythai ? _muaythaiVariant : null).firstOrNull?.label ?? '-'}',
-                  style: AppTheme.labelSmall
-                      .copyWith(color: AppTheme.textSecondary),
-                ),
-                onTap: () {
-                  final grades = getGradesForSport(
-                    sport,
-                    category: _category.value,
-                    muaythaiVariant:
-                        sport == SportId.muaythai ? _muaythaiVariant : null,
-                  );
-                  final firstId = grades.isNotEmpty ? grades.first.id : 'white';
-                  setState(() {
-                    _grades[sport] = (belt: firstId, stripes: 0);
-                    // First sport added → becomes the primary by default.
-                    _primarySport ??= sport;
-                    _tabErrors['academy'] = false;
-                  });
-                  Navigator.pop(sheetCtx);
-                },
-              );
-            }),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
