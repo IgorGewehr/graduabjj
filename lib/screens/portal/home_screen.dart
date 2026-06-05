@@ -335,9 +335,21 @@ class _WelcomeHeaderWithBeltState
           belt: grade?.currentGrade ?? 'white',
           stripes: grade?.currentStripes ?? 0,
           sportId: selectedSport,
+          muaythaiVariant:
+              ref.watch(academySettingsProvider).valueOrNull?.muaythaiGradeSystem,
           size: BeltSize.large,
           highlight: true,
         ),
+        if (selectedSport != SportId.bjj) ...[
+          const SizedBox(height: 8),
+          Text(
+            getGradeLabel(selectedSport, grade?.currentGrade ?? 'white'),
+            style: AppTheme.bodyMedium.copyWith(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
         if (multiSport && _selectorOpen) ...[
           const SizedBox(height: 12),
           SportTabBar(

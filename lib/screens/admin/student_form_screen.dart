@@ -232,9 +232,12 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
       );
     }
     // Match the Muay Thai ladder to the student's stored grade so the selector
-    // shows their actual system even if the academy default differs.
+    // shows their actual system even if the academy default differs. Skip the
+    // shared/ambiguous starting 'white' (and empty) — it belongs to neither
+    // ladder unambiguously, so resolving it would snap a CBMTT academy back to
+    // CBMT; keep the academy default seeded above in that case.
     final mtGrade = _grades[SportId.muaythai]?.belt;
-    if (mtGrade != null) {
+    if (mtGrade != null && mtGrade.isNotEmpty && mtGrade != 'white') {
       _muaythaiVariant = resolveMuaythaiVariant(mtGrade);
     }
     _primarySport = student.getPrimarySport();

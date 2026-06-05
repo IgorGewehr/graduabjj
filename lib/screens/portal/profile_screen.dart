@@ -488,6 +488,8 @@ class _HeroHeader extends ConsumerWidget {
           belt: grade?.currentGrade ?? 'white',
           stripes: grade?.currentStripes ?? 0,
           sportId: primarySport,
+          muaythaiVariant:
+              ref.watch(academySettingsProvider).valueOrNull?.muaythaiGradeSystem,
           size: BeltSize.large,
           highlight: true,
         ),

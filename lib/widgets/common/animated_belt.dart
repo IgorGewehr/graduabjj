@@ -40,6 +40,13 @@ class AnimatedBelt extends StatefulWidget {
   /// Defaults to BJJ for backward compatibility.
   final SportId sportId;
 
+  /// For Muay Thai only: the academy's federation system
+  /// ([AcademySettings.muaythaiGradeSystem], 'cbmt' | 'cbmtt'). Used as the
+  /// authoritative ladder when the stored grade id is ambiguous between the two
+  /// federations (the shared starting 'white', or empty). When the stored grade
+  /// is unambiguous it wins; for other sports this is ignored.
+  final String? muaythaiVariant;
+
   /// Visual size of the belt. Defaults to [BeltSize.large] since this widget is
   /// meant to be a focal point; use [BeltSize.small]/[BeltSize.medium] for
   /// compact placements (e.g. the home header).
@@ -60,6 +67,7 @@ class AnimatedBelt extends StatefulWidget {
     required this.belt,
     this.stripes = 0,
     this.sportId = SportId.bjj,
+    this.muaythaiVariant,
     this.size = BeltSize.large,
     this.highlight = false,
     this.animate = true,
@@ -111,13 +119,33 @@ class _AnimatedBeltState extends State<AnimatedBelt>
   /// red on its way to a normal grade — but the target grade itself, even if
   /// above-black, is always honored as the final stop.
   List<String> _sportLadder() {
-    final grades = getGradesForSport(
-      widget.sportId,
-      muaythaiVariant: widget.sportId == SportId.muaythai
-          ? resolveMuaythaiVariant(widget.belt)
-          : null,
-    );
-    return grades.map((g) => g.id).toList();
+    String? variant;
+    if (widget.sportId == SportId.muaythai) {
+      final belt = widget.belt;
+      // 'white' (and empty) are shared/ambiguous between the two federations, so
+      // honor the academy's configured system; any other stored id unambiguously
+      // belongs to one ladder and resolves itself.
+      final ambiguous = belt.isEmpty || belt == 'white';
+      variant = ambiguous
+          ? (widget.muaythaiVariant ?? resolveMuaythaiVariant(belt))
+          : resolveMuaythaiVariant(belt);
+    }
+    final grades = getGradesForSport(widget.sportId, muaythaiVariant: variant);
+    // Exclude above-black master ranks (coral/red) from the sweep PATH so the
+    // morph never crossfades through them on its way to a normal grade. The
+    // target grade itself, even if above-black, is honored below.
+    return grades.where((g) => !g.aboveBlack).map((g) => g.id).toList();
+  }
+
+  /// Stripes/graus to actually render, gated on the TARGET grade: zero unless
+  /// the sport supports stripes AND the final grade allows them, and clamped to
+  /// that grade's maxStripes. So Judô / Muay Thai / Luta Livre never show graus,
+  /// and an over-count stored on a BJJ grade can't paint extra stripes.
+  int get _effectiveStripes {
+    final targetDef = getGradeDefinition(widget.sportId, widget.belt);
+    final maxStripes = targetDef?.maxStripes ?? 0;
+    final allow = getSport(widget.sportId).supportsStripes && maxStripes > 0;
+    return allow ? widget.stripes.clamp(0, maxStripes) : 0;
   }
 
   void _buildTimeline() {
@@ -125,6 +153,12 @@ class _AnimatedBeltState extends State<AnimatedBelt>
     final targetIndex = ladder.indexOf(widget.belt);
     if (targetIndex >= 0) {
       _sweepStops = ladder.sublist(0, targetIndex + 1);
+    } else if (getGradeDefinition(widget.sportId, widget.belt)?.aboveBlack ==
+            true &&
+        ladder.isNotEmpty) {
+      // Above-black master rank (e.g. BJJ coral/red): sweep the full normal
+      // ladder, then land on the master rank as the single final crossfade.
+      _sweepStops = [...ladder, widget.belt];
     } else {
       // Unknown grade for this sport: fade from the first grade into the real
       // color so we still get a graceful morph.
@@ -134,7 +168,7 @@ class _AnimatedBeltState extends State<AnimatedBelt>
 
     // Split the controller timeline: most of it is the color sweep, a short tail
     // is the stripe pop-in (only if there are stripes to show).
-    final hasStripes = widget.stripes > 0;
+    final hasStripes = _effectiveStripes > 0;
     final hasMultipleStops = _sweepStops.length > 1;
     if (hasStripes && hasMultipleStops) {
       _sweepEnd = 0.7;
@@ -148,7 +182,7 @@ class _AnimatedBeltState extends State<AnimatedBelt>
   Duration _totalDuration() {
     // The stripe tail scales with the number of stripes so each one gets a
     // perceptible (but quick) pop. Keep it short.
-    final stripeMs = widget.stripes > 0 ? 150 + widget.stripes * 120 : 0;
+    final stripeMs = _effectiveStripes > 0 ? 150 + _effectiveStripes * 120 : 0;
     return widget.sweepDuration + Duration(milliseconds: stripeMs);
   }
 
@@ -158,6 +192,7 @@ class _AnimatedBeltState extends State<AnimatedBelt>
     if (old.belt != widget.belt ||
         old.stripes != widget.stripes ||
         old.sportId != widget.sportId ||
+        old.muaythaiVariant != widget.muaythaiVariant ||
         old.sweepDuration != widget.sweepDuration) {
       _buildTimeline();
       _controller.duration = _totalDuration();
@@ -208,12 +243,20 @@ class _AnimatedBeltState extends State<AnimatedBelt>
     if (_sweepStops.length == 1) return _sweepStops.first;
     final segments = _sweepStops.length - 1;
     final scaled = (t.clamp(0.0, 1.0)) * segments;
-    final i = scaled.round().clamp(0, segments);
+    // floor() to match _sweepColor's segment indexing, so a grade's adornment
+    // (tip color / middle stripe) only appears once the body color has actually
+    // arrived at that grade — never one segment early.
+    final i = scaled.floor().clamp(0, segments);
     return _sweepStops[i];
   }
 
   @override
   Widget build(BuildContext context) {
+    // Stripe-/belt-less sports (boxing, musculação) have no grade ladder to
+    // morph — render nothing rather than a meaningless white belt.
+    if (getSport(widget.sportId).gradeSystem == GradeSystem.none) {
+      return const SizedBox.shrink();
+    }
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
@@ -235,7 +278,8 @@ class _AnimatedBeltState extends State<AnimatedBelt>
 
         // How many stripes are currently visible, and the fractional pop of the
         // newest one (for a tiny scale-in on the leading stripe).
-        final stripeFloat = stripeT * widget.stripes;
+        final effectiveStripes = _effectiveStripes;
+        final stripeFloat = stripeT * effectiveStripes;
         final fullStripes = stripeFloat.floor();
         final partial = stripeFloat - fullStripes;
 
@@ -245,9 +289,9 @@ class _AnimatedBeltState extends State<AnimatedBelt>
           gradeDef: gradeDef,
           size: widget.size,
           highlight: widget.highlight,
-          fullStripes: fullStripes.clamp(0, widget.stripes),
+          fullStripes: fullStripes.clamp(0, effectiveStripes),
           partialStripeFraction: partial.clamp(0.0, 1.0),
-          totalStripes: widget.stripes,
+          totalStripes: effectiveStripes,
         );
       },
     );
@@ -281,10 +325,17 @@ class _BeltVisual extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final config = _beltSizeConfig(size);
-    // A light body (white, prata, ouro, "...e branca") needs a border to stand
-    // out from the page; keyed off luminance so every sport's grades are
-    // covered (BJJ white, Muay Thai branca, etc.).
-    final isLightBody = beltColor.computeLuminance() > 0.7;
+    // A light body (white/branca, prata, ouro, pale yellow) needs a border to
+    // stand out from the white page. A bare 0.7 luminance cutoff only caught
+    // pure white and left prata (~0.36), ouro (~0.45), Muay Thai light-blue and
+    // the pale yellows (~0.58) borderless. Combine an honest luminance cutoff
+    // with the grade's own semantics so every light-bodied grade is framed.
+    final luminance = beltColor.computeLuminance();
+    final gradeLabel = gradeDef?.label.toLowerCase() ?? '';
+    final isLightBody = luminance > 0.55 ||
+        gradeLabel.contains('branca') ||
+        gradeLabel.contains('prata') ||
+        gradeLabel.contains('ouro');
     final isBlackBelt = gradeDef?.isBlackBelt ?? (gradeKey == 'black');
 
     // The grade's "ponta" adornment color (Muay Thai prajied tip, BJJ/Judô
@@ -293,10 +344,9 @@ class _BeltVisual extends StatelessWidget {
     final tipColor = gradeDef?.tipColor;
 
     // Compound grade ids without an explicit tipColor still carry a middle
-    // stripe convention shared across sports: '-white' / 'coral' → white
-    // stripe, '-black' → black stripe.
-    final showWhiteStripe =
-        tipColor == null && (gradeKey.endsWith('-white') || gradeKey == 'coral');
+    // stripe convention shared across sports: '-white' → white stripe,
+    // '-black' → black stripe.
+    final showWhiteStripe = tipColor == null && gradeKey.endsWith('-white');
     final showBlackStripe = tipColor == null && gradeKey.endsWith('-black');
 
     final scale = highlight ? 1.12 : 1.0;

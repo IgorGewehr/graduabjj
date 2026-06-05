@@ -367,14 +367,8 @@ class _AdminStudentDetailScreenState
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                getGradeColor(
-                  _student!.getPrimarySport(),
-                  _student!.currentBelt,
-                ),
-                getGradeColor(
-                  _student!.getPrimarySport(),
-                  _student!.currentBelt,
-                ).withValues(alpha: 0.7),
+                _headerColor(),
+                _headerColor().withValues(alpha: 0.7),
               ],
             ),
           ),
@@ -417,9 +411,7 @@ class _AdminStudentDetailScreenState
                               style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color:
-                                    (_student!.currentBelt == 'white' ||
-                                        _student!.currentBelt == 'yellow')
+                                color: _headerColor().computeLuminance() > 0.7
                                     ? Colors.black
                                     : Colors.white,
                               ),
@@ -451,6 +443,15 @@ class _AdminStudentDetailScreenState
     );
   }
 
+  /// Header gradient/name color resolved from the primary sport's CURRENT grade
+  /// (same source as the hero belt), so non-BJJ sports (Muay Thai, etc.) get a
+  /// matching header instead of the legacy flat BJJ currentBelt field.
+  Color _headerColor() {
+    final sport = _student!.getPrimarySport();
+    final grade = _student!.getGrade(sport);
+    return getGradeColor(sport, grade?.currentGrade ?? 'white');
+  }
+
   Widget _buildAnimatedBeltHero() {
     final primarySport = _student!.getPrimarySport();
     final grade = _student!.getGrade(primarySport);
@@ -460,6 +461,8 @@ class _AdminStudentDetailScreenState
         belt: grade?.currentGrade ?? 'white',
         stripes: grade?.currentStripes ?? 0,
         sportId: primarySport,
+        muaythaiVariant:
+            ref.read(academySettingsProvider).valueOrNull?.muaythaiGradeSystem,
         size: BeltSize.medium,
         highlight: true,
       ),
