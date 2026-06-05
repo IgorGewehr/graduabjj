@@ -153,12 +153,15 @@
       (hipertrofia/emagrecimento/condicionamento/manutenção) na avaliação.
 
 **🥋 Karatê**
-- [ ] **E4. Biblioteca de katas** — recorte do currículo B1, com vídeo por kata e
-      exigência por faixa.
+- [x] **E4. Biblioteca de katas** ✅ — Karatê já é suportado pelo currículo B1
+      (faixas + técnicas + vídeo). Entregue `karateStarterTemplate` (katas Shotokan
+      + kihon/kumite por faixa) e o seed generalizado no montador (antes só BJJ).
+      O instrutor monta a biblioteca de katas no B1 com 1 toque.
 
 **🥋 Judô**
-- [ ] **E5. Checklist nage-waza / katame-waza / kata** — recorte do currículo B1
-      no vocabulário do judô.
+- [x] **E5. Checklist nage-waza / katame-waza / kata** ✅ — Judô idem (B1). Entregue
+      `judoStarterTemplate` (nage-waza/katame-waza/ukemi por grau, estilo Gokyo) +
+      seed. Teste valida que os gradeId dos templates existem nas faixas (+5 testes).
 
 ---
 

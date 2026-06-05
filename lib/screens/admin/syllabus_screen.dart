@@ -147,19 +147,19 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     }
   }
 
-  Future<void> _seedBjj() async {
+  Future<void> _seedTemplate(List<SyllabusSeedItem> template) async {
     setState(() => _seeding = true);
     try {
       final uid = FirebaseService.currentUserId ?? '';
       // Ordem incremental por faixa.
       final perGrade = <String, int>{};
       final items = <SyllabusTechnique>[];
-      for (final item in bjjStarterTemplate) {
+      for (final item in template) {
         final order =
             perGrade.update(item.gradeId, (v) => v + 1, ifAbsent: () => 0);
         items.add(SyllabusTechnique(
           id: '',
-          sport: SportId.bjj.value,
+          sport: _sport.value,
           gradeId: item.gradeId,
           category: item.category,
           name: item.name,
@@ -170,7 +170,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       }
       await _service.createMany(items);
       if (!mounted) return;
-      context.showSuccess('Template BJJ adicionado! Edite à vontade.');
+      context.showSuccess('Template adicionado! Edite à vontade.');
       _load();
     } catch (e) {
       if (mounted) context.showError('Não foi possível semear o template: $e');
@@ -318,14 +318,20 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   }
 
   Widget _emptyState() {
-    // O template semeia faixas adultas → só oferece no BJJ adulto.
-    final showSeed = _sport == SportId.bjj && _category == 'adult';
+    // Templates semeiam faixas adultas → só oferece na categoria adulto, e só
+    // para os esportes que têm template (BJJ/Karatê/Judô).
+    final template = _category == 'adult'
+        ? syllabusTemplateFor(_sport.value)
+        : null;
+    final showSeed = template != null;
     return PolishedEmptyState(
       icon: LucideIcons.bookOpen,
       title: 'Nenhuma técnica neste currículo ainda',
       subtitle: 'Toque em "Nova técnica" para começar.',
-      actionLabel: (showSeed && !_seeding) ? 'Usar template BJJ básico' : null,
-      onAction: (showSeed && !_seeding) ? _seedBjj : null,
+      actionLabel:
+          (showSeed && !_seeding) ? 'Usar template básico' : null,
+      onAction:
+          (showSeed && !_seeding) ? () => _seedTemplate(template) : null,
     );
   }
 
