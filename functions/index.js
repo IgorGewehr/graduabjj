@@ -72,24 +72,40 @@ function sanitizeExtraPermissions(raw) {
   return Array.from(seen);
 }
 
-/** Returns true when uid is admin of academyId per userAcademyMapping. */
+/**
+ * Resolve a uid's role within academyId the SAME way the Firestore rules do:
+ * userAcademyMapping.academyDetails[academyId].role is the primary source, and
+ * the per-academy user doc academies/{academyId}/users/{uid}.role is the
+ * fallback. Migrated/legacy academies frequently have a mapping with
+ * academyIds set but NO academyDetails entry — their role lives only in the
+ * academyUser doc — so a mapping-only check wrongly denies real admins.
+ * Returns the role string or null.
+ */
+async function resolveRole(uid, academyId) {
+  const mapSnap = await db.collection('userAcademyMapping').doc(uid).get();
+  if (mapSnap.exists) {
+    const entry = ((mapSnap.data() || {}).academyDetails || {})[academyId];
+    if (entry && entry.role) return entry.role;
+  }
+  const userSnap = await db
+      .collection('academies').doc(academyId)
+      .collection('users').doc(uid).get();
+  if (userSnap.exists) {
+    const role = (userSnap.data() || {}).role;
+    if (role) return role;
+  }
+  return null;
+}
+
+/** Returns true when uid is admin of academyId (mapping primary, user fallback). */
 async function isAdmin(uid, academyId) {
-  const snap = await db.collection('userAcademyMapping').doc(uid).get();
-  if (!snap.exists) return false;
-  const data = snap.data() || {};
-  const details = data.academyDetails || {};
-  const entry = details[academyId];
-  return entry && entry.role === 'admin';
+  return (await resolveRole(uid, academyId)) === 'admin';
 }
 
 /** Returns true when uid is admin OR instructor of academyId. */
 async function isStaff(uid, academyId) {
-  const snap = await db.collection('userAcademyMapping').doc(uid).get();
-  if (!snap.exists) return false;
-  const data = snap.data() || {};
-  const details = data.academyDetails || {};
-  const entry = details[academyId];
-  return entry && (entry.role === 'admin' || entry.role === 'instructor');
+  const role = await resolveRole(uid, academyId);
+  return role === 'admin' || role === 'instructor';
 }
 
 /**
