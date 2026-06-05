@@ -1,5 +1,12 @@
 <!-- Gerado por .claude/workflows/aula-particular-turmas-architecture.js -->
 
+
+## ✅ Decisões do dono (travadas)
+- **Aula particular — concessão de presença:** automática **ao confirmar o pagamento** (via webhook). Sem ação do professor.
+- **Estorno/cancelamento:** a presença concedida **permanece** (não remove nem decrementa).
+- **"Adicionar todos" em turma:** **ignora o limite** de vagas (maxStudents é só informativo) — adiciona todos os filtrados.
+- **"Remover todos":** **fora desta iteração** (follow-up).
+
 # Blueprint de Implementação — GraduaBJJ
 
 Branch alvo (ambas as features): **`firebase-production`** (Firestore, prod real). Confirmar antes de abrir as tasks; nada disso vai para `migration`.
