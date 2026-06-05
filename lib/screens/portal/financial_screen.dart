@@ -188,6 +188,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
       description: description,
       studentId: payment.studentId,
       studentName: studentName,
+      paymentMethodPolicy: payment.paymentMethodPolicy,
     );
 
     showModalBottomSheet(

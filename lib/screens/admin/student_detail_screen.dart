@@ -1811,6 +1811,7 @@ class _AdminStudentDetailScreenState
     final valueController = TextEditingController();
     final descController = TextEditingController(text: 'Cobrança Avulsa');
     DateTime selectedDate = DateTime.now().add(const Duration(days: 5));
+    PaymentMethodPolicy avulsaPolicy = PaymentMethodPolicy.both;
     final parentContext = context;
 
     showDialog(
@@ -1878,6 +1879,24 @@ class _AdminStudentDetailScreenState
                         ),
                       ),
                     ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Formas de pagamento',
+                      style: AppTheme.bodySmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: PaymentMethodPolicy.values.map((policy) {
+                        return ChoiceChip(
+                          label: Text(policy.label),
+                          selected: avulsaPolicy == policy,
+                          onSelected: (_) =>
+                              setDialogState(() => avulsaPolicy = policy),
+                        );
+                      }).toList(),
+                    ),
                   ],
                 ),
               ),
@@ -1909,6 +1928,7 @@ class _AdminStudentDetailScreenState
                         description: desc,
                         type: 'avulsa',
                         planId: null,
+                        paymentMethodPolicy: avulsaPolicy,
                         sendNotification: false,
                         createdBy: currentUser?.id,
                       );

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_service.dart';
+import 'payment_service.dart' show PaymentMethodPolicy, PaymentMethodPolicyExtension;
 
 enum BillingPeriod {
   monthly,
@@ -51,6 +52,9 @@ class Plan {
   final bool isActive;
   final Map<String, double> customValues;
   final Map<String, int> customDueDays;
+  /// Which payment methods this plan accepts (PIX e Cartão / Somente PIX /
+  /// Somente Cartão). Absent on legacy plans → [PaymentMethodPolicy.both].
+  final PaymentMethodPolicy paymentMethodPolicy;
   /// Sport id this plan applies to ('bjj', 'muaythai', ...). Null = legacy
   /// "any modality" plan from before the field existed.
   final String? sport;
@@ -70,10 +74,17 @@ class Plan {
     this.isActive = true,
     this.customValues = const {},
     this.customDueDays = const {},
+    this.paymentMethodPolicy = PaymentMethodPolicy.both,
     this.sport,
     required this.createdAt,
     required this.updatedAt,
   });
+
+  /// A monthly card-only plan is auto-billed as a recurring subscription
+  /// (decision: "cartão + mensal ⇒ assinatura automática").
+  bool get isRecurring =>
+      billingPeriod == BillingPeriod.monthly &&
+      paymentMethodPolicy == PaymentMethodPolicy.cardOnly;
 
   /// The actual amount charged per billing cycle.
   /// For monthly plans this equals monthlyValue.
@@ -100,6 +111,7 @@ class Plan {
     bool? isActive,
     Map<String, double>? customValues,
     Map<String, int>? customDueDays,
+    PaymentMethodPolicy? paymentMethodPolicy,
     String? sport,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -117,6 +129,7 @@ class Plan {
       isActive: isActive ?? this.isActive,
       customValues: customValues ?? this.customValues,
       customDueDays: customDueDays ?? this.customDueDays,
+      paymentMethodPolicy: paymentMethodPolicy ?? this.paymentMethodPolicy,
       sport: sport ?? this.sport,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -152,6 +165,8 @@ class Plan {
               ),
             )
           : {},
+      paymentMethodPolicy:
+          PaymentMethodPolicyExtension.fromString(data['paymentMethodPolicy']),
       sport: data['sport'] as String?,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
@@ -252,6 +267,7 @@ class PlanService {
     BillingPeriod billingPeriod = BillingPeriod.monthly,
     int defaultDueDay = 10,
     int? classesPerWeek,
+    PaymentMethodPolicy paymentMethodPolicy = PaymentMethodPolicy.both,
   }) async {
     final docRef = await _plansRef.add({
       'name': name,
@@ -261,6 +277,7 @@ class PlanService {
       'billingPeriod': billingPeriod.name,
       'defaultDueDay': defaultDueDay,
       'classesPerWeek': classesPerWeek,
+      'paymentMethodPolicy': paymentMethodPolicy.value,
       'studentIds': [],
       'isActive': true,
       'createdAt': FieldValue.serverTimestamp(),

@@ -104,6 +104,49 @@ extension PaymentMethodExtension on PaymentMethod {
   }
 }
 
+/// Which payment methods a plan/charge accepts. Additive & backward-compatible:
+/// an absent value resolves to [both] (the current, unrestricted behavior).
+enum PaymentMethodPolicy { both, pixOnly, cardOnly }
+
+extension PaymentMethodPolicyExtension on PaymentMethodPolicy {
+  String get value {
+    switch (this) {
+      case PaymentMethodPolicy.both:
+        return 'both';
+      case PaymentMethodPolicy.pixOnly:
+        return 'pix_only';
+      case PaymentMethodPolicy.cardOnly:
+        return 'card_only';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case PaymentMethodPolicy.both:
+        return 'PIX e Cartão';
+      case PaymentMethodPolicy.pixOnly:
+        return 'Somente PIX';
+      case PaymentMethodPolicy.cardOnly:
+        return 'Somente Cartão';
+    }
+  }
+
+  bool get allowsPix => this != PaymentMethodPolicy.cardOnly;
+  bool get allowsCard => this != PaymentMethodPolicy.pixOnly;
+
+  static PaymentMethodPolicy fromString(String? value) {
+    switch (value) {
+      case 'pix_only':
+        return PaymentMethodPolicy.pixOnly;
+      case 'card_only':
+        return PaymentMethodPolicy.cardOnly;
+      case 'both':
+      default:
+        return PaymentMethodPolicy.both;
+    }
+  }
+}
+
 /// Payment Model
 class Payment {
   final String id;
@@ -126,6 +169,9 @@ class Payment {
   final String? pixQrCode;
   final String? planId;
   final String type; // 'monthly_tuition' | 'avulsa'
+  /// Snapshot of the plan/charge payment-method policy at generation time.
+  /// Absent on legacy docs → [PaymentMethodPolicy.both].
+  final PaymentMethodPolicy paymentMethodPolicy;
   final DateTime createdAt;
 
   Payment({
@@ -146,6 +192,7 @@ class Payment {
     this.pixQrCode,
     this.planId,
     this.type = 'monthly_tuition',
+    this.paymentMethodPolicy = PaymentMethodPolicy.both,
     required this.createdAt,
   });
 
@@ -177,6 +224,8 @@ class Payment {
       pixQrCode: data['pixQrCode'],
       planId: data['planId'],
       type: data['type'] ?? 'monthly_tuition',
+      paymentMethodPolicy:
+          PaymentMethodPolicyExtension.fromString(data['paymentMethodPolicy']),
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
@@ -462,6 +511,7 @@ class PaymentService {
     String? createdBy,
     String? planId,
     String type = 'monthly_tuition',
+    PaymentMethodPolicy paymentMethodPolicy = PaymentMethodPolicy.both,
     bool sendNotification = true,
   }) async {
     final docRef = await _paymentsRef.add({
@@ -475,6 +525,7 @@ class PaymentService {
       'description': description ?? 'Mensalidade',
       'referenceMonth': referenceMonth,
       'planId': planId,
+      'paymentMethodPolicy': paymentMethodPolicy.value,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
       'createdBy': createdBy,
@@ -714,6 +765,9 @@ class PaymentService {
     final results = <Payment>[];
     final year = int.parse(referenceMonth.split('-')[0]);
     final month = int.parse(referenceMonth.split('-')[1]);
+    // planId -> payment-method policy, so each generated charge snapshots its
+    // plan's policy. Populated from the plans we process below.
+    final planPolicies = <String, PaymentMethodPolicy>{};
 
     List<({String id, String name, double value, int dueDay, String? planId, BillingPeriod billingPeriod})> studentList;
     if (students != null) {
@@ -732,6 +786,7 @@ class PaymentService {
       final entries = <({String studentId, String planId, double value, int dueDay, BillingPeriod billingPeriod})>[];
 
       for (final plan in plansToProcess) {
+        planPolicies[plan.id] = plan.paymentMethodPolicy;
         for (final studentId in plan.studentIds) {
           entries.add((
             studentId: studentId,
@@ -820,6 +875,9 @@ class PaymentService {
         referenceMonth: referenceMonth,
         createdBy: createdBy,
         planId: student.planId,
+        paymentMethodPolicy: student.planId != null
+            ? (planPolicies[student.planId] ?? PaymentMethodPolicy.both)
+            : PaymentMethodPolicy.both,
       );
 
       results.add(payment);

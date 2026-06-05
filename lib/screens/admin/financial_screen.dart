@@ -878,6 +878,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     final dueDayController = TextEditingController(text: '10');
     int? classesPerWeek;
     BillingPeriod billingPeriod = BillingPeriod.monthly;
+    PaymentMethodPolicy paymentMethodPolicy = PaymentMethodPolicy.both;
 
     showModalBottomSheet(
       context: context,
@@ -938,6 +939,15 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
                 _buildFormField('Dia de Vencimento', dueDayController, '1-31',
                     keyboardType: TextInputType.number),
+
+                const SizedBox(height: 4),
+                _PaymentMethodPolicySelector(
+                  selected: paymentMethodPolicy,
+                  isMonthly: billingPeriod == BillingPeriod.monthly,
+                  onChanged: (p) =>
+                      setDialogState(() => paymentMethodPolicy = p),
+                ),
+                const SizedBox(height: 16),
 
                 Text(
                   'Aulas por Semana',
@@ -1007,6 +1017,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                               defaultDueDay:
                                   int.tryParse(dueDayController.text) ?? 10,
                               classesPerWeek: classesPerWeek,
+                              paymentMethodPolicy: paymentMethodPolicy,
                             );
                             if (mounted) {
                               Navigator.pop(context);
@@ -1085,6 +1096,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     int? classesPerWeek = plan.classesPerWeek;
     bool isActive = plan.isActive;
     BillingPeriod billingPeriod = plan.billingPeriod;
+    PaymentMethodPolicy paymentMethodPolicy = plan.paymentMethodPolicy;
 
     showModalBottomSheet(
       context: context,
@@ -1145,6 +1157,15 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 _buildFormField('Dia de Vencimento', dueDayController, '',
                     keyboardType: TextInputType.number),
 
+                const SizedBox(height: 4),
+                _PaymentMethodPolicySelector(
+                  selected: paymentMethodPolicy,
+                  isMonthly: billingPeriod == BillingPeriod.monthly,
+                  onChanged: (p) =>
+                      setDialogState(() => paymentMethodPolicy = p),
+                ),
+                const SizedBox(height: 16),
+
                 Row(
                   children: [
                     Text(
@@ -1193,6 +1214,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                             await service.update(plan.id, {
                               'name': nameController.text,
                               'billingPeriod': billingPeriod.name,
+                              'paymentMethodPolicy': paymentMethodPolicy.value,
                               'monthlyValue':
                                   billingPeriod == BillingPeriod.monthly
                                       ? enteredValue
@@ -3192,6 +3214,70 @@ class _BillingPeriodSelector extends StatelessWidget {
             );
           }).toList(),
         ),
+      ],
+    );
+  }
+}
+
+/// Picker for the accepted payment methods of a plan (PIX e Cartão / Somente
+/// PIX / Somente Cartão). Shows a hint that monthly card-only plans become an
+/// automatic recurring subscription.
+class _PaymentMethodPolicySelector extends StatelessWidget {
+  final PaymentMethodPolicy selected;
+  final ValueChanged<PaymentMethodPolicy> onChanged;
+  final bool isMonthly;
+
+  const _PaymentMethodPolicySelector({
+    required this.selected,
+    required this.onChanged,
+    required this.isMonthly,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final showRecurringHint =
+        isMonthly && selected == PaymentMethodPolicy.cardOnly;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Formas de pagamento aceitas',
+          style: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: PaymentMethodPolicy.values.map((policy) {
+            final isSelected = selected == policy;
+            return GestureDetector(
+              onTap: () => onChanged(policy),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? AppTheme.textPrimary
+                      : AppTheme.surfaceVariant,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  policy.label,
+                  style: AppTheme.labelMedium.copyWith(
+                    color: isSelected ? Colors.white : AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        if (showRecurringHint) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Plano mensal somente no cartão vira assinatura automática: '
+            'o aluno assina uma vez e o cartão é cobrado todo mês.',
+            style: AppTheme.labelSmall.copyWith(color: AppTheme.primary),
+          ),
+        ],
       ],
     );
   }

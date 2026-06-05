@@ -2936,6 +2936,14 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
     throw new HttpsError('already-exists', 'This payment has already been completed');
   }
 
+  // Payment-method policy (defesa em profundidade — a UI ja esconde, mas o
+  // enforcement real e aqui): cobranca marcada como "somente cartao" nao pode
+  // ser paga via PIX.
+  if (fin.paymentMethodPolicy === 'card_only') {
+    throw new HttpsError('failed-precondition',
+      'Esta cobranca aceita apenas cartao.');
+  }
+
   // SECURITY: never trust the client amount. The charge is DERIVED from the
   // stored financial amount (REAIS, canonical). The client sends CENTAVOS, so
   // compare in centavos within a 1-centavo tolerance, else reject.
@@ -3150,6 +3158,11 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
       throw new HttpsError('failed-precondition',
         'Pagamento com cartao nao esta habilitado para a loja desta academia.');
     }
+  } else if (recData.paymentMethodPolicy === 'pix_only') {
+    // Payment-method policy: cobranca/mensalidade marcada como "somente PIX"
+    // nao aceita cartao (enforcement server-side, alem do gate da UI).
+    throw new HttpsError('failed-precondition',
+      'Esta cobranca aceita apenas PIX.');
   }
 
   // SECURITY: never trust the client amount. DERIVE the charge server-side from

@@ -8,6 +8,8 @@
 /// The [amount] is always in REAIS and is forwarded to the sheets only as a
 /// display value / server cross-check — the charge value remains derived
 /// server-side (createMp* never trust the client amount).
+import '../../services/payment_service.dart' show PaymentMethodPolicy;
+
 enum PaymentTargetKind { tuition, order }
 
 class PaymentTarget {
@@ -31,6 +33,10 @@ class PaymentTarget {
   /// The payer's display name (used by the card charge).
   final String studentName;
 
+  /// Which methods this charge accepts (snapshot from the financial/plan).
+  /// Orders are always [PaymentMethodPolicy.both].
+  final PaymentMethodPolicy paymentMethodPolicy;
+
   const PaymentTarget._({
     required this.kind,
     required this.id,
@@ -38,6 +44,7 @@ class PaymentTarget {
     required this.description,
     required this.studentId,
     required this.studentName,
+    this.paymentMethodPolicy = PaymentMethodPolicy.both,
   });
 
   /// A tuition (financial) charge. [financialId] is the `financials` doc id.
@@ -47,6 +54,7 @@ class PaymentTarget {
     required String description,
     required String studentId,
     required String studentName,
+    PaymentMethodPolicy paymentMethodPolicy = PaymentMethodPolicy.both,
   }) {
     return PaymentTarget._(
       kind: PaymentTargetKind.tuition,
@@ -55,6 +63,7 @@ class PaymentTarget {
       description: description,
       studentId: studentId,
       studentName: studentName,
+      paymentMethodPolicy: paymentMethodPolicy,
     );
   }
 
