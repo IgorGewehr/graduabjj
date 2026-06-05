@@ -300,6 +300,7 @@ class _AnimatedBeltState extends State<AnimatedBelt>
           beltColor: beltColor,
           gradeKey: gradeKey,
           gradeDef: gradeDef,
+          sportId: widget.sportId,
           size: widget.size,
           highlight: widget.highlight,
           fullStripes: fullStripes.clamp(0, effectiveStripes),
@@ -318,6 +319,7 @@ class _BeltVisual extends StatelessWidget {
   final Color beltColor;
   final String gradeKey;
   final GradeDefinition? gradeDef;
+  final SportId sportId;
   final BeltSize size;
   final bool highlight;
   final int fullStripes;
@@ -328,6 +330,7 @@ class _BeltVisual extends StatelessWidget {
     required this.beltColor,
     required this.gradeKey,
     required this.gradeDef,
+    required this.sportId,
     required this.size,
     required this.highlight,
     required this.fullStripes,
@@ -354,6 +357,10 @@ class _BeltVisual extends StatelessWidget {
         gradeLabel.contains('amarela') ||
         gradeLabel.startsWith('azul clara');
     final isBlackBelt = gradeDef?.isBlackBelt ?? (gradeKey == 'black');
+    // BJJ black belts carry a RED rank bar (ponta vermelha) with white degrees,
+    // the traditional faixa-preta look. Other sports keep the classic charcoal
+    // tip with red degrees.
+    final isBjjBlackBar = isBlackBelt && sportId == SportId.bjj;
 
     // The grade's "ponta" adornment color (Muay Thai prajied tip, BJJ/Judô
     // coral red, Luta Livre DAN tip). When present, the belt tip is drawn in
@@ -369,10 +376,15 @@ class _BeltVisual extends StatelessWidget {
     final scale = highlight ? 1.12 : 1.0;
 
     // The tip that holds the graus: a grade's own "ponta" color when it has one
-    // (so the adornment reads as part of the belt), otherwise the classic black
-    // tip. Black belts get a slightly lighter charcoal so red graus pop.
+    // (so the adornment reads as part of the belt). BJJ black belt → red rank
+    // bar; other black belts → slightly lighter charcoal so red graus pop;
+    // everything else → the classic black tip.
     final Color holderColor = tipColor ??
-        (isBlackBelt ? const Color(0xFF2D2D2D) : const Color(0xFF171717));
+        (isBjjBlackBar
+            ? const Color(0xFFB91C1C)
+            : isBlackBelt
+                ? const Color(0xFF2D2D2D)
+                : const Color(0xFF171717));
 
     Widget belt = Container(
       width: config.width,
@@ -451,8 +463,11 @@ class _BeltVisual extends StatelessWidget {
     final visible = fullStripes;
     if (visible <= 0 && partialStripeFraction <= 0) return const [];
 
-    final stripeColor =
-        isBlackBelt ? const Color(0xFFDC2626) : Colors.white;
+    // White graus on the BJJ red rank bar (and on every light/colored belt);
+    // red graus only on the charcoal tip of non-BJJ black belts.
+    final stripeColor = (isBlackBelt && sportId != SportId.bjj)
+        ? const Color(0xFFDC2626)
+        : Colors.white;
 
     final widgets = <Widget>[];
     for (var index = 0; index < visible; index++) {
