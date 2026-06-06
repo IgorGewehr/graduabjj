@@ -154,7 +154,12 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     icon: LucideIcons.users,
     route: '/admin/alunos',
     section: NavSection.gestao,
-    requiresAnyPermission: ['students:create', 'students:delete'],
+    requiresAnyPermission: [
+      'students:create',
+      'students:edit',
+      'students:delete',
+      'students:manage',
+    ],
   ),
   NavEntry(
     key: 'admin_chamada',

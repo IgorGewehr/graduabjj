@@ -50,6 +50,7 @@ const GRANTABLE_EXTRA_PERMISSIONS = new Set([
   'financial:view',
   'financial:create',
   'students:create',
+  'students:edit',
   'students:delete',
   'reports:view',
   'competitions:create',
