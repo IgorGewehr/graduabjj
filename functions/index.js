@@ -733,7 +733,7 @@ exports.listAcademyMembers = onCall(async (request) => {
 // getAttendanceRanking — privacy-safe attendance ranking for students
 // ============================================================
 //
-// Body: { academyId, startMillis, endMillis, classIds?: string[], limit? }
+// Body: { academyId, startMillis, endMillis, classIds?: string[], sport?, limit? }
 // Computes the attendance ranking SERVER-SIDE so a plain student can see it
 // without being able to read peers' raw attendance (which carries weight/notes
 // and is staff/monitor-only by the Firestore rules). Returns only aggregated,
@@ -743,7 +743,7 @@ exports.listAcademyMembers = onCall(async (request) => {
 // true); staff always.
 exports.getAttendanceRanking = onCall(async (request) => {
   const uid = requireAuth(request);
-  const {academyId, startMillis, endMillis, classIds} = request.data || {};
+  const {academyId, startMillis, endMillis, classIds, sport} = request.data || {};
   if (!academyId || startMillis == null || endMillis == null) {
     throw new HttpsError(
         'invalid-argument', 'academyId, startMillis e endMillis são obrigatórios.');
@@ -769,6 +769,9 @@ exports.getAttendanceRanking = onCall(async (request) => {
   const end = Timestamp.fromMillis(Number(endMillis));
   const classFilter = Array.isArray(classIds) && classIds.length > 0 ?
       new Set(classIds) : null;
+  // Sport filter for multi-modality academies. Attendance docs carry `sport`
+  // (older/missing → treated as 'bjj'); null sport = all modalities.
+  const sportFilter = (typeof sport === 'string' && sport) ? sport : null;
   const limit = Math.min(Number(request.data.limit) || 100, 500);
 
   const snap = await db
@@ -786,6 +789,7 @@ exports.getAttendanceRanking = onCall(async (request) => {
     const sid = d.studentId;
     if (!sid) return;
     if (classFilter && !classFilter.has(d.classId)) return;
+    if (sportFilter && (d.sport || 'bjj') !== sportFilter) return;
     counts[sid] = (counts[sid] || 0) + 1;
     const t = d.date && d.date.toMillis ? d.date.toMillis() : 0;
     if (!recent[sid] || t > recent[sid]) recent[sid] = t;

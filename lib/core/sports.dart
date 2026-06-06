@@ -166,7 +166,7 @@ const _muaythaiGradesCbmtt = [
   GradeDefinition(id: 'mt2-red', label: 'Vermelha', color: Color(0xFFDC2626), maxStripes: 0),
   GradeDefinition(id: 'mt2-red-white', label: 'Vermelha e Branca', color: Color(0xFFDC2626), tipColor: Color(0xFFF5F5F5), maxStripes: 0),
   GradeDefinition(id: 'mt2-black', label: 'Preta', color: Color(0xFF171717), maxStripes: 0, isBlackBelt: true),
-  GradeDefinition(id: 'mt2-black-white', label: 'Preta e Branca (Professor)', color: Color(0xFF171717), tipColor: Color(0xFFF5F5F5), maxStripes: 0, isBlackBelt: true),
+  GradeDefinition(id: 'mt2-black-white', label: 'Preta e Branca (Professor)', color: Color(0xFF171717), tipColor: Color(0xFFF5F5F5), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
   GradeDefinition(id: 'mt2-silver', label: 'Prata', color: Color(0xFF94A3B8), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
   GradeDefinition(id: 'mt2-gold', label: 'Ouro', color: Color(0xFFD4AF37), maxStripes: 0, isBlackBelt: true, aboveBlack: true),
   GradeDefinition(id: 'mt2-gold-silver', label: 'Ouro e Prata', color: Color(0xFFD4AF37), tipColor: Color(0xFF94A3B8), maxStripes: 0, isBlackBelt: true, aboveBlack: true),

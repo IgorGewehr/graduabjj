@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/ranking_entry.dart';
 import '../../providers/portal_providers.dart';
@@ -26,6 +27,9 @@ class RankingScreen extends ConsumerStatefulWidget {
 class _RankingScreenState extends ConsumerState<RankingScreen> {
   RankingCategory _category = RankingCategory.general;
   RankingPeriod _period = RankingPeriod.week;
+  // Selected modality (null until the user picks). Only relevant for academies
+  // that train more than one sport — keeps each modality's ranking separate.
+  SportId? _selectedSport;
 
   @override
   Widget build(BuildContext context) {
@@ -48,21 +52,41 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
   }
 
   Widget _buildContent() {
+    // The academy's modalities, derived from its classes. A sport selector only
+    // appears for multi-modality academies; otherwise the ranking is over the
+    // single sport (sport filter stays null = all, which is equivalent).
+    final classes = ref.watch(classesProvider).valueOrNull ?? const [];
+    final academySports = (<SportId>{for (final c in classes) c.getSport()}
+        .toList()
+      ..sort((a, b) => a.index.compareTo(b.index)));
+    final showSportSelector = academySports.length > 1;
+    final activeSport = showSportSelector
+        ? ((_selectedSport != null && academySports.contains(_selectedSport))
+            ? _selectedSport
+            : academySports.first)
+        : null;
+
     return Column(
       children: [
+        if (showSportSelector)
+          _SportSelector(
+            sports: academySports,
+            selected: activeSport!,
+            onChanged: (s) => setState(() => _selectedSport = s),
+          ),
         _RankingHeader(
           category: _category,
           period: _period,
           onCategoryChanged: (c) => setState(() => _category = c),
           onPeriodChanged: (p) => setState(() => _period = p),
         ),
-        Expanded(child: _buildLeaderboard()),
+        Expanded(child: _buildLeaderboard(activeSport)),
       ],
     );
   }
 
-  Widget _buildLeaderboard() {
-    final key = (category: _category, period: _period);
+  Widget _buildLeaderboard(SportId? sport) {
+    final key = (category: _category, period: _period, sport: sport?.value);
     final rankingAsync = ref.watch(classRankingProvider(key));
 
     return RefreshIndicator(
@@ -115,6 +139,47 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
             },
           );
         },
+      ),
+    );
+  }
+}
+
+/// Horizontal modality picker — one ranking per sport for multi-sport academies.
+class _SportSelector extends StatelessWidget {
+  final List<SportId> sports;
+  final SportId selected;
+  final ValueChanged<SportId> onChanged;
+
+  const _SportSelector({
+    required this.sports,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      color: AppTheme.surface,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (final s in sports) ...[
+              ChoiceChip(
+                label: Text(getSport(s).label),
+                selected: s == selected,
+                showCheckmark: false,
+                onSelected: (_) {
+                  HapticFeedback.selectionClick();
+                  onChanged(s);
+                },
+              ),
+              const SizedBox(width: 8),
+            ],
+          ],
+        ),
       ),
     );
   }

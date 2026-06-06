@@ -35,6 +35,7 @@ class RankingService {
   Future<List<RankingEntry>> getRanking({
     required RankingPeriod period,
     Set<String>? classIds,
+    String? sport,
     int limit = 100,
   }) async {
     if (classIds != null && classIds.isEmpty) return const [];
@@ -52,6 +53,7 @@ class RankingService {
       'startMillis': start.millisecondsSinceEpoch,
       'endMillis': end.millisecondsSinceEpoch,
       if (classIds != null) 'classIds': classIds.toList(),
+      if (sport != null) 'sport': sport,
       'limit': limit,
     });
 
@@ -99,11 +101,13 @@ class RankingService {
     required String studentId,
     required RankingPeriod period,
     Set<String>? classIds,
+    String? sport,
   }) async {
     // Use a large limit so the target student is never truncated out.
     final ranking = await getRanking(
       classIds: classIds,
       period: period,
+      sport: sport,
       limit: 100000,
     );
     for (final entry in ranking) {
