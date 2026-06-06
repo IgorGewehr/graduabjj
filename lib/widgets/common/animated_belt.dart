@@ -367,11 +367,15 @@ class _BeltVisual extends StatelessWidget {
     // this color instead of the default black tip.
     final tipColor = gradeDef?.tipColor;
 
-    // Compound grade ids without an explicit tipColor still carry a middle
-    // stripe convention shared across sports: '-white' → white stripe,
-    // '-black' → black stripe.
-    final showWhiteStripe = tipColor == null && gradeKey.endsWith('-white');
-    final showBlackStripe = tipColor == null && gradeKey.endsWith('-black');
+    // Compound grade ids without an explicit tipColor carry a middle stripe
+    // convention: '-white' → white stripe, '-black' → black stripe. This is a
+    // BJJ/kids convention — Muay Thai expresses its grades via the ponta (tip)
+    // color, so it must NOT get a middle line (e.g. CBMTT 'mt2-black').
+    final useMiddleStripe = sportId != SportId.muaythai;
+    final showWhiteStripe =
+        useMiddleStripe && tipColor == null && gradeKey.endsWith('-white');
+    final showBlackStripe =
+        useMiddleStripe && tipColor == null && gradeKey.endsWith('-black');
 
     final scale = highlight ? 1.12 : 1.0;
 

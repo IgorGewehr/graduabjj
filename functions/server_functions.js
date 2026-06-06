@@ -3402,6 +3402,28 @@ exports.createMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (reques
   if (!(billingDay >= 1)) billingDay = 1;
   if (billingDay > 28) billingDay = 28; // avoid short-month drift
 
+  // MP /preapproval REQUIRES a valid payer_email. Resolve robustly (client may
+  // send null/placeholder): fall back to the auth account, then the student doc.
+  let resolvedEmail = String(payerEmail || '').trim();
+  const emailOk = (e) => e && e.includes('@') && !e.endsWith('@bjjeasy.com.br');
+  if (!emailOk(resolvedEmail)) {
+    try {
+      const authUser = await admin.auth().getUser(request.auth.uid);
+      if (emailOk((authUser.email || '').trim())) {
+        resolvedEmail = authUser.email.trim();
+      }
+    } catch (_) { /* keep trying below */ }
+  }
+  if (!emailOk(resolvedEmail)) {
+    const stuSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
+    const stuEmail = String((stuSnap.data() || {}).email || '').trim();
+    if (emailOk(stuEmail)) resolvedEmail = stuEmail;
+  }
+  if (!resolvedEmail || !resolvedEmail.includes('@')) {
+    throw new HttpsError('failed-precondition',
+      'É necessário um e-mail válido para criar a assinatura. Atualize o e-mail do aluno.');
+  }
+
   const token = await getMpAccessToken(academyId);
   const subRef = db.collection(`academies/${academyId}/subscriptions`).doc();
   const subId = subRef.id;
@@ -3429,7 +3451,7 @@ exports.createMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (reques
       body: {
         reason: sanitizeString(plan.name ? `Mensalidade ${plan.name}` : 'Mensalidade'),
         external_reference: externalReference,
-        payer_email: payerEmail || undefined,
+        payer_email: resolvedEmail,
         card_token_id: cardToken,
         status: 'authorized', // auto-charge without a hosted page
         back_url: 'https://arpjj-76350.web.app',
