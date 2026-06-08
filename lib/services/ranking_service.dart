@@ -1,6 +1,7 @@
+import 'package:cloud_functions/cloud_functions.dart';
+
 import '../models/ranking_entry.dart';
 import '../models/student.dart';
-import 'attendance_service.dart';
 import 'student_service.dart';
 
 /// Computes attendance rankings over a [RankingPeriod], optionally scoped to a
@@ -13,8 +14,10 @@ import 'student_service.dart';
 /// trip whether the caller wants one category or everything.
 class RankingService {
   final String academyId;
+  final FirebaseFunctions _functions;
 
-  RankingService(this.academyId);
+  RankingService(this.academyId, {FirebaseFunctions? functions})
+      : _functions = functions ?? FirebaseFunctions.instance;
 
   /// Returns the ranking over [period], highest attendance first.
   ///
@@ -32,6 +35,7 @@ class RankingService {
   Future<List<RankingEntry>> getRanking({
     required RankingPeriod period,
     Set<String>? classIds,
+    String? sport,
     int limit = 100,
   }) async {
     if (classIds != null && classIds.isEmpty) return const [];
@@ -39,52 +43,51 @@ class RankingService {
     final now = DateTime.now();
     final (start, end) = periodRange(period, now);
 
-    // Single date-only ranged query for the academy, then scope to the
-    // requested classes in memory (null = keep all = "Geral").
-    final all = await AttendanceService(academyId).getByDateRange(start, end);
-    final attendance = classIds == null
-        ? all
-        : all.where((a) => classIds.contains(a.classId)).toList();
+    // Ranking is computed SERVER-SIDE (getAttendanceRanking CF): a plain student
+    // cannot read peers' raw attendance (staff/monitor-only by the Firestore
+    // rules, since attendance carries weight/notes), so the function aggregates
+    // it and returns only PII-light rows. We send the period window we already
+    // computed so the server window matches the client's exactly (no TZ drift).
+    final res = await _functions.httpsCallable('getAttendanceRanking').call({
+      'academyId': academyId,
+      'startMillis': start.millisecondsSinceEpoch,
+      'endMillis': end.millisecondsSinceEpoch,
+      if (classIds != null) 'classIds': classIds.toList(),
+      if (sport != null) 'sport': sport,
+      'limit': limit,
+    });
 
-    // Reduce to raw (studentId, date) pairs and rank in a pure, testable step.
-    final ranked = rankFromPairs(
-      attendance.map((a) => (studentId: a.studentId, date: a.date)).toList(),
-    );
-    if (ranked.isEmpty) return const [];
-
-    // Denormalized name fallback carried on each attendance record. Used when
-    // the public-profile mirror is missing (legacy / not-yet-synced student) so
-    // the ranking still shows a name instead of always degrading to "Aluno".
-    final fallbackNames = <String, String>{};
-    for (final a in attendance) {
-      if (a.studentName.isNotEmpty) {
-        fallbackNames[a.studentId] = a.studentName;
-      }
-    }
+    final data = Map<String, dynamic>.from(res.data as Map);
+    final rawEntries = (data['entries'] as List?) ?? const [];
+    if (rawEntries.isEmpty) return const [];
 
     // Hydrate name/photo only for students that appear in the ranking. Read the
     // privacy-correct mirror (publicProfiles) — NEVER the PII-laden student doc.
     // A missing/denied mirror must never break the ranking: degrade to the
-    // attendance-record name, else "Aluno", with a null photo.
+    // denormalized name returned by the function, else "Aluno", null photo.
     final studentService = StudentService(academyId);
     final hydrated = await Future.wait(
-      ranked.take(limit).map((r) async {
+      rawEntries.map((raw) async {
+        final m = Map<String, dynamic>.from(raw as Map);
+        final studentId = m['studentId'] as String;
+        final fallbackName = (m['studentName'] as String?) ?? '';
+        final mostRecentMillis = (m['mostRecentMillis'] as num?)?.toInt() ?? 0;
         Student? profile;
         try {
-          profile = await studentService.getPublicProfile(r.studentId);
+          profile = await studentService.getPublicProfile(studentId);
         } catch (_) {
-          // Missing/denied mirror — degrade gracefully (see fallback below).
           profile = null;
         }
         return RankingEntry(
-          studentId: r.studentId,
+          studentId: studentId,
           studentName: profile?.displayName ??
-              fallbackNames[r.studentId] ??
-              'Aluno',
+              (fallbackName.isNotEmpty ? fallbackName : 'Aluno'),
           photoUrl: profile?.photoUrl,
-          attendanceCount: r.attendanceCount,
-          rank: r.rank,
-          mostRecentAttendance: r.mostRecentAttendance,
+          attendanceCount: (m['attendanceCount'] as num).toInt(),
+          rank: (m['rank'] as num).toInt(),
+          mostRecentAttendance: mostRecentMillis > 0
+              ? DateTime.fromMillisecondsSinceEpoch(mostRecentMillis)
+              : null,
         );
       }),
     );
@@ -98,11 +101,13 @@ class RankingService {
     required String studentId,
     required RankingPeriod period,
     Set<String>? classIds,
+    String? sport,
   }) async {
     // Use a large limit so the target student is never truncated out.
     final ranking = await getRanking(
       classIds: classIds,
       period: period,
+      sport: sport,
       limit: 100000,
     );
     for (final entry in ranking) {

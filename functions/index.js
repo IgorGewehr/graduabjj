@@ -50,6 +50,7 @@ const GRANTABLE_EXTRA_PERMISSIONS = new Set([
   'financial:view',
   'financial:create',
   'students:create',
+  'students:edit',
   'students:delete',
   'reports:view',
   'competitions:create',
@@ -726,6 +727,89 @@ exports.listAcademyMembers = onCall(async (request) => {
   }
 
   return {admins, instructors, students};
+});
+
+// ============================================================
+// getAttendanceRanking — privacy-safe attendance ranking for students
+// ============================================================
+//
+// Body: { academyId, startMillis, endMillis, classIds?: string[], sport?, limit? }
+// Computes the attendance ranking SERVER-SIDE so a plain student can see it
+// without being able to read peers' raw attendance (which carries weight/notes
+// and is staff/monitor-only by the Firestore rules). Returns only aggregated,
+// PII-light rows {studentId, studentName, attendanceCount, rank,
+// mostRecentMillis}; the client hydrates name/photo from the publicProfiles
+// mirror. Access: any academy member when rankingVisibleToStudents (default
+// true); staff always.
+exports.getAttendanceRanking = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const {academyId, startMillis, endMillis, classIds, sport} = request.data || {};
+  if (!academyId || startMillis == null || endMillis == null) {
+    throw new HttpsError(
+        'invalid-argument', 'academyId, startMillis e endMillis são obrigatórios.');
+  }
+
+  // Membership + visibility gate. resolveRole resolves via mapping (primary)
+  // or the academy user doc (fallback) — so migrated academies work too.
+  const role = await resolveRole(uid, academyId);
+  if (!role) {
+    throw new HttpsError('permission-denied', 'Você não é membro desta academia.');
+  }
+  const isStaffMember = role === 'admin' || role === 'instructor';
+  if (!isStaffMember) {
+    const acadSnap = await db.collection('academies').doc(academyId).get();
+    const visible = acadSnap.exists ?
+        acadSnap.data().rankingVisibleToStudents : true;
+    if (visible === false) {
+      throw new HttpsError('permission-denied', 'Ranking indisponível.');
+    }
+  }
+
+  const start = Timestamp.fromMillis(Number(startMillis));
+  const end = Timestamp.fromMillis(Number(endMillis));
+  const classFilter = Array.isArray(classIds) && classIds.length > 0 ?
+      new Set(classIds) : null;
+  // Sport filter for multi-modality academies. Attendance docs carry `sport`
+  // (older/missing → treated as 'bjj'); null sport = all modalities.
+  const sportFilter = (typeof sport === 'string' && sport) ? sport : null;
+  const limit = Math.min(Number(request.data.limit) || 100, 500);
+
+  const snap = await db
+      .collection('academies').doc(academyId)
+      .collection('attendance')
+      .where('date', '>=', start)
+      .where('date', '<', end)
+      .get();
+
+  const counts = {};
+  const recent = {};
+  const names = {};
+  snap.forEach((doc) => {
+    const d = doc.data() || {};
+    const sid = d.studentId;
+    if (!sid) return;
+    if (classFilter && !classFilter.has(d.classId)) return;
+    if (sportFilter && (d.sport || 'bjj') !== sportFilter) return;
+    counts[sid] = (counts[sid] || 0) + 1;
+    const t = d.date && d.date.toMillis ? d.date.toMillis() : 0;
+    if (!recent[sid] || t > recent[sid]) recent[sid] = t;
+    if (d.studentName && !names[sid]) names[sid] = d.studentName;
+  });
+
+  const entries = Object.keys(counts)
+      .map((sid) => ({
+        studentId: sid,
+        studentName: names[sid] || '',
+        attendanceCount: counts[sid],
+        mostRecentMillis: recent[sid] || 0,
+      }))
+      .sort((a, b) =>
+        b.attendanceCount - a.attendanceCount ||
+        b.mostRecentMillis - a.mostRecentMillis)
+      .slice(0, limit)
+      .map((e, i) => ({...e, rank: i + 1}));
+
+  return {entries};
 });
 
 // ============================================================

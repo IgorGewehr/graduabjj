@@ -13,6 +13,7 @@ enum FeatureId {
   musculacao, // Musculação -> AcademySettings.musculacaoEnabled
   workouts, // Treinos      -> AcademySettings.workoutPlansEnabled
   videos, // Vídeos         -> AcademySettings.trainingVideosEnabled
+  evolution, // Evolução    -> AcademySettings.physicalEvolutionEnabled
   booking, // Reservar aula -> AcademySettings.bookingEnabled
   striking, // Trocação      -> AcademySettings.strikingEnabled
 }
@@ -52,6 +53,8 @@ enum PortalContextGate {
   hasPlan, // requiresPlan
   storePublished, // requiresStorePublished
   hideForMonitor, // hideWhen == monitor
+  multiSport, // só quando o aluno treina +1 modalidade
+  multipleAcademies, // só quando o aluno pertence a +1 academia
 }
 
 @immutable
@@ -153,7 +156,12 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     icon: LucideIcons.users,
     route: '/admin/alunos',
     section: NavSection.gestao,
-    requiresAnyPermission: ['students:create', 'students:delete'],
+    requiresAnyPermission: [
+      'students:create',
+      'students:edit',
+      'students:delete',
+      'students:manage',
+    ],
   ),
   NavEntry(
     key: 'admin_chamada',
@@ -345,6 +353,7 @@ const List<NavEntry> kPortalNavCatalog = <NavEntry>[
     icon: LucideIcons.trendingUp,
     route: '/portal/evolucao',
     section: NavSection.treinos,
+    feature: FeatureId.evolution,
   ),
   NavEntry(
     key: 'portal_graduacao',
@@ -359,6 +368,7 @@ const List<NavEntry> kPortalNavCatalog = <NavEntry>[
     icon: LucideIcons.dumbbell,
     route: '/portal/minhas-modalidades',
     section: NavSection.treinos,
+    portalGate: PortalContextGate.multiSport,
   ),
   NavEntry(
     key: 'portal_treinos',
@@ -429,5 +439,6 @@ const List<NavEntry> kPortalNavCatalog = <NavEntry>[
     icon: LucideIcons.school,
     route: '/portal/academias',
     section: NavSection.conta,
+    portalGate: PortalContextGate.multipleAcademies,
   ),
 ];

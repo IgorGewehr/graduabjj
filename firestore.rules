@@ -595,6 +595,20 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Recurring subscriptions (Mercado Pago Preapproval)
+      // ============================================
+      // Read-only for the client: staff see all; a student sees their own
+      // (drives the "Minha assinatura" card). ALL writes are server-only — the
+      // backend (createMpSubscription / webhook / cancel) is the single writer,
+      // so the MP preapproval and the doc never diverge.
+      match /subscriptions/{subscriptionId} {
+        allow read: if isAcademyStaff(academyId)
+                    || isOwnStudentRecord(academyId, resource.data.studentId)
+                    || isResponsibleForStudent(academyId, resource.data.studentId);
+        allow write: if false;
+      }
+
+      // ============================================
       // Wallet Subcollection (CRITICAL - Money)
       // ============================================
       match /wallet/{docId} {

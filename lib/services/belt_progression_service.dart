@@ -850,6 +850,13 @@ class BeltProgressionService {
       currentStripes = sd?['currentStripes'] ?? 0;
     }
 
+    // Invariant: graduating to a NEW belt always resets graus to 0 — a new
+    // faixa starts sem graus. Defends against any caller that carries the
+    // previous stripe count (the reported "branca 4 graus → azul 4 graus" bug).
+    if (newBelt != currentBelt) {
+      newStripes = 0;
+    }
+
     final totalClasses = (studentData['initialAttendanceCount'] ?? 0) +
         (studentData['attendanceCount'] ?? 0);
 

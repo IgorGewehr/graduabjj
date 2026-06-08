@@ -611,6 +611,8 @@ class _AdminBottomNavState extends ConsumerState<AdminBottomNav> {
     final canSeeStudents =
         isAdminUser ||
         user?.hasPermission('students:create') == true ||
+        user?.hasPermission('students:edit') == true ||
+        user?.hasPermission('students:manage') == true ||
         user?.hasPermission('students:delete') == true;
 
     final items = <_AdminNavItem>[

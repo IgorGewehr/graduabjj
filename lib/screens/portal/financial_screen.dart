@@ -15,10 +15,12 @@ import '../../services/services.dart';
 import '../../services/abacate_pay_service.dart';
 import '../../services/asaas_payment_service.dart';
 import '../../services/mercado_pago_service.dart';
+import '../../services/subscription_service.dart';
 import '../../services/payment/payment_gateway_resolver.dart';
 import '../../models/student.dart';
 import '../../widgets/payment/payment_method_sheet.dart';
 import '../../widgets/payment/payment_target.dart';
+import '../../widgets/payment_sheets.dart' show CardPaymentSheet;
 import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
@@ -34,6 +36,254 @@ final abacatePayEnabledProvider = FutureProvider<bool>((ref) async {
 
 /// One section per dependent: their OPEN charges with a pay button. Hidden when
 /// the dependent has no open charges.
+/// Live recurring subscriptions for a student (academy resolved from the
+/// logged-in user). Drives the "Minha assinatura" card + dunning banner.
+final studentSubscriptionsProvider =
+    StreamProvider.family<List<Subscription>, String>((ref, studentId) {
+  final user = ref.watch(currentUserProvider).valueOrNull;
+  final academyId = user?.academyId;
+  if (academyId == null) return Stream.value(const <Subscription>[]);
+  return SubscriptionService(academyId).streamByStudent(studentId);
+});
+
+/// Student-facing subscription block: shows the active subscription (status,
+/// next charge, remaining months, cancel + dunning), or an "Assinar" CTA when
+/// the student is on a recurring (monthly + card-only) plan without one yet.
+class _SubscriptionSection extends ConsumerWidget {
+  final Student student;
+  const _SubscriptionSection({required this.student});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final subs =
+        ref.watch(studentSubscriptionsProvider(student.id)).valueOrNull ??
+            const <Subscription>[];
+    final plan = ref.watch(studentPlanProvider(student.id)).valueOrNull;
+
+    final active = subs
+        .where((s) =>
+            s.status == 'authorized' ||
+            s.status == 'pending' ||
+            s.status == 'paused')
+        .toList();
+
+    if (active.isNotEmpty) {
+      return Column(
+        children: [
+          for (final s in active) _SubscriptionCard(sub: s),
+          const SizedBox(height: 12),
+        ],
+      );
+    }
+
+    // No active subscription, but on a recurring plan → offer to subscribe.
+    if (plan != null && plan.isRecurring) {
+      final value = plan.getStudentValue(student.id);
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppTheme.primary.withValues(alpha: 0.25)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(LucideIcons.repeat,
+                      size: 18, color: AppTheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Assinatura ${plan.name}',
+                      style: AppTheme.titleSmall
+                          .copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'R\$ ${value.toStringAsFixed(2)}/mês no cartão'
+                '${(plan.recurringMonths ?? 0) > 0 ? ' por ${plan.recurringMonths} meses' : ''}'
+                ', cobrança automática todo dia ${plan.billingDay ?? plan.defaultDueDay}.',
+                style: AppTheme.bodySmall
+                    .copyWith(color: AppTheme.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) => CardPaymentSheet(
+                        amount: value,
+                        description: 'Assinatura ${plan.name}',
+                        subscriptionPlanId: plan.id,
+                        studentId: student.id,
+                        studentName: student.fullName,
+                        onPaymentSuccess: () => ref.invalidate(
+                            studentSubscriptionsProvider(student.id)),
+                      ),
+                    );
+                  },
+                  icon: const Icon(LucideIcons.creditCard, size: 18),
+                  label: const Text('Assinar'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+}
+
+class _SubscriptionCard extends ConsumerWidget {
+  final Subscription sub;
+  const _SubscriptionCard({required this.sub});
+
+  ({String label, Color color}) get _statusChip {
+    switch (sub.status) {
+      case 'authorized':
+      case 'pending':
+        return (label: 'Ativa', color: AppTheme.success);
+      case 'paused':
+        return (label: 'Pausada', color: AppTheme.warning);
+      case 'completed':
+        return (label: 'Encerrada', color: AppTheme.textSecondary);
+      default:
+        return (label: 'Cancelada', color: AppTheme.textSecondary);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final chip = _statusChip;
+    final df = DateFormat('dd/MM/yyyy');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(LucideIcons.repeat, size: 18, color: AppTheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Minha assinatura',
+                    style: AppTheme.titleSmall
+                        .copyWith(fontWeight: FontWeight.w700)),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: chip.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(chip.label,
+                    style: AppTheme.labelSmall.copyWith(
+                        color: chip.color, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'R\$ ${sub.recurringValue.toStringAsFixed(2)}/mês'
+            '${sub.nextBillingDate != null ? ' · próxima ${df.format(sub.nextBillingDate!)}' : ''}',
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+          ),
+          if (sub.remainingCharges != null)
+            Text(
+              'Faltam ${sub.remainingCharges} de ${sub.months} cobranças',
+              style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+            ),
+          if (sub.needsReauth) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.error.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'Pagamento recusado — atualize o cartão para retomar a assinatura.',
+                style:
+                    AppTheme.labelSmall.copyWith(color: AppTheme.error),
+              ),
+            ),
+          ],
+          if (sub.status == 'authorized' ||
+              sub.status == 'pending' ||
+              sub.status == 'paused') ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => _confirmCancel(context, ref),
+                style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+                icon: const Icon(LucideIcons.x, size: 16),
+                label: const Text('Cancelar assinatura'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmCancel(BuildContext context, WidgetRef ref) async {
+    final user = ref.read(currentUserProvider).valueOrNull;
+    final academyId = user?.academyId;
+    if (academyId == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancelar assinatura?'),
+        content: const Text(
+          'As próximas cobranças serão interrompidas. Os meses já pagos '
+          'permanecem. Sem reembolso do mês corrente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Voltar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cancelar assinatura'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await SubscriptionService(academyId).cancel(sub.id);
+      if (context.mounted) {
+        context.showSuccess('Assinatura cancelada.');
+        ref.invalidate(studentSubscriptionsProvider(sub.studentId));
+      }
+    } catch (e) {
+      if (context.mounted) context.showError('Não foi possível cancelar: $e');
+    }
+  }
+}
+
 class _DependentSection extends ConsumerWidget {
   final Student dependent;
   final bool abacatePayEnabled;
@@ -188,6 +438,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
       description: description,
       studentId: payment.studentId,
       studentName: studentName,
+      paymentMethodPolicy: payment.paymentMethodPolicy,
     );
 
     showModalBottomSheet(
@@ -316,6 +567,9 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
+
+                  // Recurring subscription (status + cancel) or "Assinar" CTA.
+                  _SubscriptionSection(student: student),
 
                   // When this student is managed by a financial responsible,
                   // their OPEN charges live in the responsible's login — hide

@@ -4,6 +4,8 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
 import '../../services/abacate_pay_service.dart' show PaymentLink;
+import '../../services/payment_service.dart'
+    show PaymentMethodPolicyExtension;
 import '../../services/payment/payment_gateway_resolver.dart';
 import '../payment_sheets.dart';
 import '../polish/polish.dart';
@@ -112,7 +114,11 @@ class PaymentMethodSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cardEnabled = _cardEnabled;
+    // Payment-method policy snapshot from the charge (orders = both). PIX shows
+    // unless the charge is card-only; Cartão unless it's pix-only.
+    final policy = target.paymentMethodPolicy;
+    final showPix = policy.allowsPix;
+    final cardEnabled = _cardEnabled && policy.allowsCard;
 
     return Container(
       decoration: BoxDecoration(
@@ -185,18 +191,19 @@ class PaymentMethodSheet extends StatelessWidget {
               ),
               const SizedBox(height: 24),
 
-              _PaymentMethodCard(
-                icon: LucideIcons.qrCode,
-                title: 'PIX',
-                subtitle: 'Aprovacao instantanea',
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  _openPix(context);
-                },
-              ),
+              if (showPix)
+                _PaymentMethodCard(
+                  icon: LucideIcons.qrCode,
+                  title: 'PIX',
+                  subtitle: 'Aprovacao instantanea',
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    _openPix(context);
+                  },
+                ),
 
               if (cardEnabled) ...[
-                const SizedBox(height: 12),
+                if (showPix) const SizedBox(height: 12),
                 _PaymentMethodCard(
                   icon: LucideIcons.creditCard,
                   title: 'Cartao de credito',
@@ -207,6 +214,20 @@ class PaymentMethodSheet extends StatelessWidget {
                   },
                 ),
               ],
+
+              // No payable method on the connected gateway (e.g. card-only
+              // charge but the gateway can't charge cards) — degrade gracefully.
+              if (!showPix && !cardEnabled)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    'Nenhum metodo de pagamento disponivel para esta cobranca. '
+                    'Combine o pagamento diretamente com a academia.',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),

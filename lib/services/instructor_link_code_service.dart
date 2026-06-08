@@ -24,6 +24,8 @@ const List<GrantablePermission> kGrantableExtraPermissions = [
       'Criar novas cobranças (não inclui edição/exclusão)'),
   GrantablePermission('students:create', 'Cadastrar alunos',
       'Criar novos alunos na academia'),
+  GrantablePermission('students:edit', 'Editar alunos',
+      'Acessar a lista de alunos e editar dados básicos e de graduação'),
   GrantablePermission('students:delete', 'Excluir alunos',
       'Remover alunos da academia (cuidado!)'),
   GrantablePermission('reports:view', 'Ver relatórios',

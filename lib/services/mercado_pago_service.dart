@@ -137,6 +137,69 @@ class MercadoPagoService {
     );
   }
 
+  /// Starts a recurring card subscription (MP Preapproval) for a recurring
+  /// plan. The card is tokenized client-side (PCI-safe); the monthly value,
+  /// term and billing day are derived server-side from the plan.
+  Future<({bool success, String message, String? subscriptionId, String? status})>
+      createSubscription({
+    required String planId,
+    required String studentId,
+    required String studentName,
+    required CardData cardData,
+  }) async {
+    try {
+      final pk = await _publicKey();
+      if (pk == null || pk.isEmpty) {
+        return (
+          success: false,
+          message: 'Mercado Pago nao conectado.',
+          subscriptionId: null,
+          status: null,
+        );
+      }
+      final token = await MpCardTokenizer.tokenize(
+        publicKey: pk,
+        cardNumber: cardData.cardNumber,
+        expirationMonth: cardData.expirationMonth,
+        expirationYear: cardData.expirationYear,
+        securityCode: cardData.cvv,
+        cardholderName: cardData.cardHolder,
+        cpf: cardData.cpf,
+      );
+      final result =
+          await _functions.httpsCallable('createMpSubscription').call({
+        'academyId': academyId,
+        'planId': planId,
+        'studentId': studentId,
+        'studentName': studentName,
+        'cardToken': token.tokenId,
+        'payerCpf': cardData.cpf,
+        'payerEmail': _payerEmail,
+      });
+      final data = Map<String, dynamic>.from(result.data);
+      return (
+        success: true,
+        message: 'Assinatura ativada!',
+        subscriptionId: data['subscriptionId'] as String?,
+        status: data['status'] as String?,
+      );
+    } on FirebaseFunctionsException catch (e) {
+      return (
+        success: false,
+        message: e.message ?? 'Falha ao criar a assinatura.',
+        subscriptionId: null,
+        status: null,
+      );
+    } catch (e) {
+      return (
+        success: false,
+        message: e.toString(),
+        subscriptionId: null,
+        status: null,
+      );
+    }
+  }
+
   /// Card payment for a store order. [amount] in REAIS (converted to CENTAVOS
   /// for the CF, matching the PIX contract; the CF derives & cross-checks).
   Future<CardPaymentResult> createStoreOrderCardPayment({

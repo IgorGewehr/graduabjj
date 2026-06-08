@@ -81,8 +81,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _studentCheckinEnabled = false;
   bool _journalVisibleToStudents = true;
   bool _rankingVisibleToStudents = true;
-  bool _workoutPlansEnabled = true;
-  bool _trainingVideosEnabled = true;
+  bool _workoutPlansEnabled = false;
+  bool _trainingVideosEnabled = false;
+  bool _physicalEvolutionEnabled = false;
 
   // Reserva de aula (A1)
   bool _bookingEnabled = false;
@@ -199,6 +200,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _rankingVisibleToStudents,
       _workoutPlansEnabled,
       _trainingVideosEnabled,
+      _physicalEvolutionEnabled,
       _musculacaoEnabled,
       _musculacaoCheckinMode,
       hours,
@@ -285,6 +287,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _maxActiveBookingsPerStudent = settings.maxActiveBookingsPerStudent;
           _strikingEnabled = settings.strikingEnabled;
           _monthlyAttendanceGoal = settings.monthlyAttendanceGoal;
+          _physicalEvolutionEnabled = settings.physicalEvolutionEnabled;
           _musculacaoEnabled = settings.musculacaoEnabled;
           _musculacaoCheckinMode = settings.musculacaoCheckinMode;
           _operatingHours
@@ -2083,6 +2086,28 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 persist: (s) => s.updateStrikingEnabled(value),
               ),
               icon: Icons.sports_mma_outlined,
+              iconColor: AppTheme.primary,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Evolução (avaliações físicas / antropométricas)
+          _SettingsCard(
+            cardKey: _featureKeys[FeatureId.evolution],
+            highlighted: _highlightedFeature == FeatureId.evolution,
+            title: 'Evolução',
+            icon: LucideIcons.trendingUp,
+            child: _ModernSwitch(
+              title: 'Habilitar Evolução',
+              subtitle:
+                  'Avaliacoes fisicas e acompanhamento de evolucao do aluno',
+              value: _physicalEvolutionEnabled,
+              onChanged: (value) => _inlineSaveFeature(
+                apply: () => _physicalEvolutionEnabled = value,
+                persist: (s) => s.updatePhysicalEvolutionEnabled(value),
+              ),
+              icon: LucideIcons.trendingUp,
               iconColor: AppTheme.primary,
             ),
           ),

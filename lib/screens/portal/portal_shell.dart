@@ -162,6 +162,8 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       hasPlan: hasPlan,
       storePublished: isStorePublished,
       graduationProgressVisible: graduationVisible,
+      multiSport: (student?.getSports().length ?? 0) > 1,
+      hasMultipleAcademies: ref.read(hasMultipleAcademiesProvider),
     );
     final resolved = resolvePortalCatalog(
       catalog: kPortalNavCatalog,

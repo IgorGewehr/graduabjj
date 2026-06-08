@@ -46,9 +46,11 @@ final rankingServiceProvider = Provider<RankingService?>((ref) {
   return RankingService(currentUser!.academyId!);
 });
 
-/// Attendance ranking for a category (Geral / Adulto / Kids) over a period.
+/// Attendance ranking for a category (Geral / Adulto / Kids) over a period,
+/// optionally scoped to a single modality ([sport] = SportId.value; null = all).
 final classRankingProvider = FutureProvider.family<List<RankingEntry>,
-    ({RankingCategory category, RankingPeriod period})>((ref, args) async {
+    ({RankingCategory category, RankingPeriod period, String? sport})>(
+        (ref, args) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return const [];
   final classes = await ref.watch(classesProvider.future);
@@ -56,6 +58,7 @@ final classRankingProvider = FutureProvider.family<List<RankingEntry>,
   return RankingService(currentUser!.academyId!).getRanking(
     classIds: classIds,
     period: args.period,
+    sport: args.sport,
   );
 });
 
