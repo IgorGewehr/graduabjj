@@ -7,6 +7,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 
 import 'core/theme.dart';
 import 'core/constants.dart';
+import 'core/navigator_key.dart';
 import 'core/navigation/nav_catalog.dart';
 import 'providers/auth_provider.dart';
 import 'services/push_notification_service.dart';
@@ -425,9 +426,6 @@ class _OverlayProgressStep extends StatelessWidget {
     );
   }
 }
-
-/// Global Navigator Key for push notifications deep linking
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 /// Tracks whether the current signed-in session has already "landed" on its
 /// post-login destination (portal/admin). Once landed, a transient re-fetch of

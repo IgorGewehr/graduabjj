@@ -53,7 +53,14 @@
       `docs/plano-reserva-aula.md`. **Deploy de functions/rules/índices: FEITO**
       (additivo, não afeta a versão em produção).
       _Pendente: teste manual + merge p/ produção._
-- [ ] **A2. Push notifications reais** — hoje é stub (sem tokens/APNs). Habilita
+- [~] **A2. Push notifications reais** — **lado do app FEITO** (F2): pacote
+      `firebase_messaging`, registro/limpeza de token em `users/{uid}/fcmTokens`
+      (casa com o `sendToUser` das functions), permissão, refresh, topics, tap →
+      deep-link via `navigatorKey`. iOS: `remote-notification` + entitlement
+      `aps-environment`. **Pendente do dono:** chave APNs (.p8) no Apple Developer
+      + upload no Firebase Console + capability Push no Xcode, e **publicar nova
+      versão** (Android funciona já). Deep-link no tap exige `actionUrl` no data do
+      push (melhoria futura no servidor). Antes era stub (sem tokens/APNs). Habilita
       lembrete de aula/treino, "nova planilha/vídeo", "você faltou esta semana",
       lembrete de graduação. _(todas)_ — depende de **F2**.
 - [x] **A3. Avaliação física / antropometria** ✅ **CONCLUÍDA (5 fases)** em
@@ -170,7 +177,8 @@
 - [x] **F1. `storage.rules`** ✅ — criado e endurecido na A3 (fotos de avaliação
       **privadas**: staff + próprio aluno; fallback sem `read` público). Base pronta
       para uploads futuros (vídeos de técnica B1/A5).
-- [ ] **F2. Push/FCM real** — cliente + tokens + APNs (iOS). Habilita **A2**.
+- [x] **F2. Push/FCM real** — ✅ cliente implementado (ver A2). Falta só a config
+      de console do dono (chave APNs) + release.
 - [~] **F3. Índices Firestore** — adicionado o índice `physicalAssessments`
       (studentId ASC + date DESC) na A3. Novos conforme cada feature futura
       (conteúdo por sport, reservas por turma/data).
