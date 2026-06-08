@@ -4,11 +4,14 @@
 > Marque `[x]` conforme for testando. Cada bloco diz **com qual conta** testar
 > (admin = dono/instrutor; aluno = portal).
 >
-> **Contas de teste** (preencher após o seed):
-> - Admin: `__________` / senha `__________`
-> - Aluno 1 (BJJ + Muay Thai): `__________` / senha `__________`
-> - Aluno 2 (Musculação): `__________` / senha `__________`
-> - Academia de teste: **ZZZ TESTE — APAGAR** (apagar tudo no fim)
+> **Contas de teste** (seed em 2026-06 — senhas simples, descartáveis, apagar no fim):
+> - **Academia:** Lobisomens Jiu Jitsu (`nZJ00BMyGJ8xJGPQzVKL`)
+> - **Admin:** sua própria conta (você é dono da Lobisomens)
+> - **Aluno 1 (BJJ + Muay Thai):** `aluno1.lobi@teste.com` / `teste123` — já tem 8 presenças no mês
+> - **Aluno 2 (Musculação):** `aluno2.lobi@teste.com` / `teste123`
+> - **Aluno 3 (BJJ):** `aluno3.lobi@teste.com` / `teste123`
+>
+> Limpeza no fim: `…/seedLobisomensTest?secret=lobo-seed-7x9q2&action=clean` (depois deletar a function).
 
 ## 0. Pré-condições (admin → Ajustes → Funcionalidades)
 - [ ] Ligar: **Reserva de aula**, **Trocação**, **Treinos**, **Vídeos**,
