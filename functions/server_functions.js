@@ -17,6 +17,7 @@
 
 const functions = require('firebase-functions/v1');
 const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
 
@@ -3997,19 +3998,18 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
 // ============================================================
 // Resiliência de Recorrência — Cloud Functions agendadas (crons)
 // ============================================================
-// Todas seguem o molde de scheduledOverdueCheck (:870): firebase-functions v1
-// (functions.pubsub.schedule().onRun), iteração por academia com try/catch POR
+// Seguem o molde de iteração de scheduledOverdueCheck (:870): try/catch POR
 // academia (uma falha NUNCA aborta o lote) e são idempotentes — seguras para
-// re-rodar.
+// re-rodar. Declaradas em v2 onSchedule({ schedule, timeZone, secrets }) —
+// mesmo runtime/secrets das callables MP (v2), não o gen1 das demais crons.
 //
-// IMPORTANTE — credenciais do Mercado Pago: diferente de WHATSAPP_API_KEY (que
-// vem de functions config / .env), os secrets MP_OAUTH_CLIENT_ID/SECRET vivem no
-// Secret Manager (MP_MKT_SECRETS) e SÓ são injetados em process.env quando
-// declarados na própria função. As callables fazem isso via
-// onCall({ secrets: MP_MKT_SECRETS }); estas crons gen1 fazem o equivalente via
-// .runWith({ secrets: MP_MKT_SECRETS }).pubsub.schedule(...). Sem esse bind, o
-// branch de refresh de getMpAccessToken leria client_id/secret undefined, falharia
-// o /oauth/token e marcaria a academia mpNeedsReauth indevidamente.
+// IMPORTANTE — credenciais do Mercado Pago: os secrets MP_OAUTH_CLIENT_ID/SECRET
+// vivem no Secret Manager (MP_MKT_SECRETS) e SÓ são injetados em process.env
+// quando declarados na própria função. As callables fazem isso via
+// onCall({ secrets: MP_MKT_SECRETS }); estas crons fazem o equivalente via
+// onSchedule({ ..., secrets: MP_MKT_SECRETS }). Sem esse bind, o branch de
+// refresh de getMpAccessToken leria client_id/secret undefined, falharia o
+// /oauth/token e marcaria a academia mpNeedsReauth indevidamente.
 
 /** Notifica o ALUNO (ou o responsável, p/ menores) de uma assinatura — push +
  * notificação interna. Best-effort: nunca lança. */
@@ -4044,12 +4044,9 @@ function subscriptionTermEndDate(sub) {
 // Rede de segurança: cancela o preapproval + marca `completed` quando a
 // assinatura atingiu N meses, caso o webhook do último ciclo se perca.
 // Idempotente: nunca rebaixa uma assinatura já `completed`.
-exports.scheduledSubscriptionTermGuard = functions
-  .runWith({ secrets: MP_MKT_SECRETS })
-  .pubsub
-  .schedule('15 6 * * *')
-  .timeZone('America/Sao_Paulo')
-  .onRun(async () => {
+exports.scheduledSubscriptionTermGuard = onSchedule(
+  { schedule: '15 6 * * *', timeZone: 'America/Sao_Paulo', secrets: MP_MKT_SECRETS },
+  async () => {
     console.log('[termGuard] start');
     const now = new Date();
     const academiesSnapshot = await db.collection('academies').get();
@@ -4174,12 +4171,9 @@ exports.scheduledSubscriptionTermGuard = functions
 // vencida há >48h e sem `financials` novo do ciclo, re-sincroniza via
 // GET /preapproval e liquida os authorized_payments aprovados via
 // mpSubSettleCycle (idempotente por id determinístico). A cada 6h.
-exports.scheduledSubscriptionReconcile = functions
-  .runWith({ secrets: MP_MKT_SECRETS })
-  .pubsub
-  .schedule('0 */6 * * *')
-  .timeZone('America/Sao_Paulo')
-  .onRun(async () => {
+exports.scheduledSubscriptionReconcile = onSchedule(
+  { schedule: '0 */6 * * *', timeZone: 'America/Sao_Paulo', secrets: MP_MKT_SECRETS },
+  async () => {
     console.log('[reconcile] start');
     const now = Date.now();
     const STALE_MS = 48 * 60 * 60 * 1000;
@@ -4274,12 +4268,9 @@ exports.scheduledSubscriptionReconcile = functions
 // Retry automático de assinaturas `paused`/needsReauth: MAX 3 tentativas com
 // backoff [1,3,7] dias a partir da falha. Após esgotar, mantém `paused` e
 // notifica admin + aluno (NÃO cancela). Diário.
-exports.scheduledSubscriptionDunning = functions
-  .runWith({ secrets: MP_MKT_SECRETS })
-  .pubsub
-  .schedule('30 6 * * *')
-  .timeZone('America/Sao_Paulo')
-  .onRun(async () => {
+exports.scheduledSubscriptionDunning = onSchedule(
+  { schedule: '30 6 * * *', timeZone: 'America/Sao_Paulo', secrets: MP_MKT_SECRETS },
+  async () => {
     console.log('[dunning] start');
     const now = Date.now();
     const academiesSnapshot = await db.collection('academies').get();
@@ -4387,12 +4378,9 @@ exports.scheduledSubscriptionDunning = functions
 // ---- 7. scheduledCardExpiryWarning ----------------------------------------
 // Avisa o aluno quando o cartão da assinatura expira no MÊS CORRENTE, ANTES do
 // billing_day, uma única vez por mês (expiryNotifiedAt). Diário.
-exports.scheduledCardExpiryWarning = functions
-  .runWith({ secrets: MP_MKT_SECRETS })
-  .pubsub
-  .schedule('45 6 * * *')
-  .timeZone('America/Sao_Paulo')
-  .onRun(async () => {
+exports.scheduledCardExpiryWarning = onSchedule(
+  { schedule: '45 6 * * *', timeZone: 'America/Sao_Paulo', secrets: MP_MKT_SECRETS },
+  async () => {
     console.log('[cardExpiry] start');
     const now = new Date();
     const curYear = now.getFullYear();
