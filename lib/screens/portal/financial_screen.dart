@@ -68,6 +68,12 @@ class _SubscriptionSection extends ConsumerWidget {
             s.status == 'paused')
         .toList();
 
+    // Fixed-term subscriptions that ran their full course (months>0, all
+    // charges billed). Distinct from `cancelled` — the student fulfilled the
+    // plan, so we show a read-only "concluída" card (with history) instead of
+    // silently offering a new charge.
+    final completed = subs.where((s) => s.isCompleted).toList();
+
     if (active.isNotEmpty) {
       // Dunning banner: a failed charge needs a new card. Shown above the
       // card(s) so it's the first thing the student sees; tapping opens the
@@ -77,6 +83,19 @@ class _SubscriptionSection extends ConsumerWidget {
         children: [
           for (final s in dunning) _DunningBanner(sub: s),
           for (final s in active) _SubscriptionCard(sub: s),
+          const SizedBox(height: 12),
+        ],
+      );
+    }
+
+    // No active subscription, but a completed one exists → show the concluded
+    // card (read-only, opens the detail sheet + history). Do NOT fall through
+    // to the "Assinar" CTA: the term was fulfilled and re-offering it here
+    // would invite an unintended new charge.
+    if (completed.isNotEmpty) {
+      return Column(
+        children: [
+          for (final s in completed) _SubscriptionCard(sub: s),
           const SizedBox(height: 12),
         ],
       );
@@ -165,7 +184,7 @@ class _SubscriptionCard extends ConsumerWidget {
       case 'paused':
         return (label: 'Pausada', color: AppTheme.warning);
       case 'completed':
-        return (label: 'Encerrada', color: AppTheme.textSecondary);
+        return (label: 'Concluída', color: AppTheme.info);
       default:
         return (label: 'Cancelada', color: AppTheme.textSecondary);
     }
@@ -179,6 +198,8 @@ class _SubscriptionCard extends ConsumerWidget {
       context,
       sub: sub,
       academyId: academyId,
+      // A concluded subscription is read-only — no pause/cancel/card actions.
+      canManage: !sub.isCompleted,
       onChanged: () =>
           ref.invalidate(studentSubscriptionsProvider(sub.studentId)),
     );

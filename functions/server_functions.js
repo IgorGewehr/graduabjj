@@ -3305,6 +3305,11 @@ const FV = admin.firestore.FieldValue;
 // notifica admin + aluno (NÃO cancela).
 const MAX_DUNNING_RETRIES = 3;
 const DUNNING_BACKOFF_DAYS = [1, 3, 7];
+// Folga do backstop por DATA do term guard: ~1 ciclo de billing além do termo.
+// Evita cancelar/completar antes da última cobrança quando o billing_day adiou a
+// 1ª cobrança cheia (billing_day_proportional:false). A conclusão primária é por
+// contagem (chargesPaid>=months); a data só age como rede de segurança tardia.
+const TERM_GUARD_SLACK_MS = 35 * 24 * 60 * 60 * 1000;
 
 /**
  * Extrai do retorno do Mercado Pago (preapproval POST ou payment) os dados
@@ -3329,10 +3334,17 @@ function extractMpCardInfo(mpPayload) {
     ? card.expiration_month : card.expirationMonth) : null;
   const expYear = card ? (card.expiration_year != null
     ? card.expiration_year : card.expirationYear) : null;
+  // Normaliza ano de 2 dígitos (ex.: 27 → 2027). O MP pode devolver YY em alguns
+  // payloads; sem isso o filtro expYear<2000 do scheduledCardExpiryWarning
+  // descartaria o cartão silenciosamente. (00..99 → 2000..2099.)
+  let expYearNorm = toInt(expYear);
+  if (expYearNorm != null && expYearNorm >= 0 && expYearNorm < 100) {
+    expYearNorm += 2000;
+  }
   return {
     cardLast4: last4Raw != null ? String(last4Raw) : null,
     cardExpMonth: toInt(expMonth),
-    cardExpYear: toInt(expYear),
+    cardExpYear: expYearNorm,
   };
 }
 
@@ -3641,14 +3653,20 @@ exports.createMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (reques
     status,
     updatedAt: FV.serverTimestamp(),
   };
+  let firstBilling = null;
   if (pa.next_payment_date) {
-    update.nextBillingDate =
-      admin.firestore.Timestamp.fromDate(new Date(pa.next_payment_date));
+    firstBilling = new Date(pa.next_payment_date);
+    update.nextBillingDate = admin.firestore.Timestamp.fromDate(firstBilling);
   }
   // Fim do termo (rede de segurança do scheduledSubscriptionTermGuard caso o
-  // webhook do último ciclo se perca). createdAt acabou de ser gravado agora;
-  // usar `new Date()` como base é equivalente dentro da tolerância de meses.
-  const termEndsAt = computeTermEndsAt(new Date(), months);
+  // webhook do último ciclo se perca). ANCORAR na 1ª data de cobrança retornada
+  // pelo MP (next_payment_date), NÃO em createdAt: com billing_day +
+  // billing_day_proportional:false, se a assinatura é criada APÓS o billing_day a
+  // 1ª cobrança cheia é adiada para o próximo ciclo, então a N-ésima cobrança cai
+  // depois de (createdAt + N meses). Ancorar no 1º billing evita que o term guard
+  // cancele por data antes do último ciclo. Fallback p/ now se o MP não devolveu
+  // a data (mesma tolerância de meses de antes).
+  const termEndsAt = computeTermEndsAt(firstBilling || new Date(), months);
   if (termEndsAt) update.termEndsAt = termEndsAt;
   // Espelho NÃO-PCI do cartão (últimos 4 + validade) extraído do retorno do MP.
   const cardInfo = extractMpCardInfo(pa);
@@ -3982,8 +4000,16 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
 // Todas seguem o molde de scheduledOverdueCheck (:870): firebase-functions v1
 // (functions.pubsub.schedule().onRun), iteração por academia com try/catch POR
 // academia (uma falha NUNCA aborta o lote) e são idempotentes — seguras para
-// re-rodar. As credenciais do Mercado Pago (MP_OAUTH_CLIENT_ID/SECRET) chegam
-// via functions config / .env em runtime, igual às demais crons v1.
+// re-rodar.
+//
+// IMPORTANTE — credenciais do Mercado Pago: diferente de WHATSAPP_API_KEY (que
+// vem de functions config / .env), os secrets MP_OAUTH_CLIENT_ID/SECRET vivem no
+// Secret Manager (MP_MKT_SECRETS) e SÓ são injetados em process.env quando
+// declarados na própria função. As callables fazem isso via
+// onCall({ secrets: MP_MKT_SECRETS }); estas crons gen1 fazem o equivalente via
+// .runWith({ secrets: MP_MKT_SECRETS }).pubsub.schedule(...). Sem esse bind, o
+// branch de refresh de getMpAccessToken leria client_id/secret undefined, falharia
+// o /oauth/token e marcaria a academia mpNeedsReauth indevidamente.
 
 /** Notifica o ALUNO (ou o responsável, p/ menores) de uma assinatura — push +
  * notificação interna. Best-effort: nunca lança. */
@@ -4018,7 +4044,9 @@ function subscriptionTermEndDate(sub) {
 // Rede de segurança: cancela o preapproval + marca `completed` quando a
 // assinatura atingiu N meses, caso o webhook do último ciclo se perca.
 // Idempotente: nunca rebaixa uma assinatura já `completed`.
-exports.scheduledSubscriptionTermGuard = functions.pubsub
+exports.scheduledSubscriptionTermGuard = functions
+  .runWith({ secrets: MP_MKT_SECRETS })
+  .pubsub
   .schedule('15 6 * * *')
   .timeZone('America/Sao_Paulo')
   .onRun(async () => {
@@ -4044,8 +4072,17 @@ exports.scheduledSubscriptionTermGuard = functions.pubsub
           const chargesPaid = Number(sub.chargesPaid) || 0;
           const termEnd = subscriptionTermEndDate(sub);
           const reachedByCharges = chargesPaid >= months;
-          const reachedByDate = termEnd != null && now >= termEnd;
-          if (!reachedByCharges && !reachedByDate) continue;
+          // Backstop por DATA com folga: só serve de rede de segurança quando o
+          // webhook do último ciclo se perdeu. Damos ~1 ciclo de margem (35d) além
+          // do termo para não cancelar antes da última cobrança quando o billing
+          // foi adiado (billing_day + billing_day_proportional:false). A conclusão
+          // real é por CONTAGEM (chargesPaid>=months); a data é só fallback.
+          const dateBackstop = termEnd != null &&
+            now.getTime() >= termEnd.getTime() + TERM_GUARD_SLACK_MS;
+          // Entra no fluxo (drenar + possivelmente completar) se bateu a contagem
+          // OU se passou do backstop por data. A decisão FINAL de 'completed' é
+          // tomada depois da drenagem, sobre os dados re-lidos (freshSnap).
+          if (!reachedByCharges && !dateBackstop) continue;
 
           // INTEGRIDADE FINANCEIRA: antes de cancelar o preapproval, DRENA os
           // authorized_payments aprovados ainda não liquidados. Sem isso, se o
@@ -4080,19 +4117,35 @@ exports.scheduledSubscriptionTermGuard = functions.pubsub
             }
           }
 
-          // Se a drenagem já liquidou o último ciclo, mpSubSettleCycle pode ter
-          // cancelado o preapproval e marcado 'completed'. Re-lê para não
-          // re-cancelar/rebaixar (defensivo + evita PUT redundante).
+          // Re-lê o estado APÓS a drenagem: mpSubSettleCycle pode ter liquidado o
+          // último ciclo (e até completado/cancelado a assinatura), e bumpou
+          // chargesPaid. Toda a decisão abaixo usa freshSnap (não o `sub` stale),
+          // evitando re-cancelar/rebaixar e evitando clobber de uma transição
+          // concorrente.
           const freshSnap = await subDoc.ref.get();
           if (!freshSnap.exists || freshSnap.data().status === 'completed') {
             continue;
           }
+          const fresh = freshSnap.data();
+          const freshCharges = Number(fresh.chargesPaid) || 0;
+          const freshPreapprovalId = fresh.mpPreapprovalId;
+
+          // CONCLUSÃO: primariamente por CONTAGEM. A data é só backstop tardio (já
+          // com a folga TERM_GUARD_SLACK_MS aplicada na entrada). NUNCA completar
+          // uma assinatura que não pagou NENHUM ciclo (freshCharges===0) apenas por
+          // data — deixa o dunning seguir; só a contagem pode concluí-la. Isso
+          // cobre assinaturas nunca-pagas (inclusive 'paused') que de outra forma
+          // seriam marcadas 'completed' por mera passagem de tempo.
+          const completeByCharges = freshCharges >= months;
+          if (!completeByCharges && freshCharges === 0) {
+            continue; // nunca-paga: não concluir por data, segue o dunning
+          }
 
           // Atingiu o termo → cancela no MP (best-effort) e marca completed.
-          if (sub.mpPreapprovalId) {
+          if (freshPreapprovalId) {
             try {
               if (!token) token = await getMpAccessToken(academyId);
-              await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+              await mpRequest('PUT', `/preapproval/${freshPreapprovalId}`,
                 { token, body: { status: 'cancelled' } });
             } catch (e) {
               console.error('[termGuard] cancel preapproval falhou', academyId,
@@ -4104,7 +4157,8 @@ exports.scheduledSubscriptionTermGuard = functions.pubsub
             lastEvent: 'term_completed_guard',
             updatedAt: FV.serverTimestamp(),
           });
-          console.log('[termGuard] completed', academyId, subDoc.id);
+          console.log('[termGuard] completed', academyId, subDoc.id,
+            'charges', freshCharges, 'byCharges', completeByCharges);
         }
       } catch (e) {
         console.error('[termGuard] academia falhou', academyId, e.message);
@@ -4120,7 +4174,9 @@ exports.scheduledSubscriptionTermGuard = functions.pubsub
 // vencida há >48h e sem `financials` novo do ciclo, re-sincroniza via
 // GET /preapproval e liquida os authorized_payments aprovados via
 // mpSubSettleCycle (idempotente por id determinístico). A cada 6h.
-exports.scheduledSubscriptionReconcile = functions.pubsub
+exports.scheduledSubscriptionReconcile = functions
+  .runWith({ secrets: MP_MKT_SECRETS })
+  .pubsub
   .schedule('0 */6 * * *')
   .timeZone('America/Sao_Paulo')
   .onRun(async () => {
@@ -4218,7 +4274,9 @@ exports.scheduledSubscriptionReconcile = functions.pubsub
 // Retry automático de assinaturas `paused`/needsReauth: MAX 3 tentativas com
 // backoff [1,3,7] dias a partir da falha. Após esgotar, mantém `paused` e
 // notifica admin + aluno (NÃO cancela). Diário.
-exports.scheduledSubscriptionDunning = functions.pubsub
+exports.scheduledSubscriptionDunning = functions
+  .runWith({ secrets: MP_MKT_SECRETS })
+  .pubsub
   .schedule('30 6 * * *')
   .timeZone('America/Sao_Paulo')
   .onRun(async () => {
@@ -4289,7 +4347,20 @@ exports.scheduledSubscriptionDunning = functions.pubsub
               e.message);
           }
 
-          // Backoff para a PRÓXIMA tentativa: índice attemptN..MAX, cap no fim.
+          if (!reactivated) {
+            // Falha TRANSITÓRIA de chamada (throw/5xx/timeout no PUT, refresh de
+            // token, etc.) — NÃO é um ciclo de cobrança recusado. Não consome a
+            // tentativa nem avança o backoff: deixamos o estado intacto e o
+            // próximo run (try/catch por academia já isola) tenta de novo. Assim
+            // `failedAttempts` representa ciclos de cobrança falhos, não falhas de
+            // API, e 3 indisponibilidades não suspendem quem paga.
+            console.log('[dunning] reativacao falhou (transitorio), tentativa NAO ' +
+              'consumida', academyId, subDoc.id, 'attempt', attemptN);
+            continue;
+          }
+
+          // Reativação aceita pelo MP → conta como tentativa do ciclo. Backoff
+          // para a PRÓXIMA tentativa: índice attemptN..MAX, cap no fim.
           const backoffIdx = Math.min(attemptN, DUNNING_BACKOFF_DAYS.length - 1);
           const nextRetry = admin.firestore.Timestamp.fromMillis(
             now + DUNNING_BACKOFF_DAYS[backoffIdx] * 24 * 60 * 60 * 1000);
@@ -4297,10 +4368,10 @@ exports.scheduledSubscriptionDunning = functions.pubsub
             failedAttempts: attemptN,
             lastFailureAt: FV.serverTimestamp(),
             nextRetryAt: nextRetry,
-            lastEvent: reactivated ? 'dunning_retry_sent' : 'dunning_retry_failed',
+            lastEvent: 'dunning_retry_sent',
             updatedAt: FV.serverTimestamp(),
           });
-          // Se a reativação foi aceita, o webhook do próximo authorized_payment
+          // A reativação foi aceita; o webhook do próximo authorized_payment
           // confirma (e mpSubSettleCycle zera failedAttempts ao aprovar).
           console.log('[dunning] retry', academyId, subDoc.id, 'attempt', attemptN,
             'reactivated', reactivated);
@@ -4316,7 +4387,9 @@ exports.scheduledSubscriptionDunning = functions.pubsub
 // ---- 7. scheduledCardExpiryWarning ----------------------------------------
 // Avisa o aluno quando o cartão da assinatura expira no MÊS CORRENTE, ANTES do
 // billing_day, uma única vez por mês (expiryNotifiedAt). Diário.
-exports.scheduledCardExpiryWarning = functions.pubsub
+exports.scheduledCardExpiryWarning = functions
+  .runWith({ secrets: MP_MKT_SECRETS })
+  .pubsub
   .schedule('45 6 * * *')
   .timeZone('America/Sao_Paulo')
   .onRun(async () => {
@@ -4341,11 +4414,21 @@ exports.scheduledCardExpiryWarning = functions.pubsub
           const expYear = Number(sub.cardExpYear) || 0;
           if (!(expMonth >= 1 && expMonth <= 12) || expYear < 2000) continue;
 
-          // Expira no mês corrente?
-          if (expYear !== curYear || expMonth !== curMonth) continue;
-          // Avisar ANTES do billing_day (depois disso a cobrança já tentou).
+          // ANTECEDÊNCIA: o cartão é válido até o FIM do mês expMonth/expYear, então
+          // avisar só no mês exato da expiração chega tarde (a cobrança do próprio
+          // mês pode já ter sido recusada). Avisamos quando faltam <= ~40 dias para
+          // o fim da validade — ou seja, quando estamos no mês da expiração OU no
+          // mês anterior. Usamos índice ano*12+mês para comparar meses linearmente.
+          const curIdx = curYear * 12 + curMonth;
+          const expIdx = expYear * 12 + expMonth;
+          const monthsUntilExpiry = expIdx - curIdx; // 0 = expira este mês
+          // Já expirou (monthsUntilExpiry<0) → ainda assim avisa (cartão vencido).
+          // Só pula quando ainda falta mais de 1 mês para o mês de expiração.
+          if (monthsUntilExpiry > 1) continue;
+          // Avisar ANTES do billing_day (depois disso a cobrança já tentou neste
+          // ciclo); só relevante quando o aviso e a cobrança caem no mesmo mês.
           const billingDay = Number(sub.billingDay) || 1;
-          if (curDay >= billingDay) continue;
+          if (monthsUntilExpiry <= 0 && curDay >= billingDay) continue;
 
           // Já avisamos NESTE mês? (expiryNotifiedAt no mesmo ano/mês).
           const notified = sub.expiryNotifiedAt &&

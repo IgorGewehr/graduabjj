@@ -490,6 +490,10 @@ class _ActionsState extends State<_Actions> {
           ],
         ),
       );
+      // The confirm dialog is an async gap: the parent bottom sheet may have
+      // been dismissed (drag-down / pop) while it was open, disposing this
+      // State. Guard before touching setState/context.
+      if (!mounted) return;
       if (ok != true) return;
     }
     setState(() => _busy = true);
@@ -519,9 +523,10 @@ class _ActionsState extends State<_Actions> {
       academyId: widget.academyId,
       subscriptionId: widget.sub.id,
     );
+    if (!mounted) return;
     if (changed == true) {
       widget.onChanged?.call();
-      if (mounted) Navigator.of(context).pop();
+      Navigator.of(context).pop();
     }
   }
 
