@@ -16,6 +16,7 @@ import '../../services/asaas_payment_service.dart';
 import '../../services/firebase_service.dart';
 import '../../services/mercado_pago_service.dart';
 import '../../services/payment/payment_gateway_resolver.dart';
+import '../../services/payment_service.dart' show PaymentMethodPolicy;
 import '../../services/store_service.dart';
 import '../../widgets/payment/payment_method_sheet.dart';
 import '../../widgets/payment/payment_target.dart';
@@ -145,6 +146,19 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
     final storeCreditCardEnabled = settings?.storeCreditCardEnabled ?? false;
     final description = _orderDescription(order);
 
+    // Gate the offered methods by the order's policy snapshot AND the academy
+    // card flag. If nothing is payable (e.g. card_only while the academy has
+    // card disabled), explain it instead of opening an unusable sheet.
+    final availability = StoreCheckoutMethodAvailability.from(
+      policy: order.paymentMethodPolicy,
+      storeCreditCardEnabled: storeCreditCardEnabled,
+    );
+    if (!availability.hasPayableMethod) {
+      context.showWarning(_blockedReason(order.paymentMethodPolicy));
+      _goToOrders();
+      return;
+    }
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -156,9 +170,12 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
           description: description,
           studentId: currentUser.studentId ?? '',
           studentName: currentUser.displayName,
+          paymentMethodPolicy: order.paymentMethodPolicy,
         ),
         gateway: gateway,
-        storeCreditCardEnabled: storeCreditCardEnabled,
+        // Card is offered only when the order policy allows it AND the academy
+        // enabled store card. PIX is gated inside the sheet by the same policy.
+        storeCreditCardEnabled: availability.creditCard,
         createPix: (cpf) => _createOrderPix(order, cpf: cpf),
         onSettled: _onPaymentSettled,
       ),
@@ -167,6 +184,18 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
     // Whether the student paid now or chose to pay later, the order already
     // exists — land them on the orders list so they can track/pay it.
     _goToOrders();
+  }
+
+  /// Human reason shown when an order has no payable method (so the buyer is
+  /// never dropped into a dead-end sheet). The order still exists as pending —
+  /// payment can be arranged with the academy.
+  String _blockedReason(PaymentMethodPolicy policy) {
+    if (policy == PaymentMethodPolicy.cardOnly) {
+      return 'Este pedido aceita apenas cartao, mas o pagamento com cartao '
+          'nao esta habilitado. Combine o pagamento com a academia.';
+    }
+    return 'Nenhum metodo de pagamento disponivel para este pedido. '
+        'Combine o pagamento com a academia.';
   }
 
   /// Short order label used by the payment sheets (matches `store_orders_screen`).

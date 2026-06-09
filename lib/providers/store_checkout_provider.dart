@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../services/payment_service.dart'
+    show PaymentMethodPolicy, PaymentMethodPolicyExtension;
 import '../services/store_service.dart';
 import 'auth_provider.dart';
 import 'store_provider.dart';
@@ -29,6 +31,53 @@ enum StoreCheckoutStep {
 /// PIX/Card sheets and validated server-side. Mirrors the marketplace's
 /// `PaymentMethod` so the UI can pre-select before opening a sheet.
 enum StoreCheckoutMethod { pix, creditCard }
+
+/// Which store checkout methods are payable for a given order, after gating by
+/// the order's [PaymentMethodPolicy] snapshot AND the academy's
+/// `storeCreditCardEnabled` flag.
+///
+/// Card is offered **iff** `policy.allowsCard && storeCreditCardEnabled`; PIX
+/// **iff** `policy.allowsPix`. When the set is empty (e.g. `card_only` while
+/// the academy never enabled card payments) there is no payable method and the
+/// UI must surface a clear blocked state instead of a dead-end charge. The
+/// server is the final arbiter — this only decorates.
+class StoreCheckoutMethodAvailability {
+  final bool pix;
+  final bool creditCard;
+
+  const StoreCheckoutMethodAvailability({
+    required this.pix,
+    required this.creditCard,
+  });
+
+  /// Derives availability from the order [policy] and the academy
+  /// [storeCreditCardEnabled] flag.
+  factory StoreCheckoutMethodAvailability.from({
+    required PaymentMethodPolicy policy,
+    required bool storeCreditCardEnabled,
+  }) {
+    return StoreCheckoutMethodAvailability(
+      pix: policy.allowsPix,
+      creditCard: policy.allowsCard && storeCreditCardEnabled,
+    );
+  }
+
+  /// True when at least one method is payable.
+  bool get hasPayableMethod => pix || creditCard;
+
+  /// True when the order requires card but the academy has card disabled (the
+  /// most common dead-end), so the UI can explain *why* nothing is payable.
+  bool get blockedByDisabledCard => !pix && !creditCard;
+
+  bool allows(StoreCheckoutMethod method) {
+    switch (method) {
+      case StoreCheckoutMethod.pix:
+        return pix;
+      case StoreCheckoutMethod.creditCard:
+        return creditCard;
+    }
+  }
+}
 
 /// Immutable state of the store checkout state machine.
 ///

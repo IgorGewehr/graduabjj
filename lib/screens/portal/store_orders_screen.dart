@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../services/store_service.dart';
 import '../../services/abacate_pay_service.dart';
@@ -12,8 +13,11 @@ import '../../services/asaas_payment_service.dart';
 import '../../services/mercado_pago_service.dart';
 import '../../services/firebase_service.dart';
 import '../../services/payment/payment_gateway_resolver.dart';
+import '../../services/payment_service.dart' show PaymentMethodPolicy;
 import '../../providers/payment_providers.dart';
 import '../../providers/portal_providers.dart';
+import '../../providers/store_checkout_provider.dart'
+    show StoreCheckoutMethodAvailability;
 import '../../providers/store_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/payment/payment_method_sheet.dart';
@@ -574,6 +578,24 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
     if (!mounted) return;
     final storeCreditCardEnabled = settings?.storeCreditCardEnabled ?? false;
 
+    // Gate the offered methods by the order's policy snapshot AND the academy
+    // card flag. If nothing is payable, explain instead of opening a dead-end
+    // sheet — the order stays pending and can be settled with the academy.
+    final availability = StoreCheckoutMethodAvailability.from(
+      policy: widget.order.paymentMethodPolicy,
+      storeCreditCardEnabled: storeCreditCardEnabled,
+    );
+    if (!availability.hasPayableMethod) {
+      context.showWarning(
+        widget.order.paymentMethodPolicy == PaymentMethodPolicy.cardOnly
+            ? 'Este pedido aceita apenas cartao, mas o pagamento com cartao nao '
+                'esta habilitado. Combine o pagamento com a academia.'
+            : 'Nenhum metodo de pagamento disponivel para este pedido. '
+                'Combine o pagamento com a academia.',
+      );
+      return;
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -585,9 +607,12 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
           description: _orderDescription,
           studentId: currentUser.studentId ?? '',
           studentName: currentUser.displayName,
+          paymentMethodPolicy: widget.order.paymentMethodPolicy,
         ),
         gateway: gateway,
-        storeCreditCardEnabled: storeCreditCardEnabled,
+        // Card offered only when the order policy allows it AND the academy
+        // enabled store card.
+        storeCreditCardEnabled: availability.creditCard,
         createPix: (cpf) => _createOrderPix(cpf: cpf),
         onSettled: _onPaymentSettled,
       ),
