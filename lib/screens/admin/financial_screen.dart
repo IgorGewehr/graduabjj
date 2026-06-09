@@ -3287,6 +3287,11 @@ class _PaymentMethodPolicySelector extends StatelessWidget {
   Widget build(BuildContext context) {
     final showRecurringHint =
         isMonthly && selected == PaymentMethodPolicy.cardOnly;
+    // Non-monthly (trimestral/anual) card-only is a one-off full-period charge,
+    // NOT a recurring subscription — make that explicit so admins don't expect
+    // auto-renewal.
+    final showSinglePeriodHint =
+        !isMonthly && selected == PaymentMethodPolicy.cardOnly;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3326,6 +3331,13 @@ class _PaymentMethodPolicySelector extends StatelessWidget {
             'Plano mensal somente no cartão vira assinatura automática: '
             'o aluno assina uma vez e o cartão é cobrado todo mês.',
             style: AppTheme.labelSmall.copyWith(color: AppTheme.primary),
+          ),
+        ],
+        if (showSinglePeriodHint) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Cobrança única do período — NÃO é assinatura automática.',
+            style: AppTheme.labelSmall.copyWith(color: AppTheme.warning),
           ),
         ],
       ],

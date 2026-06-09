@@ -2857,6 +2857,44 @@ function orderExpectedTotalReais(order) {
 }
 
 /**
+ * SECURITY: derive the order's effective payment-method policy SERVER-SIDE from
+ * the products, never from the client-controlled `order.paymentMethodPolicy`
+ * snapshot. Store orders are created directly by the client (no creation CF), so
+ * the persisted policy field is not a trustworthy boundary — a malicious client
+ * could write `'both'` for a `pix_only`/`card_only` product. This mirrors the
+ * `orderExpectedTotalReais` mold (recompute the boundary from authoritative data).
+ *
+ * The effective policy is the MOST-RESTRICTIVE across all line items: PIX is
+ * allowed only when EVERY product allows PIX; card only when EVERY product allows
+ * card. A product whose `paymentMethodPolicy` is missing ⇒ `'both'` (compat).
+ * Returns `{ allowsPix, allowsCard, value }` where `value` is the canonical
+ * `'both' | 'pix_only' | 'card_only'`.
+ */
+async function orderEffectivePolicy(academyId, order) {
+  let allowsPix = true;
+  let allowsCard = true;
+  const items = (order && order.items) || [];
+  if (Array.isArray(items)) {
+    for (const it of items) {
+      const productId = it && it.productId;
+      if (!productId) continue; // can't resolve → leave as 'both' for this item
+      let policy = 'both';
+      try {
+        const p = await db.doc(
+          `academies/${academyId}/storeProducts/${productId}`).get();
+        if (p.exists) policy = p.data()?.paymentMethodPolicy || 'both';
+      } catch (_) { /* product unreadable → conservative default 'both' */ }
+      if (policy === 'pix_only') allowsCard = false;
+      else if (policy === 'card_only') allowsPix = false;
+    }
+  }
+  let value = 'both';
+  if (allowsPix && !allowsCard) value = 'pix_only';
+  else if (allowsCard && !allowsPix) value = 'card_only';
+  return { allowsPix, allowsCard, value };
+}
+
+/**
  * Creates a PIX payment on the academy's MP account. transactionAmount in REAIS.
  * MP requires the payer identification (CPF) for PIX — pass it when available.
  */
@@ -3042,6 +3080,17 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
     throw new HttpsError('already-exists', 'This order has already been paid');
   }
 
+  // Enforcement de política de método de pagamento da LOJA. SECURITY: o pedido
+  // é criado client-side, então NÃO confiamos em `order.paymentMethodPolicy`.
+  // Recomputamos a política efetiva a partir dos PRODUTOS (server-side), do
+  // mesmo jeito que o total é recomputado via orderExpectedTotalReais. Pedido
+  // com algum item "somente cartao" não aceita PIX. Espelha o erro de :3161.
+  const orderPolicy = await orderEffectivePolicy(academyId, order);
+  if (!orderPolicy.allowsPix) {
+    throw new HttpsError('failed-precondition',
+      'Este pedido aceita apenas cartao.');
+  }
+
   // SECURITY: never trust the client amount. Derive the charge server-side from
   // the order (reais). Prefer recomputing from the line items (each carries a
   // server-validated price), falling back to the persisted total. The client
@@ -3153,6 +3202,16 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
   // academia habilitou storeCreditCardEnabled. O gate da UI nao basta — reforco
   // server-side aqui. Mensalidade (nao-order) nao e afetada.
   if (isOrder) {
+    // Enforcement de política de método de pagamento da LOJA. SECURITY: o pedido
+    // é criado client-side, então NÃO confiamos em `recData.paymentMethodPolicy`.
+    // Recomputamos a política efetiva a partir dos PRODUTOS (server-side), do
+    // mesmo jeito que o total é recomputado via orderExpectedTotalReais. Cartão
+    // permitido SSE policy.allowsCard && storeCreditCardEnabled.
+    const orderPolicy = await orderEffectivePolicy(academyId, recData);
+    if (!orderPolicy.allowsCard) {
+      throw new HttpsError('failed-precondition',
+        'Este pedido aceita apenas PIX.');
+    }
     const acadSnap = await db.doc(`academies/${academyId}`).get();
     if (acadSnap.data()?.storeCreditCardEnabled !== true) {
       throw new HttpsError('failed-precondition',
@@ -3240,10 +3299,68 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
 
 const FV = admin.firestore.FieldValue;
 
+// ---- Dunning policy constants (resiliência de recorrência) -----------------
+// Máximo de retentativas automáticas de uma assinatura `paused`/needsReauth e
+// o backoff (em dias) a partir da falha. Após esgotar, mantém `paused` e
+// notifica admin + aluno (NÃO cancela).
+const MAX_DUNNING_RETRIES = 3;
+const DUNNING_BACKOFF_DAYS = [1, 3, 7];
+
+/**
+ * Extrai do retorno do Mercado Pago (preapproval POST ou payment) os dados
+ * NÃO-PCI do cartão para espelhar em Firestore: últimos 4 dígitos + validade.
+ * Defensivo: o payload do /preapproval pode trazer o cartão em `card` ou
+ * aninhado; só retorna os campos que conseguir extrair (resto fica null).
+ * Retorna { cardLast4, cardExpMonth, cardExpYear } com valores ou null.
+ */
+function extractMpCardInfo(mpPayload) {
+  const card = mpPayload && (mpPayload.card ||
+    (mpPayload.summarized && mpPayload.summarized.card) ||
+    // authorized_payment / payment payloads aninham o cartão em `payment.card`.
+    (mpPayload.payment && mpPayload.payment.card) || null);
+  const toInt = (v) => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : null;
+  };
+  const last4Raw = card && (card.last_four_digits != null
+    ? card.last_four_digits
+    : card.lastFourDigits);
+  const expMonth = card ? (card.expiration_month != null
+    ? card.expiration_month : card.expirationMonth) : null;
+  const expYear = card ? (card.expiration_year != null
+    ? card.expiration_year : card.expirationYear) : null;
+  return {
+    cardLast4: last4Raw != null ? String(last4Raw) : null,
+    cardExpMonth: toInt(expMonth),
+    cardExpYear: toInt(expYear),
+  };
+}
+
+/** Calcula o Timestamp do fim do termo (createdAt + months meses). `base` é um
+ * Date/Timestamp; retorna admin Timestamp ou null se months<=0. */
+function computeTermEndsAt(base, months) {
+  const m = Number(months) || 0;
+  if (m <= 0) return null;
+  const baseDate = base && typeof base.toDate === 'function'
+    ? base.toDate()
+    : (base instanceof Date ? base : new Date());
+  // Soma `m` meses clampando o dia ao último dia do mês alvo (mesma filosofia do
+  // clamp de billing_day em 28): 31/Jan +1 → 28/Fev, e NÃO transborda p/ Março.
+  const end = new Date(baseDate.getTime());
+  const day = end.getDate();
+  end.setDate(1); // evita overflow ao trocar o mês
+  end.setMonth(end.getMonth() + m);
+  // Último dia do mês alvo (dia 0 do mês seguinte).
+  const lastDay = new Date(end.getFullYear(), end.getMonth() + 1, 0).getDate();
+  end.setDate(Math.min(day, lastDay));
+  return admin.firestore.Timestamp.fromDate(end);
+}
+
 /** Settle ONE approved subscription charge: mint a paid financial for the cycle
  * (idempotent by deterministic id), bump chargesPaid, and cancel the
  * preapproval once the N-month term is reached. */
-async function mpSubSettleCycle(academyId, subscriptionId, token, { paymentId, amount }) {
+async function mpSubSettleCycle(academyId, subscriptionId, token,
+  { paymentId, amount, mpPayload } = {}) {
   const subRef = db.doc(`academies/${academyId}/subscriptions/${subscriptionId}`);
   // Deterministic financial id → the same MP payment never settles twice.
   const finId = `sub_${subscriptionId}_${paymentId}`;
@@ -3279,14 +3396,34 @@ async function mpSubSettleCycle(academyId, subscriptionId, token, { paymentId, a
       createdAt: FV.serverTimestamp(),
       updatedAt: FV.serverTimestamp(),
     });
-    tx.update(subRef, {
+    const subUpdate = {
       chargesPaid: cycle,
       lastPaymentId: paymentId,
       status: 'authorized',
       needsReauth: false,
+      // Voltou a cobrar com sucesso → zera o estado de dunning.
+      failedAttempts: 0,
+      nextRetryAt: null,
+      dunningExhaustedNotifiedAt: null,
       lastEvent: 'payment_approved',
       updatedAt: FV.serverTimestamp(),
-    });
+    };
+    // Fallback do espelho NÃO-PCI do cartão: o POST /preapproval normalmente NÃO
+    // traz o cartão, mas o authorized_payment/payment aprovado costuma trazê-lo.
+    // Preenche só o que ainda estiver ausente na assinatura (defensivo).
+    if (mpPayload) {
+      const cardInfo = extractMpCardInfo(mpPayload);
+      if (cardInfo.cardLast4 != null && sub.cardLast4 == null) {
+        subUpdate.cardLast4 = cardInfo.cardLast4;
+      }
+      if (cardInfo.cardExpMonth != null && sub.cardExpMonth == null) {
+        subUpdate.cardExpMonth = cardInfo.cardExpMonth;
+      }
+      if (cardInfo.cardExpYear != null && sub.cardExpYear == null) {
+        subUpdate.cardExpYear = cardInfo.cardExpYear;
+      }
+    }
+    tx.update(subRef, subUpdate);
     return { ok: true, cycle, months: Number(sub.months) || 0,
       preapprovalId: sub.mpPreapprovalId };
   });
@@ -3324,7 +3461,8 @@ async function mpSubHandleAuthorizedPayment(academyId, authPayId) {
     String(ap.payment.id) : `ap_${authPayId}`;
   const amount = Number(ap.transaction_amount) || 0;
   if (payStatus === 'approved') {
-    await mpSubSettleCycle(academyId, subRef.id, token, { paymentId, amount });
+    await mpSubSettleCycle(academyId, subRef.id, token,
+      { paymentId, amount, mpPayload: ap });
   } else if (payStatus === 'rejected' || payStatus === 'cancelled') {
     // Dunning: do NOT settle. The preapproval will move to paused; the sync
     // handler flags needsReauth. Record the failed attempt for visibility.
@@ -3359,8 +3497,23 @@ async function mpSubSyncPreapproval(academyId, preapprovalId) {
     update.nextBillingDate =
       admin.firestore.Timestamp.fromDate(new Date(pa.next_payment_date));
   }
-  if (pa.status === 'paused') update.needsReauth = true;
-  if (pa.status === 'authorized') update.needsReauth = false;
+  if (pa.status === 'paused') {
+    update.needsReauth = true;
+    // Início do ciclo de dunning: marca a falha e agenda o 1º retry se ainda
+    // não houver um pendente (o cron scheduledSubscriptionDunning assume daqui).
+    update.lastFailureAt = FV.serverTimestamp();
+    if (current.nextRetryAt == null) {
+      update.nextRetryAt = admin.firestore.Timestamp.fromMillis(
+        Date.now() + DUNNING_BACKOFF_DAYS[0] * 24 * 60 * 60 * 1000);
+    }
+  }
+  if (pa.status === 'authorized') {
+    update.needsReauth = false;
+    // Recuperou sozinha → limpa o estado de dunning.
+    update.failedAttempts = 0;
+    update.nextRetryAt = null;
+    update.dunningExhaustedNotifiedAt = null;
+  }
   await subRef.update(update);
 
   if (pa.status === 'paused') {
@@ -3439,6 +3592,8 @@ exports.createMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (reques
     months,
     chargesPaid: 0,
     needsReauth: false,
+    // Resiliência de recorrência: estado de dunning começa zerado.
+    failedAttempts: 0,
     createdAt: FV.serverTimestamp(),
     updatedAt: FV.serverTimestamp(),
   });
@@ -3490,6 +3645,16 @@ exports.createMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (reques
     update.nextBillingDate =
       admin.firestore.Timestamp.fromDate(new Date(pa.next_payment_date));
   }
+  // Fim do termo (rede de segurança do scheduledSubscriptionTermGuard caso o
+  // webhook do último ciclo se perca). createdAt acabou de ser gravado agora;
+  // usar `new Date()` como base é equivalente dentro da tolerância de meses.
+  const termEndsAt = computeTermEndsAt(new Date(), months);
+  if (termEndsAt) update.termEndsAt = termEndsAt;
+  // Espelho NÃO-PCI do cartão (últimos 4 + validade) extraído do retorno do MP.
+  const cardInfo = extractMpCardInfo(pa);
+  if (cardInfo.cardLast4 != null) update.cardLast4 = cardInfo.cardLast4;
+  if (cardInfo.cardExpMonth != null) update.cardExpMonth = cardInfo.cardExpMonth;
+  if (cardInfo.cardExpYear != null) update.cardExpYear = cardInfo.cardExpYear;
   await subRef.update(update);
 
   return {
@@ -3555,17 +3720,31 @@ exports.updateSubscriptionCard = onCall({ secrets: MP_MKT_SECRETS }, async (requ
     throw new HttpsError('failed-precondition', 'Assinatura sem preapproval.');
   }
   const token = await getMpAccessToken(academyId);
+  let pa;
   try {
-    await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+    pa = await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
       { token, body: { card_token_id: cardToken, status: 'authorized' } });
   } catch (e) {
     console.error('[updateSubscriptionCard] erro', e.message, e.data);
     throw new HttpsError('failed-precondition',
       'Não foi possível atualizar o cartão. Tente novamente.');
   }
-  await subRef.update({
-    needsReauth: false, status: 'authorized', updatedAt: FV.serverTimestamp(),
-  });
+  const update = {
+    needsReauth: false,
+    status: 'authorized',
+    // Cartão novo → zera o estado de dunning e o aviso de expiração.
+    failedAttempts: 0,
+    nextRetryAt: null,
+    dunningExhaustedNotifiedAt: null,
+    expiryNotifiedAt: null,
+    updatedAt: FV.serverTimestamp(),
+  };
+  // Re-espelha os dados NÃO-PCI do novo cartão (se o retorno do MP trouxer).
+  const cardInfo = extractMpCardInfo(pa);
+  if (cardInfo.cardLast4 != null) update.cardLast4 = cardInfo.cardLast4;
+  if (cardInfo.cardExpMonth != null) update.cardExpMonth = cardInfo.cardExpMonth;
+  if (cardInfo.cardExpYear != null) update.cardExpYear = cardInfo.cardExpYear;
+  await subRef.update(update);
   return { success: true };
 });
 
@@ -3796,3 +3975,400 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
   await notifyAdminCF(academyId, 'payment_received', 'Pagamento Recebido',
     `Pagamento de R$ ${amtFmt} recebido ${viaLabel}.`, { financialId: docId });
 }
+
+// ============================================================
+// Resiliência de Recorrência — Cloud Functions agendadas (crons)
+// ============================================================
+// Todas seguem o molde de scheduledOverdueCheck (:870): firebase-functions v1
+// (functions.pubsub.schedule().onRun), iteração por academia com try/catch POR
+// academia (uma falha NUNCA aborta o lote) e são idempotentes — seguras para
+// re-rodar. As credenciais do Mercado Pago (MP_OAUTH_CLIENT_ID/SECRET) chegam
+// via functions config / .env em runtime, igual às demais crons v1.
+
+/** Notifica o ALUNO (ou o responsável, p/ menores) de uma assinatura — push +
+ * notificação interna. Best-effort: nunca lança. */
+async function notifySubscriptionStudent(academyId, sub, type, title, message, options) {
+  try {
+    const uid = await getBillingRecipientUid(sub.studentId, academyId);
+    if (!uid) return;
+    await sendToUser(uid, title, message, { type, academyId });
+    await createInternalNotification(academyId, uid, type, 'high', title, message, {
+      actionUrl: '/portal/financeiro', actionLabel: 'Atualizar cartão',
+      studentId: sub.studentId, expiresInDays: 30,
+      ...(options || {}),
+    });
+  } catch (e) {
+    console.error('[notifySubscriptionStudent] erro', e.message);
+  }
+}
+
+/** Resolve o fim do termo de uma assinatura com fallback legacy:
+ * termEndsAt ?? (createdAt + months meses). Retorna Date ou null. */
+function subscriptionTermEndDate(sub) {
+  if (sub.termEndsAt && typeof sub.termEndsAt.toDate === 'function') {
+    return sub.termEndsAt.toDate();
+  }
+  const months = Number(sub.months) || 0;
+  if (months <= 0) return null;
+  const ts = computeTermEndsAt(sub.createdAt, months);
+  return ts ? ts.toDate() : null;
+}
+
+// ---- 4. scheduledSubscriptionTermGuard ------------------------------------
+// Rede de segurança: cancela o preapproval + marca `completed` quando a
+// assinatura atingiu N meses, caso o webhook do último ciclo se perca.
+// Idempotente: nunca rebaixa uma assinatura já `completed`.
+exports.scheduledSubscriptionTermGuard = functions.pubsub
+  .schedule('15 6 * * *')
+  .timeZone('America/Sao_Paulo')
+  .onRun(async () => {
+    console.log('[termGuard] start');
+    const now = new Date();
+    const academiesSnapshot = await db.collection('academies').get();
+
+    for (const academyDoc of academiesSnapshot.docs) {
+      const academyId = academyDoc.id;
+      try {
+        let token = null; // lazy: só busca MP se houver algo a cancelar
+        const subsSnap = await db
+          .collection(`academies/${academyId}/subscriptions`)
+          .where('status', 'in', ['authorized', 'paused'])
+          .get();
+
+        for (const subDoc of subsSnap.docs) {
+          const sub = subDoc.data();
+          if (sub.status === 'completed') continue; // nunca rebaixa
+          const months = Number(sub.months) || 0;
+          if (months <= 0) continue; // open-ended: sem termo
+
+          const chargesPaid = Number(sub.chargesPaid) || 0;
+          const termEnd = subscriptionTermEndDate(sub);
+          const reachedByCharges = chargesPaid >= months;
+          const reachedByDate = termEnd != null && now >= termEnd;
+          if (!reachedByCharges && !reachedByDate) continue;
+
+          // INTEGRIDADE FINANCEIRA: antes de cancelar o preapproval, DRENA os
+          // authorized_payments aprovados ainda não liquidados. Sem isso, se o
+          // webhook do último ciclo se perdeu (reachedByDate, chargesPaid<months)
+          // e a janela do reconcile (>48h) ainda não passou, a academia perde o
+          // financial 'paid' do último ciclo. mpSubSettleCycle é idempotente
+          // (id determinístico sub_{}_{}), então re-rodar é seguro.
+          if (sub.mpPreapprovalId) {
+            try {
+              if (!token) token = await getMpAccessToken(academyId);
+              const search = await mpRequest('GET',
+                `/authorized_payments/search?preapproval_id=${sub.mpPreapprovalId}`,
+                { token }).catch((e) => {
+                  console.error('[termGuard] search ap falhou', academyId,
+                    subDoc.id, e.message);
+                  return null;
+                });
+              const results =
+                (search && (search.results || search.elements)) || [];
+              for (const ap of results) {
+                const payStatus = ap.payment && ap.payment.status;
+                if (payStatus !== 'approved') continue;
+                const paymentId = ap.payment && ap.payment.id
+                  ? String(ap.payment.id) : `ap_${ap.id}`;
+                const apAmount = Number(ap.transaction_amount) || 0;
+                await mpSubSettleCycle(academyId, subDoc.id, token,
+                  { paymentId, amount: apAmount, mpPayload: ap });
+              }
+            } catch (e) {
+              console.error('[termGuard] drenar ap falhou', academyId,
+                subDoc.id, e.message);
+            }
+          }
+
+          // Se a drenagem já liquidou o último ciclo, mpSubSettleCycle pode ter
+          // cancelado o preapproval e marcado 'completed'. Re-lê para não
+          // re-cancelar/rebaixar (defensivo + evita PUT redundante).
+          const freshSnap = await subDoc.ref.get();
+          if (!freshSnap.exists || freshSnap.data().status === 'completed') {
+            continue;
+          }
+
+          // Atingiu o termo → cancela no MP (best-effort) e marca completed.
+          if (sub.mpPreapprovalId) {
+            try {
+              if (!token) token = await getMpAccessToken(academyId);
+              await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+                { token, body: { status: 'cancelled' } });
+            } catch (e) {
+              console.error('[termGuard] cancel preapproval falhou', academyId,
+                subDoc.id, e.message);
+            }
+          }
+          await subDoc.ref.update({
+            status: 'completed',
+            lastEvent: 'term_completed_guard',
+            updatedAt: FV.serverTimestamp(),
+          });
+          console.log('[termGuard] completed', academyId, subDoc.id);
+        }
+      } catch (e) {
+        console.error('[termGuard] academia falhou', academyId, e.message);
+        // try/catch POR academia: uma falha não aborta o lote.
+      }
+    }
+    console.log('[termGuard] done');
+    return null;
+  });
+
+// ---- 5. scheduledSubscriptionReconcile ------------------------------------
+// Recupera webhooks perdidos: para assinaturas `authorized` com nextBillingDate
+// vencida há >48h e sem `financials` novo do ciclo, re-sincroniza via
+// GET /preapproval e liquida os authorized_payments aprovados via
+// mpSubSettleCycle (idempotente por id determinístico). A cada 6h.
+exports.scheduledSubscriptionReconcile = functions.pubsub
+  .schedule('0 */6 * * *')
+  .timeZone('America/Sao_Paulo')
+  .onRun(async () => {
+    console.log('[reconcile] start');
+    const now = Date.now();
+    const STALE_MS = 48 * 60 * 60 * 1000;
+    const academiesSnapshot = await db.collection('academies').get();
+
+    for (const academyDoc of academiesSnapshot.docs) {
+      const academyId = academyDoc.id;
+      try {
+        const subsSnap = await db
+          .collection(`academies/${academyId}/subscriptions`)
+          .where('status', 'in', ['authorized', 'paused'])
+          .get();
+        if (subsSnap.empty) continue;
+
+        let token = null;
+        for (const subDoc of subsSnap.docs) {
+          const sub = subDoc.data();
+          if (!sub.mpPreapprovalId) continue;
+          const nextBilling = sub.nextBillingDate &&
+            typeof sub.nextBillingDate.toDate === 'function'
+            ? sub.nextBillingDate.toDate().getTime() : null;
+          // `authorized` só reconcilia quando a cobrança já deveria ter ocorrido
+          // há >48h. `paused` SEMPRE reconcilia (buraco de cobertura: uma
+          // assinatura pausada no MP cujo webhook se perdeu pode nunca entrar em
+          // dunning se nextBillingDate local ainda <48h vencida ou dessincronizada
+          // — precisamos garantir needsReauth=true para o dunning pegar).
+          if (sub.status === 'authorized' &&
+              (nextBilling == null || now - nextBilling <= STALE_MS)) continue;
+
+          try {
+            if (!token) token = await getMpAccessToken(academyId);
+
+            // 1) Re-sync do status + próxima cobrança a partir do preapproval.
+            const pa = await mpRequest('GET',
+              `/preapproval/${sub.mpPreapprovalId}`, { token });
+            const map = { authorized: 'authorized', paused: 'paused',
+              cancelled: 'cancelled', pending: 'pending' };
+            const syncUpdate = {
+              lastEvent: 'reconcile_resync',
+              updatedAt: FV.serverTimestamp(),
+            };
+            if (sub.status !== 'completed' && map[pa.status]) {
+              syncUpdate.status = map[pa.status];
+              if (pa.status === 'paused') {
+                syncUpdate.needsReauth = true;
+                syncUpdate.lastFailureAt = FV.serverTimestamp();
+                if (sub.nextRetryAt == null) {
+                  syncUpdate.nextRetryAt = admin.firestore.Timestamp.fromMillis(
+                    Date.now() + DUNNING_BACKOFF_DAYS[0] * 24 * 60 * 60 * 1000);
+                }
+              }
+            }
+            if (pa.next_payment_date) {
+              syncUpdate.nextBillingDate = admin.firestore.Timestamp.fromDate(
+                new Date(pa.next_payment_date));
+            }
+            await subDoc.ref.update(syncUpdate);
+
+            // 2) Liquida authorized_payments aprovados ainda não liquidados.
+            //    mpSubSettleCycle é idempotente (id determinístico sub_{}_{}).
+            const search = await mpRequest('GET',
+              `/authorized_payments/search?preapproval_id=${sub.mpPreapprovalId}`,
+              { token }).catch((e) => {
+                console.error('[reconcile] search ap falhou', academyId,
+                  subDoc.id, e.message);
+                return null;
+              });
+            const results = (search && (search.results || search.elements)) || [];
+            for (const ap of results) {
+              const payStatus = ap.payment && ap.payment.status;
+              if (payStatus !== 'approved') continue;
+              const paymentId = ap.payment && ap.payment.id
+                ? String(ap.payment.id) : `ap_${ap.id}`;
+              const amount = Number(ap.transaction_amount) || 0;
+              await mpSubSettleCycle(academyId, subDoc.id, token,
+                { paymentId, amount, mpPayload: ap });
+            }
+          } catch (e) {
+            console.error('[reconcile] assinatura falhou', academyId,
+              subDoc.id, e.message);
+          }
+        }
+      } catch (e) {
+        console.error('[reconcile] academia falhou', academyId, e.message);
+      }
+    }
+    console.log('[reconcile] done');
+    return null;
+  });
+
+// ---- 6. scheduledSubscriptionDunning --------------------------------------
+// Retry automático de assinaturas `paused`/needsReauth: MAX 3 tentativas com
+// backoff [1,3,7] dias a partir da falha. Após esgotar, mantém `paused` e
+// notifica admin + aluno (NÃO cancela). Diário.
+exports.scheduledSubscriptionDunning = functions.pubsub
+  .schedule('30 6 * * *')
+  .timeZone('America/Sao_Paulo')
+  .onRun(async () => {
+    console.log('[dunning] start');
+    const now = Date.now();
+    const academiesSnapshot = await db.collection('academies').get();
+
+    for (const academyDoc of academiesSnapshot.docs) {
+      const academyId = academyDoc.id;
+      try {
+        const subsSnap = await db
+          .collection(`academies/${academyId}/subscriptions`)
+          .where('status', '==', 'paused')
+          .get();
+        if (subsSnap.empty) continue;
+
+        let token = null;
+        for (const subDoc of subsSnap.docs) {
+          const sub = subDoc.data();
+          if (sub.needsReauth !== true) continue;
+          if (!sub.mpPreapprovalId) continue;
+          const failedAttempts = Number(sub.failedAttempts) || 0;
+
+          // Esgotou as tentativas → para de tentar e notifica (uma vez).
+          // Idempotência da notificação via campo DEDICADO
+          // (dunningExhaustedNotifiedAt), desacoplada do gatilho nextRetryAt —
+          // nextRetryAt cuida só do backoff, não de "já notifiquei a suspensão".
+          if (failedAttempts >= MAX_DUNNING_RETRIES) {
+            if (sub.dunningExhaustedNotifiedAt == null) {
+              await subDoc.ref.update({
+                nextRetryAt: null,
+                dunningExhaustedNotifiedAt: FV.serverTimestamp(),
+                lastEvent: 'dunning_exhausted',
+                updatedAt: FV.serverTimestamp(),
+              });
+              try {
+                await notifyAdminCF(academyId, 'payment_overdue',
+                  'Assinatura suspensa',
+                  `A cobranca recorrente de ${sub.studentName || 'um aluno'} ` +
+                  'falhou apos 3 tentativas. Peca a atualizacao do cartao.',
+                  { subscriptionId: subDoc.id });
+              } catch (_) { /* best-effort */ }
+              await notifySubscriptionStudent(academyId, sub, 'payment_overdue',
+                'Atualize seu cartao',
+                'Sua assinatura foi suspensa apos varias tentativas de cobranca. ' +
+                'Atualize o cartao para reativar.',
+                { subscriptionId: subDoc.id });
+            }
+            continue;
+          }
+
+          // Ainda há tentativas: respeita o backoff (nextRetryAt). Na 1ª
+          // tentativa nextRetryAt pode ser nulo → tenta imediatamente.
+          const retryAt = sub.nextRetryAt &&
+            typeof sub.nextRetryAt.toDate === 'function'
+            ? sub.nextRetryAt.toDate().getTime() : null;
+          if (retryAt != null && now < retryAt) continue;
+
+          const attemptN = failedAttempts + 1; // 1..3
+          let reactivated = false;
+          try {
+            if (!token) token = await getMpAccessToken(academyId);
+            await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+              { token, body: { status: 'authorized' } });
+            reactivated = true;
+          } catch (e) {
+            console.error('[dunning] reativar falhou', academyId, subDoc.id,
+              e.message);
+          }
+
+          // Backoff para a PRÓXIMA tentativa: índice attemptN..MAX, cap no fim.
+          const backoffIdx = Math.min(attemptN, DUNNING_BACKOFF_DAYS.length - 1);
+          const nextRetry = admin.firestore.Timestamp.fromMillis(
+            now + DUNNING_BACKOFF_DAYS[backoffIdx] * 24 * 60 * 60 * 1000);
+          await subDoc.ref.update({
+            failedAttempts: attemptN,
+            lastFailureAt: FV.serverTimestamp(),
+            nextRetryAt: nextRetry,
+            lastEvent: reactivated ? 'dunning_retry_sent' : 'dunning_retry_failed',
+            updatedAt: FV.serverTimestamp(),
+          });
+          // Se a reativação foi aceita, o webhook do próximo authorized_payment
+          // confirma (e mpSubSettleCycle zera failedAttempts ao aprovar).
+          console.log('[dunning] retry', academyId, subDoc.id, 'attempt', attemptN,
+            'reactivated', reactivated);
+        }
+      } catch (e) {
+        console.error('[dunning] academia falhou', academyId, e.message);
+      }
+    }
+    console.log('[dunning] done');
+    return null;
+  });
+
+// ---- 7. scheduledCardExpiryWarning ----------------------------------------
+// Avisa o aluno quando o cartão da assinatura expira no MÊS CORRENTE, ANTES do
+// billing_day, uma única vez por mês (expiryNotifiedAt). Diário.
+exports.scheduledCardExpiryWarning = functions.pubsub
+  .schedule('45 6 * * *')
+  .timeZone('America/Sao_Paulo')
+  .onRun(async () => {
+    console.log('[cardExpiry] start');
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth() + 1; // 1..12
+    const curDay = now.getDate();
+    const academiesSnapshot = await db.collection('academies').get();
+
+    for (const academyDoc of academiesSnapshot.docs) {
+      const academyId = academyDoc.id;
+      try {
+        const subsSnap = await db
+          .collection(`academies/${academyId}/subscriptions`)
+          .where('status', '==', 'authorized')
+          .get();
+
+        for (const subDoc of subsSnap.docs) {
+          const sub = subDoc.data();
+          const expMonth = Number(sub.cardExpMonth) || 0;
+          const expYear = Number(sub.cardExpYear) || 0;
+          if (!(expMonth >= 1 && expMonth <= 12) || expYear < 2000) continue;
+
+          // Expira no mês corrente?
+          if (expYear !== curYear || expMonth !== curMonth) continue;
+          // Avisar ANTES do billing_day (depois disso a cobrança já tentou).
+          const billingDay = Number(sub.billingDay) || 1;
+          if (curDay >= billingDay) continue;
+
+          // Já avisamos NESTE mês? (expiryNotifiedAt no mesmo ano/mês).
+          const notified = sub.expiryNotifiedAt &&
+            typeof sub.expiryNotifiedAt.toDate === 'function'
+            ? sub.expiryNotifiedAt.toDate() : null;
+          if (notified && notified.getFullYear() === curYear &&
+              notified.getMonth() + 1 === curMonth) continue;
+
+          await notifySubscriptionStudent(academyId, sub, 'card_expiring',
+            'Cartao prestes a expirar',
+            'O cartao da sua assinatura expira este mes. Atualize-o antes da ' +
+            'proxima cobranca para nao perder o acesso.',
+            { subscriptionId: subDoc.id });
+          await subDoc.ref.update({
+            expiryNotifiedAt: FV.serverTimestamp(),
+            updatedAt: FV.serverTimestamp(),
+          });
+          console.log('[cardExpiry] avisado', academyId, subDoc.id);
+        }
+      } catch (e) {
+        console.error('[cardExpiry] academia falhou', academyId, e.message);
+      }
+    }
+    console.log('[cardExpiry] done');
+    return null;
+  });

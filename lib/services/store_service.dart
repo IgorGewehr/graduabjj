@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
+import 'payment_service.dart' show PaymentMethodPolicy, PaymentMethodPolicyExtension;
 
 /// Product Category
 enum StoreProductCategory { uniform, equipment, accessory, other }
@@ -154,6 +155,12 @@ class StoreProduct {
   final List<String>? sizes;
   final List<String>? colors;
   final bool isActive;
+
+  /// Which payment methods this product accepts. Snapshotted onto the order at
+  /// `createOrder` time. Absent on legacy docs → [PaymentMethodPolicy.both]
+  /// (the current unrestricted behavior). Editable in the admin product form.
+  final PaymentMethodPolicy paymentMethodPolicy;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -169,6 +176,7 @@ class StoreProduct {
     this.sizes,
     this.colors,
     this.isActive = true,
+    this.paymentMethodPolicy = PaymentMethodPolicy.both,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -193,6 +201,9 @@ class StoreProduct {
       sizes: data['sizes'] != null ? List<String>.from(data['sizes']) : null,
       colors: data['colors'] != null ? List<String>.from(data['colors']) : null,
       isActive: data['active'] ?? data['isActive'] ?? true,
+      paymentMethodPolicy: PaymentMethodPolicyExtension.fromString(
+        data['paymentMethodPolicy'] as String?,
+      ),
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -279,6 +290,13 @@ class StoreOrder {
   final String? pixCode;
   final String? pixQrCode;
   final String? externalPaymentId;
+
+  /// Snapshot of the accepted payment methods for this order, derived from the
+  /// products at creation time (most-restrictive wins). Absent on legacy docs →
+  /// [PaymentMethodPolicy.both] (compat). The server re-enforces it on the
+  /// charge; the UI only decorates.
+  final PaymentMethodPolicy paymentMethodPolicy;
+
   final DateTime? paidAt;
   final DateTime? deliveredAt;
   final DateTime createdAt;
@@ -295,6 +313,7 @@ class StoreOrder {
     this.pixCode,
     this.pixQrCode,
     this.externalPaymentId,
+    this.paymentMethodPolicy = PaymentMethodPolicy.both,
     this.paidAt,
     this.deliveredAt,
     required this.createdAt,
@@ -321,6 +340,9 @@ class StoreOrder {
       pixQrCode: data['pixQrCode'],
       externalPaymentId:
           data['externalPaymentId'] ?? data['abacatePayTransactionId'],
+      paymentMethodPolicy: PaymentMethodPolicyExtension.fromString(
+        data['paymentMethodPolicy'] as String?,
+      ),
       paidAt: data['paidAt'] != null
           ? (data['paidAt'] as Timestamp).toDate()
           : null,
@@ -439,6 +461,7 @@ class StoreService {
     int? stockQuantity,
     List<String>? sizes,
     List<String>? colors,
+    PaymentMethodPolicy paymentMethodPolicy = PaymentMethodPolicy.both,
   }) async {
     final docRef = await _productsRef.add({
       'academyId': academyId,
@@ -451,6 +474,7 @@ class StoreService {
       'stockQuantity': stockQuantity,
       'sizes': sizes,
       'colors': colors,
+      'paymentMethodPolicy': paymentMethodPolicy.value,
       'active': true,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -627,6 +651,14 @@ class StoreService {
     final validatedItems = <Map<String, dynamic>>[];
     double total = 0;
 
+    // Snapshot of the order's accepted payment methods, derived from the
+    // products in the cart. Combined most-restrictive: PIX stays allowed only
+    // while every product allows it, same for card. A mixed cart of pix_only +
+    // card_only collapses to the most restrictive single method (server is the
+    // final arbiter; this is only the snapshot written to the order).
+    bool orderAllowsPix = true;
+    bool orderAllowsCard = true;
+
     for (final item in items) {
       final product = await getProductById(item.productId);
 
@@ -668,6 +700,10 @@ class StoreService {
         }
       }
 
+      // Accumulate the order's effective policy (most-restrictive across items).
+      orderAllowsPix = orderAllowsPix && product.paymentMethodPolicy.allowsPix;
+      orderAllowsCard = orderAllowsCard && product.paymentMethodPolicy.allowsCard;
+
       // Build validated item with SERVER-SIDE price
       final itemTotal = product.price * item.quantity;
       total += itemTotal;
@@ -682,6 +718,17 @@ class StoreService {
       });
     }
 
+    // Resolve the combined policy snapshot. `card_only` wins when only card is
+    // allowed, `pix_only` when only PIX is allowed, else `both`.
+    final PaymentMethodPolicy orderPolicy;
+    if (orderAllowsPix && orderAllowsCard) {
+      orderPolicy = PaymentMethodPolicy.both;
+    } else if (orderAllowsPix) {
+      orderPolicy = PaymentMethodPolicy.pixOnly;
+    } else {
+      orderPolicy = PaymentMethodPolicy.cardOnly;
+    }
+
     final docRef = await _ordersRef.add({
       'academyId': academyId,
       'studentId': studentId,
@@ -690,6 +737,7 @@ class StoreService {
       'total': total,
       'status': StoreOrderStatus.pendingPayment.value,
       'notes': notes,
+      'paymentMethodPolicy': orderPolicy.value,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });

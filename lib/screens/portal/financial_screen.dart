@@ -20,6 +20,7 @@ import '../../services/payment/payment_gateway_resolver.dart';
 import '../../models/student.dart';
 import '../../widgets/payment/payment_method_sheet.dart';
 import '../../widgets/payment/payment_target.dart';
+import '../../widgets/payment/subscription_detail_sheet.dart';
 import '../../widgets/payment_sheets.dart' show CardPaymentSheet;
 import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
@@ -68,8 +69,13 @@ class _SubscriptionSection extends ConsumerWidget {
         .toList();
 
     if (active.isNotEmpty) {
+      // Dunning banner: a failed charge needs a new card. Shown above the
+      // card(s) so it's the first thing the student sees; tapping opens the
+      // card-update flow (updateSubscriptionCard).
+      final dunning = active.where((s) => s.needsReauth).toList();
       return Column(
         children: [
+          for (final s in dunning) _DunningBanner(sub: s),
           for (final s in active) _SubscriptionCard(sub: s),
           const SizedBox(height: 12),
         ],
@@ -165,11 +171,27 @@ class _SubscriptionCard extends ConsumerWidget {
     }
   }
 
+  void _openDetail(BuildContext context, WidgetRef ref) {
+    final user = ref.read(currentUserProvider).valueOrNull;
+    final academyId = user?.academyId;
+    if (academyId == null) return;
+    SubscriptionDetailSheet.show(
+      context,
+      sub: sub,
+      academyId: academyId,
+      onChanged: () =>
+          ref.invalidate(studentSubscriptionsProvider(sub.studentId)),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final chip = _statusChip;
     final df = DateFormat('dd/MM/yyyy');
-    return Container(
+    return InkWell(
+      onTap: () => _openDetail(context, ref),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -232,55 +254,104 @@ class _SubscriptionCard extends ConsumerWidget {
               sub.status == 'pending' ||
               sub.status == 'paused') ...[
             const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: () => _confirmCancel(context, ref),
-                style: TextButton.styleFrom(foregroundColor: AppTheme.error),
-                icon: const Icon(LucideIcons.x, size: 16),
-                label: const Text('Cancelar assinatura'),
-              ),
+            Row(
+              children: [
+                Icon(LucideIcons.settings2,
+                    size: 14, color: AppTheme.textSecondary),
+                const SizedBox(width: 6),
+                Text(
+                  'Toque para gerenciar',
+                  style: AppTheme.labelSmall
+                      .copyWith(color: AppTheme.textSecondary),
+                ),
+                const Spacer(),
+                const Icon(LucideIcons.chevronRight,
+                    size: 16, color: AppTheme.textSecondary),
+              ],
             ),
           ],
         ],
       ),
-    );
-  }
-
-  Future<void> _confirmCancel(BuildContext context, WidgetRef ref) async {
-    final user = ref.read(currentUserProvider).valueOrNull;
-    final academyId = user?.academyId;
-    if (academyId == null) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Cancelar assinatura?'),
-        content: const Text(
-          'As próximas cobranças serão interrompidas. Os meses já pagos '
-          'permanecem. Sem reembolso do mês corrente.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Voltar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Cancelar assinatura'),
-          ),
-        ],
       ),
     );
-    if (ok != true) return;
-    try {
-      await SubscriptionService(academyId).cancel(sub.id);
-      if (context.mounted) {
-        context.showSuccess('Assinatura cancelada.');
-        ref.invalidate(studentSubscriptionsProvider(sub.studentId));
-      }
-    } catch (e) {
-      if (context.mounted) context.showError('Não foi possível cancelar: $e');
-    }
+  }
+}
+
+/// Prominent dunning banner shown when a subscription charge failed
+/// (`needsReauth==true`). Tapping it opens the card-update flow
+/// (`updateSubscriptionCard`) via the subscription-detail sheet.
+class _DunningBanner extends ConsumerWidget {
+  final Subscription sub;
+  const _DunningBanner({required this.sub});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(currentUserProvider).valueOrNull;
+    final academyId = user?.academyId;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: academyId == null
+              ? null
+              : () => UpdateSubscriptionCardSheet.show(
+                    context,
+                    academyId: academyId,
+                    subscriptionId: sub.id,
+                    onUpdated: () => ref.invalidate(
+                        studentSubscriptionsProvider(sub.studentId)),
+                  ),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.error.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(14),
+              border:
+                  Border.all(color: AppTheme.error.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppTheme.error.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(LucideIcons.alertTriangle,
+                      size: 20, color: AppTheme.error),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Sua cobrança falhou',
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.error,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Atualize o cartão para retomar a assinatura.',
+                        style: AppTheme.bodySmall
+                            .copyWith(color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(LucideIcons.creditCard,
+                    size: 18, color: AppTheme.error),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
