@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -508,9 +509,15 @@ class _ActionsState extends State<_Actions> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
+      // O backend devolve mensagens pt-BR legíveis (failed-precondition etc.)
+      // — exibe a message em vez do e.toString() com prefixo técnico.
+      final msg = (e is FirebaseFunctionsException &&
+              (e.message?.trim().isNotEmpty ?? false))
+          ? e.message!.trim()
+          : 'Não foi possível concluir. Tente novamente.';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Não foi possível concluir: $e'),
+          content: Text(msg),
           backgroundColor: AppTheme.error,
         ),
       );
@@ -533,8 +540,31 @@ class _ActionsState extends State<_Actions> {
   @override
   Widget build(BuildContext context) {
     final paused = widget.sub.status == 'paused';
+    // Pausa intencional do usuário (sem dunning): oferece retomar. Quando
+    // needsReauth==true a retomada passa pela troca de cartão (fluxo abaixo).
+    final canResume = paused && !widget.sub.needsReauth;
     return Column(
       children: [
+        if (canResume) ...[
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _busy
+                  ? null
+                  : () => _run(
+                        () => _service.resume(widget.sub.id),
+                        success: 'Assinatura retomada.',
+                        confirmTitle: 'Retomar assinatura?',
+                        confirmBody:
+                            'As cobranças mensais no cartão voltam a ser '
+                            'feitas normalmente a partir do próximo ciclo.',
+                      ),
+              icon: const Icon(LucideIcons.play, size: 18),
+              label: const Text('Retomar assinatura'),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(

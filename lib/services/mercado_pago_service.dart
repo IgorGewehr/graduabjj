@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 
 import 'abacate_pay_service.dart' show PaymentLink, CardData, CardPaymentResult;
 import 'mp_card_tokenizer.dart';
@@ -177,23 +178,34 @@ class MercadoPagoService {
         'payerEmail': _payerEmail,
       });
       final data = Map<String, dynamic>.from(result.data);
+      final status = data['status'] as String?;
+      // A mensagem reflete o status real do preapproval: 'authorized' já está
+      // cobrando; 'pending' ainda aguarda a autorização do cartão no MP.
       return (
         success: true,
-        message: 'Assinatura ativada!',
+        message: status == 'authorized'
+            ? 'Assinatura ativada!'
+            : 'Assinatura criada! Aguardando autorizacao do cartao.',
         subscriptionId: data['subscriptionId'] as String?,
-        status: data['status'] as String?,
+        status: status,
       );
     } on FirebaseFunctionsException catch (e) {
+      // e.message vem pt-BR do backend (ex.: failed-precondition de
+      // assinatura duplicada) — exibe direto ao usuario.
       return (
         success: false,
-        message: e.message ?? 'Falha ao criar a assinatura.',
+        message: (e.message?.trim().isNotEmpty ?? false)
+            ? e.message!.trim()
+            : 'Falha ao criar a assinatura. Tente novamente.',
         subscriptionId: null,
         status: null,
       );
     } catch (e) {
+      debugPrint('[MercadoPago] createSubscription exception: $e');
       return (
         success: false,
-        message: e.toString(),
+        message: 'Nao foi possivel criar a assinatura. Verifique os dados '
+            'do cartao e tente novamente.',
         subscriptionId: null,
         status: null,
       );

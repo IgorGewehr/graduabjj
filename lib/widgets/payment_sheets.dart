@@ -18,6 +18,8 @@ import '../services/firebase_service.dart';
 import '../services/abacate_pay_service.dart';
 import '../services/asaas_payment_service.dart';
 import '../services/mercado_pago_service.dart';
+import '../services/subscription_service.dart';
+import '../services/payment/payment_gateway_resolver.dart';
 
 // ============================================
 // Modern PIX Payment Bottom Sheet
@@ -1304,6 +1306,13 @@ class CardPaymentSheet extends StatefulWidget {
   final String? subscriptionPlanId;
   final String studentId;
   final String studentName;
+
+  /// The connected gateway already resolved by the caller
+  /// ([paymentGatewayProvider] / `PaymentGatewayResolver` — single source of
+  /// truth). The sheet NEVER re-resolves it here: a transient Firestore read
+  /// failure must surface as a retryable error, never silently fall back to
+  /// another card gateway (Asaas/AbacatePay receive the raw card data).
+  final PaymentGateway gateway;
   final VoidCallback? onPaymentSuccess;
   final VoidCallback? onClose;
 
@@ -1316,6 +1325,7 @@ class CardPaymentSheet extends StatefulWidget {
     this.subscriptionPlanId,
     required this.studentId,
     required this.studentName,
+    required this.gateway,
     this.onPaymentSuccess,
     this.onClose,
   });
@@ -1476,19 +1486,37 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
         cpf: _cpfController.text,
       );
 
-      // Gateway precedence: Mercado Pago (connected) > Asaas > AbacatePay.
+      // Gateway resolvido pelo caller (paymentGatewayProvider). NUNCA
+      // re-resolver aqui: uma falha transitória de leitura faria o fluxo cair
+      // num gateway de cartão errado (Asaas/AbacatePay recebem o cartão cru).
+      final gateway = widget.gateway;
       final mp = MercadoPagoService(academyId);
-      final asaasService = AsaasPaymentService(academyId);
-      final useMp = await mp.isEnabled();
-      final isAsaas = !useMp && await asaasService.isEnabled();
+      final useMp = gateway == PaymentGateway.mercadoPago;
+      final isAsaas = gateway == PaymentGateway.asaas;
+      final isAbacate = gateway == PaymentGateway.abacatePay;
 
       CardPaymentResult result;
       // Recurring subscription (MP only): tokenize once, then MP auto-charges
       // the card monthly. No installments — it's a monthly preapproval.
       if (widget.isSubscription) {
         if (!useMp) {
+          if (!mounted) return;
           setState(() => _errorMessage =
               'Assinatura recorrente requer o Mercado Pago conectado.');
+          return;
+        }
+        // Guarda de duplicação: re-checa no servidor se já existe assinatura
+        // viva (pending/authorized/paused) deste plano para o aluno antes de
+        // criar o preapproval — cobre o retry pós-timeout. O backend tem a
+        // mesma guarda (failed-precondition); aqui é defesa em profundidade.
+        final hasLive = await SubscriptionService(academyId).hasLiveSubscription(
+          studentId: widget.studentId,
+          planId: widget.subscriptionPlanId!,
+        );
+        if (hasLive) {
+          if (!mounted) return;
+          setState(() => _errorMessage =
+              'Já existe uma assinatura ativa deste plano para este aluno.');
           return;
         }
         final sub = await mp.createSubscription(
@@ -1510,7 +1538,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             installments: _installments,
           );
         } else if (isAsaas) {
-          result = await asaasService.createStoreOrderCardPayment(
+          result = await AsaasPaymentService(academyId).createStoreOrderCardPayment(
             amount: widget.amount,
             orderId: widget.orderId!,
             studentId: widget.studentId,
@@ -1518,7 +1546,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             cardData: cardData,
             description: widget.description,
           );
-        } else {
+        } else if (isAbacate) {
           result = await AbacatePayService(academyId).createStoreOrderCardPayment(
             amount: widget.amount,
             orderId: widget.orderId!,
@@ -1527,6 +1555,13 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             cardData: cardData,
             description: widget.description,
           );
+        } else {
+          // PaymentGateway.none: nenhum gateway de cartão conectado — nunca
+          // tentar cobrar. Erro retryable em vez de fallback silencioso.
+          if (!mounted) return;
+          setState(() => _errorMessage =
+              'Pagamento com cartao indisponivel no momento. Tente novamente.');
+          return;
         }
       } else if (widget.financialId != null) {
         if (useMp) {
@@ -1540,7 +1575,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             installments: _installments,
           );
         } else if (isAsaas) {
-          result = await asaasService.createCardPayment(
+          result = await AsaasPaymentService(academyId).createCardPayment(
             amount: widget.amount,
             financialId: widget.financialId!,
             studentId: widget.studentId,
@@ -1548,7 +1583,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             cardData: cardData,
             description: widget.description,
           );
-        } else {
+        } else if (isAbacate) {
           result = await AbacatePayService(academyId).createCardPayment(
             amount: widget.amount,
             financialId: widget.financialId!,
@@ -1557,6 +1592,11 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             cardData: cardData,
             description: widget.description,
           );
+        } else {
+          if (!mounted) return;
+          setState(() => _errorMessage =
+              'Pagamento com cartao indisponivel no momento. Tente novamente.');
+          return;
         }
       } else {
         throw Exception('Order ID or Financial ID is required');
@@ -1583,12 +1623,14 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
           widget.onPaymentSuccess?.call();
         }
       } else {
+        if (!mounted) return;
         setState(() {
           _errorMessage =
               result.message ?? 'Pagamento nao aprovado. Verifique os dados do cartao e tente novamente.';
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = _friendlyCardError(e);
       });

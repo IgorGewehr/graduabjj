@@ -56,9 +56,50 @@ class _SubscriptionSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final subs =
-        ref.watch(studentSubscriptionsProvider(student.id)).valueOrNull ??
-            const <Subscription>[];
+    final subsAsync = ref.watch(studentSubscriptionsProvider(student.id));
+    // Enquanto o stream de assinaturas não emitiu o primeiro snapshot, não dá
+    // para saber se já existe assinatura ativa — renderizar o CTA 'Assinar'
+    // aqui abriria janela para preapproval duplicado.
+    if (subsAsync.isLoading && !subsAsync.hasValue) {
+      return const SizedBox.shrink();
+    }
+    // Erro no stream (regras/transiente no cold start): NÃO sumir com a seção
+    // — ela carrega o card da assinatura e o banner de dunning (o único
+    // caminho do aluno para atualizar um cartão recusado). Mostra um tile
+    // compacto com retry; o CTA 'Assinar' segue suprimido (sem dado confiável).
+    if (!subsAsync.hasValue) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppTheme.error.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppTheme.error.withValues(alpha: 0.25)),
+          ),
+          child: Row(
+            children: [
+              const Icon(LucideIcons.alertTriangle,
+                  size: 18, color: AppTheme.error),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Não foi possível carregar sua assinatura.',
+                  style: AppTheme.bodySmall
+                      .copyWith(color: AppTheme.textSecondary),
+                ),
+              ),
+              TextButton(
+                onPressed: () => ref
+                    .invalidate(studentSubscriptionsProvider(student.id)),
+                child: const Text('Tentar de novo'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final subs = subsAsync.value ?? const <Subscription>[];
     final plan = ref.watch(studentPlanProvider(student.id)).valueOrNull;
 
     final active = subs
@@ -153,6 +194,11 @@ class _SubscriptionSection extends ConsumerWidget {
                         subscriptionPlanId: plan.id,
                         studentId: student.id,
                         studentName: student.fullName,
+                        // Assinatura recorrente é MP-only por contrato (cartão
+                        // tokenizado client-side; nada cru sai do app). A
+                        // conexão real é validada no service (public key) e no
+                        // backend (createMpSubscription).
+                        gateway: PaymentGateway.mercadoPago,
                         onPaymentSuccess: () => ref.invalidate(
                             studentSubscriptionsProvider(student.id)),
                       ),
@@ -594,6 +640,9 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
           onRefresh: () async {
             HapticFeedback.mediumImpact();
             ref.invalidate(studentPaymentsProvider(student.id));
+            // Recupera também a seção de assinatura (um StreamProvider com erro
+            // não se auto-recupera; sem isso o pull-to-refresh não a traz de volta).
+            ref.invalidate(studentSubscriptionsProvider(student.id));
             ref.invalidate(dependentsProvider);
             ref.invalidate(pixInfoProvider);
             ref.invalidate(abacatePayEnabledProvider);
