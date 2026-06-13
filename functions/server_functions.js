@@ -4657,6 +4657,84 @@ async function mpMktRecordUnmatchedPayment(academyId, type, docId, payment, opts
 }
 
 /** Flips the financial/order to paid (idempotent) + stock + admin notify. */
+// ---- Aula particular: concessão de presença ao liquidar a cobrança ---------
+// Uma cobrança financial type='private_lesson' concede UMA presença real ao
+// aluno (sem turma/plano) quando é paga. Espelha a semântica do markPresent do
+// cliente (attendance_service.dart:362-427): cria o doc de attendance e
+// incrementa student.attendanceCount na MESMA transação. É idempotente por
+// FINANCIAL via dois mecanismos combinados: a flag fin.attendanceGranted e um
+// id de presença determinístico que inclui o financialId — duas aulas
+// particulares do mesmo aluno no mesmo dia geram presenças distintas (a regra
+// padrão {studentId}_{classId}_{YYYYMMDD} colidiria e perderia uma presença
+// paga). NOTA: a auto-promoção de faixa (graduationMode='auto') roda no cliente
+// no check-in; aqui só incrementamos o contador (que alimenta ranking/streak/
+// elegibilidade) — a promoção é reavaliada no próximo check-in ou manualmente.
+function ymdCompact(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}${m}${day}`;
+}
+
+/** Concede (exactly-once) a presença de uma aula particular paga. `fin` é o
+ * snapshot do doc financial; `actor` = { verifiedBy, verifiedByName }. Best-
+ * effort no chamador: uma falha aqui nunca deve desfazer a liquidação. */
+async function grantPrivateLessonAttendance(academyId, financialId, fin, actor) {
+  const studentId = fin.studentId;
+  if (!studentId) {
+    console.error('[grantPrivateLesson] financial sem studentId', financialId);
+    return;
+  }
+  const lessonDate = fin.lessonDate?.toDate?.() ||
+    fin.dueDate?.toDate?.() || new Date();
+  const weight = Number(fin.lessonWeight) > 0 ? Number(fin.lessonWeight) : 1;
+  const sport = fin.lessonSport || 'bjj';
+  const attendanceId =
+    `${studentId}_aula_particular_${ymdCompact(lessonDate)}_${String(financialId).slice(-6)}`;
+
+  const finRef = db.doc(`academies/${academyId}/financials/${financialId}`);
+  const attRef = db.doc(`academies/${academyId}/attendance/${attendanceId}`);
+  const studentRef = db.doc(`academies/${academyId}/students/${studentId}`);
+
+  await db.runTransaction(async (tx) => {
+    const finSnap = await tx.get(finRef);
+    if (finSnap.exists && finSnap.data().attendanceGranted === true) {
+      return; // já concedida (re-entrega do webhook / grant manual prévio)
+    }
+    const attSnap = await tx.get(attRef);
+    const finUpdate = {
+      attendanceGranted: true,
+      attendanceId,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (attSnap.exists) {
+      // Presença já existe mas a flag não estava setada (reconciliação): só
+      // marca a flag, sem re-incrementar o contador (evita duplo incremento).
+      tx.update(finRef, finUpdate);
+      return;
+    }
+    const payload = {
+      studentId,
+      studentName: fin.studentName || '',
+      classId: 'aula_particular',
+      className: 'Aula Particular',
+      date: admin.firestore.Timestamp.fromDate(lessonDate),
+      verifiedBy: actor.verifiedBy,
+      verifiedByName: actor.verifiedByName,
+      notes: `Aula particular — fin ${financialId}`,
+      sport,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (weight !== 1) payload.weight = weight; // espelha markPresent (só != 1)
+    tx.set(attRef, payload);
+    tx.update(studentRef, {
+      attendanceCount: admin.firestore.FieldValue.increment(1),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    tx.update(finRef, finUpdate);
+  });
+}
+
 async function mpMktSettle({ academyId, type, docId }, payment) {
   const chargeId = String(payment.id);
   const amtFmt = (Number(payment.transaction_amount) || 0).toFixed(2);
@@ -4809,6 +4887,13 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
           snap.data().gatewayPaymentId !== chargeId) {
         return { didSettle: false, duplicatePayment: true };
       }
+      // Aula particular já paga mas com a presença ainda não concedida (crash
+      // entre o commit do dinheiro e o grant, espelho do completeStock/achado
+      // #30): completa o grant na re-entrega do webhook em vez de no-op.
+      if (snap.data().type === 'private_lesson' &&
+          snap.data().attendanceGranted !== true) {
+        return { didSettle: false, completeGrant: true, finData: snap.data() };
+      }
       return { didSettle: false }; // idempotent
     }
     // SECURITY: refuse to settle if the paid amount differs from the stored
@@ -4847,8 +4932,18 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
       pixExpiresAt: admin.firestore.FieldValue.delete(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    return { didSettle: true };
+    return { didSettle: true, finData: snap.data() };
   });
+  // Aula particular: completa só o grant da presença numa re-entrega tardia
+  // (dinheiro já liquidado num processo anterior que crashou antes do grant).
+  // Tx do dinheiro e tx do grant são separadas mas ambas idempotentes.
+  if (finSettle.completeGrant) {
+    await grantPrivateLessonAttendance(academyId, docId, finSettle.finData, {
+      verifiedBy: 'mp-webhook', verifiedByName: 'Mercado Pago',
+    }).catch((e) =>
+      console.error('[mpMktSettle] grant aula particular falhou', docId, e.message));
+    return; // efeito completado; não re-notifica o admin
+  }
   if (!finSettle.didSettle) {
     if (finSettle.missingDoc) {
       await mpMktRecordUnmatchedPayment(academyId, type, docId, payment);
@@ -4867,9 +4962,69 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
     }
     return; // already settled, missing doc, or mismatch
   }
+  // Liquidação real: se for aula particular, concede a presença (best-effort,
+  // após o commit do dinheiro — uma falha aqui não desfaz o pagamento).
+  if (finSettle.finData?.type === 'private_lesson') {
+    await grantPrivateLessonAttendance(academyId, docId, finSettle.finData, {
+      verifiedBy: 'mp-webhook', verifiedByName: 'Mercado Pago',
+    }).catch((e) =>
+      console.error('[mpMktSettle] grant aula particular falhou', docId, e.message));
+  }
   await notifyAdminCF(academyId, 'payment_received', 'Pagamento Recebido',
     `Pagamento de R$ ${amtFmt} recebido ${viaLabel}.`, { financialId: docId });
 }
+
+/** Concessão MANUAL da presença de uma aula particular — caminho offline:
+ * dinheiro recebido em mãos (cash), aula cortesia, ou staff confirmando que a
+ * aula aconteceu. Gated para staff (admin/instrutor). Opcionalmente marca a
+ * cobrança como paga (method='cash') quando paga presencialmente. Reutiliza o
+ * MESMO grantPrivateLessonAttendance idempotente do caminho do webhook, de modo
+ * que conceder manual e depois receber o webhook (ou vice-versa) nunca duplica
+ * a presença nem o contador. */
+exports.markPrivateLessonGiven = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login required.');
+  const { academyId, financialId, markPaidCash, staffName } = request.data || {};
+  if (!academyId || !financialId) {
+    throw new HttpsError('invalid-argument',
+      'academyId e financialId são obrigatórios.');
+  }
+  const membership = await getUserAcademyMembership(request.auth.uid, academyId);
+  const isStaff = membership &&
+    (membership.role === 'admin' || membership.role === 'instructor');
+  if (!isStaff) {
+    throw new HttpsError('permission-denied',
+      'Apenas admin ou professor pode conceder a presença.');
+  }
+
+  const finRef = db.doc(`academies/${academyId}/financials/${financialId}`);
+  const snap = await finRef.get();
+  if (!snap.exists) {
+    throw new HttpsError('not-found', 'Cobrança não encontrada.');
+  }
+  const fin = snap.data();
+  if (fin.type !== 'private_lesson') {
+    throw new HttpsError('failed-precondition',
+      'A cobrança não é uma aula particular.');
+  }
+
+  // Pagamento presencial em dinheiro: marca a cobrança como paga (cash) antes
+  // de conceder a presença. Idempotente — só marca se ainda não estava paga.
+  if (markPaidCash === true && fin.status !== 'paid') {
+    await finRef.update({
+      status: 'paid',
+      method: 'cash',
+      paymentGateway: 'cash',
+      paymentDate: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  await grantPrivateLessonAttendance(academyId, financialId, fin, {
+    verifiedBy: request.auth.uid,
+    verifiedByName: (staffName && String(staffName).trim()) || 'Professor',
+  });
+  return { success: true };
+});
 
 // ---- Estorno / chargeback no marketplace (achado #16) ----------------------
 // O MP re-notifica o MESMO payment id com status refunded/charged_back/

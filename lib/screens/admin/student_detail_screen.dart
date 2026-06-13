@@ -1597,7 +1597,11 @@ class _AdminStudentDetailScreenState
   }
 
   Widget _buildFinancialTab() {
-    final mensalidades = _payments.where((p) => p.type != 'avulsa').toList();
+    final aulasParticulares =
+        _payments.where((p) => p.isPrivateLesson).toList();
+    final mensalidades = _payments
+        .where((p) => p.type != 'avulsa' && !p.isPrivateLesson)
+        .toList();
     final avulsas = _payments.where((p) => p.type == 'avulsa').toList();
 
     if (_payments.isEmpty && _storeOrders.isEmpty && _studentPlans.isEmpty) {
@@ -1795,6 +1799,54 @@ class _AdminStudentDetailScreenState
           ...avulsas.map((payment) => _PaymentCard(payment: payment)),
           const SizedBox(height: 16),
         ],
+        // Private lessons (aula particular) — cobrança avulsa que concede uma
+        // presença ao aluno quando paga, sem plano nem turma.
+        Row(
+          children: [
+            Text(
+              'AULAS PARTICULARES',
+              style: AppTheme.labelSmall.copyWith(
+                color: AppTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: _showPrivateLessonDialog,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(LucideIcons.plus, size: 14, color: AppTheme.primary),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Aula Particular',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (aulasParticulares.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Text(
+              'Nenhuma aula particular',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+          )
+        else ...[
+          ...aulasParticulares.map((payment) => _PrivateLessonCard(
+                payment: payment,
+                onGrantPresence: () => _grantPrivateLessonPresence(payment),
+              )),
+          const SizedBox(height: 16),
+        ],
         // Tuition payments
         if (mensalidades.isNotEmpty) ...[
           Text(
@@ -1970,6 +2022,267 @@ class _AdminStudentDetailScreenState
         );
       },
     );
+  }
+
+  /// Cria uma cobrança de AULA PARTICULAR (type 'private_lesson'): cobrança
+  /// avulsa que, ao ser paga (PIX/cartão via MP) — ou marcada como dada
+  /// manualmente — concede UMA presença ao aluno, sem plano nem turma.
+  void _showPrivateLessonDialog() {
+    final valueController = TextEditingController();
+    final descController = TextEditingController(text: 'Aula particular');
+    DateTime lessonDate = DateTime.now();
+    PaymentMethodPolicy policy = PaymentMethodPolicy.both;
+    double weight = 1;
+    final sports = _student?.getSports() ?? [SportId.bjj];
+    SportId sport = _student?.getPrimarySport() ?? SportId.bjj;
+    final parentContext = context;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Nova Aula Particular'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: descController,
+                      decoration: const InputDecoration(
+                        labelText: 'Descrição',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: valueController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Valor',
+                        prefixText: 'R\$ ',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Data da aula',
+                      style: AppTheme.bodySmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: lessonDate,
+                          firstDate: DateTime.now()
+                              .subtract(const Duration(days: 365)),
+                          lastDate:
+                              DateTime.now().add(const Duration(days: 730)),
+                        );
+                        if (picked != null) {
+                          setDialogState(() => lessonDate = picked);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: AppTheme.divider),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.calendar,
+                                size: 16, color: AppTheme.textSecondary),
+                            const SizedBox(width: 8),
+                            Text(
+                              DateFormat('dd/MM/yyyy').format(lessonDate),
+                              style: AppTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // Peso da presença (graduação/streak). Padrão 1; alguns
+                    // professores contam a particular em dobro.
+                    Row(
+                      children: [
+                        Text(
+                          'Conta como',
+                          style: AppTheme.bodySmall
+                              .copyWith(color: AppTheme.textSecondary),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(LucideIcons.minus, size: 18),
+                          onPressed: weight > 1
+                              ? () => setDialogState(() => weight -= 1)
+                              : null,
+                        ),
+                        Text(
+                          '${weight.toInt()} presença${weight > 1 ? 's' : ''}',
+                          style: AppTheme.bodyMedium
+                              .copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        IconButton(
+                          icon: const Icon(LucideIcons.plus, size: 18),
+                          onPressed: weight < 5
+                              ? () => setDialogState(() => weight += 1)
+                              : null,
+                        ),
+                      ],
+                    ),
+                    if (sports.length > 1) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Esporte',
+                        style: AppTheme.bodySmall
+                            .copyWith(color: AppTheme.textSecondary),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: sports.map((s) {
+                          return ChoiceChip(
+                            label: Text(getSport(s).label),
+                            selected: sport == s,
+                            onSelected: (_) =>
+                                setDialogState(() => sport = s),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    Text(
+                      'Formas de pagamento',
+                      style: AppTheme.bodySmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: PaymentMethodPolicy.values.map((p) {
+                        return ChoiceChip(
+                          label: Text(p.label),
+                          selected: policy == p,
+                          onSelected: (_) =>
+                              setDialogState(() => policy = p),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final value = double.tryParse(
+                      valueController.text.replaceAll(',', '.'),
+                    );
+                    if (value == null || value <= 0) return;
+                    final desc = descController.text.trim().isEmpty
+                        ? 'Aula particular'
+                        : descController.text.trim();
+                    Navigator.of(dialogContext).pop();
+
+                    final currentUser =
+                        ref.read(currentUserProvider).valueOrNull;
+                    try {
+                      await PaymentService(FirebaseService.academyId).create(
+                        studentId: widget.studentId,
+                        studentName: _student?.fullName ?? '',
+                        value: value,
+                        dueDate: lessonDate,
+                        description: desc,
+                        type: 'private_lesson',
+                        planId: null,
+                        paymentMethodPolicy: policy,
+                        sendNotification: true,
+                        createdBy: currentUser?.id,
+                        lessonDate: lessonDate,
+                        lessonWeight: weight,
+                        lessonSport: sport.value,
+                        instructorId: currentUser?.id,
+                        instructorName: currentUser?.displayName,
+                      );
+                    } catch (e) {
+                      if (parentContext.mounted) {
+                        parentContext.showError('Erro ao criar aula particular');
+                      }
+                      return;
+                    }
+                    if (parentContext.mounted) {
+                      parentContext.showSuccess('Aula particular criada');
+                    }
+                    _loadData();
+                  },
+                  child: const Text('Criar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Concede manualmente a presença de uma aula particular (cash/cortesia ou
+  /// confirmação de que a aula aconteceu). Chama a CF idempotente — conceder
+  /// aqui e depois receber o pagamento MP nunca duplica a presença.
+  Future<void> _grantPrivateLessonPresence(Payment payment) async {
+    final isPaid = payment.isPaid;
+    // null = cancelar; false = conceder sem marcar pago; true = marcar pago
+    // (dinheiro) e conceder.
+    final markCash = await showDialog<bool?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Conceder presença'),
+        content: Text(isPaid
+            ? 'Confirmar a presença desta aula particular para '
+                '${_student?.fullName ?? 'o aluno'}?'
+            : 'A cobrança ainda não foi paga. Como deseja conceder a presença?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          if (!isPaid)
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cortesia'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(!isPaid),
+            child: Text(isPaid ? 'Conceder' : 'Pago em dinheiro'),
+          ),
+        ],
+      ),
+    );
+    if (markCash == null) return;
+
+    final staffName = ref.read(currentUserProvider).valueOrNull?.displayName;
+    try {
+      await PaymentService(FirebaseService.academyId).markPrivateLessonGiven(
+        financialId: payment.id,
+        markPaidCash: markCash,
+        staffName: staffName,
+      );
+    } catch (e) {
+      if (mounted) context.showError('Erro ao conceder presença');
+      return;
+    }
+    if (mounted) context.showSuccess('Presença concedida');
+    _loadData();
   }
 
   void _showCustomValueDialog(Plan plan) {
@@ -4182,6 +4495,129 @@ class _PaymentCard extends StatelessWidget {
                 ),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Card de aula particular: cobrança avulsa que concede presença ao aluno.
+/// Mostra o status de pagamento + o status da presença (concedida ✓ ou um
+/// botão "Conceder presença" para o caminho manual/cash/cortesia).
+class _PrivateLessonCard extends StatelessWidget {
+  final Payment payment;
+  final VoidCallback onGrantPresence;
+
+  const _PrivateLessonCard({
+    required this.payment,
+    required this.onGrantPresence,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColors = {
+      PaymentStatus.pending: Colors.orange,
+      PaymentStatus.paid: Colors.green,
+      PaymentStatus.overdue: Colors.red,
+      PaymentStatus.cancelled: Colors.grey,
+    };
+    final granted = payment.attendanceGranted;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor:
+                      AppTheme.primary.withValues(alpha: 0.15),
+                  child: const Icon(LucideIcons.userCheck,
+                      size: 18, color: AppTheme.primary),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        payment.description ?? 'Aula particular',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        'Aula: ${DateFormat('dd/MM/yyyy').format(payment.dueDate)}',
+                        style: AppTheme.bodySmall
+                            .copyWith(color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      'R\$ ${payment.value.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    const SizedBox(height: 2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: statusColors[payment.status]
+                            ?.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        payment.status.label,
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: statusColors[payment.status],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Status da presença.
+            if (granted)
+              Row(
+                children: [
+                  const Icon(LucideIcons.check,
+                      size: 14, color: Colors.green),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Presença concedida',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: Colors.green,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              )
+            else
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: onGrantPresence,
+                  icon: const Icon(LucideIcons.userCheck, size: 16),
+                  label: const Text('Conceder presença'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 4),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
           ],
         ),
       ),

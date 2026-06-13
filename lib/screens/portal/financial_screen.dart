@@ -1328,6 +1328,37 @@ class _PaymentCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    // Aula particular: deixa explícito que pagar registra uma
+                    // presença, em vez de parecer uma mensalidade comum.
+                    if (payment.isPrivateLesson) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(
+                            payment.attendanceGranted
+                                ? LucideIcons.userCheck
+                                : LucideIcons.graduationCap,
+                            size: 12,
+                            color: payment.attendanceGranted
+                                ? AppTheme.success
+                                : AppTheme.primary,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            payment.attendanceGranted
+                                ? 'Aula particular · presença registrada'
+                                : 'Aula particular',
+                            style: AppTheme.labelSmall.copyWith(
+                              color: payment.attendanceGranted
+                                  ? AppTheme.success
+                                  : AppTheme.primary,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 4),
                     Row(
                       children: [

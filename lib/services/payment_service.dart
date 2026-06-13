@@ -168,10 +168,13 @@ class Payment {
   final String? pixCode;
   final String? pixQrCode;
   final String? planId;
-  final String type; // 'monthly_tuition' | 'avulsa'
+  final String type; // 'monthly_tuition' | 'avulsa' | 'private_lesson'
   /// Snapshot of the plan/charge payment-method policy at generation time.
   /// Absent on legacy docs → [PaymentMethodPolicy.both].
   final PaymentMethodPolicy paymentMethodPolicy;
+  /// Aula particular (type == 'private_lesson'): true depois que o backend
+  /// concedeu a presença ao aluno (no settle do pagamento ou no grant manual).
+  final bool attendanceGranted;
   final DateTime createdAt;
 
   Payment({
@@ -193,6 +196,7 @@ class Payment {
     this.planId,
     this.type = 'monthly_tuition',
     this.paymentMethodPolicy = PaymentMethodPolicy.both,
+    this.attendanceGranted = false,
     required this.createdAt,
   });
 
@@ -226,12 +230,17 @@ class Payment {
       type: data['type'] ?? 'monthly_tuition',
       paymentMethodPolicy:
           PaymentMethodPolicyExtension.fromString(data['paymentMethodPolicy']),
+      attendanceGranted: data['attendanceGranted'] == true,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
 
   // Computed properties
   bool get isPaid => status == PaymentStatus.paid;
+
+  /// Aula particular 1:1 (type 'private_lesson') — cobrança avulsa que concede
+  /// uma presença ao aluno quando paga, sem plano nem turma.
+  bool get isPrivateLesson => type == 'private_lesson';
 
   /// Cobrança indevida de assinatura (lote 1: type 'subscription_overcharge',
   /// status 'paid', needsRefund) — dinheiro a DEVOLVER, nunca receita. Toda
@@ -519,7 +528,16 @@ class PaymentService {
     String type = 'monthly_tuition',
     PaymentMethodPolicy paymentMethodPolicy = PaymentMethodPolicy.both,
     bool sendNotification = true,
+    // Aula particular (type == 'private_lesson'): metadados da aula que o
+    // backend usa para conceder a presença ao liquidar a cobrança. Ignorados
+    // para os demais tipos.
+    DateTime? lessonDate,
+    double? lessonWeight,
+    String? lessonSport,
+    String? instructorId,
+    String? instructorName,
   }) async {
+    final isPrivateLesson = type == 'private_lesson';
     final docRef = await _paymentsRef.add({
       'academyId': academyId,
       'studentId': studentId,
@@ -535,13 +553,23 @@ class PaymentService {
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
       'createdBy': createdBy,
+      if (isPrivateLesson) ...{
+        'lessonDate': Timestamp.fromDate(lessonDate ?? dueDate),
+        'lessonWeight': lessonWeight ?? 1.0,
+        'lessonSport': lessonSport ?? 'bjj',
+        'instructorId': instructorId,
+        'instructorName': instructorName,
+        // O backend vira true ao conceder a presença (grantPrivateLessonAttendance).
+        'attendanceGranted': false,
+      },
     });
 
     final doc = await docRef.get();
     final payment = Payment.fromFirestore(doc);
 
     // Send notification to student if they have a linked account
-    if (sendNotification && type == 'monthly_tuition') {
+    if (sendNotification &&
+        (type == 'monthly_tuition' || isPrivateLesson)) {
       try {
         final student = await _studentService.getById(studentId);
         // Route to the responsible adult (kids) when set, else the student's
@@ -562,6 +590,27 @@ class PaymentService {
     }
 
     return payment;
+  }
+
+  /// Concede manualmente a presença de uma aula particular (caminho offline:
+  /// dinheiro em mãos, cortesia, ou confirmação de que a aula aconteceu).
+  /// Chama a CF `markPrivateLessonGiven` (gated p/ admin/professor), que roda o
+  /// MESMO grant idempotente do webhook — conceder manual e depois receber o
+  /// pagamento MP nunca duplica a presença. Quando [markPaidCash] é true, marca
+  /// a cobrança como paga (method 'cash') antes de conceder.
+  Future<void> markPrivateLessonGiven({
+    required String financialId,
+    bool markPaidCash = false,
+    String? staffName,
+  }) async {
+    await FirebaseFunctions.instance
+        .httpsCallable('markPrivateLessonGiven')
+        .call({
+      'academyId': academyId,
+      'financialId': financialId,
+      'markPaidCash': markPaidCash,
+      if (staffName != null) 'staffName': staffName,
+    });
   }
 
   // ============================================
