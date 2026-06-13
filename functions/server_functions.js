@@ -1693,6 +1693,51 @@ async function getUserAcademyInfo(uid) {
   return { academyId };
 }
 
+/**
+ * Multi-academy aware variant of getUserAcademyInfo: resolves the caller's
+ * membership in ONE SPECIFIC academy instead of only the primary one, so
+ * users of a second academy aren't wrongly denied. Membership evidence comes
+ * from userAcademyMapping (primaryAcademyId / academyIds / academyDetails
+ * entry); role/studentId for THAT academy come from academyDetails[academyId]
+ * with the academy-scoped user doc as fallback (same sources as
+ * getUserAcademyInfo and index.js resolveRole).
+ * Returns { academyId, role, studentId } or null when uid does NOT belong to
+ * that academy. For single-academy users the result is identical to
+ * getUserAcademyInfo.
+ */
+async function getUserAcademyMembership(uid, academyId) {
+  if (!uid || !academyId) return null;
+  const mappingDoc = await db.collection('userAcademyMapping').doc(uid).get();
+  const mappingData = mappingDoc.data();
+
+  const details = mappingData?.academyDetails?.[academyId];
+  const belongs =
+    mappingData?.primaryAcademyId === academyId ||
+    (Array.isArray(mappingData?.academyIds) &&
+      mappingData.academyIds.includes(academyId)) ||
+    details !== undefined;
+  if (!belongs) return null;
+
+  if (details?.role) {
+    return { academyId, role: details.role, studentId: details.studentId };
+  }
+
+  // Fallback: legacy academies often have academyIds set but no academyDetails
+  // entry — the role/studentId live only in the academy-scoped user doc.
+  const academyUserDoc = await db.collection('academies').doc(academyId)
+    .collection('users').doc(uid).get();
+  const academyUserData = academyUserDoc.data();
+  if (academyUserData?.role) {
+    return {
+      academyId,
+      role: academyUserData.role,
+      studentId: academyUserData.studentId,
+    };
+  }
+
+  return { academyId };
+}
+
 // ============================================
 // Cloud Functions - Payment Callable Functions
 // ============================================
@@ -1719,9 +1764,9 @@ exports.createPixPayment = onCall(async (request) => {
     );
   }
 
-  // 3. Validate user belongs to academy
-  const userInfo = await getUserAcademyInfo(context.auth.uid);
-  if (userInfo.academyId !== academyId) {
+  // 3. Validate user belongs to THIS academy (multi-academy aware)
+  const userInfo = await getUserAcademyMembership(context.auth.uid, academyId);
+  if (!userInfo) {
     throw new HttpsError('permission-denied', 'Access denied: Invalid academy');
   }
 
@@ -1871,9 +1916,9 @@ exports.createOrderPixPayment = onCall(async (request) => {
     );
   }
 
-  // 3. Validate user belongs to academy
-  const userInfo = await getUserAcademyInfo(context.auth.uid);
-  if (userInfo.academyId !== academyId) {
+  // 3. Validate user belongs to THIS academy (multi-academy aware)
+  const userInfo = await getUserAcademyMembership(context.auth.uid, academyId);
+  if (!userInfo) {
     throw new HttpsError('permission-denied', 'Access denied: Invalid academy');
   }
 
@@ -1916,13 +1961,25 @@ exports.createOrderPixPayment = onCall(async (request) => {
     throw new HttpsError('failed-precondition', 'This order is not pending payment');
   }
 
-  // 8. Verify amount matches
-  const orderTotal = orderData.total ?? orderData.totalAmount;
+  // 8. SECURITY (preco autoritativo da LOJA): o pedido e criado client-side,
+  // entao items[].price/total NAO sao confiaveis. Recomputa o total em REAIS
+  // a partir de storeProducts e cobra ESSE valor — o amount do cliente vira
+  // apenas cross-check.
+  const orderTotal = await orderAuthoritativeTotalReais(academyId, orderData);
   if (Math.abs(orderTotal - amount) > 1) {
     throw new HttpsError(
       'invalid-argument',
       `Amount (${amount}) does not match order total (${orderTotal})`
     );
+  }
+  // Grava o total autoritativo de volta no pedido (validacao de valor do
+  // settle compara contra o numero correto).
+  if (Math.abs((Number(orderData.total ?? orderData.totalAmount) || 0) -
+      orderTotal) > 0.005) {
+    await orderRef.update({
+      total: orderTotal,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
   }
 
   // 9. Get API key
@@ -1940,7 +1997,8 @@ exports.createOrderPixPayment = onCall(async (request) => {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      amount: Math.round(amount * 100), // Convert Reais to cents for AbacatePay
+      // Cobra o total AUTORITATIVO (reais -> cents), nunca o amount do cliente.
+      amount: Math.round(orderTotal * 100),
       description: sanitizeString(description) || 'Pedido da Loja',
       externalReference: `${academyId}_order_${orderId}`,
       expiresIn: 86400,
@@ -1966,7 +2024,7 @@ exports.createOrderPixPayment = onCall(async (request) => {
   await db.collection(`academies/${academyId}/walletTransactions`).add({
     academyId,
     type: 'payment',
-    amount: Math.round(amount * 100), // Store in cents (consistent with wallet display)
+    amount: Math.round(orderTotal * 100), // cents (autoritativo; wallet display)
     status: 'pending',
     financialId: `order_${orderId}`,
     studentId,
@@ -2020,9 +2078,9 @@ exports.createCardPayment = onCall(async (request) => {
     );
   }
 
-  // 3. Validate user belongs to academy
-  const userInfo = await getUserAcademyInfo(context.auth.uid);
-  if (userInfo.academyId !== academyId) {
+  // 3. Validate user belongs to THIS academy (multi-academy aware)
+  const userInfo = await getUserAcademyMembership(context.auth.uid, academyId);
+  if (!userInfo) {
     throw new HttpsError('permission-denied', 'Access denied: Invalid academy');
   }
 
@@ -2291,9 +2349,9 @@ exports.requestWithdrawal = onCall(async (request) => {
     );
   }
 
-  // 3. Validate user belongs to academy
-  const userInfo = await getUserAcademyInfo(context.auth.uid);
-  if (userInfo.academyId !== academyId) {
+  // 3. Validate user belongs to THIS academy (multi-academy aware)
+  const userInfo = await getUserAcademyMembership(context.auth.uid, academyId);
+  if (!userInfo) {
     throw new HttpsError('permission-denied', 'Access denied: Invalid academy');
   }
 
@@ -2572,6 +2630,18 @@ async function getMpAccessToken(academyId) {
 
   const d = await readTokens();
   if (isFresh(d)) {
+    // Um token válido prova que a conexão está saudável — limpa uma flag
+    // mpNeedsReauth espúria deixada por uma falha transitória de refresh
+    // (best-effort, fire-and-forget, fora do caminho crítico do pagamento).
+    academyRef.get()
+      .then((a) => {
+        if (a.exists && a.data().mpNeedsReauth) {
+          return academyRef.set(
+            { mpNeedsReauth: admin.firestore.FieldValue.delete() },
+            { merge: true });
+        }
+      })
+      .catch(() => {});
     return d.accessToken;
   }
 
@@ -2602,9 +2672,11 @@ async function getMpAccessToken(academyId) {
 
   if (!(await acquireLock())) {
     // Another call is refreshing. Re-read the token + expiry in a bounded loop
-    // (short waits) instead of a single blind read, so we never return a stale
-    // token. If the holder never finishes, fall through to retry the lock once.
-    for (let i = 0; i < 10; i++) {
+    // (30×300ms ≈ 9s — um refresh OAuth lento não pode derrubar cobranças
+    // legítimas com deadline-exceeded) instead of a single blind read, so we
+    // never return a stale token. If the holder never finishes, fall through
+    // to retry the lock once.
+    for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 300));
       const cur = await readTokens();
       if (isFresh(cur)) {
@@ -2613,6 +2685,8 @@ async function getMpAccessToken(academyId) {
     }
     // Holder appears stuck; attempt to take over (acquireLock reclaims if stale).
     if (!(await acquireLock())) {
+      // Última chance: relê o doc de auth — o holder pode ter renovado entre
+      // a última iteração e agora — antes de falhar de vez.
       const cur = await readTokens();
       if (isFresh(cur)) return cur.accessToken;
       throw new HttpsError('deadline-exceeded',
@@ -2664,8 +2738,8 @@ async function requireAdminOf(request, academyId) {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'User must be authenticated');
   }
-  const info = await getUserAcademyInfo(request.auth.uid);
-  if (info.academyId !== academyId || info.role !== 'admin') {
+  const info = await getUserAcademyMembership(request.auth.uid, academyId);
+  if (!info || info.role !== 'admin') {
     throw new HttpsError('permission-denied', 'Apenas o admin da academia pode conectar.');
   }
   return info;
@@ -2778,10 +2852,97 @@ function mpCallbackHtml(title, message, isError) {
 }
 
 // ---- OAuth: disconnect (admin) -------------------------------------------
-exports.disconnectMercadoPago = onCall(async (request) => {
+exports.disconnectMercadoPago = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
   const academyId = String(request.data?.academyId || '');
   if (!academyId) throw new HttpsError('invalid-argument', 'academyId é obrigatório.');
   await requireAdminOf(request, academyId);
+
+  // Sem assinaturas órfãs: o preapproval vive no LADO DO MP, independente do
+  // nosso token OAuth — apagar os tokens sem cancelá-lo deixaria o MP cobrando
+  // o cartão do aluno todo mês sem que ninguém (aluno, app ou crons) consiga
+  // mais gerenciar. Cancela tudo no MP enquanto o token ainda é válido; se
+  // QUALQUER cancel falhar, aborta o disconnect (tokens ficam p/ re-tentativa).
+  const activeSubs = await db.collection(`academies/${academyId}/subscriptions`)
+    .where('status', 'in', ['pending', 'authorized', 'paused'])
+    .get();
+  if (!activeSubs.empty) {
+    let token = null;
+    let failed = 0;
+    // Token IRRECUPERÁVEL (refresh revogado no painel do MP / conta encerrada):
+    // getMpAccessToken lança failed-precondition determinístico — abortar aqui
+    // bloquearia o disconnect PARA SEMPRE. Nesse caso liberamos o disconnect
+    // marcando as subs como pendentes de cancelamento MANUAL no painel do MP.
+    let tokenIrrecoverable = false;
+    for (const subDoc of activeSubs.docs) {
+      const sub = subDoc.data();
+      if (!sub.mpPreapprovalId) continue; // nunca chegou ao MP: nada a cancelar
+      if (tokenIrrecoverable) break;
+      try {
+        if (!token) token = await getMpAccessToken(academyId);
+        let mpCancelled = false;
+        try {
+          await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+            { token, body: { status: 'cancelled' } });
+          mpCancelled = true;
+        } catch (e) {
+          // PUT pode falhar com o preapproval JÁ cancelado no MP — confirma via GET.
+          const pa = await mpRequest('GET',
+            `/preapproval/${sub.mpPreapprovalId}`, { token });
+          mpCancelled = !!pa && pa.status === 'cancelled';
+          if (!mpCancelled) throw e;
+        }
+        await subDoc.ref.update({
+          status: 'cancelled',
+          lastEvent: 'cancelled_by_disconnect',
+          updatedAt: FV.serverTimestamp(),
+        });
+        await notifySubscriptionStudent(academyId, sub, 'subscription_cancelled',
+          'Assinatura encerrada',
+          'Sua assinatura recorrente foi encerrada pela academia. ' +
+          'Nenhuma nova cobrança será feita no seu cartão.',
+          { actionLabel: 'Ver financeiro' });
+      } catch (e) {
+        console.error('[disconnectMercadoPago] cancel preapproval falhou',
+          subDoc.id, e.message);
+        // failed-precondition de getMpAccessToken = refresh token recusado
+        // pelo MP (invalid_grant): determinístico, nunca vai melhorar com
+        // retry. Falhas TRANSITÓRIAS (timeout/5xx) seguem abortando.
+        if (!token && e instanceof HttpsError &&
+            e.code === 'failed-precondition') {
+          tokenIrrecoverable = true;
+        } else {
+          failed += 1;
+        }
+      }
+    }
+    if (tokenIrrecoverable) {
+      // Não dá para cancelar no MP sem token — mas manter a academia presa a
+      // um disconnect impossível também não resolve o preapproval. Marca as
+      // subs (preservando o status: NÃO são 'cancelled' — podem seguir vivas
+      // no MP) e avisa o admin para cancelá-las manualmente no painel.
+      for (const subDoc of activeSubs.docs) {
+        if (!subDoc.data().mpPreapprovalId) continue;
+        await subDoc.ref.update({
+          cancelPendingAtMp: true,
+          lastEvent: 'disconnect_token_revoked',
+          updatedAt: FV.serverTimestamp(),
+        }).catch(() => { /* best-effort: não bloqueia o disconnect */ });
+      }
+      try {
+        await notifyAdminCF(academyId, 'payment_overdue',
+          'Assinaturas para cancelar no Mercado Pago',
+          'A conexao com o Mercado Pago foi revogada e as assinaturas ' +
+          'recorrentes NAO puderam ser canceladas pelo app. Cancele-as ' +
+          'manualmente no painel do Mercado Pago para os cartoes dos alunos ' +
+          'nao continuarem sendo cobrados.', {});
+      } catch (_) { /* best-effort */ }
+    } else if (failed > 0) {
+      throw new HttpsError('unavailable',
+        `${failed} assinatura(s) ativa(s) não puderam ser canceladas no ` +
+        'Mercado Pago. A conta NÃO foi desconectada — tente novamente em ' +
+        'alguns minutos.');
+    }
+  }
 
   await db.doc(`academies/${academyId}/private/mpAuth`).delete().catch(() => {});
   await db.doc(`academies/${academyId}`).update({
@@ -2796,8 +2957,8 @@ exports.disconnectMercadoPago = onCall(async (request) => {
 
 /** Shared payer-permission check (self / staff / responsible adult). */
 async function assertCanPayFor(request, academyId, studentId) {
-  const userInfo = await getUserAcademyInfo(request.auth.uid);
-  if (userInfo.academyId !== academyId) {
+  const userInfo = await getUserAcademyMembership(request.auth.uid, academyId);
+  if (!userInfo) {
     throw new HttpsError('permission-denied', 'Access denied: Invalid academy');
   }
   const isStaff = userInfo.role === 'admin' || userInfo.role === 'instructor';
@@ -2855,6 +3016,43 @@ function orderExpectedTotalReais(order) {
     if (ok) return sum;
   }
   return Number((order && (order.total ?? order.totalAmount)) || 0);
+}
+
+/**
+ * SECURITY (preco autoritativo da LOJA): pedidos de loja sao criados DIRETO
+ * pelo cliente no Firestore (sem CF de criacao), entao `items[].price` e
+ * `total` NAO sao confiaveis — recomputar a partir dos proprios items
+ * (orderExpectedTotalReais) e defesa CIRCULAR contra um cliente malicioso.
+ * Este helper recomputa o total em REAIS buscando cada item em storeProducts
+ * (preco unico por produto; sizes/colors sao atributos sem modificador de
+ * preco). Se um produto nao existir mais, estiver sem preco valido, ou o preco
+ * atual divergir do gravado no item (tolerancia de 1 centavo), lanca
+ * failed-precondition — NUNCA cobramos o valor escrito pelo cliente.
+ * Usado pelas CFs de cobranca de pedido (PIX/cartao, MP e AbacatePay).
+ */
+async function orderAuthoritativeTotalReais(academyId, order) {
+  const stale = () => new HttpsError('failed-precondition',
+    'Os preços deste pedido mudaram. Refaça o pedido.');
+  const items = (order && order.items) || [];
+  if (!Array.isArray(items) || items.length === 0) throw stale();
+  let sum = 0;
+  for (const it of items) {
+    const productId = it && it.productId;
+    const qty = Number(it && it.quantity);
+    if (!productId || !Number.isInteger(qty) || qty <= 0) throw stale();
+    const p = await db.doc(
+      `academies/${academyId}/storeProducts/${productId}`).get();
+    if (!p.exists) throw stale();
+    const authoritative = Number(p.data()?.price);
+    if (!Number.isFinite(authoritative) || authoritative <= 0) throw stale();
+    const written = Number(it.price ?? it.unitPrice);
+    if (!Number.isFinite(written) ||
+        Math.abs(authoritative - written) > 0.01) {
+      throw stale();
+    }
+    sum += authoritative * qty;
+  }
+  return Number(sum.toFixed(2));
 }
 
 /**
@@ -2950,6 +3148,94 @@ async function createMpPix({ academyId, transactionAmount, description, external
   };
 }
 
+// ---- Lock de geração de PIX (anti-race, achado #24) ------------------------
+// createMpPixPayment/createMpOrderPixPayment faziam check-then-act sem
+// transação: dois aparelhos abrindo a mesma cobrança mintavam DOIS PIX
+// pagáveis (idempotency key tem epoch-millis) e a família podia pagar 2x.
+// Serializa o mint com uma transação que grava pixMintAt/pixMintBy no doc
+// ANTES de chamar o MP (padrão do mpTokenLock): quem perde a corrida espera
+// e reusa o PIX do vencedor. Quem adquire o lock DEVE limpá-lo ao terminar
+// (sucesso: no próprio update dos campos do PIX; falha no MP: no catch) —
+// um lock órfão (crash) expira sozinho após PIX_MINT_STALE_MS.
+const PIX_MINT_STALE_MS = 60 * 1000;
+
+/** Resposta de reuso de um PIX ainda válido gravado no doc. */
+function mpPixReuseResponse(d) {
+  return {
+    pixCode: d.pixCode,
+    qrCodeUrl: d.pixQrCode || '',
+    ticketUrl: d.pixTicketUrl || '',
+    paymentId: d.gatewayPaymentId,
+    expiresAt: d.pixExpiresAt.toDate().toISOString(),
+  };
+}
+
+/** Adquire o lock de mint de PIX para um financial/pedido. Retorna
+ * { acquired:true } (chame o MP e depois limpe pixMintAt/pixMintBy) ou
+ * { reuse: data } (outro mint concorrente já produziu um PIX válido). */
+async function mpAcquirePixMint(docRef, uid) {
+  const pixExpMs = (d) =>
+    (d.pixExpiresAt && typeof d.pixExpiresAt.toMillis === 'function')
+      ? d.pixExpiresAt.toMillis() : 0;
+  const mintAtMs = (d) =>
+    (d.pixMintAt && typeof d.pixMintAt.toMillis === 'function')
+      ? d.pixMintAt.toMillis() : 0;
+  const hasFreshPix = (d) =>
+    d.gatewayPaymentId && d.pixCode && pixExpMs(d) > Date.now();
+
+  const tryAcquire = () => db.runTransaction(async (tx) => {
+    const s = await tx.get(docRef);
+    if (!s.exists) {
+      throw new HttpsError('not-found', 'Registro de cobranca nao encontrado.');
+    }
+    const d = s.data();
+    if (d.status === 'paid') {
+      throw new HttpsError('already-exists', 'Este pagamento ja foi concluido.');
+    }
+    if (hasFreshPix(d)) return { reuse: d };
+    const mintAt = mintAtMs(d);
+    if (mintAt && Date.now() - mintAt < PIX_MINT_STALE_MS) {
+      return { wait: true }; // outro mint em andamento
+    }
+    tx.update(docRef, {
+      pixMintAt: admin.firestore.Timestamp.now(),
+      pixMintBy: uid || null,
+    });
+    return { acquired: true };
+  });
+
+  let r = await tryAcquire();
+  if (r.wait) {
+    // Outro aparelho está mintando: espera curto e reusa o PIX do vencedor
+    // (molde do loop de espera do mpTokenLock em getMpAccessToken).
+    for (let i = 0; i < 10; i++) {
+      await new Promise((res) => setTimeout(res, 500));
+      const s = await docRef.get();
+      if (!s.exists) break;
+      const d = s.data();
+      if (hasFreshPix(d)) return { reuse: d };
+      const mintAt = mintAtMs(d);
+      // Vencedor falhou no MP (limpou o lock) ou travou (lock stale):
+      // sai do loop e tenta assumir o mint.
+      if (!mintAt || Date.now() - mintAt >= PIX_MINT_STALE_MS) break;
+    }
+    r = await tryAcquire();
+    if (r.wait) {
+      throw new HttpsError('deadline-exceeded',
+        'Outro dispositivo esta gerando o PIX desta cobranca. Tente novamente em instantes.');
+    }
+  }
+  return r;
+}
+
+/** Solta o lock de mint após falha na chamada ao MP (best-effort). */
+async function mpReleasePixMint(docRef) {
+  await docRef.update({
+    pixMintAt: admin.firestore.FieldValue.delete(),
+    pixMintBy: admin.firestore.FieldValue.delete(),
+  }).catch(() => {});
+}
+
 // ---- PIX: mensalidade (amount in CENTAVOS, matching createPixPayment) -----
 exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
   const { academyId, amount, description, financialId, studentId, studentName,
@@ -3028,13 +3314,24 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
       'E necessario um e-mail valido na sua conta para gerar a cobranca PIX.');
   }
 
-  const pix = await createMpPix({
-    academyId,
-    transactionAmount: Number(fin.amount) || 0, // server-derived REAIS
-    description: sanitizeString(description) || 'Mensalidade',
-    externalReference: `${academyId}:fin:${financialId}`,
-    payer: { email: resolvedEmail, cpf: cpfDigits, name: studentName },
-  });
+  // Anti-race (achado #24): serializa o mint via lock transacional no doc —
+  // dois aparelhos concorrentes geram UM PIX só (o perdedor reusa o do vencedor).
+  const mint = await mpAcquirePixMint(finRef, request.auth.uid);
+  if (mint.reuse) return mpPixReuseResponse(mint.reuse);
+
+  let pix;
+  try {
+    pix = await createMpPix({
+      academyId,
+      transactionAmount: Number(fin.amount) || 0, // server-derived REAIS
+      description: sanitizeString(description) || 'Mensalidade',
+      externalReference: `${academyId}:fin:${financialId}`,
+      payer: { email: resolvedEmail, cpf: cpfDigits, name: studentName },
+    });
+  } catch (e) {
+    await mpReleasePixMint(finRef); // solta o lock p/ um retry imediato
+    throw e;
+  }
 
   const expiresAt = admin.firestore.Timestamp.fromDate(pix.expiresAt);
   await finRef.update({
@@ -3044,6 +3341,8 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
     gatewayPaymentId: pix.paymentId,
     paymentGateway: 'mercadopago',
     pixExpiresAt: expiresAt,
+    pixMintAt: admin.firestore.FieldValue.delete(),
+    pixMintBy: admin.firestore.FieldValue.delete(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
@@ -3084,7 +3383,7 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
   // Enforcement de política de método de pagamento da LOJA. SECURITY: o pedido
   // é criado client-side, então NÃO confiamos em `order.paymentMethodPolicy`.
   // Recomputamos a política efetiva a partir dos PRODUTOS (server-side), do
-  // mesmo jeito que o total é recomputado via orderExpectedTotalReais. Pedido
+  // mesmo jeito que o total é recomputado via orderAuthoritativeTotalReais. Pedido
   // com algum item "somente cartao" não aceita PIX. Espelha o erro de :3161.
   const orderPolicy = await orderEffectivePolicy(academyId, order);
   if (!orderPolicy.allowsPix) {
@@ -3092,15 +3391,23 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
       'Este pedido aceita apenas cartao.');
   }
 
-  // SECURITY: never trust the client amount. Derive the charge server-side from
-  // the order (reais). Prefer recomputing from the line items (each carries a
-  // server-validated price), falling back to the persisted total. The client
-  // now sends CENTAVOS (H1); it is only a cross-check (1-centavo tolerance).
-  const expectedReais = orderExpectedTotalReais(order);
+  // SECURITY: never trust the client amount. Derive the charge server-side
+  // recomputando o total a partir de storeProducts (preco autoritativo —
+  // items[].price/total do pedido sao escritos pelo cliente e NAO valem como
+  // fronteira). O cliente envia CENTAVOS (H1); e so cross-check (1 centavo).
+  const expectedReais = await orderAuthoritativeTotalReais(academyId, order);
   const expectedCentavos = Math.round(expectedReais * 100);
   if (Math.abs(expectedCentavos - amount) > 1) {
     throw new HttpsError('invalid-argument',
       `Amount (${amount}) does not match order total (${expectedCentavos})`);
+  }
+  // Grava o total autoritativo de volta no pedido para o guard de valor do
+  // settle (mpMktSettle) comparar contra o numero correto.
+  if (Math.abs((Number(order.total ?? order.totalAmount) || 0) - expectedReais) > 0.005) {
+    await orderRef.update({
+      total: expectedReais,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
   }
 
   const existingExpiry = order.pixExpiresAt && typeof order.pixExpiresAt.toMillis === 'function'
@@ -3137,13 +3444,24 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
       'E necessario um e-mail valido na sua conta para gerar a cobranca PIX.');
   }
 
-  const pix = await createMpPix({
-    academyId,
-    transactionAmount: expectedReais, // server-derived reais
-    description: sanitizeString(description) || 'Pedido da Loja',
-    externalReference: `${academyId}:order:${orderId}`,
-    payer: { email: resolvedEmail, cpf: cpfDigits, name: studentName },
-  });
+  // Anti-race (achado #24): serializa o mint via lock transacional no doc —
+  // dois aparelhos concorrentes geram UM PIX só (o perdedor reusa o do vencedor).
+  const mint = await mpAcquirePixMint(orderRef, request.auth.uid);
+  if (mint.reuse) return mpPixReuseResponse(mint.reuse);
+
+  let pix;
+  try {
+    pix = await createMpPix({
+      academyId,
+      transactionAmount: expectedReais, // server-derived reais
+      description: sanitizeString(description) || 'Pedido da Loja',
+      externalReference: `${academyId}:order:${orderId}`,
+      payer: { email: resolvedEmail, cpf: cpfDigits, name: studentName },
+    });
+  } catch (e) {
+    await mpReleasePixMint(orderRef); // solta o lock p/ um retry imediato
+    throw e;
+  }
 
   const expiresAt = admin.firestore.Timestamp.fromDate(pix.expiresAt);
   await orderRef.update({
@@ -3153,6 +3471,8 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
     gatewayPaymentId: pix.paymentId,
     paymentGateway: 'mercadopago',
     pixExpiresAt: expiresAt,
+    pixMintAt: admin.firestore.FieldValue.delete(),
+    pixMintBy: admin.firestore.FieldValue.delete(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
@@ -3206,7 +3526,7 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
     // Enforcement de política de método de pagamento da LOJA. SECURITY: o pedido
     // é criado client-side, então NÃO confiamos em `recData.paymentMethodPolicy`.
     // Recomputamos a política efetiva a partir dos PRODUTOS (server-side), do
-    // mesmo jeito que o total é recomputado via orderExpectedTotalReais. Cartão
+    // mesmo jeito que o total é recomputado via orderAuthoritativeTotalReais. Cartão
     // permitido SSE policy.allowsCard && storeCreditCardEnabled.
     const orderPolicy = await orderEffectivePolicy(academyId, recData);
     if (!orderPolicy.allowsCard) {
@@ -3225,13 +3545,28 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
       'Esta cobranca aceita apenas PIX.');
   }
 
-  // SECURITY: never trust the client amount. DERIVE the charge server-side from
-  // the stored record. The client sends CENTAVOS; the client value is only a
-  // cross-check (1-centavo tolerance). financial.amount is REAIS (canonical);
-  // order total is reais -> both normalized to centavos here.
-  const expectedCentavos = isOrder
-    ? Math.round(orderExpectedTotalReais(recData) * 100)
-    : Math.round((Number(recData.amount) || 0) * 100);
+  // SECURITY: never trust the client amount. DERIVE the charge server-side.
+  // Mensalidade: financial.amount e REAIS (canonico). Loja: o pedido e criado
+  // client-side, entao o total e recomputado de storeProducts (preco
+  // autoritativo) — items[].price/total NAO valem como fronteira. O cliente
+  // envia CENTAVOS; o valor dele e so cross-check (1-centavo tolerance).
+  let expectedCentavos;
+  if (isOrder) {
+    const authoritativeReais =
+      await orderAuthoritativeTotalReais(academyId, recData);
+    expectedCentavos = Math.round(authoritativeReais * 100);
+    // Grava o total autoritativo de volta no pedido para o guard de valor do
+    // settle (mpMktSettle) comparar contra o numero correto.
+    if (Math.abs((Number(recData.total ?? recData.totalAmount) || 0) -
+        authoritativeReais) > 0.005) {
+      await ref.update({
+        total: authoritativeReais,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  } else {
+    expectedCentavos = Math.round((Number(recData.amount) || 0) * 100);
+  }
   if (Math.abs(expectedCentavos - amount) > 1) {
     throw new HttpsError('invalid-argument',
       `Amount (${amount}) does not match expected amount (${expectedCentavos})`);
@@ -3243,11 +3578,32 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
   const nameParts = String(studentName || '').trim().split(/\s+/);
   const externalReference = `${academyId}:${isOrder ? 'order' : 'fin'}:${docId}`;
 
+  // Valida/resolve o e-mail do pagador (achado #25 — assimetria com o PIX):
+  // espelha o bloco dos caminhos PIX. Um payer.email vazio ou placeholder
+  // '@bjjeasy.com.br' faz o MP recusar o pagamento e o aluno só via o erro
+  // genérico 'Falha ao processar o cartao.' sem saber o que corrigir.
+  let resolvedEmail = String(payerEmail || '').trim();
+  if (!resolvedEmail || !resolvedEmail.includes('@') ||
+      resolvedEmail.endsWith('@bjjeasy.com.br')) {
+    try {
+      const authUser = await admin.auth().getUser(request.auth.uid);
+      resolvedEmail = (authUser.email || '').trim();
+    } catch (_) { /* keep whatever we had */ }
+  }
+  if (!resolvedEmail || !resolvedEmail.includes('@')) {
+    throw new HttpsError('failed-precondition',
+      'E necessario um e-mail valido na sua conta para pagar com cartao.');
+  }
+
   let payment;
   try {
     payment = await mpRequest('POST', '/v1/payments', {
       token,
-      idempotencyKey: `${externalReference}:card`,
+      // Idempotency key inclui o token do cartao: estavel num retry de
+      // transporte do MESMO submit, mas NOVA a cada nova tokenizacao — uma
+      // recusa (CVV errado/sem saldo) nao congela a resposta para sempre.
+      // Espelha o racional do PIX em createMpPix (key unica por mint).
+      idempotencyKey: `${externalReference}:card:${cardToken}`,
       body: {
         transaction_amount: Number(transactionAmount.toFixed(2)),
         description: sanitizeString(description) ||
@@ -3261,7 +3617,7 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
         // NÃO enviar application_fee: o MP rejeita `0` ("must be positive").
         // Liquidação direta na conta da academia (0% de taxa) → omitir.
         payer: {
-          email: payerEmail || undefined,
+          email: resolvedEmail,
           first_name: nameParts[0] || undefined,
           last_name: nameParts.length > 1 ? nameParts.slice(1).join(' ') : undefined,
           identification: cpf.length >= 11 ? { type: 'CPF', number: cpf } : undefined,
@@ -3373,11 +3729,22 @@ function computeTermEndsAt(base, months) {
  * (idempotent by deterministic id), bump chargesPaid, and cancel the
  * preapproval once the N-month term is reached. */
 async function mpSubSettleCycle(academyId, subscriptionId, token,
-  { paymentId, amount, mpPayload } = {}) {
+  { paymentId, amount, mpPayload, chargeDate } = {}) {
   const subRef = db.doc(`academies/${academyId}/subscriptions/${subscriptionId}`);
   // Deterministic financial id → the same MP payment never settles twice.
   const finId = `sub_${subscriptionId}_${paymentId}`;
   const finRef = db.doc(`academies/${academyId}/financials/${finId}`);
+
+  // Data REAL da cobrança (payload do MP, passada pelo chamador): o
+  // referenceMonth/dueDate do financial devem refletir o mês civil do CICLO
+  // cobrado em America/Sao_Paulo (TZ pinada no index.js → localMonthKey é
+  // wall-clock Brasil), NÃO o momento do settle — a drenagem atrasada do
+  // reconcile/termGuard contabilizaria o ciclo no mês errado. Fallback para
+  // `now` apenas quando o chamador não tem a data (ou ela é inválida).
+  let chargedAt = chargeDate ? new Date(chargeDate) : null;
+  if (!(chargedAt instanceof Date) || isNaN(chargedAt.getTime())) {
+    chargedAt = new Date();
+  }
 
   const result = await db.runTransaction(async (tx) => {
     const [subDoc, finDoc] = await Promise.all([tx.get(subRef), tx.get(finRef)]);
@@ -3385,9 +3752,48 @@ async function mpSubSettleCycle(academyId, subscriptionId, token,
     if (finDoc.exists) return { ok: false }; // already settled this charge
     const sub = subDoc.data();
     const cycle = (sub.chargesPaid || 0) + 1;
-    const now = new Date();
-    const referenceMonth =
-      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const referenceMonth = localMonthKey(chargedAt);
+    const months = Number(sub.months) || 0;
+    // GUARDA DE ESTADO TERMINAL / ALÉM DO TERMO: se a assinatura já está
+    // 'cancelled'/'completed' ou já quitou todos os ciclos, o MP cobrou ALÉM
+    // do contratado. O dinheiro entrou de fato, então o financial determinístico
+    // É criado (idempotência preservada), mas sinalizado como cobrança indevida
+    // (NÃO conta como mensalidade) e o estado da assinatura NÃO é ressuscitado.
+    const isTerminal = sub.status === 'cancelled' || sub.status === 'completed';
+    const beyondTerm = months > 0 && (sub.chargesPaid || 0) >= months;
+    if (isTerminal || beyondTerm) {
+      tx.set(finRef, {
+        academyId,
+        studentId: sub.studentId,
+        studentName: sub.studentName || '',
+        amount: amount > 0 ? amount : (Number(sub.recurringValue) || 0),
+        type: 'subscription_overcharge',
+        status: 'paid',
+        overcharge: true,
+        needsRefund: true,
+        description:
+          'Cobrança indevida de assinatura (além do termo/cancelamento) — reembolsar',
+        referenceMonth,
+        planId: sub.planId || null,
+        subscriptionId,
+        paymentMethodPolicy: 'card_only',
+        paymentGateway: 'mercadopago',
+        method: 'card',
+        gatewayPaymentId: paymentId,
+        dueDate: admin.firestore.Timestamp.fromDate(chargedAt),
+        paymentDate: FV.serverTimestamp(),
+        createdAt: FV.serverTimestamp(),
+        updatedAt: FV.serverTimestamp(),
+      });
+      // Preserva status/chargesPaid (não reabre 'completed'/'cancelled').
+      tx.update(subRef, {
+        lastPaymentId: paymentId,
+        lastEvent: 'overcharge_detected',
+        updatedAt: FV.serverTimestamp(),
+      });
+      return { ok: true, overcharge: true,
+        preapprovalId: sub.mpPreapprovalId };
+    }
     tx.set(finRef, {
       academyId,
       studentId: sub.studentId,
@@ -3404,7 +3810,7 @@ async function mpSubSettleCycle(academyId, subscriptionId, token,
       paymentGateway: 'mercadopago',
       method: 'card',
       gatewayPaymentId: paymentId,
-      dueDate: admin.firestore.Timestamp.fromDate(now),
+      dueDate: admin.firestore.Timestamp.fromDate(chargedAt),
       paymentDate: FV.serverTimestamp(),
       createdAt: FV.serverTimestamp(),
       updatedAt: FV.serverTimestamp(),
@@ -3412,7 +3818,6 @@ async function mpSubSettleCycle(academyId, subscriptionId, token,
     const subUpdate = {
       chargesPaid: cycle,
       lastPaymentId: paymentId,
-      status: 'authorized',
       needsReauth: false,
       // Voltou a cobrar com sucesso → zera o estado de dunning.
       failedAttempts: 0,
@@ -3421,6 +3826,11 @@ async function mpSubSettleCycle(academyId, subscriptionId, token,
       lastEvent: 'payment_approved',
       updatedAt: FV.serverTimestamp(),
     };
+    // Um ciclo em trânsito aprovado NÃO desfaz uma pausa intencional do aluno:
+    // mantém 'paused'/pausedBy. Nos demais casos, pagamento aprovado ⇒ ativa.
+    if (!(sub.status === 'paused' && sub.pausedBy === 'user')) {
+      subUpdate.status = 'authorized';
+    }
     // Fallback do espelho NÃO-PCI do cartão: o POST /preapproval normalmente NÃO
     // traz o cartão, mas o authorized_payment/payment aprovado costuma trazê-lo.
     // Preenche só o que ainda estiver ausente na assinatura (defensivo).
@@ -3442,15 +3852,60 @@ async function mpSubSettleCycle(academyId, subscriptionId, token,
   });
 
   if (!result.ok) return;
-  // Term reached → cancel the preapproval so MP stops charging.
+  // Cobrança indevida (estado terminal / além do termo): tenta matar o
+  // preapproval que ainda cobra (best-effort, o próximo ciclo re-tenta) e
+  // alerta o admin para reembolso MANUAL. Não notifica como mensalidade.
+  if (result.overcharge) {
+    if (result.preapprovalId) {
+      try {
+        await mpRequest('PUT', `/preapproval/${result.preapprovalId}`,
+          { token, body: { status: 'cancelled' } });
+      } catch (e) {
+        console.error('[mpSubSettleCycle] overcharge cancel failed', e.message);
+      }
+    }
+    try {
+      await notifyAdminCF(academyId, 'payment_overdue',
+        'Cobranca indevida de assinatura',
+        `Assinatura cobrou R$ ${(amount || 0).toFixed(2)} alem do termo/` +
+        'cancelamento. Reembolse o aluno manualmente no Mercado Pago.',
+        { subscriptionId });
+    } catch (_) { /* notify is best-effort */ }
+    return;
+  }
+  // Term reached → cancel the preapproval so MP stops charging. Só marca
+  // 'completed' quando o MP CONFIRMAR o cancel (PUT ok, ou GET = cancelled);
+  // senão o doc sumiria das queries dos crons com o preapproval vivo cobrando.
   if (result.months > 0 && result.cycle >= result.months && result.preapprovalId) {
+    let mpCancelled = false;
     try {
       await mpRequest('PUT', `/preapproval/${result.preapprovalId}`,
         { token, body: { status: 'cancelled' } });
+      mpCancelled = true;
     } catch (e) {
       console.error('[mpSubSettleCycle] term cancel failed', e.message);
+      // PUT pode falhar com o preapproval JÁ cancelado no MP — confirma via GET.
+      try {
+        const pa = await mpRequest('GET',
+          `/preapproval/${result.preapprovalId}`, { token });
+        mpCancelled = !!pa && pa.status === 'cancelled';
+      } catch (_) { /* mantém mpCancelled = false */ }
     }
-    await subRef.update({ status: 'completed', updatedAt: FV.serverTimestamp() });
+    if (mpCancelled) {
+      await subRef.update({
+        status: 'completed',
+        termCancelPending: FV.delete(),
+        updatedAt: FV.serverTimestamp(),
+      });
+    } else {
+      // Mantém o status atual (authorized/paused): o termGuard diário re-acha
+      // a assinatura (chargesPaid >= months) e re-tenta o cancel até suceder.
+      await subRef.update({
+        termCancelPending: true,
+        lastEvent: 'term_cancel_failed',
+        updatedAt: FV.serverTimestamp(),
+      });
+    }
   }
   try {
     await notifyAdminCF(academyId, 'payment_received', 'Mensalidade recebida',
@@ -3467,15 +3922,42 @@ async function mpSubHandleAuthorizedPayment(academyId, authPayId) {
   if (!preapprovalId) return;
   const subSnap = await db.collection(`academies/${academyId}/subscriptions`)
     .where('mpPreapprovalId', '==', String(preapprovalId)).limit(1).get();
-  if (subSnap.empty) return;
-  const subRef = subSnap.docs[0].ref;
+  let subRef;
+  if (!subSnap.empty) {
+    subRef = subSnap.docs[0].ref;
+  } else {
+    // SELF-HEALING: doc órfão (crash entre POST /preapproval e o update do
+    // doc). O external_reference costuma vir no próprio authorized_payment;
+    // se ausente, busca no preapproval.
+    let extRef = ap.external_reference;
+    let paStatus = null;
+    if (!extRef) {
+      try {
+        const pa = await mpRequest('GET',
+          `/preapproval/${preapprovalId}`, { token });
+        extRef = pa && pa.external_reference;
+        paStatus = pa && pa.status;
+      } catch (e) {
+        console.error('[mpSubHandleAuthorizedPayment] GET preapproval falhou ' +
+          'no self-healing', academyId, String(preapprovalId), e.message);
+      }
+    }
+    const healed = await mpSubHealOrphanSubscription(
+      academyId, String(preapprovalId), extRef, paStatus);
+    if (!healed) return;
+    subRef = healed.ref;
+  }
   const payStatus = ap.payment && ap.payment.status;
   const paymentId = ap.payment && ap.payment.id ?
     String(ap.payment.id) : `ap_${authPayId}`;
   const amount = Number(ap.transaction_amount) || 0;
   if (payStatus === 'approved') {
-    await mpSubSettleCycle(academyId, subRef.id, token,
-      { paymentId, amount, mpPayload: ap });
+    await mpSubSettleCycle(academyId, subRef.id, token, {
+      paymentId, amount, mpPayload: ap,
+      // Data real da cobrança → referenceMonth/dueDate do ciclo correto.
+      chargeDate: (ap.payment && ap.payment.date_approved) ||
+        ap.debit_date || ap.date_created,
+    });
   } else if (payStatus === 'rejected' || payStatus === 'cancelled') {
     // Dunning: do NOT settle. The preapproval will move to paused; the sync
     // handler flags needsReauth. Record the failed attempt for visibility.
@@ -3486,15 +3968,92 @@ async function mpSubHandleAuthorizedPayment(academyId, authPayId) {
   }
 }
 
+/** Pausa intencional LEGADA: o pauseMpSubscription antigo (em produção) gravava
+ * `status:'paused'` SEM `pausedBy`. Um doc local já 'paused' sem NENHUM estado
+ * de dunning (needsReauth/failedAttempts/nextRetryAt) só pode ter vindo dessa
+ * pausa intencional — uma pausa por cobrança recusada sempre chega com o doc
+ * 'authorized' (webhook/reconcile é quem o pausa, já setando needsReauth).
+ * Tratar como pausedBy:'user' (com backfill) impede que reconcile+dunning
+ * reativem a cobrança desses dados legados sem consentimento. */
+function isLegacyUserPause(sub) {
+  return sub.status === 'paused' && sub.pausedBy == null &&
+    sub.needsReauth !== true &&
+    !(Number(sub.failedAttempts) > 0) &&
+    sub.nextRetryAt == null;
+}
+
+/** SELF-HEALING de assinatura órfã: se a function morreu entre o POST
+ * /preapproval e o update do doc (createMpSubscription), a assinatura fica
+ * 'pending' SEM mpPreapprovalId e os lookups por mpPreapprovalId retornam
+ * vazio — webhooks descartados em silêncio enquanto o MP cobra o cartão.
+ * Recupera pelo external_reference do preapproval (`${academyId}:sub:${subId}`,
+ * gerado em createMpSubscription e parseável por mpMktParseRef): grava o
+ * mpPreapprovalId ausente (e o status do MP, se o doc ainda está 'pending') e
+ * devolve { ref, data } para o chamador prosseguir o processamento. Retorna
+ * null (com log destacado) quando irrecuperável. */
+async function mpSubHealOrphanSubscription(academyId, preapprovalId,
+  externalReference, mpStatus) {
+  const parsed = mpMktParseRef(externalReference);
+  if (!parsed || parsed.type !== 'sub' || parsed.academyId !== academyId) {
+    console.error('[mpSubHealOrphan] ASSINATURA ÓRFÃ IRRECUPERÁVEL: nenhum doc ' +
+      'com este mpPreapprovalId e external_reference não aponta para assinatura ' +
+      'desta academia', academyId, preapprovalId, externalReference || '(vazio)');
+    return null;
+  }
+  const ref = db.doc(`academies/${academyId}/subscriptions/${parsed.docId}`);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    console.error('[mpSubHealOrphan] ASSINATURA ÓRFÃ IRRECUPERÁVEL: doc ' +
+      `subscriptions/${parsed.docId} não existe`, academyId, preapprovalId);
+    return null;
+  }
+  const data = snap.data();
+  if (data.mpPreapprovalId && data.mpPreapprovalId !== String(preapprovalId)) {
+    console.error('[mpSubHealOrphan] doc aponta para OUTRO preapproval — ' +
+      'possível preapproval duplicado, NÃO sobrescrevendo', academyId,
+      parsed.docId, 'doc:', data.mpPreapprovalId,
+      'webhook:', String(preapprovalId));
+    return null;
+  }
+  const heal = {
+    mpPreapprovalId: String(preapprovalId),
+    lastEvent: 'orphan_preapproval_healed',
+    updatedAt: FV.serverTimestamp(),
+  };
+  const map = { authorized: 'authorized', paused: 'paused',
+    cancelled: 'cancelled', pending: 'pending' };
+  if (data.status === 'pending' && map[mpStatus]) heal.status = map[mpStatus];
+  await ref.update(heal);
+  console.log('[mpSubHealOrphan] assinatura órfã recuperada', academyId,
+    parsed.docId, '→ mpPreapprovalId', String(preapprovalId));
+  return {
+    ref,
+    data: Object.assign({}, data, { mpPreapprovalId: String(preapprovalId) },
+      heal.status ? { status: heal.status } : {}),
+  };
+}
+
 /** Webhook: a preapproval status change (authorized/paused/cancelled). */
 async function mpSubSyncPreapproval(academyId, preapprovalId) {
   const token = await getMpAccessToken(academyId);
   const pa = await mpRequest('GET', `/preapproval/${preapprovalId}`, { token });
   const subSnap = await db.collection(`academies/${academyId}/subscriptions`)
     .where('mpPreapprovalId', '==', String(preapprovalId)).limit(1).get();
-  if (subSnap.empty) return;
-  const subRef = subSnap.docs[0].ref;
-  const current = subSnap.docs[0].data();
+  let subRef; let current;
+  if (!subSnap.empty) {
+    subRef = subSnap.docs[0].ref;
+    current = subSnap.docs[0].data();
+  } else {
+    // SELF-HEALING: doc órfão (crash entre POST /preapproval e o update do
+    // doc em createMpSubscription) — sem isso o webhook seria descartado em
+    // silêncio com o preapproval vivo cobrando o cartão.
+    const healed = await mpSubHealOrphanSubscription(
+      academyId, String(preapprovalId), pa && pa.external_reference,
+      pa && pa.status);
+    if (!healed) return;
+    subRef = healed.ref;
+    current = healed.data;
+  }
   // Never downgrade a term-completed subscription back to cancelled.
   if (current.status === 'completed') return;
 
@@ -3510,18 +4069,29 @@ async function mpSubSyncPreapproval(academyId, preapprovalId) {
     update.nextBillingDate =
       admin.firestore.Timestamp.fromDate(new Date(pa.next_payment_date));
   }
-  if (pa.status === 'paused') {
-    update.needsReauth = true;
-    // Início do ciclo de dunning: marca a falha e agenda o 1º retry se ainda
-    // não houver um pendente (o cron scheduledSubscriptionDunning assume daqui).
-    update.lastFailureAt = FV.serverTimestamp();
-    if (current.nextRetryAt == null) {
-      update.nextRetryAt = admin.firestore.Timestamp.fromMillis(
-        Date.now() + DUNNING_BACKOFF_DAYS[0] * 24 * 60 * 60 * 1000);
+  // Pausa INTENCIONAL do aluno (pausedBy:'user') NÃO entra em dunning: nada de
+  // needsReauth/nextRetryAt, senão o dunning reativa a cobrança sem consentimento.
+  let startedDunning = false;
+  if (pa.status === 'paused' && current.pausedBy !== 'user') {
+    if (isLegacyUserPause(current)) {
+      // Dados legados: pausa intencional gravada sem pausedBy — backfill.
+      update.pausedBy = 'user';
+    } else {
+      startedDunning = true;
+      update.needsReauth = true;
+      // Início do ciclo de dunning: marca a falha e agenda o 1º retry se ainda
+      // não houver um pendente (o cron scheduledSubscriptionDunning assume daqui).
+      update.lastFailureAt = FV.serverTimestamp();
+      if (current.nextRetryAt == null) {
+        update.nextRetryAt = admin.firestore.Timestamp.fromMillis(
+          Date.now() + DUNNING_BACKOFF_DAYS[0] * 24 * 60 * 60 * 1000);
+      }
     }
   }
   if (pa.status === 'authorized') {
     update.needsReauth = false;
+    // Reativou no MP → a pausa intencional (se havia) deixa de existir.
+    update.pausedBy = FV.delete();
     // Recuperou sozinha → limpa o estado de dunning.
     update.failedAttempts = 0;
     update.nextRetryAt = null;
@@ -3529,7 +4099,7 @@ async function mpSubSyncPreapproval(academyId, preapprovalId) {
   }
   await subRef.update(update);
 
-  if (pa.status === 'paused') {
+  if (startedDunning) {
     try {
       await notifyAdminCF(academyId, 'payment_overdue', 'Assinatura com falha',
         'A cobranca recorrente de um aluno falhou (cartao recusado/expirado).',
@@ -3547,6 +4117,41 @@ exports.createMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (reques
     throw new HttpsError('invalid-argument', 'Missing required fields');
   }
   await assertCanPayFor(request, academyId, studentId);
+
+  // Guarda de duplicidade: um retry/duplo-toque do cliente criaria DOIS
+  // preapprovals cobrando o mesmo cartão todo mês. Rejeita se já existe
+  // assinatura viva deste aluno+plano (cobre o retry sequencial; o caso
+  // CONCORRENTE é colapsado pela idempotencyKey determinística no POST
+  // /preapproval abaixo). Exceção: docs 'pending' SEM mpPreapprovalId com
+  // mais de 1h são lixo de tentativa abortada (crash antes do POST
+  // /preapproval) — marca 'abandoned' e ignora.
+  const dupSnap = await db.collection(`academies/${academyId}/subscriptions`)
+    .where('studentId', '==', studentId)
+    .where('planId', '==', planId)
+    .where('status', 'in', ['pending', 'authorized', 'paused'])
+    .get();
+  const STALE_PENDING_MS = 60 * 60 * 1000; // 1h
+  let hasLiveSub = false;
+  for (const dupDoc of dupSnap.docs) {
+    const dup = dupDoc.data();
+    const createdMs = dup.createdAt && typeof dup.createdAt.toMillis === 'function'
+      ? dup.createdAt.toMillis() : 0;
+    const isStaleAbort = dup.status === 'pending' && !dup.mpPreapprovalId &&
+      createdMs > 0 && (Date.now() - createdMs) > STALE_PENDING_MS;
+    if (isStaleAbort) {
+      await dupDoc.ref.update({
+        status: 'abandoned',
+        lastEvent: 'abandoned_stale_pending',
+        updatedAt: FV.serverTimestamp(),
+      }).catch(() => { /* best-effort: não bloqueia a criação */ });
+    } else {
+      hasLiveSub = true;
+    }
+  }
+  if (hasLiveSub) {
+    throw new HttpsError('failed-precondition',
+      'Já existe uma assinatura ativa deste plano para este aluno.');
+  }
 
   const planSnap = await db.doc(`academies/${academyId}/plans/${planId}`).get();
   if (!planSnap.exists) throw new HttpsError('not-found', 'Plano não encontrado.');
@@ -3611,11 +4216,19 @@ exports.createMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (reques
     updatedAt: FV.serverTimestamp(),
   });
 
+  // Idempotência DETERMINÍSTICA por alvo (academia+aluno+plano) numa janela de
+  // 15 min: duas invocações SIMULTÂNEAS (ex.: responsável e aluno com a mesma
+  // cobrança aberta em dois aparelhos) passam ambas pela guarda de duplicidade
+  // acima, mas colapsam no MP em UM único preapproval — em vez de dois
+  // cobrando o mesmo cartão todo mês. A janela curta evita que uma
+  // re-assinatura legítima (cancelou e assinou de novo mais tarde) colida com
+  // a key da criação anterior.
+  const idemWindow = Math.floor(Date.now() / (15 * 60 * 1000));
   let pa;
   try {
     pa = await mpRequest('POST', '/preapproval', {
       token,
-      idempotencyKey: `sub:${subId}`,
+      idempotencyKey: `sub:${academyId}:${studentId}:${planId}:${idemWindow}`,
       body: {
         reason: sanitizeString(plan.name ? `Mensalidade ${plan.name}` : 'Mensalidade'),
         external_reference: externalReference,
@@ -3699,13 +4312,35 @@ exports.cancelMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (reques
     throw new HttpsError('invalid-argument', 'Missing required fields');
   }
   const { subRef, sub } = await _loadOwnedSubscription(request, academyId, subscriptionId);
+  // Estado TERMINAL: não há o que cancelar — e protege contra um cliente com
+  // snapshot stale rebaixando 'completed' para 'cancelled'.
+  if (sub.status === 'cancelled' || sub.status === 'completed') {
+    throw new HttpsError('failed-precondition', sub.status === 'completed'
+      ? 'Esta assinatura já foi concluída e não pode ser cancelada.'
+      : 'Esta assinatura já está cancelada.');
+  }
   if (sub.mpPreapprovalId) {
+    // NÃO é best-effort: se o cancel no MP falhar, o preapproval continua
+    // cobrando o cartão — não podemos marcar 'cancelled' local e dizer ao
+    // aluno que deu certo. Propaga o erro para o aluno re-tentar.
     try {
       const token = await getMpAccessToken(academyId);
-      await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
-        { token, body: { status: 'cancelled' } });
+      try {
+        await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+          { token, body: { status: 'cancelled' } });
+      } catch (e) {
+        // PUT pode falhar com o preapproval JÁ cancelado no MP (ex.: retry
+        // após a function morrer pós-PUT, ou cancel pelo painel do MP) —
+        // confirma via GET; só propaga quando o MP não confirmar o cancel.
+        const pa = await mpRequest('GET',
+          `/preapproval/${sub.mpPreapprovalId}`, { token });
+        if (!pa || pa.status !== 'cancelled') throw e;
+      }
     } catch (e) {
-      console.error('[cancelMpSubscription] erro', e.message);
+      console.error('[cancelMpSubscription] erro', e.message, e.data);
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('internal',
+        'Não foi possível cancelar a assinatura agora. Tente novamente.');
     }
   }
   await subRef.update({ status: 'cancelled', updatedAt: FV.serverTimestamp() });
@@ -3719,12 +4354,71 @@ exports.pauseMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (request
     throw new HttpsError('invalid-argument', 'Missing required fields');
   }
   const { subRef, sub } = await _loadOwnedSubscription(request, academyId, subscriptionId);
+  // Estado TERMINAL: não há o que pausar — e protege contra um cliente com
+  // snapshot stale sobrescrevendo 'completed'/'cancelled' com 'paused'.
+  if (sub.status === 'cancelled' || sub.status === 'completed') {
+    throw new HttpsError('failed-precondition', sub.status === 'completed'
+      ? 'Esta assinatura já foi concluída e não pode ser pausada.'
+      : 'Esta assinatura já foi cancelada e não pode ser pausada.');
+  }
   if (sub.mpPreapprovalId) {
+    // Marca a intenção ANTES do PUT: o webhook subscription_preapproval que o
+    // próprio PUT dispara pode ler o doc antes do update final — sem o
+    // marcador, mpSubSyncPreapproval trataria a pausa como falha de cobrança
+    // (needsReauth:true), escondendo o "Retomar assinatura" no app.
+    await subRef.update({ pausedBy: 'user', updatedAt: FV.serverTimestamp() });
+    try {
+      const token = await getMpAccessToken(academyId);
+      await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+        { token, body: { status: 'paused' } });
+    } catch (e) {
+      // A pausa NÃO aconteceu no MP: desfaz o marcador (best-effort) e propaga.
+      await subRef.update({
+        pausedBy: FV.delete(), updatedAt: FV.serverTimestamp(),
+      }).catch(() => {});
+      throw e;
+    }
+  }
+  await subRef.update({
+    status: 'paused',
+    // Pausa INTENCIONAL do aluno: não é falha de cobrança. O flag impede que
+    // sync/reconcile/dunning tratem como dunning e reativem sem consentimento.
+    pausedBy: 'user',
+    needsReauth: false,
+    nextRetryAt: null,
+    failedAttempts: 0,
+    updatedAt: FV.serverTimestamp(),
+  });
+  return { success: true };
+});
+
+// ---- resumeMpSubscription — student resumes a user-paused subscription -----
+exports.resumeMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
+  const { academyId, subscriptionId } = request.data || {};
+  if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
+  if (!academyId || !subscriptionId) {
+    throw new HttpsError('invalid-argument', 'Missing required fields');
+  }
+  const { subRef, sub } = await _loadOwnedSubscription(request, academyId, subscriptionId);
+  if (sub.status !== 'paused') {
+    throw new HttpsError('failed-precondition', 'A assinatura não está pausada.');
+  }
+  if (sub.mpPreapprovalId) {
+    // Sem try/catch: se o PUT falhar, propaga SEM tocar no doc — o aluno
+    // re-tenta e o estado local segue refletindo o MP ('paused').
     const token = await getMpAccessToken(academyId);
     await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
-      { token, body: { status: 'paused' } });
+      { token, body: { status: 'authorized' } });
   }
-  await subRef.update({ status: 'paused', updatedAt: FV.serverTimestamp() });
+  await subRef.update({
+    status: 'authorized',
+    pausedBy: FV.delete(),
+    needsReauth: FV.delete(),
+    nextRetryAt: FV.delete(),
+    failedAttempts: 0,
+    lastEvent: 'resumed_by_user',
+    updatedAt: FV.serverTimestamp(),
+  });
   return { success: true };
 });
 
@@ -3751,6 +4445,8 @@ exports.updateSubscriptionCard = onCall({ secrets: MP_MKT_SECRETS }, async (requ
   const update = {
     needsReauth: false,
     status: 'authorized',
+    // Reativou no MP → uma pausa intencional do aluno deixa de existir.
+    pausedBy: FV.delete(),
     // Cartão novo → zera o estado de dunning e o aviso de expiração.
     failedAttempts: 0,
     nextRetryAt: null,
@@ -3875,16 +4571,29 @@ exports.mercadoPagoMarketplaceWebhook = onRequest(
       }
       // A subscription payment that surfaces on the payment topic (defensive —
       // normally it arrives as subscription_authorized_payment).
+      const isReversal = MP_REVERSAL_STATUSES.includes(payment.status);
       if (parsed.type === 'sub') {
         if (payment.status === 'approved') {
           await mpSubSettleCycle(acad, parsed.docId, token, {
             paymentId: String(payment.id),
             amount: Number(payment.transaction_amount) || 0,
+            // Data real da cobrança → referenceMonth/dueDate do ciclo correto.
+            chargeDate: payment.date_approved || payment.date_created,
           });
+        } else if (isReversal) {
+          // Estorno/chargeback de um ciclo já liquidado (achado #16).
+          await mpSubHandleReversal(acad, parsed.docId, payment);
         }
         return res.status(200).json({ success: true, kind: 'sub_payment' });
       }
       if (payment.status !== 'approved') {
+        if (isReversal) {
+          // Estorno/chargeback de financial/pedido já 'paid' (achado #16).
+          // No-op se o doc não estiver 'paid' com o mesmo paymentId (ex.: PIX
+          // expirado chega como 'cancelled'). Sempre responde 200.
+          await mpMktHandleReversal(parsed, payment);
+          return res.status(200).json({ success: true, kind: 'reversal' });
+        }
         return res.status(200).json({ received: true, status: payment.status });
       }
       await mpMktSettle(parsed, payment);
@@ -3894,6 +4603,58 @@ exports.mercadoPagoMarketplaceWebhook = onRequest(
       return res.status(500).json({ error: e.message }); // 500 => MP retries
     }
   });
+
+/** Pagamento APROVADO que não casa com o estado do doc:
+ * - reason 'missing_doc' (default): doc apagado/inexistente (ex.: professor
+ *   apagou a cobrança/pedido com o PIX vivo e o aluno pagou depois) — sem
+ *   registro, o dinheiro cai na conta MP da academia sem rastro no app.
+ * - reason 'duplicate': SEGUNDO pagamento aprovado com paymentId diferente do
+ *   gravado num doc já 'paid' (race da geração de PIX) — a família pagou 2x e
+ *   o admin precisa reembolsar.
+ * Grava um doc de conciliação (dedupe por paymentId via create(), p/ webhook
+ * duplicado) e avisa o admin na 1ª vez. Best-effort: nunca lança. */
+async function mpMktRecordUnmatchedPayment(academyId, type, docId, payment, opts) {
+  const reason = (opts && opts.reason) || 'missing_doc';
+  const chargeId = String(payment.id);
+  const amount = Number(payment.transaction_amount) || 0;
+  console.error('[mpMktSettle]', reason === 'duplicate'
+    ? 'segundo pagamento aprovado p/ doc ja pago'
+    : 'pagamento aprovado p/ doc inexistente',
+  type, docId, chargeId);
+  try {
+    await db.doc(`academies/${academyId}/unmatchedPayments/${chargeId}`).create({
+      type,
+      docId,
+      paymentId: chargeId,
+      amount, // REAIS (canônico)
+      reason,
+      createdAt: FV.serverTimestamp(),
+    });
+  } catch (_) {
+    return; // já registrado (webhook duplicado): não re-notifica
+  }
+  try {
+    const what = type === 'order'
+      ? `o pedido #${docId.slice(-6).toUpperCase()}` : 'uma cobranca';
+    const notifType = type === 'order' ? 'order_paid' : 'payment_received';
+    const target = type === 'order' ? { orderId: docId } : { financialId: docId };
+    if (reason === 'duplicate') {
+      await notifyAdminCF(academyId, notifType,
+        'Pagamento duplicado — reembolso necessario',
+        `Caiu um SEGUNDO pagamento de R$ ${amount.toFixed(2)} para ${what} ` +
+        `que ja estava paga(o). O aluno pagou duas vezes — reembolse o ` +
+        `pagamento ${chargeId} no Mercado Pago.`,
+        target);
+    } else {
+      await notifyAdminCF(academyId, notifType,
+        'Pagamento sem cobranca no app',
+        `Caiu um pagamento de R$ ${amount.toFixed(2)} para ${what} que nao ` +
+        `existe mais no app. O valor esta na sua conta Mercado Pago — confira ` +
+        `manualmente (pagamento ${chargeId}).`,
+        target);
+    }
+  } catch (_) { /* notify is best-effort */ }
+}
 
 /** Flips the financial/order to paid (idempotent) + stock + admin notify. */
 async function mpMktSettle({ academyId, type, docId }, payment) {
@@ -3910,7 +4671,26 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
     // notify. Only the execution that actually performed the flip proceeds.
     const settle = await db.runTransaction(async (transaction) => {
       const snap = await transaction.get(orderRef);
-      if (!snap.exists || snap.data().status === 'paid') {
+      if (!snap.exists) {
+        // Doc apagado/inexistente NÃO é o caso idempotente de 'já pago' —
+        // precisa virar registro de conciliação + aviso (fora da transação).
+        return { didSettle: false, missingDoc: true };
+      }
+      if (snap.data().status === 'paid') {
+        // SEGUNDO pagamento aprovado com OUTRO paymentId para um pedido já
+        // pago (race da geração de PIX, achado #24): a família pagou 2x.
+        // Registra para conciliação + alerta de reembolso (fora da tx).
+        if (snap.data().gatewayPaymentId &&
+            snap.data().gatewayPaymentId !== chargeId) {
+          return { didSettle: false, duplicatePayment: true };
+        }
+        // Re-entrega do webhook com o decremento de estoque pendente (crash
+        // entre o commit da tx e o loop de estoque, achado #30): completa o
+        // efeito em vez de retornar direto.
+        if (snap.data().stockSettled === false) {
+          return { didSettle: false, completeStock: true,
+            items: snap.data().items };
+        }
         return { didSettle: false }; // idempotent
       }
       // SECURITY: refuse to settle if the paid amount differs from the order
@@ -3921,7 +4701,25 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
       if (Math.abs(expectedReais - paidReais) > 0.01) {
         console.error('[mpMktSettle] amount mismatch order', docId,
           'expected', expectedReais, 'paid', paidReais);
-        return { didSettle: false }; // do NOT settle
+        // Mismatch VISIVEL: registra no doc (sem marcar paid) e avisa o admin
+        // APOS a transacao — dinheiro caiu com valor divergente e precisa de
+        // conferencia manual. Mesmo paymentId ja registrado => nao re-notifica
+        // (settle inline + webhook para o mesmo pagamento).
+        const already =
+          snap.data().settleMismatch?.paymentId === chargeId;
+        if (!already) {
+          transaction.update(orderRef, {
+            settleMismatch: {
+              paymentId: chargeId,
+              paidAmount: paidReais,
+              expectedAmount: expectedReais,
+              at: admin.firestore.Timestamp.now(),
+            },
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+        return { didSettle: false,
+          mismatch: already ? null : { paid: paidReais, expected: expectedReais } };
       }
       transaction.update(orderRef, {
         status: 'paid',
@@ -3930,6 +4728,10 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
         paymentGateway: 'mercadopago',
         gatewayPaymentId: chargeId,
         externalPaymentId: chargeId,
+        // Decremento de estoque PENDENTE: vira true após o loop pós-tx. Uma
+        // re-entrega do webhook com paid && stockSettled===false completa o
+        // decremento perdido num crash (achado #30).
+        stockSettled: false,
         pixCode: admin.firestore.FieldValue.delete(),
         pixQrCode: admin.firestore.FieldValue.delete(),
         pixTicketUrl: admin.firestore.FieldValue.delete(),
@@ -3938,7 +4740,25 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
       });
       return { didSettle: true, items: snap.data().items };
     });
-    if (!settle.didSettle) return; // another execution already settled it
+    if (!settle.didSettle && !settle.completeStock) {
+      if (settle.missingDoc) {
+        await mpMktRecordUnmatchedPayment(academyId, type, docId, payment);
+      }
+      if (settle.duplicatePayment) {
+        await mpMktRecordUnmatchedPayment(academyId, type, docId, payment,
+          { reason: 'duplicate' });
+      }
+      if (settle.mismatch) {
+        const code = docId.slice(-6).toUpperCase();
+        await notifyAdminCF(academyId, 'order_paid',
+          'Pagamento com valor divergente',
+          `Pedido #${code}: caiu um pagamento de R$ ${settle.mismatch.paid.toFixed(2)}, ` +
+          `mas o esperado era R$ ${settle.mismatch.expected.toFixed(2)}. ` +
+          `O pedido NAO foi marcado como pago — confira manualmente no Mercado Pago.`,
+          { orderId: docId });
+      }
+      return; // already settled, missing doc, duplicate, or mismatch
+    }
     const items = settle.items;
     if (Array.isArray(items)) {
       for (const item of items) {
@@ -3952,6 +4772,18 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
         }
       }
     }
+    // Decremento concluído — desarma o flag (achado #30). Best-effort: se
+    // falhar, a re-entrega do webhook completa de novo (increment idempotente
+    // por execução; janela de duplo decremento exige crash + duas re-entregas
+    // simultâneas, aceito como risco residual).
+    await orderRef.update({
+      stockSettled: true,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }).catch((e) =>
+      console.error('[mpMktSettle] stockSettled update falhou', docId, e.message));
+    if (!settle.didSettle) {
+      return; // completeStock: efeito completado; não re-notifica o admin
+    }
     const code = docId.slice(-6).toUpperCase();
     await notifyAdminCF(academyId, 'order_paid', 'Pedido Pago',
       `Pedido #${code} pago - R$ ${amtFmt} ${viaLabel}.`, { orderId: docId });
@@ -3964,7 +4796,19 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
   // webhook double-settle so the admin notify fires exactly once.
   const finSettle = await db.runTransaction(async (transaction) => {
     const snap = await transaction.get(finRef);
-    if (!snap.exists || snap.data().status === 'paid') {
+    if (!snap.exists) {
+      // Doc apagado/inexistente NÃO é o caso idempotente de 'já pago' —
+      // precisa virar registro de conciliação + aviso (fora da transação).
+      return { didSettle: false, missingDoc: true };
+    }
+    if (snap.data().status === 'paid') {
+      // SEGUNDO pagamento aprovado com OUTRO paymentId para cobrança já paga
+      // (race da geração de PIX, achado #24): a família pagou 2x. Registra
+      // para conciliação + alerta de reembolso (fora da tx).
+      if (snap.data().gatewayPaymentId &&
+          snap.data().gatewayPaymentId !== chargeId) {
+        return { didSettle: false, duplicatePayment: true };
+      }
       return { didSettle: false }; // idempotent
     }
     // SECURITY: refuse to settle if the paid amount differs from the stored
@@ -3974,7 +4818,22 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
     if (Math.abs(expectedFinReais - paidFinReais) > 0.01) {
       console.error('[mpMktSettle] amount mismatch fin', docId,
         'expected', expectedFinReais, 'paid', paidFinReais);
-      return { didSettle: false }; // do NOT settle
+      // Mismatch VISIVEL (espelha o branch de order): registra no doc sem
+      // marcar paid e avisa o admin apos a transacao para conferencia manual.
+      const already = snap.data().settleMismatch?.paymentId === chargeId;
+      if (!already) {
+        transaction.update(finRef, {
+          settleMismatch: {
+            paymentId: chargeId,
+            paidAmount: paidFinReais,
+            expectedAmount: expectedFinReais,
+            at: admin.firestore.Timestamp.now(),
+          },
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+      return { didSettle: false,
+        mismatch: already ? null : { paid: paidFinReais, expected: expectedFinReais } };
     }
     transaction.update(finRef, {
       status: 'paid',
@@ -3990,9 +4849,201 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
     });
     return { didSettle: true };
   });
-  if (!finSettle.didSettle) return; // another execution already settled it
+  if (!finSettle.didSettle) {
+    if (finSettle.missingDoc) {
+      await mpMktRecordUnmatchedPayment(academyId, type, docId, payment);
+    }
+    if (finSettle.duplicatePayment) {
+      await mpMktRecordUnmatchedPayment(academyId, type, docId, payment,
+        { reason: 'duplicate' });
+    }
+    if (finSettle.mismatch) {
+      await notifyAdminCF(academyId, 'payment_received',
+        'Pagamento com valor divergente',
+        `Caiu um pagamento de R$ ${finSettle.mismatch.paid.toFixed(2)}, ` +
+        `mas a cobranca esperava R$ ${finSettle.mismatch.expected.toFixed(2)}. ` +
+        `A cobranca NAO foi marcada como paga — confira manualmente no Mercado Pago.`,
+        { financialId: docId });
+    }
+    return; // already settled, missing doc, or mismatch
+  }
   await notifyAdminCF(academyId, 'payment_received', 'Pagamento Recebido',
     `Pagamento de R$ ${amtFmt} recebido ${viaLabel}.`, { financialId: docId });
+}
+
+// ---- Estorno / chargeback no marketplace (achado #16) ----------------------
+// O MP re-notifica o MESMO payment id com status refunded/charged_back/
+// cancelled quando um pagamento já liquidado é devolvido. Antes, qualquer
+// status != 'approved' era ignorado: o financial/pedido ficava 'paid' para
+// sempre, o estoque continuava decrementado e o admin nem ficava sabendo do
+// chargeback. Só age quando o doc está 'paid' com o MESMO gatewayPaymentId —
+// um PIX expirado ('cancelled') de doc pendente continua sendo no-op.
+const MP_REVERSAL_STATUSES = ['refunded', 'charged_back', 'cancelled'];
+
+/** Estorno de pagamento avulso (financial ou pedido da loja). Marca o doc como
+ * 'refunded'/'chargeback', restaura o estoque do pedido (idempotente via flag
+ * stockRestorePending) e notifica o admin. Nunca relança para o webhook. */
+async function mpMktHandleReversal({ academyId, type, docId }, payment) {
+  const chargeId = String(payment.id);
+  const newStatus = payment.status === 'charged_back' ? 'chargeback' : 'refunded';
+  const amount = Number(payment.transaction_amount) || 0; // REAIS
+  const verb = newStatus === 'chargeback'
+    ? 'contestado (chargeback)' : 'estornado';
+  const refundEvent = {
+    paymentId: chargeId,
+    mpStatus: payment.status,
+    statusDetail: payment.status_detail || null,
+    amount,
+    at: admin.firestore.Timestamp.now(),
+  };
+
+  if (type === 'order') {
+    const orderRef = db.doc(`academies/${academyId}/storeOrders/${docId}`);
+    const r = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(orderRef);
+      if (!snap.exists) return { handled: false };
+      const d = snap.data();
+      // Re-entrega com a restauração de estoque pendente (crash entre o
+      // commit e o loop de estoque): completa o efeito sem re-notificar.
+      if ((d.status === 'refunded' || d.status === 'chargeback') &&
+          d.gatewayPaymentId === chargeId && d.stockRestorePending === true) {
+        return { handled: false, restock: true, items: d.items };
+      }
+      if (d.status !== 'paid' || d.gatewayPaymentId !== chargeId) {
+        return { handled: false }; // outro pagamento/estado — não mexe
+      }
+      const update = {
+        status: newStatus,
+        refundedAt: FV.serverTimestamp(),
+        refundEvent,
+        updatedAt: FV.serverTimestamp(),
+      };
+      let restock = false;
+      if (d.stockSettled === false) {
+        // O decremento do settle NUNCA rodou (crash antes do loop): consome o
+        // pendente em vez de restaurar — efeito líquido nulo no estoque, e a
+        // re-entrega do 'approved' não decrementa mais (doc não está 'paid').
+        update.stockSettled = true;
+      } else {
+        update.stockRestorePending = true; // flag de idempotência da restauração
+        restock = true;
+      }
+      tx.update(orderRef, update);
+      return { handled: true, restock, items: d.items };
+    });
+    if (r.restock && Array.isArray(r.items)) {
+      for (const item of r.items) {
+        const productRef =
+          db.doc(`academies/${academyId}/storeProducts/${item.productId}`);
+        const p = await productRef.get();
+        if (p.exists && p.data()?.stockType === 'in_stock') {
+          await productRef.update({
+            stockQuantity: FV.increment(item.quantity),
+            updatedAt: FV.serverTimestamp(),
+          });
+        }
+      }
+      await orderRef.update({
+        stockRestorePending: FV.delete(),
+        updatedAt: FV.serverTimestamp(),
+      }).catch((e) => console.error(
+        '[mpMktHandleReversal] stockRestorePending clear falhou', docId, e.message));
+    }
+    if (r.handled) {
+      const code = docId.slice(-6).toUpperCase();
+      await notifyAdminCF(academyId, 'order_paid',
+        newStatus === 'chargeback' ? 'Chargeback em pedido' : 'Pedido estornado',
+        `Pedido #${code}: o pagamento de R$ ${amount.toFixed(2)} foi ${verb} ` +
+        `no Mercado Pago.` +
+        (r.restock ? ' O estoque foi restaurado — confira o pedido.'
+          : ' Confira o pedido.'),
+        { orderId: docId });
+    }
+    return;
+  }
+
+  // financial (mensalidade/cobrança avulsa)
+  const finRef = db.doc(`academies/${academyId}/financials/${docId}`);
+  const r = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(finRef);
+    if (!snap.exists) return { handled: false };
+    const d = snap.data();
+    if (d.status !== 'paid' || d.gatewayPaymentId !== chargeId) {
+      return { handled: false }; // já estornado (idempotente) ou outro pagamento
+    }
+    tx.update(finRef, {
+      status: newStatus,
+      refundedAt: FV.serverTimestamp(),
+      refundEvent,
+      updatedAt: FV.serverTimestamp(),
+    });
+    return { handled: true };
+  });
+  if (r.handled) {
+    await notifyAdminCF(academyId, 'payment_received',
+      newStatus === 'chargeback' ? 'Chargeback recebido' : 'Pagamento estornado',
+      `Um pagamento de R$ ${amount.toFixed(2)} foi ${verb} no Mercado Pago. ` +
+      `A cobranca foi marcada como estornada — confira no app.`,
+      { financialId: docId });
+  }
+}
+
+/** Estorno de um CICLO de assinatura: marca o financial determinístico
+ * sub_{subId}_{paymentId} como 'refunded'/'chargeback' e REGRIDE chargesPaid
+ * em 1 dentro da mesma transação.
+ * DECISÃO (documentada): chargesPaid regride porque reflete ciclos
+ * efetivamente pagos — sem regredir, um ciclo estornado contaria para
+ * completar o termo sem o professor ter recebido. A regressão é idempotente
+ * via flag chargesPaidReversed no próprio financial (re-entrega do webhook
+ * não regride 2x); 'subscription_overcharge' nunca incrementou chargesPaid,
+ * então não regride. O status da assinatura NÃO muda aqui (um sub
+ * 'completed'/'cancelled' não volta às queries dos crons). */
+async function mpSubHandleReversal(academyId, subscriptionId, payment) {
+  const chargeId = String(payment.id);
+  const newStatus = payment.status === 'charged_back' ? 'chargeback' : 'refunded';
+  const finRef =
+    db.doc(`academies/${academyId}/financials/sub_${subscriptionId}_${chargeId}`);
+  const subRef = db.doc(`academies/${academyId}/subscriptions/${subscriptionId}`);
+  const r = await db.runTransaction(async (tx) => {
+    const [finDoc, subDoc] = await Promise.all([tx.get(finRef), tx.get(subRef)]);
+    if (!finDoc.exists) return { handled: false }; // ciclo nunca liquidado aqui
+    const fin = finDoc.data();
+    if (fin.status !== 'paid') return { handled: false }; // já estornado
+    const finUpdate = {
+      status: newStatus,
+      refundedAt: FV.serverTimestamp(),
+      refundEvent: {
+        paymentId: chargeId,
+        mpStatus: payment.status,
+        statusDetail: payment.status_detail || null,
+        amount: Number(payment.transaction_amount) || 0, // REAIS
+        at: admin.firestore.Timestamp.now(),
+      },
+      updatedAt: FV.serverTimestamp(),
+    };
+    if (subDoc.exists && fin.type === 'monthly_tuition' &&
+        fin.chargesPaidReversed !== true &&
+        (Number(subDoc.data().chargesPaid) || 0) > 0) {
+      finUpdate.chargesPaidReversed = true;
+      tx.update(subRef, {
+        chargesPaid: FV.increment(-1),
+        lastEvent: 'cycle_refunded',
+        updatedAt: FV.serverTimestamp(),
+      });
+    }
+    tx.update(finRef, finUpdate);
+    return { handled: true, amount: Number(fin.amount) || 0 };
+  });
+  if (!r.handled) return;
+  try {
+    await notifyAdminCF(academyId, 'payment_overdue',
+      newStatus === 'chargeback'
+        ? 'Chargeback em assinatura' : 'Ciclo de assinatura estornado',
+      `Uma cobranca de assinatura de R$ ${r.amount.toFixed(2)} foi ` +
+      `${newStatus === 'chargeback' ? 'contestada (chargeback)' : 'estornada'} ` +
+      `no Mercado Pago. Confira a assinatura do aluno.`,
+      { subscriptionId });
+  } catch (_) { /* notify is best-effort */ }
 }
 
 // ============================================================
@@ -4040,129 +5091,238 @@ function subscriptionTermEndDate(sub) {
   return ts ? ts.toDate() : null;
 }
 
+// ---- Escala das crons ------------------------------------------------------
+// As 4 crons de assinatura faziam full-scan sequencial de `academies` com o
+// timeout default do v2 (60s) — com crescimento, as MESMAS academias do fim do
+// snapshot nunca rodariam. Mitigação pragmática (sem collectionGroup → sem
+// índice novo): filtro por mpConnected==true (gravado pelo OAuth connect/
+// disconnect), lotes concorrentes pequenos e timeoutSeconds:540 nas crons.
+const CRON_ACADEMY_BATCH = 5;
+
+/** Itera as academias com Mercado Pago conectado (mpConnected==true) em lotes
+ * concorrentes de CRON_ACADEMY_BATCH via Promise.allSettled — uma academia que
+ * falha não derruba o lote (mesma isolação do try/catch por academia). O
+ * handler pode retornar 'skipped' quando não há nada a fazer. Ao final, loga o
+ * placar processadas/puladas/falhas. */
+async function forEachMpAcademy(label, handler) {
+  const snap = await db.collection('academies')
+    .where('mpConnected', '==', true)
+    .get();
+  let processed = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (let i = 0; i < snap.docs.length; i += CRON_ACADEMY_BATCH) {
+    const batch = snap.docs.slice(i, i + CRON_ACADEMY_BATCH);
+    const results = await Promise.allSettled(batch.map((d) => handler(d)));
+    results.forEach((r, idx) => {
+      if (r.status === 'fulfilled') {
+        if (r.value === 'skipped') skipped += 1;
+        else processed += 1;
+      } else {
+        failed += 1;
+        console.error(`[${label}] academia falhou`, batch[idx].id,
+          (r.reason && r.reason.message) || r.reason);
+      }
+    });
+  }
+  console.log(`[${label}] done — academias: ${processed} processadas, ` +
+    `${skipped} puladas, ${failed} falhas`);
+}
+
+// Paginação do search de authorized_payments: o MP retorna só a primeira
+// página por default — ciclos além dela nunca seriam liquidados (e o termGuard
+// poderia 'completar' por data perdendo financials para sempre). Teto de
+// segurança de MP_AP_SEARCH_MAX_PAGES páginas contra paging.total inconsistente.
+const MP_AP_SEARCH_LIMIT = 50;
+const MP_AP_SEARCH_MAX_PAGES = 20;
+
+/** Busca TODOS os authorized_payments de um preapproval, paginando o search do
+ * MP via limit/offset até cobrir paging.total. Retorna a lista concatenada. */
+async function mpSearchAllAuthorizedPayments(token, preapprovalId) {
+  const all = [];
+  let offset = 0;
+  for (let page = 0; page < MP_AP_SEARCH_MAX_PAGES; page += 1) {
+    const search = await mpRequest('GET',
+      `/authorized_payments/search?preapproval_id=${preapprovalId}` +
+      `&limit=${MP_AP_SEARCH_LIMIT}&offset=${offset}`, { token });
+    const results = (search && (search.results || search.elements)) || [];
+    all.push(...results);
+    offset += results.length;
+    const total = search && search.paging ? Number(search.paging.total) : NaN;
+    if (results.length === 0 || results.length < MP_AP_SEARCH_LIMIT ||
+        (Number.isFinite(total) && offset >= total)) {
+      break;
+    }
+  }
+  return all;
+}
+
 // ---- 4. scheduledSubscriptionTermGuard ------------------------------------
 // Rede de segurança: cancela o preapproval + marca `completed` quando a
 // assinatura atingiu N meses, caso o webhook do último ciclo se perca.
 // Idempotente: nunca rebaixa uma assinatura já `completed`.
 exports.scheduledSubscriptionTermGuard = onSchedule(
-  { schedule: '15 6 * * *', timeZone: 'America/Sao_Paulo', secrets: MP_MKT_SECRETS },
+  { schedule: '15 6 * * *', timeZone: 'America/Sao_Paulo',
+    timeoutSeconds: 540, secrets: MP_MKT_SECRETS },
   async () => {
     console.log('[termGuard] start');
     const now = new Date();
-    const academiesSnapshot = await db.collection('academies').get();
 
-    for (const academyDoc of academiesSnapshot.docs) {
+    await forEachMpAcademy('termGuard', async (academyDoc) => {
       const academyId = academyDoc.id;
-      try {
-        let token = null; // lazy: só busca MP se houver algo a cancelar
-        const subsSnap = await db
-          .collection(`academies/${academyId}/subscriptions`)
-          .where('status', 'in', ['authorized', 'paused'])
-          .get();
+      let token = null; // lazy: só busca MP se houver algo a cancelar
+      const subsSnap = await db
+        .collection(`academies/${academyId}/subscriptions`)
+        .where('status', 'in', ['authorized', 'paused'])
+        .get();
+      if (subsSnap.empty) return 'skipped';
 
-        for (const subDoc of subsSnap.docs) {
-          const sub = subDoc.data();
-          if (sub.status === 'completed') continue; // nunca rebaixa
-          const months = Number(sub.months) || 0;
-          if (months <= 0) continue; // open-ended: sem termo
+      for (const subDoc of subsSnap.docs) {
+        const sub = subDoc.data();
+        if (sub.status === 'completed') continue; // nunca rebaixa
+        const months = Number(sub.months) || 0;
+        if (months <= 0) continue; // open-ended: sem termo
 
-          const chargesPaid = Number(sub.chargesPaid) || 0;
-          const termEnd = subscriptionTermEndDate(sub);
-          const reachedByCharges = chargesPaid >= months;
-          // Backstop por DATA com folga: só serve de rede de segurança quando o
-          // webhook do último ciclo se perdeu. Damos ~1 ciclo de margem (35d) além
-          // do termo para não cancelar antes da última cobrança quando o billing
-          // foi adiado (billing_day + billing_day_proportional:false). A conclusão
-          // real é por CONTAGEM (chargesPaid>=months); a data é só fallback.
-          const dateBackstop = termEnd != null &&
-            now.getTime() >= termEnd.getTime() + TERM_GUARD_SLACK_MS;
-          // Entra no fluxo (drenar + possivelmente completar) se bateu a contagem
-          // OU se passou do backstop por data. A decisão FINAL de 'completed' é
-          // tomada depois da drenagem, sobre os dados re-lidos (freshSnap).
-          if (!reachedByCharges && !dateBackstop) continue;
+        const chargesPaid = Number(sub.chargesPaid) || 0;
+        const termEnd = subscriptionTermEndDate(sub);
+        const reachedByCharges = chargesPaid >= months;
+        // Backstop por DATA com folga: só serve de rede de segurança quando o
+        // webhook do último ciclo se perdeu. Damos ~1 ciclo de margem (35d) além
+        // do termo para não cancelar antes da última cobrança quando o billing
+        // foi adiado (billing_day + billing_day_proportional:false). A conclusão
+        // real é por CONTAGEM (chargesPaid>=months); a data é só fallback.
+        const dateBackstop = termEnd != null &&
+          now.getTime() >= termEnd.getTime() + TERM_GUARD_SLACK_MS;
+        // Entra no fluxo (drenar + possivelmente completar) se bateu a contagem
+        // OU se passou do backstop por data. A decisão FINAL de 'completed' é
+        // tomada depois da drenagem, sobre os dados re-lidos (freshSnap).
+        if (!reachedByCharges && !dateBackstop) continue;
 
-          // INTEGRIDADE FINANCEIRA: antes de cancelar o preapproval, DRENA os
-          // authorized_payments aprovados ainda não liquidados. Sem isso, se o
-          // webhook do último ciclo se perdeu (reachedByDate, chargesPaid<months)
-          // e a janela do reconcile (>48h) ainda não passou, a academia perde o
-          // financial 'paid' do último ciclo. mpSubSettleCycle é idempotente
-          // (id determinístico sub_{}_{}), então re-rodar é seguro.
-          if (sub.mpPreapprovalId) {
+        // INTEGRIDADE FINANCEIRA: antes de cancelar o preapproval, DRENA os
+        // authorized_payments aprovados ainda não liquidados. Sem isso, se o
+        // webhook do último ciclo se perdeu (reachedByDate, chargesPaid<months)
+        // e a janela do reconcile (>48h) ainda não passou, a academia perde o
+        // financial 'paid' do último ciclo. mpSubSettleCycle é idempotente
+        // (id determinístico sub_{}_{}), então re-rodar é seguro.
+        if (sub.mpPreapprovalId) {
+          try {
+            if (!token) token = await getMpAccessToken(academyId);
+            const results = await mpSearchAllAuthorizedPayments(
+              token, sub.mpPreapprovalId).catch((e) => {
+                console.error('[termGuard] search ap falhou', academyId,
+                  subDoc.id, e.message);
+                return [];
+              });
+            for (const ap of results) {
+              const payStatus = ap.payment && ap.payment.status;
+              if (payStatus !== 'approved') continue;
+              const paymentId = ap.payment && ap.payment.id
+                ? String(ap.payment.id) : `ap_${ap.id}`;
+              const apAmount = Number(ap.transaction_amount) || 0;
+              await mpSubSettleCycle(academyId, subDoc.id, token, {
+                paymentId, amount: apAmount, mpPayload: ap,
+                // Data real da cobrança: a drenagem roda DEPOIS do ciclo —
+                // sem isso o financial cairia no mês do settle.
+                chargeDate: (ap.payment && ap.payment.date_approved) ||
+                  ap.debit_date || ap.date_created,
+              });
+            }
+          } catch (e) {
+            console.error('[termGuard] drenar ap falhou', academyId,
+              subDoc.id, e.message);
+          }
+        }
+
+        // Re-lê o estado APÓS a drenagem: mpSubSettleCycle pode ter liquidado o
+        // último ciclo (e até completado/cancelado a assinatura), e bumpou
+        // chargesPaid. Toda a decisão abaixo usa freshSnap (não o `sub` stale),
+        // evitando re-cancelar/rebaixar e evitando clobber de uma transição
+        // concorrente.
+        const freshSnap = await subDoc.ref.get();
+        if (!freshSnap.exists || freshSnap.data().status === 'completed') {
+          continue;
+        }
+        const fresh = freshSnap.data();
+        const freshCharges = Number(fresh.chargesPaid) || 0;
+        const freshPreapprovalId = fresh.mpPreapprovalId;
+
+        // CONCLUSÃO: primariamente por CONTAGEM. A data é só backstop tardio (já
+        // com a folga TERM_GUARD_SLACK_MS aplicada na entrada). NUNCA completar
+        // uma assinatura que não pagou NENHUM ciclo (freshCharges===0) apenas por
+        // data — deixa o dunning seguir; só a contagem pode concluí-la. Isso
+        // cobre assinaturas nunca-pagas (inclusive 'paused') que de outra forma
+        // seriam marcadas 'completed' por mera passagem de tempo.
+        const completeByCharges = freshCharges >= months;
+        if (!completeByCharges && freshCharges === 0) {
+          continue; // nunca-paga: não concluir por data, segue o dunning
+        }
+
+        // Atingiu o termo → cancela no MP e SÓ marca completed quando o MP
+        // confirmar (PUT ok, ou GET = cancelled). Em falha, mantém o status
+        // atual (authorized/paused) + termCancelPending: como a sub continua
+        // nas queries deste cron e chargesPaid >= months, o próximo run
+        // re-tenta o cancel até suceder.
+        let mpCancelled = !freshPreapprovalId; // sem preapproval: nada a cancelar
+        if (freshPreapprovalId) {
+          try {
+            if (!token) token = await getMpAccessToken(academyId);
+            await mpRequest('PUT', `/preapproval/${freshPreapprovalId}`,
+              { token, body: { status: 'cancelled' } });
+            mpCancelled = true;
+          } catch (e) {
+            console.error('[termGuard] cancel preapproval falhou', academyId,
+              subDoc.id, e.message);
+            // PUT pode falhar com o preapproval JÁ cancelado — confirma via GET.
             try {
-              if (!token) token = await getMpAccessToken(academyId);
-              const search = await mpRequest('GET',
-                `/authorized_payments/search?preapproval_id=${sub.mpPreapprovalId}`,
-                { token }).catch((e) => {
-                  console.error('[termGuard] search ap falhou', academyId,
-                    subDoc.id, e.message);
-                  return null;
-                });
-              const results =
-                (search && (search.results || search.elements)) || [];
-              for (const ap of results) {
-                const payStatus = ap.payment && ap.payment.status;
-                if (payStatus !== 'approved') continue;
-                const paymentId = ap.payment && ap.payment.id
-                  ? String(ap.payment.id) : `ap_${ap.id}`;
-                const apAmount = Number(ap.transaction_amount) || 0;
-                await mpSubSettleCycle(academyId, subDoc.id, token,
-                  { paymentId, amount: apAmount, mpPayload: ap });
+              if (token) {
+                const pa = await mpRequest('GET',
+                  `/preapproval/${freshPreapprovalId}`, { token });
+                mpCancelled = !!pa && pa.status === 'cancelled';
               }
-            } catch (e) {
-              console.error('[termGuard] drenar ap falhou', academyId,
-                subDoc.id, e.message);
-            }
+            } catch (_) { /* mantém mpCancelled = false */ }
           }
-
-          // Re-lê o estado APÓS a drenagem: mpSubSettleCycle pode ter liquidado o
-          // último ciclo (e até completado/cancelado a assinatura), e bumpou
-          // chargesPaid. Toda a decisão abaixo usa freshSnap (não o `sub` stale),
-          // evitando re-cancelar/rebaixar e evitando clobber de uma transição
-          // concorrente.
-          const freshSnap = await subDoc.ref.get();
-          if (!freshSnap.exists || freshSnap.data().status === 'completed') {
-            continue;
-          }
-          const fresh = freshSnap.data();
-          const freshCharges = Number(fresh.chargesPaid) || 0;
-          const freshPreapprovalId = fresh.mpPreapprovalId;
-
-          // CONCLUSÃO: primariamente por CONTAGEM. A data é só backstop tardio (já
-          // com a folga TERM_GUARD_SLACK_MS aplicada na entrada). NUNCA completar
-          // uma assinatura que não pagou NENHUM ciclo (freshCharges===0) apenas por
-          // data — deixa o dunning seguir; só a contagem pode concluí-la. Isso
-          // cobre assinaturas nunca-pagas (inclusive 'paused') que de outra forma
-          // seriam marcadas 'completed' por mera passagem de tempo.
-          const completeByCharges = freshCharges >= months;
-          if (!completeByCharges && freshCharges === 0) {
-            continue; // nunca-paga: não concluir por data, segue o dunning
-          }
-
-          // Atingiu o termo → cancela no MP (best-effort) e marca completed.
-          if (freshPreapprovalId) {
-            try {
-              if (!token) token = await getMpAccessToken(academyId);
-              await mpRequest('PUT', `/preapproval/${freshPreapprovalId}`,
-                { token, body: { status: 'cancelled' } });
-            } catch (e) {
-              console.error('[termGuard] cancel preapproval falhou', academyId,
-                subDoc.id, e.message);
-            }
-          }
+        }
+        if (!mpCancelled) {
           await subDoc.ref.update({
-            status: 'completed',
-            lastEvent: 'term_completed_guard',
+            termCancelPending: true,
+            lastEvent: 'term_cancel_failed',
             updatedAt: FV.serverTimestamp(),
           });
-          console.log('[termGuard] completed', academyId, subDoc.id,
-            'charges', freshCharges, 'byCharges', completeByCharges);
+          console.log('[termGuard] cancel pendente (MP nao confirmou)',
+            academyId, subDoc.id);
+          continue;
         }
-      } catch (e) {
-        console.error('[termGuard] academia falhou', academyId, e.message);
-        // try/catch POR academia: uma falha não aborta o lote.
+        // TÉRMINO COM INADIMPLÊNCIA VISÍVEL: se completou pelo backstop por
+        // DATA com pagamento parcial (0 < freshCharges < months), mantém o
+        // status 'completed' (compatível com as queries existentes) mas marca
+        // termShortfall + lastEvent dedicado e avisa o admin — o professor não
+        // perde a distinção entre "aluno quitou" e "pagou N de M e sumiu".
+        const termShortfall = completeByCharges
+          ? 0 : Math.max(0, months - freshCharges);
+        const completedUpdate = {
+          status: 'completed',
+          termCancelPending: FV.delete(),
+          lastEvent: termShortfall > 0
+            ? 'term_expired_shortfall' : 'term_completed_guard',
+          updatedAt: FV.serverTimestamp(),
+        };
+        if (termShortfall > 0) completedUpdate.termShortfall = termShortfall;
+        await subDoc.ref.update(completedUpdate);
+        if (termShortfall > 0) {
+          try {
+            await notifyAdminCF(academyId, 'payment_overdue',
+              'Assinatura encerrada com ciclos em aberto',
+              `A assinatura de ${fresh.studentName || 'um aluno'} chegou ao ` +
+              `fim do prazo com ${termShortfall} de ${months} ciclo(s) sem ` +
+              'pagamento. Avalie a cobranca dos valores em aberto.',
+              { subscriptionId: subDoc.id });
+          } catch (_) { /* best-effort */ }
+        }
+        console.log('[termGuard] completed', academyId, subDoc.id,
+          'charges', freshCharges, 'byCharges', completeByCharges,
+          'shortfall', termShortfall);
       }
-    }
-    console.log('[termGuard] done');
+    });
     return null;
   });
 
@@ -4172,52 +5332,59 @@ exports.scheduledSubscriptionTermGuard = onSchedule(
 // GET /preapproval e liquida os authorized_payments aprovados via
 // mpSubSettleCycle (idempotente por id determinístico). A cada 6h.
 exports.scheduledSubscriptionReconcile = onSchedule(
-  { schedule: '0 */6 * * *', timeZone: 'America/Sao_Paulo', secrets: MP_MKT_SECRETS },
+  { schedule: '0 */6 * * *', timeZone: 'America/Sao_Paulo',
+    timeoutSeconds: 540, secrets: MP_MKT_SECRETS },
   async () => {
     console.log('[reconcile] start');
     const now = Date.now();
     const STALE_MS = 48 * 60 * 60 * 1000;
-    const academiesSnapshot = await db.collection('academies').get();
 
-    for (const academyDoc of academiesSnapshot.docs) {
+    await forEachMpAcademy('reconcile', async (academyDoc) => {
       const academyId = academyDoc.id;
-      try {
-        const subsSnap = await db
-          .collection(`academies/${academyId}/subscriptions`)
-          .where('status', 'in', ['authorized', 'paused'])
-          .get();
-        if (subsSnap.empty) continue;
+      const subsSnap = await db
+        .collection(`academies/${academyId}/subscriptions`)
+        .where('status', 'in', ['authorized', 'paused'])
+        .get();
+      if (subsSnap.empty) return 'skipped';
 
-        let token = null;
-        for (const subDoc of subsSnap.docs) {
-          const sub = subDoc.data();
-          if (!sub.mpPreapprovalId) continue;
-          const nextBilling = sub.nextBillingDate &&
-            typeof sub.nextBillingDate.toDate === 'function'
-            ? sub.nextBillingDate.toDate().getTime() : null;
-          // `authorized` só reconcilia quando a cobrança já deveria ter ocorrido
-          // há >48h. `paused` SEMPRE reconcilia (buraco de cobertura: uma
-          // assinatura pausada no MP cujo webhook se perdeu pode nunca entrar em
-          // dunning se nextBillingDate local ainda <48h vencida ou dessincronizada
-          // — precisamos garantir needsReauth=true para o dunning pegar).
-          if (sub.status === 'authorized' &&
-              (nextBilling == null || now - nextBilling <= STALE_MS)) continue;
+      let token = null;
+      for (const subDoc of subsSnap.docs) {
+        const sub = subDoc.data();
+        if (!sub.mpPreapprovalId) continue;
+        const nextBilling = sub.nextBillingDate &&
+          typeof sub.nextBillingDate.toDate === 'function'
+          ? sub.nextBillingDate.toDate().getTime() : null;
+        // `authorized` só reconcilia quando a cobrança já deveria ter ocorrido
+        // há >48h. `paused` SEMPRE reconcilia (buraco de cobertura: uma
+        // assinatura pausada no MP cujo webhook se perdeu pode nunca entrar em
+        // dunning se nextBillingDate local ainda <48h vencida ou dessincronizada
+        // — precisamos garantir needsReauth=true para o dunning pegar).
+        if (sub.status === 'authorized' &&
+            (nextBilling == null || now - nextBilling <= STALE_MS)) continue;
 
-          try {
-            if (!token) token = await getMpAccessToken(academyId);
+        try {
+          if (!token) token = await getMpAccessToken(academyId);
 
-            // 1) Re-sync do status + próxima cobrança a partir do preapproval.
-            const pa = await mpRequest('GET',
-              `/preapproval/${sub.mpPreapprovalId}`, { token });
-            const map = { authorized: 'authorized', paused: 'paused',
-              cancelled: 'cancelled', pending: 'pending' };
-            const syncUpdate = {
-              lastEvent: 'reconcile_resync',
-              updatedAt: FV.serverTimestamp(),
-            };
-            if (sub.status !== 'completed' && map[pa.status]) {
-              syncUpdate.status = map[pa.status];
-              if (pa.status === 'paused') {
+          // 1) Re-sync do status + próxima cobrança a partir do preapproval.
+          const pa = await mpRequest('GET',
+            `/preapproval/${sub.mpPreapprovalId}`, { token });
+          const map = { authorized: 'authorized', paused: 'paused',
+            cancelled: 'cancelled', pending: 'pending' };
+          const syncUpdate = {
+            lastEvent: 'reconcile_resync',
+            updatedAt: FV.serverTimestamp(),
+          };
+          if (sub.status !== 'completed' && map[pa.status]) {
+            syncUpdate.status = map[pa.status];
+            // Pausa INTENCIONAL do aluno (pausedBy:'user') NÃO entra em
+            // dunning — sem needsReauth/nextRetryAt, senão o dunning
+            // reativaria a cobrança sem consentimento.
+            if (pa.status === 'paused' && sub.pausedBy !== 'user') {
+              if (isLegacyUserPause(sub)) {
+                // Dados legados: o pauseMpSubscription antigo não gravava
+                // pausedBy — backfill em vez de iniciar dunning.
+                syncUpdate.pausedBy = 'user';
+              } else {
                 syncUpdate.needsReauth = true;
                 syncUpdate.lastFailureAt = FV.serverTimestamp();
                 if (sub.nextRetryAt == null) {
@@ -4226,41 +5393,45 @@ exports.scheduledSubscriptionReconcile = onSchedule(
                 }
               }
             }
-            if (pa.next_payment_date) {
-              syncUpdate.nextBillingDate = admin.firestore.Timestamp.fromDate(
-                new Date(pa.next_payment_date));
+            // MP cobrando de novo → a pausa intencional (se havia) acabou.
+            if (pa.status === 'authorized') {
+              syncUpdate.pausedBy = FV.delete();
             }
-            await subDoc.ref.update(syncUpdate);
-
-            // 2) Liquida authorized_payments aprovados ainda não liquidados.
-            //    mpSubSettleCycle é idempotente (id determinístico sub_{}_{}).
-            const search = await mpRequest('GET',
-              `/authorized_payments/search?preapproval_id=${sub.mpPreapprovalId}`,
-              { token }).catch((e) => {
-                console.error('[reconcile] search ap falhou', academyId,
-                  subDoc.id, e.message);
-                return null;
-              });
-            const results = (search && (search.results || search.elements)) || [];
-            for (const ap of results) {
-              const payStatus = ap.payment && ap.payment.status;
-              if (payStatus !== 'approved') continue;
-              const paymentId = ap.payment && ap.payment.id
-                ? String(ap.payment.id) : `ap_${ap.id}`;
-              const amount = Number(ap.transaction_amount) || 0;
-              await mpSubSettleCycle(academyId, subDoc.id, token,
-                { paymentId, amount, mpPayload: ap });
-            }
-          } catch (e) {
-            console.error('[reconcile] assinatura falhou', academyId,
-              subDoc.id, e.message);
           }
+          if (pa.next_payment_date) {
+            syncUpdate.nextBillingDate = admin.firestore.Timestamp.fromDate(
+              new Date(pa.next_payment_date));
+          }
+          await subDoc.ref.update(syncUpdate);
+
+          // 2) Liquida authorized_payments aprovados ainda não liquidados.
+          //    mpSubSettleCycle é idempotente (id determinístico sub_{}_{}).
+          const results = await mpSearchAllAuthorizedPayments(
+            token, sub.mpPreapprovalId).catch((e) => {
+              console.error('[reconcile] search ap falhou', academyId,
+                subDoc.id, e.message);
+              return [];
+            });
+          for (const ap of results) {
+            const payStatus = ap.payment && ap.payment.status;
+            if (payStatus !== 'approved') continue;
+            const paymentId = ap.payment && ap.payment.id
+              ? String(ap.payment.id) : `ap_${ap.id}`;
+            const amount = Number(ap.transaction_amount) || 0;
+            await mpSubSettleCycle(academyId, subDoc.id, token, {
+              paymentId, amount, mpPayload: ap,
+              // Data real da cobrança: o reconcile age >48h após o ciclo —
+              // sem isso o financial cairia no mês do settle.
+              chargeDate: (ap.payment && ap.payment.date_approved) ||
+                ap.debit_date || ap.date_created,
+            });
+          }
+        } catch (e) {
+          console.error('[reconcile] assinatura falhou', academyId,
+            subDoc.id, e.message);
         }
-      } catch (e) {
-        console.error('[reconcile] academia falhou', academyId, e.message);
       }
-    }
-    console.log('[reconcile] done');
+    });
     return null;
   });
 
@@ -4269,109 +5440,124 @@ exports.scheduledSubscriptionReconcile = onSchedule(
 // backoff [1,3,7] dias a partir da falha. Após esgotar, mantém `paused` e
 // notifica admin + aluno (NÃO cancela). Diário.
 exports.scheduledSubscriptionDunning = onSchedule(
-  { schedule: '30 6 * * *', timeZone: 'America/Sao_Paulo', secrets: MP_MKT_SECRETS },
+  { schedule: '30 6 * * *', timeZone: 'America/Sao_Paulo',
+    timeoutSeconds: 540, secrets: MP_MKT_SECRETS },
   async () => {
     console.log('[dunning] start');
     const now = Date.now();
-    const academiesSnapshot = await db.collection('academies').get();
 
-    for (const academyDoc of academiesSnapshot.docs) {
+    await forEachMpAcademy('dunning', async (academyDoc) => {
       const academyId = academyDoc.id;
-      try {
-        const subsSnap = await db
-          .collection(`academies/${academyId}/subscriptions`)
-          .where('status', '==', 'paused')
-          .get();
-        if (subsSnap.empty) continue;
+      const subsSnap = await db
+        .collection(`academies/${academyId}/subscriptions`)
+        .where('status', '==', 'paused')
+        .get();
+      if (subsSnap.empty) return 'skipped';
 
-        let token = null;
-        for (const subDoc of subsSnap.docs) {
-          const sub = subDoc.data();
-          if (sub.needsReauth !== true) continue;
-          if (!sub.mpPreapprovalId) continue;
-          const failedAttempts = Number(sub.failedAttempts) || 0;
+      let token = null;
+      for (const subDoc of subsSnap.docs) {
+        const sub = subDoc.data();
+        // Pausa INTENCIONAL do aluno: NUNCA reativar o preapproval por cron —
+        // só o próprio aluno retoma (resumeMpSubscription / troca de cartão).
+        if (sub.pausedBy === 'user') continue;
+        if (sub.needsReauth !== true) continue;
+        if (!sub.mpPreapprovalId) continue;
+        const failedAttempts = Number(sub.failedAttempts) || 0;
 
-          // Esgotou as tentativas → para de tentar e notifica (uma vez).
-          // Idempotência da notificação via campo DEDICADO
-          // (dunningExhaustedNotifiedAt), desacoplada do gatilho nextRetryAt —
-          // nextRetryAt cuida só do backoff, não de "já notifiquei a suspensão".
-          if (failedAttempts >= MAX_DUNNING_RETRIES) {
-            if (sub.dunningExhaustedNotifiedAt == null) {
-              await subDoc.ref.update({
-                nextRetryAt: null,
-                dunningExhaustedNotifiedAt: FV.serverTimestamp(),
-                lastEvent: 'dunning_exhausted',
-                updatedAt: FV.serverTimestamp(),
-              });
-              try {
-                await notifyAdminCF(academyId, 'payment_overdue',
-                  'Assinatura suspensa',
-                  `A cobranca recorrente de ${sub.studentName || 'um aluno'} ` +
-                  'falhou apos 3 tentativas. Peca a atualizacao do cartao.',
-                  { subscriptionId: subDoc.id });
-              } catch (_) { /* best-effort */ }
-              await notifySubscriptionStudent(academyId, sub, 'payment_overdue',
-                'Atualize seu cartao',
-                'Sua assinatura foi suspensa apos varias tentativas de cobranca. ' +
-                'Atualize o cartao para reativar.',
+        // Esgotou as tentativas → para de tentar e notifica (uma vez).
+        // Idempotência da notificação via campo DEDICADO
+        // (dunningExhaustedNotifiedAt), desacoplada do gatilho nextRetryAt —
+        // nextRetryAt cuida só do backoff, não de "já notifiquei a suspensão".
+        if (failedAttempts >= MAX_DUNNING_RETRIES) {
+          if (sub.dunningExhaustedNotifiedAt == null) {
+            await subDoc.ref.update({
+              nextRetryAt: null,
+              dunningExhaustedNotifiedAt: FV.serverTimestamp(),
+              lastEvent: 'dunning_exhausted',
+              updatedAt: FV.serverTimestamp(),
+            });
+            try {
+              await notifyAdminCF(academyId, 'payment_overdue',
+                'Assinatura suspensa',
+                `A cobranca recorrente de ${sub.studentName || 'um aluno'} ` +
+                'falhou apos 3 tentativas. Peca a atualizacao do cartao.',
                 { subscriptionId: subDoc.id });
-            }
-            continue;
+            } catch (_) { /* best-effort */ }
+            await notifySubscriptionStudent(academyId, sub, 'payment_overdue',
+              'Atualize seu cartao',
+              'Sua assinatura foi suspensa apos varias tentativas de cobranca. ' +
+              'Atualize o cartao para reativar.',
+              { subscriptionId: subDoc.id });
           }
+          continue;
+        }
 
-          // Ainda há tentativas: respeita o backoff (nextRetryAt). Na 1ª
-          // tentativa nextRetryAt pode ser nulo → tenta imediatamente.
-          const retryAt = sub.nextRetryAt &&
-            typeof sub.nextRetryAt.toDate === 'function'
-            ? sub.nextRetryAt.toDate().getTime() : null;
-          if (retryAt != null && now < retryAt) continue;
+        // Ainda há tentativas: respeita o backoff (nextRetryAt). Na 1ª
+        // tentativa nextRetryAt pode ser nulo → tenta imediatamente.
+        const retryAt = sub.nextRetryAt &&
+          typeof sub.nextRetryAt.toDate === 'function'
+          ? sub.nextRetryAt.toDate().getTime() : null;
+        if (retryAt != null && now < retryAt) continue;
 
-          const attemptN = failedAttempts + 1; // 1..3
-          let reactivated = false;
-          try {
-            if (!token) token = await getMpAccessToken(academyId);
-            await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
-              { token, body: { status: 'authorized' } });
-            reactivated = true;
-          } catch (e) {
-            console.error('[dunning] reativar falhou', academyId, subDoc.id,
-              e.message);
+        const attemptN = failedAttempts + 1; // 1..3
+        let reactivated = false;
+        try {
+          if (!token) token = await getMpAccessToken(academyId);
+          await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+            { token, body: { status: 'authorized' } });
+          reactivated = true;
+        } catch (e) {
+          console.error('[dunning] reativar falhou', academyId, subDoc.id,
+            e.message);
+        }
+
+        if (!reactivated) {
+          // Falha TRANSITÓRIA de chamada (throw/5xx/timeout no PUT, refresh de
+          // token, etc.) — NÃO é um ciclo de cobrança recusado. Não consome a
+          // tentativa nem avança o backoff: deixamos o estado intacto e o
+          // próximo run (a isolação por academia segue valendo) tenta de novo.
+          // Assim `failedAttempts` representa ciclos de cobrança falhos, não
+          // falhas de API, e 3 indisponibilidades não suspendem quem paga.
+          console.log('[dunning] reativacao falhou (transitorio), tentativa NAO ' +
+            'consumida', academyId, subDoc.id, 'attempt', attemptN);
+          continue;
+        }
+
+        // Reativação aceita pelo MP → conta como tentativa do ciclo. Backoff
+        // para a PRÓXIMA tentativa: índice attemptN..MAX, cap no fim.
+        const backoffIdx = Math.min(attemptN, DUNNING_BACKOFF_DAYS.length - 1);
+        const nextRetry = admin.firestore.Timestamp.fromMillis(
+          now + DUNNING_BACKOFF_DAYS[backoffIdx] * 24 * 60 * 60 * 1000);
+        // TRANSAÇÃO, não update cego: entre o PUT authorized e este write o
+        // MP pode disparar webhooks que já resetaram o estado (sync/settle →
+        // 'authorized' + failedAttempts:0, ou pausa intencional do aluno).
+        // Só grava o estado de dunning se a assinatura AINDA está no ciclo
+        // esperado ('paused' + needsReauth, não pausada pelo aluno) — se o
+        // webhook já reativou, não regride com contador fantasma.
+        await db.runTransaction(async (txn) => {
+          const freshSnap = await txn.get(subDoc.ref);
+          if (!freshSnap.exists) return;
+          const fresh = freshSnap.data();
+          if (fresh.status !== 'paused' || fresh.needsReauth !== true ||
+              fresh.pausedBy === 'user') {
+            console.log('[dunning] estado mudou durante o retry — write de ' +
+              'dunning ignorado', academyId, subDoc.id, fresh.status);
+            return;
           }
-
-          if (!reactivated) {
-            // Falha TRANSITÓRIA de chamada (throw/5xx/timeout no PUT, refresh de
-            // token, etc.) — NÃO é um ciclo de cobrança recusado. Não consome a
-            // tentativa nem avança o backoff: deixamos o estado intacto e o
-            // próximo run (try/catch por academia já isola) tenta de novo. Assim
-            // `failedAttempts` representa ciclos de cobrança falhos, não falhas de
-            // API, e 3 indisponibilidades não suspendem quem paga.
-            console.log('[dunning] reativacao falhou (transitorio), tentativa NAO ' +
-              'consumida', academyId, subDoc.id, 'attempt', attemptN);
-            continue;
-          }
-
-          // Reativação aceita pelo MP → conta como tentativa do ciclo. Backoff
-          // para a PRÓXIMA tentativa: índice attemptN..MAX, cap no fim.
-          const backoffIdx = Math.min(attemptN, DUNNING_BACKOFF_DAYS.length - 1);
-          const nextRetry = admin.firestore.Timestamp.fromMillis(
-            now + DUNNING_BACKOFF_DAYS[backoffIdx] * 24 * 60 * 60 * 1000);
-          await subDoc.ref.update({
+          txn.update(subDoc.ref, {
             failedAttempts: attemptN,
             lastFailureAt: FV.serverTimestamp(),
             nextRetryAt: nextRetry,
             lastEvent: 'dunning_retry_sent',
             updatedAt: FV.serverTimestamp(),
           });
-          // A reativação foi aceita; o webhook do próximo authorized_payment
-          // confirma (e mpSubSettleCycle zera failedAttempts ao aprovar).
-          console.log('[dunning] retry', academyId, subDoc.id, 'attempt', attemptN,
-            'reactivated', reactivated);
-        }
-      } catch (e) {
-        console.error('[dunning] academia falhou', academyId, e.message);
+        });
+        // A reativação foi aceita; o webhook do próximo authorized_payment
+        // confirma (e mpSubSettleCycle zera failedAttempts ao aprovar).
+        console.log('[dunning] retry', academyId, subDoc.id, 'attempt', attemptN,
+          'reactivated', reactivated);
       }
-    }
-    console.log('[dunning] done');
+    });
     return null;
   });
 
@@ -4379,67 +5565,63 @@ exports.scheduledSubscriptionDunning = onSchedule(
 // Avisa o aluno quando o cartão da assinatura expira no MÊS CORRENTE, ANTES do
 // billing_day, uma única vez por mês (expiryNotifiedAt). Diário.
 exports.scheduledCardExpiryWarning = onSchedule(
-  { schedule: '45 6 * * *', timeZone: 'America/Sao_Paulo', secrets: MP_MKT_SECRETS },
+  { schedule: '45 6 * * *', timeZone: 'America/Sao_Paulo',
+    timeoutSeconds: 540, secrets: MP_MKT_SECRETS },
   async () => {
     console.log('[cardExpiry] start');
     const now = new Date();
     const curYear = now.getFullYear();
     const curMonth = now.getMonth() + 1; // 1..12
     const curDay = now.getDate();
-    const academiesSnapshot = await db.collection('academies').get();
 
-    for (const academyDoc of academiesSnapshot.docs) {
+    await forEachMpAcademy('cardExpiry', async (academyDoc) => {
       const academyId = academyDoc.id;
-      try {
-        const subsSnap = await db
-          .collection(`academies/${academyId}/subscriptions`)
-          .where('status', '==', 'authorized')
-          .get();
+      const subsSnap = await db
+        .collection(`academies/${academyId}/subscriptions`)
+        .where('status', '==', 'authorized')
+        .get();
+      if (subsSnap.empty) return 'skipped';
 
-        for (const subDoc of subsSnap.docs) {
-          const sub = subDoc.data();
-          const expMonth = Number(sub.cardExpMonth) || 0;
-          const expYear = Number(sub.cardExpYear) || 0;
-          if (!(expMonth >= 1 && expMonth <= 12) || expYear < 2000) continue;
+      for (const subDoc of subsSnap.docs) {
+        const sub = subDoc.data();
+        const expMonth = Number(sub.cardExpMonth) || 0;
+        const expYear = Number(sub.cardExpYear) || 0;
+        if (!(expMonth >= 1 && expMonth <= 12) || expYear < 2000) continue;
 
-          // ANTECEDÊNCIA: o cartão é válido até o FIM do mês expMonth/expYear, então
-          // avisar só no mês exato da expiração chega tarde (a cobrança do próprio
-          // mês pode já ter sido recusada). Avisamos quando faltam <= ~40 dias para
-          // o fim da validade — ou seja, quando estamos no mês da expiração OU no
-          // mês anterior. Usamos índice ano*12+mês para comparar meses linearmente.
-          const curIdx = curYear * 12 + curMonth;
-          const expIdx = expYear * 12 + expMonth;
-          const monthsUntilExpiry = expIdx - curIdx; // 0 = expira este mês
-          // Já expirou (monthsUntilExpiry<0) → ainda assim avisa (cartão vencido).
-          // Só pula quando ainda falta mais de 1 mês para o mês de expiração.
-          if (monthsUntilExpiry > 1) continue;
-          // Avisar ANTES do billing_day (depois disso a cobrança já tentou neste
-          // ciclo); só relevante quando o aviso e a cobrança caem no mesmo mês.
-          const billingDay = Number(sub.billingDay) || 1;
-          if (monthsUntilExpiry <= 0 && curDay >= billingDay) continue;
+        // ANTECEDÊNCIA: o cartão é válido até o FIM do mês expMonth/expYear, então
+        // avisar só no mês exato da expiração chega tarde (a cobrança do próprio
+        // mês pode já ter sido recusada). Avisamos quando faltam <= ~40 dias para
+        // o fim da validade — ou seja, quando estamos no mês da expiração OU no
+        // mês anterior. Usamos índice ano*12+mês para comparar meses linearmente.
+        const curIdx = curYear * 12 + curMonth;
+        const expIdx = expYear * 12 + expMonth;
+        const monthsUntilExpiry = expIdx - curIdx; // 0 = expira este mês
+        // Já expirou (monthsUntilExpiry<0) → ainda assim avisa (cartão vencido).
+        // Só pula quando ainda falta mais de 1 mês para o mês de expiração.
+        if (monthsUntilExpiry > 1) continue;
+        // Avisar ANTES do billing_day (depois disso a cobrança já tentou neste
+        // ciclo); só relevante quando o aviso e a cobrança caem no mesmo mês.
+        const billingDay = Number(sub.billingDay) || 1;
+        if (monthsUntilExpiry <= 0 && curDay >= billingDay) continue;
 
-          // Já avisamos NESTE mês? (expiryNotifiedAt no mesmo ano/mês).
-          const notified = sub.expiryNotifiedAt &&
-            typeof sub.expiryNotifiedAt.toDate === 'function'
-            ? sub.expiryNotifiedAt.toDate() : null;
-          if (notified && notified.getFullYear() === curYear &&
-              notified.getMonth() + 1 === curMonth) continue;
+        // Já avisamos NESTE mês? (expiryNotifiedAt no mesmo ano/mês).
+        const notified = sub.expiryNotifiedAt &&
+          typeof sub.expiryNotifiedAt.toDate === 'function'
+          ? sub.expiryNotifiedAt.toDate() : null;
+        if (notified && notified.getFullYear() === curYear &&
+            notified.getMonth() + 1 === curMonth) continue;
 
-          await notifySubscriptionStudent(academyId, sub, 'card_expiring',
-            'Cartao prestes a expirar',
-            'O cartao da sua assinatura expira este mes. Atualize-o antes da ' +
-            'proxima cobranca para nao perder o acesso.',
-            { subscriptionId: subDoc.id });
-          await subDoc.ref.update({
-            expiryNotifiedAt: FV.serverTimestamp(),
-            updatedAt: FV.serverTimestamp(),
-          });
-          console.log('[cardExpiry] avisado', academyId, subDoc.id);
-        }
-      } catch (e) {
-        console.error('[cardExpiry] academia falhou', academyId, e.message);
+        await notifySubscriptionStudent(academyId, sub, 'card_expiring',
+          'Cartao prestes a expirar',
+          'O cartao da sua assinatura expira este mes. Atualize-o antes da ' +
+          'proxima cobranca para nao perder o acesso.',
+          { subscriptionId: subDoc.id });
+        await subDoc.ref.update({
+          expiryNotifiedAt: FV.serverTimestamp(),
+          updatedAt: FV.serverTimestamp(),
+        });
+        console.log('[cardExpiry] avisado', academyId, subDoc.id);
       }
-    }
-    console.log('[cardExpiry] done');
+    });
     return null;
   });

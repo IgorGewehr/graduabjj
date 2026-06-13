@@ -67,6 +67,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         countCancelled++;
         continue;
       }
+      // Cobrança indevida a reembolsar (subscription_overcharge) — não é
+      // receita; fica fora das somas/contagens (espelha getMonthlySummary).
+      if (p.isOvercharge) continue;
       totalExpected += p.value;
       if (p.status == PaymentStatus.paid) {
         totalPaid += p.value;
@@ -1939,7 +1942,26 @@ class _PaymentCard extends StatelessWidget {
                       color: isPaid ? AppTheme.success : AppTheme.textPrimary,
                     ),
                   ),
-                  if (isPaid)
+                  // Cobrança indevida de assinatura: está 'paid' no gateway,
+                  // mas é dinheiro a devolver — destaca em vez de 'Pago'.
+                  if (isPaid && payment.isOvercharge)
+                    Container(
+                      margin: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppTheme.warning.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Reembolso pendente',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.warning,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    )
+                  else if (isPaid)
                     Container(
                       margin: const EdgeInsets.only(top: 4),
                       padding: const EdgeInsets.symmetric(

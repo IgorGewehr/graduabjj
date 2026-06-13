@@ -475,6 +475,11 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
   /// connected (we then tell the student to arrange payment with the academy).
   PaymentGateway? _gateway;
 
+  /// True when the gateway RESOLUTION failed (transient error — distinct from
+  /// [PaymentGateway.none]). Shows a retry notice instead of an endless
+  /// spinner or a misleading 'arrange with the academy'.
+  bool _gatewayError = false;
+
   @override
   void initState() {
     super.initState();
@@ -486,9 +491,26 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
 
   Future<void> _resolveGateway() async {
     // Single source of truth (cached per academy): MP > Asaas > AbacatePay.
-    final resolved = await ref
-        .read(paymentGatewayProvider(FirebaseService.academyId).future);
-    if (mounted) setState(() => _gateway = resolved);
+    try {
+      final resolved = await ref
+          .read(paymentGatewayProvider(FirebaseService.academyId).future);
+      if (mounted) {
+        setState(() {
+          _gateway = resolved;
+          _gatewayError = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _gatewayError = true);
+    }
+  }
+
+  /// Retry after a failed resolution: the FutureProvider caches the error, so
+  /// invalidate it before resolving again.
+  void _retryResolveGateway() {
+    setState(() => _gatewayError = false);
+    ref.invalidate(paymentGatewayProvider(FirebaseService.academyId));
+    _resolveGateway();
   }
 
   Color _getStatusColor() {
@@ -625,6 +647,40 @@ class _OrderDetailsSheetState extends ConsumerState<_OrderDetailsSheet> {
   /// charge attempt); otherwise the shared PIX + Card sheets.
   List<Widget> _buildPaymentSection() {
     final gateway = _gateway;
+
+    // Falha transitória ao resolver (≠ 'nada conectado'): erro com retry, sem
+    // sumir com a opção de pagar nem fingir que não há gateway.
+    if (gateway == null && _gatewayError) {
+      return [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.warning.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(12),
+            border:
+                Border.all(color: AppTheme.warning.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            children: [
+              const Icon(LucideIcons.wifiOff,
+                  size: 18, color: AppTheme.warning),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Não foi possível carregar o pagamento online.',
+                  style: AppTheme.bodySmall
+                      .copyWith(color: AppTheme.textSecondary),
+                ),
+              ),
+              TextButton(
+                onPressed: _retryResolveGateway,
+                child: const Text('Tentar de novo'),
+              ),
+            ],
+          ),
+        ),
+      ];
+    }
 
     if (gateway == null) {
       return const [

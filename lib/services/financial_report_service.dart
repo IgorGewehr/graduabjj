@@ -126,6 +126,10 @@ class FinancialReportService {
       final data = doc.data() as Map<String, dynamic>;
       final status = data['status'] as String? ?? '';
       if (status == 'cancelled') continue;
+      // Cobrança indevida a reembolsar (type 'subscription_overcharge',
+      // needsRefund) — nunca entra em receita confirmada/esperada, projeções
+      // nem receita por plano.
+      if (data['type'] == 'subscription_overcharge') continue;
 
       final dueDate = data['dueDate'] is Timestamp
           ? (data['dueDate'] as Timestamp).toDate()

@@ -56,9 +56,50 @@ class _SubscriptionSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final subs =
-        ref.watch(studentSubscriptionsProvider(student.id)).valueOrNull ??
-            const <Subscription>[];
+    final subsAsync = ref.watch(studentSubscriptionsProvider(student.id));
+    // Enquanto o stream de assinaturas não emitiu o primeiro snapshot, não dá
+    // para saber se já existe assinatura ativa — renderizar o CTA 'Assinar'
+    // aqui abriria janela para preapproval duplicado.
+    if (subsAsync.isLoading && !subsAsync.hasValue) {
+      return const SizedBox.shrink();
+    }
+    // Erro no stream (regras/transiente no cold start): NÃO sumir com a seção
+    // — ela carrega o card da assinatura e o banner de dunning (o único
+    // caminho do aluno para atualizar um cartão recusado). Mostra um tile
+    // compacto com retry; o CTA 'Assinar' segue suprimido (sem dado confiável).
+    if (!subsAsync.hasValue) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppTheme.error.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppTheme.error.withValues(alpha: 0.25)),
+          ),
+          child: Row(
+            children: [
+              const Icon(LucideIcons.alertTriangle,
+                  size: 18, color: AppTheme.error),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Não foi possível carregar sua assinatura.',
+                  style: AppTheme.bodySmall
+                      .copyWith(color: AppTheme.textSecondary),
+                ),
+              ),
+              TextButton(
+                onPressed: () => ref
+                    .invalidate(studentSubscriptionsProvider(student.id)),
+                child: const Text('Tentar de novo'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final subs = subsAsync.value ?? const <Subscription>[];
     final plan = ref.watch(studentPlanProvider(student.id)).valueOrNull;
 
     final active = subs
@@ -153,6 +194,11 @@ class _SubscriptionSection extends ConsumerWidget {
                         subscriptionPlanId: plan.id,
                         studentId: student.id,
                         studentName: student.fullName,
+                        // Assinatura recorrente é MP-only por contrato (cartão
+                        // tokenizado client-side; nada cru sai do app). A
+                        // conexão real é validada no service (public key) e no
+                        // backend (createMpSubscription).
+                        gateway: PaymentGateway.mercadoPago,
                         onPaymentSuccess: () => ref.invalidate(
                             studentSubscriptionsProvider(student.id)),
                       ),
@@ -379,12 +425,18 @@ class _DunningBanner extends ConsumerWidget {
 class _DependentSection extends ConsumerWidget {
   final Student dependent;
   final bool abacatePayEnabled;
+
+  /// True when the gateway RESOLUTION failed (transient error). Suppresses the
+  /// misleading 'not connected' notice on the cards — the screen-level banner
+  /// already explains and offers retry.
+  final bool gatewayError;
   final String Function(double) formatCurrency;
   final void Function(Payment) onPayPix;
 
   const _DependentSection({
     required this.dependent,
     required this.abacatePayEnabled,
+    this.gatewayError = false,
     required this.formatCurrency,
     required this.onPayPix,
   });
@@ -416,7 +468,7 @@ class _DependentSection extends ConsumerWidget {
                   payment: payment,
                   formatCurrency: formatCurrency,
                   showPayButton: abacatePayEnabled,
-                  gatewayConnected: abacatePayEnabled,
+                  gatewayConnected: abacatePayEnabled || gatewayError,
                   onPayPix: () => onPayPix(payment),
                 ),
               ),
@@ -426,6 +478,51 @@ class _DependentSection extends ConsumerWidget {
         );
       },
       orElse: () => const SizedBox.shrink(),
+    );
+  }
+}
+
+/// Banner shown when the gateway RESOLUTION failed (transient network error —
+/// distinct from 'no gateway connected'). Keeps the open charges visible and
+/// offers a retry instead of silently dropping the pay button of a connected
+/// academy.
+class _GatewayErrorBanner extends ConsumerWidget {
+  const _GatewayErrorBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.warning.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.warning.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            const Icon(LucideIcons.wifiOff, size: 18, color: AppTheme.warning),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Não foi possível verificar o pagamento online.',
+                style:
+                    AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                // Raiz da resolução + derivada (o botão de pagar volta sozinho
+                // quando a nova resolução conclui).
+                ref.invalidate(paymentGatewayProvider);
+                ref.invalidate(abacatePayEnabledProvider);
+              },
+              child: const Text('Tentar de novo'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -461,10 +558,28 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
     // Resolve the connected gateway up front (single source of truth) so we
     // know whether the payer CPF must be captured (Mercado Pago requires it for
     // PIX). Precedence: Mercado Pago > Asaas > AbacatePay.
-    final gateway =
-        await ref.read(paymentGatewayProvider(academyId).future);
+    final PaymentGateway gateway;
+    try {
+      gateway = await ref.read(paymentGatewayProvider(academyId).future);
+    } catch (_) {
+      // Falha transitória ao resolver (≠ 'nada conectado'): nunca tentar um
+      // gateway às cegas — avisa e deixa o aluno tentar de novo.
+      if (!mounted) return;
+      ref.invalidate(paymentGatewayProvider(academyId));
+      context.showError(
+          'Não foi possível verificar o pagamento online. Tente novamente.');
+      return;
+    }
 
     if (!mounted) return;
+
+    // Nada conectado de fato (resolução CONCLUÍDA): estado sem método, sem
+    // chamar gateway nenhum.
+    if (gateway == PaymentGateway.none) {
+      context.showWarning(
+          'Pagamento online não configurado — combine com a academia.');
+      return;
+    }
 
     // One-tap checkout: if Mercado Pago needs the CPF and the payer already has
     // a VALID one saved on their student doc, skip the CPF form and generate the
@@ -511,7 +626,6 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
             description: description,
           );
         case PaymentGateway.abacatePay:
-        case PaymentGateway.none:
           return AbacatePayService(academyId).createPixPayment(
             amount: payment.value,
             financialId: payment.id,
@@ -519,6 +633,11 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
             studentName: studentName,
             description: description,
           );
+        case PaymentGateway.none:
+          // Nunca chamar um gateway não conectado. O guard acima impede
+          // chegar aqui; se chegar, o sheet exibe a mensagem amigável.
+          throw Exception(
+              'Pagamento online não configurado — combine com a academia.');
       }
     }
 
@@ -576,8 +695,11 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
   Widget build(BuildContext context) {
     final studentAsync = ref.watch(currentStudentProvider);
     final pixInfoAsync = ref.watch(pixInfoProvider);
-    final abacatePayEnabled =
-        ref.watch(abacatePayEnabledProvider).valueOrNull ?? false;
+    final gatewayAsync = ref.watch(abacatePayEnabledProvider);
+    final abacatePayEnabled = gatewayAsync.valueOrNull ?? false;
+    // Falha transitória ao resolver o gateway (≠ 'nada conectado'): mostra um
+    // banner com retry em vez do aviso enganoso de 'pagamento indisponível'.
+    final gatewayError = gatewayAsync.hasError && !gatewayAsync.hasValue;
 
     return studentAsync.when(
       data: (student) {
@@ -594,8 +716,14 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
           onRefresh: () async {
             HapticFeedback.mediumImpact();
             ref.invalidate(studentPaymentsProvider(student.id));
+            // Recupera também a seção de assinatura (um StreamProvider com erro
+            // não se auto-recupera; sem isso o pull-to-refresh não a traz de volta).
+            ref.invalidate(studentSubscriptionsProvider(student.id));
             ref.invalidate(dependentsProvider);
             ref.invalidate(pixInfoProvider);
+            // Raiz da resolução do gateway (a abacatePayEnabledProvider deriva
+            // dela) — sem isso uma falha de rede ficaria cacheada como erro.
+            ref.invalidate(paymentGatewayProvider);
             ref.invalidate(abacatePayEnabledProvider);
           },
           child: paymentsAsync.when(
@@ -690,6 +818,10 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                         count: openPayments.length,
                       ),
                       const SizedBox(height: 12),
+                      // Falha ao RESOLVER o gateway (erro transitório): em vez
+                      // de sumir com o botão de pagar e fingir 'indisponível',
+                      // explica e oferece retry.
+                      if (gatewayError) const _GatewayErrorBanner(),
                       ...openPayments.asMap().entries.map(
                         (entry) => Padding(
                           padding: const EdgeInsets.only(bottom: 12),
@@ -697,7 +829,9 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                             payment: entry.value,
                             formatCurrency: _formatCurrency,
                             showPayButton: abacatePayEnabled,
-                            gatewayConnected: abacatePayEnabled,
+                            // Em erro de resolução, suprime o aviso enganoso de
+                            // 'não conectado' (o banner acima já explica).
+                            gatewayConnected: abacatePayEnabled || gatewayError,
                             pixKey: pixKey,
                             onCopyPix: () => _copyPixKey(pixKey),
                             onPayPix: () => _showPixPaymentDialog(
@@ -725,6 +859,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                               (dep) => _DependentSection(
                                 dependent: dep,
                                 abacatePayEnabled: abacatePayEnabled,
+                                gatewayError: gatewayError,
                                 formatCurrency: _formatCurrency,
                                 onPayPix: (payment) =>
                                     _showPixPaymentDialog(payment, dep),
@@ -1243,6 +1378,27 @@ class _PaymentCard extends StatelessWidget {
                   if (showStatus) ...[
                     const SizedBox(height: 4),
                     _StatusChip(status: payment.status),
+                  ],
+                  // Cobrança indevida de assinatura (a reembolsar) — destaca
+                  // para o aluno em vez de parecer uma mensalidade comum.
+                  if (payment.isOvercharge) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.warning.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'Reembolso pendente',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.warning,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
                   ],
                 ],
               ),

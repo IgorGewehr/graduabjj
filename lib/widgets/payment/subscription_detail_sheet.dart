@@ -1,9 +1,12 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
+import '../../services/mp_card_tokenizer.dart'
+    show MpCardTokenizationException;
 import '../../services/subscription_service.dart';
 import '../card_formatters.dart';
 
@@ -402,11 +405,21 @@ class _CycleHistory extends StatelessWidget {
                       width: 32,
                       height: 32,
                       decoration: BoxDecoration(
-                        color: AppTheme.successLight,
+                        // Cobrança indevida (a reembolsar) destacada — não é
+                        // um ciclo liquidado normal.
+                        color: c.overcharge
+                            ? AppTheme.warning.withValues(alpha: 0.12)
+                            : AppTheme.successLight,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(LucideIcons.checkCircle,
-                          size: 16, color: AppTheme.success),
+                      child: Icon(
+                        c.overcharge
+                            ? LucideIcons.alertTriangle
+                            : LucideIcons.checkCircle,
+                        size: 16,
+                        color:
+                            c.overcharge ? AppTheme.warning : AppTheme.success,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -414,19 +427,25 @@ class _CycleHistory extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            c.cycle != null
-                                ? 'Cobrança ${c.cycle}'
-                                : 'Cobrança',
+                            c.overcharge
+                                ? 'Cobrança indevida'
+                                : c.cycle != null
+                                    ? 'Cobrança ${c.cycle}'
+                                    : 'Cobrança',
                             style: AppTheme.bodySmall
                                 .copyWith(fontWeight: FontWeight.w600),
                           ),
                           Text(
                             [
+                              if (c.overcharge) 'Reembolso pendente',
                               if (c.referenceMonth != null) c.referenceMonth!,
                               if (c.paidAt != null) df.format(c.paidAt!),
                             ].join(' · '),
-                            style: AppTheme.labelSmall
-                                .copyWith(color: AppTheme.textSecondary),
+                            style: AppTheme.labelSmall.copyWith(
+                              color: c.overcharge
+                                  ? AppTheme.warning
+                                  : AppTheme.textSecondary,
+                            ),
                           ),
                         ],
                       ),
@@ -508,9 +527,15 @@ class _ActionsState extends State<_Actions> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
+      // O backend devolve mensagens pt-BR legíveis (failed-precondition etc.)
+      // — exibe a message em vez do e.toString() com prefixo técnico.
+      final msg = (e is FirebaseFunctionsException &&
+              (e.message?.trim().isNotEmpty ?? false))
+          ? e.message!.trim()
+          : 'Não foi possível concluir. Tente novamente.';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Não foi possível concluir: $e'),
+          content: Text(msg),
           backgroundColor: AppTheme.error,
         ),
       );
@@ -533,8 +558,31 @@ class _ActionsState extends State<_Actions> {
   @override
   Widget build(BuildContext context) {
     final paused = widget.sub.status == 'paused';
+    // Pausa intencional do usuário (sem dunning): oferece retomar. Quando
+    // needsReauth==true a retomada passa pela troca de cartão (fluxo abaixo).
+    final canResume = paused && !widget.sub.needsReauth;
     return Column(
       children: [
+        if (canResume) ...[
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _busy
+                  ? null
+                  : () => _run(
+                        () => _service.resume(widget.sub.id),
+                        success: 'Assinatura retomada.',
+                        confirmTitle: 'Retomar assinatura?',
+                        confirmBody:
+                            'As cobranças mensais no cartão voltam a ser '
+                            'feitas normalmente a partir do próximo ciclo.',
+                      ),
+              icon: const Icon(LucideIcons.play, size: 18),
+              label: const Text('Retomar assinatura'),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
@@ -683,6 +731,24 @@ class _UpdateSubscriptionCardSheetState
       if (!mounted) return;
       widget.onUpdated?.call();
       Navigator.of(context).pop(true);
+    } on MpCardTokenizationException catch (e) {
+      // Erro de digitação identificado pelo tokenizer (número/CVV/validade) —
+      // mostra a causa real em vez da mensagem genérica.
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = e.message;
+      });
+    } on FirebaseFunctionsException catch (e) {
+      // O backend (updateSubscriptionCard) responde pt-BR quando rejeita.
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = (e.message?.trim().isNotEmpty ?? false)
+            ? e.message!.trim()
+            : 'Não foi possível atualizar o cartão. Verifique os dados e '
+                'tente novamente.';
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {

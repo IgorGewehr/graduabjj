@@ -159,6 +159,39 @@ class SubscriptionService {
     });
   }
 
+  /// Fresh (one-shot) check for a live subscription (pending/authorized/paused)
+  /// of the same student+plan. Guards the "Assinar" flow against duplicate
+  /// preapprovals (e.g. retry after a client timeout) — same rule enforced by
+  /// the backend in `createMpSubscription` (failed-precondition), INCLUDING its
+  /// exception: a 'pending' doc WITHOUT `mpPreapprovalId` older than 1h is an
+  /// aborted attempt (CF crashed before the POST /preapproval) that the backend
+  /// marks 'abandoned' and allows through — blocking on it here would make that
+  /// auto-heal unreachable and lock the student out of retrying forever.
+  Future<bool> hasLiveSubscription({
+    required String studentId,
+    required String planId,
+  }) async {
+    final snap = await _ref.where('studentId', isEqualTo: studentId).get();
+    final now = DateTime.now();
+    return snap.docs.any((d) {
+      final data = d.data();
+      if (data['planId'] != planId) return false;
+      final status = data['status'] as String? ?? '';
+      if (status != 'pending' &&
+          status != 'authorized' &&
+          status != 'paused') {
+        return false;
+      }
+      final mpId = data['mpPreapprovalId'] as String?;
+      final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+      final isStaleAbort = status == 'pending' &&
+          (mpId == null || mpId.isEmpty) &&
+          createdAt != null &&
+          now.difference(createdAt) > const Duration(hours: 1);
+      return !isStaleAbort;
+    });
+  }
+
   Future<void> cancel(String subscriptionId) async {
     await _functions.httpsCallable('cancelMpSubscription').call({
       'academyId': academyId,
@@ -168,6 +201,17 @@ class SubscriptionService {
 
   Future<void> pause(String subscriptionId) async {
     await _functions.httpsCallable('pauseMpSubscription').call({
+      'academyId': academyId,
+      'subscriptionId': subscriptionId,
+    });
+  }
+
+  /// Resumes a user-paused subscription. The backend (`resumeMpSubscription`)
+  /// rejects with failed-precondition when the subscription is not 'paused';
+  /// on success the MP preapproval is re-authorized and the doc returns to
+  /// 'authorized'.
+  Future<void> resume(String subscriptionId) async {
+    await _functions.httpsCallable('resumeMpSubscription').call({
       'academyId': academyId,
       'subscriptionId': subscriptionId,
     });
@@ -259,12 +303,18 @@ class SubscriptionCharge {
   final DateTime? paidAt;
   final int? cycle;
 
+  /// Cobrança indevida (type 'subscription_overcharge', needsRefund): dinheiro
+  /// a devolver, não um ciclo da assinatura — o histórico a exibe destacada
+  /// como 'Reembolso pendente'.
+  final bool overcharge;
+
   const SubscriptionCharge({
     required this.id,
     required this.amount,
     required this.referenceMonth,
     required this.paidAt,
     required this.cycle,
+    this.overcharge = false,
   });
 
   factory SubscriptionCharge.fromFirestore(DocumentSnapshot doc) {
@@ -277,6 +327,8 @@ class SubscriptionCharge {
           (data['paidAt'] as Timestamp?)?.toDate() ??
           (data['createdAt'] as Timestamp?)?.toDate(),
       cycle: (data['recurringCycle'] as num?)?.toInt(),
+      overcharge: data['type'] == 'subscription_overcharge' ||
+          data['overcharge'] == true,
     );
   }
 }

@@ -4126,6 +4126,16 @@ class _PaymentCard extends StatelessWidget {
                 'Pago em: ${DateFormat('dd/MM/yyyy').format(payment.paidAt!)}',
                 style: const TextStyle(color: Colors.green),
               ),
+            // Cobrança indevida de assinatura — dinheiro a devolver, não
+            // receita; destacada para o professor não confundir com 'Pago'.
+            if (payment.isOvercharge)
+              const Text(
+                'Reembolso pendente',
+                style: TextStyle(
+                  color: Colors.orange,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
           ],
         ),
         trailing: Column(

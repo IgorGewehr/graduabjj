@@ -495,8 +495,10 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
 
     // Get payments for the selected month
     final monthPayments = results[2] as List<Payment>;
+    // Receita confirmada: exclui cobranças indevidas a reembolsar
+    // (subscription_overcharge) — pagas no gateway, mas não são receita.
     final paidInMonth = monthPayments
-        .where((p) => p.status.value == 'paid')
+        .where((p) => p.status.value == 'paid' && !p.isOvercharge)
         .toList();
     final pendingInMonth = monthPayments
         .where((p) => p.status.value == 'pending')

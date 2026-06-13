@@ -107,6 +107,9 @@ class PaymentMethodSheet extends StatelessWidget {
         financialId: target.financialId,
         studentId: target.studentId,
         studentName: target.studentName,
+        // Gateway já resolvido (paymentGatewayProvider) — o sheet nunca
+        // re-resolve, evitando fallback de cartão para gateway errado.
+        gateway: gateway,
         onPaymentSuccess: onSettled,
       ),
     );
