@@ -38,3 +38,38 @@ double sessionVolume(Iterable<SetTuple> sets) {
   }
   return v;
 }
+
+/// Carga (kg) correspondente a [pct]% do [oneRM]. [pct] em 0..100. Entradas
+/// inválidas → 0. (E2 — calculadora de 1RM.)
+double loadForPercent(double oneRM, num pct) {
+  if (oneRM <= 0 || pct <= 0) return 0;
+  return oneRM * (pct / 100.0);
+}
+
+/// Faixa de reps tipicamente associada a uma intensidade (% do 1RM), só para
+/// orientar a tabela. Aproximação comum de força/hipertrofia.
+String repHintForPercent(int pct) {
+  if (pct >= 95) return '1-2 reps';
+  if (pct >= 90) return '2-4 reps';
+  if (pct >= 85) return '3-5 reps';
+  if (pct >= 80) return '5-7 reps';
+  if (pct >= 75) return '7-9 reps';
+  if (pct >= 70) return '10-12 reps';
+  if (pct >= 65) return '12-15 reps';
+  return '15+ reps';
+}
+
+/// Tabela de %1RM (de 100% até [minPct], decrescendo de [step]) com a carga
+/// correspondente — usada na calculadora. Lista vazia se [oneRM] <= 0.
+List<({int pct, double load, String repHint})> percentTable(
+  double oneRM, {
+  int step = 5,
+  int minPct = 50,
+}) {
+  if (oneRM <= 0 || step <= 0) return const [];
+  final out = <({int pct, double load, String repHint})>[];
+  for (var p = 100; p >= minPct; p -= step) {
+    out.add((pct: p, load: loadForPercent(oneRM, p), repHint: repHintForPercent(p)));
+  }
+  return out;
+}

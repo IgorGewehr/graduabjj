@@ -85,6 +85,18 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _trainingVideosEnabled = false;
   bool _physicalEvolutionEnabled = false;
 
+  // Reserva de aula (A1)
+  bool _bookingEnabled = false;
+  int _bookingWindowDays = 7;
+  int _bookingCancelCutoffMinutes = 60;
+  int _maxActiveBookingsPerStudent = 3;
+
+  // Trocação (C1–C3)
+  bool _strikingEnabled = false;
+
+  // Gamificação (A4): meta de frequência mensal padrão (0 = desligado)
+  int _monthlyAttendanceGoal = 0;
+
   // Deep-link (?feature=<id>) → scroll + temporary highlight on the target card.
   final Map<FeatureId, GlobalKey> _featureKeys = {
     for (final f in FeatureId.values) f: GlobalKey(),
@@ -269,6 +281,12 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _rankingVisibleToStudents = settings.rankingVisibleToStudents;
           _workoutPlansEnabled = settings.workoutPlansEnabled;
           _trainingVideosEnabled = settings.trainingVideosEnabled;
+          _bookingEnabled = settings.bookingEnabled;
+          _bookingWindowDays = settings.bookingWindowDays;
+          _bookingCancelCutoffMinutes = settings.bookingCancelCutoffMinutes;
+          _maxActiveBookingsPerStudent = settings.maxActiveBookingsPerStudent;
+          _strikingEnabled = settings.strikingEnabled;
+          _monthlyAttendanceGoal = settings.monthlyAttendanceGoal;
           _physicalEvolutionEnabled = settings.physicalEvolutionEnabled;
           _musculacaoEnabled = settings.musculacaoEnabled;
           _musculacaoCheckinMode = settings.musculacaoCheckinMode;
@@ -364,6 +382,72 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     } catch (e) {
       if (mounted) context.showError('Erro: $e');
     }
+  }
+
+  /// Debounce-light: persists the three booking tunables together and refreshes
+  /// the provider so the portal picks up the new window/cutoff/limit.
+  Future<void> _saveBookingTunables() async {
+    try {
+      await SettingsService(FirebaseService.academyId).updateBookingSettings(
+        windowDays: _bookingWindowDays,
+        cancelCutoffMinutes: _bookingCancelCutoffMinutes,
+        maxActivePerStudent: _maxActiveBookingsPerStudent,
+      );
+      if (!mounted) return;
+      ref.invalidate(academySettingsProvider);
+    } catch (e) {
+      if (mounted) context.showError('Erro: $e');
+    }
+  }
+
+  /// Persists the academy-default monthly attendance goal (A4) and refreshes
+  /// the provider so the home progress updates.
+  Future<void> _saveMonthlyGoal() async {
+    try {
+      await SettingsService(FirebaseService.academyId)
+          .updateMonthlyAttendanceGoal(_monthlyAttendanceGoal);
+      if (!mounted) return;
+      ref.invalidate(academySettingsProvider);
+    } catch (e) {
+      if (mounted) context.showError('Erro: $e');
+    }
+  }
+
+  /// Compact −/value/+ stepper row used by the booking tunables.
+  Widget _bookingStepper({
+    required String label,
+    required int value,
+    required String suffix,
+    required int min,
+    required int max,
+    required int step,
+    required void Function(int) onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: AppTheme.bodyMedium)),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            onPressed: value > min ? () => onChanged(value - step) : null,
+            icon: const Icon(LucideIcons.minusCircle, size: 20),
+          ),
+          SizedBox(
+            width: 78,
+            child: Text('$value $suffix',
+                textAlign: TextAlign.center,
+                style: AppTheme.bodyMedium
+                    .copyWith(fontWeight: FontWeight.w700)),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            onPressed: value < max ? () => onChanged(value + step) : null,
+            icon: const Icon(LucideIcons.plusCircle, size: 20),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _saveSettings() async {
@@ -1921,6 +2005,93 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           const SizedBox(height: 16),
 
+          // Reserva de aula (A1)
+          _SettingsCard(
+            cardKey: _featureKeys[FeatureId.booking],
+            highlighted: _highlightedFeature == FeatureId.booking,
+            title: 'Reserva de aula',
+            icon: LucideIcons.calendarCheck,
+            child: Column(
+              children: [
+                _ModernSwitch(
+                  title: 'Habilitar reserva de aula',
+                  subtitle:
+                      'Alunos reservam vaga nas aulas (com lista de espera). Usa o limite de alunos da turma.',
+                  value: _bookingEnabled,
+                  onChanged: (value) => _inlineSaveFeature(
+                    apply: () => _bookingEnabled = value,
+                    persist: (s) => s.updateBookingEnabled(value),
+                  ),
+                  icon: LucideIcons.calendarCheck,
+                  iconColor: AppTheme.primary,
+                ),
+                if (_bookingEnabled) ...[
+                  const SizedBox(height: 8),
+                  _bookingStepper(
+                    label: 'Janela de reserva',
+                    value: _bookingWindowDays,
+                    suffix: 'dias',
+                    min: 1,
+                    max: 30,
+                    step: 1,
+                    onChanged: (v) {
+                      setState(() => _bookingWindowDays = v);
+                      _saveBookingTunables();
+                    },
+                  ),
+                  _bookingStepper(
+                    label: 'Corte p/ cancelar',
+                    value: _bookingCancelCutoffMinutes,
+                    suffix: 'min antes',
+                    min: 0,
+                    max: 720,
+                    step: 15,
+                    onChanged: (v) {
+                      setState(() => _bookingCancelCutoffMinutes = v);
+                      _saveBookingTunables();
+                    },
+                  ),
+                  _bookingStepper(
+                    label: 'Limite por aluno',
+                    value: _maxActiveBookingsPerStudent,
+                    suffix: 'reservas',
+                    min: 1,
+                    max: 20,
+                    step: 1,
+                    onChanged: (v) {
+                      setState(() => _maxActiveBookingsPerStudent = v);
+                      _saveBookingTunables();
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Trocação (C1–C3)
+          _SettingsCard(
+            cardKey: _featureKeys[FeatureId.striking],
+            highlighted: _highlightedFeature == FeatureId.striking,
+            title: 'Trocação',
+            icon: Icons.sports_mma_outlined,
+            child: _ModernSwitch(
+              title: 'Habilitar Trocação',
+              subtitle:
+                  'Timer de rounds + registro de sessões (sparring/saco/manoplas) para Muay Thai, Boxe e Kickboxing',
+              value: _strikingEnabled,
+              onChanged: (value) => _inlineSaveFeature(
+                apply: () => _strikingEnabled = value,
+                persist: (s) => s.updateStrikingEnabled(value),
+              ),
+              icon: Icons.sports_mma_outlined,
+              iconColor: AppTheme.primary,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // Evolução (avaliações físicas / antropométricas)
           _SettingsCard(
             cardKey: _featureKeys[FeatureId.evolution],
@@ -1938,6 +2109,37 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
               ),
               icon: LucideIcons.trendingUp,
               iconColor: AppTheme.primary,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Gamificação (A4): meta de frequência mensal padrão
+          _SettingsCard(
+            title: 'Gamificação',
+            icon: LucideIcons.target,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Meta de frequência mensal padrão para os alunos. 0 = desligado. '
+                  'Pode ser sobrescrita por aluno no cadastro.',
+                  style: AppTheme.bodySmall
+                      .copyWith(color: AppTheme.textSecondary),
+                ),
+                _bookingStepper(
+                  label: 'Meta mensal',
+                  value: _monthlyAttendanceGoal,
+                  suffix: _monthlyAttendanceGoal == 0 ? 'off' : 'aulas',
+                  min: 0,
+                  max: 60,
+                  step: 1,
+                  onChanged: (v) {
+                    setState(() => _monthlyAttendanceGoal = v);
+                    _saveMonthlyGoal();
+                  },
+                ),
+              ],
             ),
           ),
 

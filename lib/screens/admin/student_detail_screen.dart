@@ -25,6 +25,7 @@ import '../../widgets/common/sport_chip.dart';
 import '../../widgets/polish/polish.dart';
 import 'physical_assessment_form_screen.dart';
 import 'student_syllabus_tab.dart';
+import 'student_cartel_tab.dart';
 
 /// Admin Student Detail Screen - View and manage student
 class AdminStudentDetailScreen extends ConsumerStatefulWidget {
@@ -60,14 +61,19 @@ class _AdminStudentDetailScreenState
   // Aba "Currículo" (índice 7) é construída só na 1ª visita — evita ler
   // currículo+progresso ao abrir o aluno sem nunca abrir a aba.
   bool _syllabusVisited = false;
+  // Aba "Cartel" (índice 8) também é lazy.
+  bool _cartelVisited = false;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 8, vsync: this);
+    _tabController = TabController(length: 9, vsync: this);
     _tabController.addListener(() {
       if (_tabController.index == 7 && !_syllabusVisited) {
         setState(() => _syllabusVisited = true);
+      }
+      if (_tabController.index == 8 && !_cartelVisited) {
+        setState(() => _cartelVisited = true);
       }
     });
     _loadData();
@@ -256,6 +262,16 @@ class _AdminStudentDetailScreenState
                             ],
                           ),
                         ),
+                        Tab(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: const [
+                              Icon(LucideIcons.swords, size: 16),
+                              SizedBox(width: 6),
+                              Text('Cartel'),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -273,6 +289,9 @@ class _AdminStudentDetailScreenState
                         (_student == null || !_syllabusVisited)
                             ? const SizedBox()
                             : StudentSyllabusTab(student: _student!),
+                        (_student == null || !_cartelVisited)
+                            ? const SizedBox()
+                            : StudentCartelTab(student: _student!),
                       ],
                     ),
                   ),

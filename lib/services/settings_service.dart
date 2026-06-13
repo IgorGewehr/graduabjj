@@ -241,6 +241,27 @@ class AcademySettings {
   /// system always resolve for display. See [muaythaiVariantCbmt] in sports.dart.
   final String muaythaiGradeSystem;
 
+  // Class booking (A1: reserva de aula com vaga + lista de espera).
+  /// Master toggle: when false students never see the "Reservar aula" entry and
+  /// the reserve callable rejects non-staff. Default false (opt-in per academy).
+  final bool bookingEnabled;
+  /// How far ahead (days) a student may reserve. Default 7.
+  final int bookingWindowDays;
+  /// Minutes before class start after which a student can no longer self-cancel
+  /// (staff always can). Default 60.
+  final int bookingCancelCutoffMinutes;
+  /// Max simultaneous active (confirmed+waitlist) future reservations per
+  /// student. Default 3.
+  final int maxActiveBookingsPerStudent;
+
+  /// Striking module (C1–C3: timer de rounds, registro de sessão, cartel,
+  /// combinações). Opt-in per academy, default off.
+  final bool strikingEnabled;
+
+  /// Default monthly attendance goal (A4) shown to every student unless they
+  /// have a per-student override. 0 = disabled (no goal shown).
+  final int monthlyAttendanceGoal;
+
   // Monitors (students with additional permissions)
   final List<String> monitorIds;
 
@@ -296,6 +317,12 @@ class AcademySettings {
     this.musculacaoCheckinMode = 'manual',
     this.operatingHours = OperatingHours.empty,
     this.muaythaiGradeSystem = 'cbmt',
+    this.bookingEnabled = false,
+    this.bookingWindowDays = 7,
+    this.bookingCancelCutoffMinutes = 60,
+    this.maxActiveBookingsPerStudent = 3,
+    this.strikingEnabled = false,
+    this.monthlyAttendanceGoal = 0,
     this.monitorIds = const [],
     this.updatedAt,
   });
@@ -379,6 +406,15 @@ class AcademySettings {
       ),
       muaythaiGradeSystem:
           (data['muaythaiGradeSystem'] as String?) ?? 'cbmt',
+      bookingEnabled: data['bookingEnabled'] ?? false,
+      bookingWindowDays: (data['bookingWindowDays'] as num?)?.toInt() ?? 7,
+      bookingCancelCutoffMinutes:
+          (data['bookingCancelCutoffMinutes'] as num?)?.toInt() ?? 60,
+      maxActiveBookingsPerStudent:
+          (data['maxActiveBookingsPerStudent'] as num?)?.toInt() ?? 3,
+      strikingEnabled: data['strikingEnabled'] ?? false,
+      monthlyAttendanceGoal:
+          (data['monthlyAttendanceGoal'] as num?)?.toInt() ?? 0,
       monitorIds: List<String>.from(data['monitorIds'] ?? []),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
@@ -712,6 +748,54 @@ class SettingsService {
   Future<void> updateTrainingVideosEnabled(bool value) async {
     await _academyRef.set({
       'trainingVideosEnabled': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Reserva de aula (A1): master toggle + tunables
+  // ============================================
+  Future<void> updateBookingEnabled(bool value) async {
+    await _academyRef.set({
+      'bookingEnabled': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> updateBookingSettings({
+    int? windowDays,
+    int? cancelCutoffMinutes,
+    int? maxActivePerStudent,
+  }) async {
+    final data = <String, dynamic>{
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    if (windowDays != null) data['bookingWindowDays'] = windowDays;
+    if (cancelCutoffMinutes != null) {
+      data['bookingCancelCutoffMinutes'] = cancelCutoffMinutes;
+    }
+    if (maxActivePerStudent != null) {
+      data['maxActiveBookingsPerStudent'] = maxActivePerStudent;
+    }
+    await _academyRef.set(data, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Gamificação (A4): meta de frequência mensal (padrão da academia)
+  // ============================================
+  Future<void> updateMonthlyAttendanceGoal(int value) async {
+    await _academyRef.set({
+      'monthlyAttendanceGoal': value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Trocação (C1–C3): master toggle
+  // ============================================
+  Future<void> updateStrikingEnabled(bool value) async {
+    await _academyRef.set({
+      'strikingEnabled': value,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }

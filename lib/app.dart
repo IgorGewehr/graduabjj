@@ -7,6 +7,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 
 import 'core/theme.dart';
 import 'core/constants.dart';
+import 'core/navigator_key.dart';
 import 'core/navigation/nav_catalog.dart';
 import 'providers/auth_provider.dart';
 import 'services/push_notification_service.dart';
@@ -38,6 +39,11 @@ import 'screens/portal/timeline_screen.dart';
 import 'screens/portal/evolution_screen.dart';
 import 'screens/portal/my_sports_screen.dart';
 import 'screens/portal/student_graduation_screen.dart';
+import 'screens/portal/class_booking_screen.dart';
+import 'screens/admin/class_bookings_admin_screen.dart';
+import 'screens/portal/striking_screen.dart';
+import 'screens/admin/combos_screen.dart';
+import 'screens/admin/mesocycles_screen.dart';
 import 'screens/portal/financial_screen.dart';
 import 'screens/portal/notifications_screen.dart';
 import 'screens/portal/behavior_screen.dart';
@@ -421,9 +427,6 @@ class _OverlayProgressStep extends StatelessWidget {
   }
 }
 
-/// Global Navigator Key for push notifications deep linking
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
 /// Tracks whether the current signed-in session has already "landed" on its
 /// post-login destination (portal/admin). Once landed, a transient re-fetch of
 /// the user/settings/student providers (e.g. the selected-academy id flipping
@@ -688,6 +691,22 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const StudentGraduationScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/reservas',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const ClassBookingScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/trocacao',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const StrikingScreen(),
             ),
           ),
           GoRoute(
@@ -976,6 +995,30 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const ExercisesScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/reservas',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const ClassBookingsAdminScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/combinacoes',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const CombosScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/periodizacao',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const MesocyclesScreen(),
             ),
           ),
           GoRoute(

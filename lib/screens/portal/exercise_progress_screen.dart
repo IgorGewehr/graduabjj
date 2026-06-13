@@ -8,7 +8,9 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/number_format.dart';
 import '../../core/theme.dart';
+import '../../models/strength_goal.dart';
 import '../../services/firebase_service.dart';
+import '../../services/strength_goal_service.dart';
 import '../../services/workout_execution_service.dart';
 import '../../widgets/polish/polish.dart';
 
@@ -41,9 +43,13 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
   ];
 
   List<WorkoutExecution> _history = []; // mais recente primeiro
+  StrengthGoal? _goal; // meta de carga do aluno (E2)
   bool _loading = true;
   bool _error = false;
   String _metricKey = 'load';
+
+  late final StrengthGoalService _goalService =
+      StrengthGoalService(FirebaseService.academyId);
 
   @override
   void initState() {
@@ -59,10 +65,72 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
     try {
       final h = await WorkoutExecutionService(FirebaseService.academyId)
           .getHistoryForExercise(widget.studentId, widget.exerciseName);
-      if (mounted) setState(() { _history = h; _loading = false; });
+      final g =
+          await _goalService.getOne(widget.studentId, widget.exerciseName);
+      if (mounted) setState(() { _history = h; _goal = g; _loading = false; });
     } catch (_) {
       if (mounted) setState(() { _error = true; _loading = false; });
     }
+  }
+
+  Future<void> _editGoal(double prLoad) async {
+    final ctrl = TextEditingController(
+        text: _goal != null ? fmtNum(_goal!.targetLoadKg) : '');
+    final result = await showDialog<({bool clear, double? value})>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Meta de carga'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Defina a carga (kg) que você quer alcançar neste exercício.',
+                style: AppTheme.bodySmall
+                    .copyWith(color: AppTheme.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                  labelText: 'Carga alvo (kg)', border: OutlineInputBorder()),
+            ),
+          ],
+        ),
+        actions: [
+          if (_goal != null)
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(ctx, (clear: true, value: null)),
+              child: Text('Remover',
+                  style: TextStyle(color: AppTheme.error)),
+            ),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar')),
+          FilledButton(
+            onPressed: () {
+              final v = double.tryParse(ctrl.text.replaceAll(',', '.'));
+              Navigator.pop(ctx, (clear: false, value: v));
+            },
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+    if (result.clear) {
+      await _goalService.clearGoal(widget.studentId, widget.exerciseName);
+    } else if (result.value != null && result.value! > 0) {
+      await _goalService.setGoal(
+        studentId: widget.studentId,
+        exerciseName: widget.exerciseName,
+        targetLoadKg: result.value!,
+      );
+    } else {
+      return;
+    }
+    await _load();
   }
 
   @override
@@ -144,6 +212,8 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
           ],
         ),
         const SizedBox(height: 16),
+        _goalCard(prLoad),
+        const SizedBox(height: 16),
         _Card(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -194,6 +264,71 @@ class _ExerciseProgressScreenState extends State<ExerciseProgressScreen> {
         const SizedBox(height: 8),
         for (final e in _history) _sessionCard(e, prLoad),
       ],
+    );
+  }
+
+  Widget _goalCard(double prLoad) {
+    final goal = _goal?.targetLoadKg ?? 0;
+    if (goal <= 0) {
+      return _Card(
+        child: Row(
+          children: [
+            const Icon(LucideIcons.target, size: 18, color: AppTheme.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Defina uma meta de carga',
+                  style: AppTheme.bodyMedium
+                      .copyWith(fontWeight: FontWeight.w600)),
+            ),
+            TextButton(
+                onPressed: () => _editGoal(prLoad),
+                child: const Text('Definir')),
+          ],
+        ),
+      );
+    }
+    final pct = (prLoad / goal).clamp(0.0, 1.0);
+    final reached = prLoad >= goal;
+    final remaining = reached ? 0.0 : goal - prLoad;
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(LucideIcons.target, size: 18, color: AppTheme.primary),
+            const SizedBox(width: 8),
+            Text('Meta de carga', style: AppTheme.titleSmall),
+            const Spacer(),
+            Text('${fmtNum(goal)} kg',
+                style: AppTheme.titleSmall.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: reached ? AppTheme.success : AppTheme.primary)),
+            IconButton(
+              icon: const Icon(LucideIcons.pencil, size: 16),
+              onPressed: () => _editGoal(prLoad),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: pct,
+              minHeight: 8,
+              backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
+              valueColor: AlwaysStoppedAnimation(
+                  reached ? AppTheme.success : AppTheme.primary),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            reached
+                ? 'Meta batida! Melhor: ${fmtNum(prLoad)} kg'
+                : 'Melhor: ${fmtNum(prLoad)} kg · faltam ${fmtNum(remaining)} kg',
+            style: AppTheme.bodySmall.copyWith(
+                color: reached ? AppTheme.success : AppTheme.textSecondary),
+          ),
+        ],
+      ),
     );
   }
 

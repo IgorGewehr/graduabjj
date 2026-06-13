@@ -42,10 +42,25 @@
 
 ## A. Transversais — beneficiam TODAS as modalidades (maior ROI)
 
-- [ ] **A1. Reserva/agendamento de aula com vaga + lista de espera** — `maxStudents`
-      hoje é só informativo; falta booking pelo aluno, limite de vaga, cancelamento
-      e waitlist. Padrão em todo concorrente. _(beneficia: todas as modalidades com turma)_
-- [ ] **A2. Push notifications reais** — hoje é stub (sem tokens/APNs). Habilita
+- [x] **A1. Reserva/agendamento de aula com vaga + lista de espera** ✅ **CONCLUÍDA
+      (4 fases)** em `feat/evolucao-modulos` — ocorrência datada sobre as turmas
+      recorrentes; capacidade real (`maxStudents`) + **fila de espera
+      server-authoritative** (callables `reserveClassSlot`/`cancelClassReservation`,
+      contador `classOccurrences` que o cliente não escreve); **auto-promoção** do 1º
+      da espera com aviso; **corte de 1h**, **janela de 7 dias** e **limite/aluno**
+      configuráveis; portal "Reservar aula" + admin "Reservas" (roster, add/remove,
+      **no-show**). Reserva ≠ presença (check-in QR intacto). Ver
+      `docs/plano-reserva-aula.md`. **Deploy de functions/rules/índices: FEITO**
+      (additivo, não afeta a versão em produção).
+      _Pendente: teste manual + merge p/ produção._
+- [~] **A2. Push notifications reais** — **lado do app FEITO** (F2): pacote
+      `firebase_messaging`, registro/limpeza de token em `users/{uid}/fcmTokens`
+      (casa com o `sendToUser` das functions), permissão, refresh, topics, tap →
+      deep-link via `navigatorKey`. iOS: `remote-notification` + entitlement
+      `aps-environment`. **Pendente do dono:** chave APNs (.p8) no Apple Developer
+      + upload no Firebase Console + capability Push no Xcode, e **publicar nova
+      versão** (Android funciona já). Deep-link no tap exige `actionUrl` no data do
+      push (melhoria futura no servidor). Antes era stub (sem tokens/APNs). Habilita
       lembrete de aula/treino, "nova planilha/vídeo", "você faltou esta semana",
       lembrete de graduação. _(todas)_ — depende de **F2**.
 - [x] **A3. Avaliação física / antropometria** ✅ **CONCLUÍDA (5 fases)** em
@@ -55,10 +70,14 @@
       + progresso, notificação, lembrete de reavaliação e export PDF. Ver
       `docs/plano-avaliacao-fisica.md` e `docs/roteiro-teste-avaliacao-fisica.md`.
       _Pendente: teste manual + merge p/ produção._
-- [~] **A4. Gamificação/engajamento** — **PARCIAL**: **Ranking de frequência**
-      (leaderboard por turma, semanal/mensal) entregue na branch `cobranca-pix-whatsapp`
-      (já mergeada na nossa). **Faltam**: streaks, metas de frequência mensal, badges.
-      _(todas)_
+- [x] **A4. Gamificação/engajamento** ✅ — **streaks, badges/marcos e ranking** já
+      vieram completos no sprint do amigo (cálculo + cron `scheduledGamificationMilestones`
+      + timeline + hero na home). A4 "resto" fechou o gap real: **meta de frequência
+      mensal** (padrão da academia em Ajustes + override por aluno no cadastro; barra
+      de progresso "X/Y aulas" na home) + **surfacing na home** (posição no ranking do
+      mês + 3 conquistas recentes). Helper puro `gamification.dart` +8 testes. Sem
+      deploy (só campos em docs existentes + providers). Ver `docs/plano-gamificacao-a4.md`.
+      _(todas)_ _Pendente: teste manual + merge p/ produção._
 - [x] **A5. Biblioteca de exercícios com vídeo demonstrativo** ✅ — catálogo
       `exercises` por academia (grupo muscular/equipamento/vídeo) + seed; **picker
       no montador** (linka `exerciseId`, mantém texto livre); **"Ver demonstração"**
@@ -98,12 +117,21 @@
 
 ## C. Combate de trocação (Muay Thai · Kickboxing · Boxe)
 
-- [ ] **C1. Registro de sparring/rounds + timer de rounds** — log de sessões
-      (sacos, manoplas, sparring) e timer configurável (rounds/descanso).
-- [ ] **C2. Biblioteca de combinações/golpes** — sequências (jab-cross-hook…) por
-      nível, com vídeo. _(parente de A5/B1, mas voltada a trocação)_
-- [ ] **C3. Cartel/ficha de luta** — registro de lutas (V/D/KO, evento, data) além
-      do módulo de competições genérico.
+> Módulo "Trocação" gateado por `FeatureId.striking` (AcademySettings.strikingEnabled).
+> Ver `docs/plano-trocacao.md`. Ordem: C1 → C3 → C2.
+
+- [x] **C1. Registro de sparring/rounds + timer de rounds** ✅ — timer cheio
+      configurável (rounds/duração/descanso) com vibração+som; registro do aluno
+      (tipo saco/manoplas/sparring/clinch/técnica + rounds + RPE + notas) com
+      histórico. Coleção `strikingSessions`. Helper puro +11 testes. _Deploy feito._
+- [x] **C2. Biblioteca de combinações/golpes** ✅ — catálogo `combos` por
+      modalidade + nível (iniciante/intermediário/avançado), sequência de golpes +
+      vídeo opcional; admin "Combinações" (CRUD + seed de modelos boxe/MT/kick) +
+      portal read-only por modalidade. Helper de nível +4 testes.
+- [x] **C3. Cartel/ficha de luta** ✅ — cartel oficial (só staff escreve, aluno vê):
+      V/D/E + método (KO/TKO/Decisão/Finalização/DQ), evento, data, adversário,
+      peso, rounds, vídeo, notas. Resumo "XV-YD-ZE (N nocautes)". Aba "Cartel" no
+      aluno (admin) + portal "Meu cartel". Coleção `fightRecords`. Helper +7 testes.
 
 ---
 
@@ -118,19 +146,29 @@
 ## E. Específicas de uma modalidade
 
 **🏋️ Musculação**
-- [ ] **E1. Periodização / mesociclos** — progressão planejada por semanas.
-- [ ] **E2. Calculadora de 1RM e metas de carga.**
+- [x] **E1. Periodização / mesociclos** ✅ — mesociclo simples: programa de N
+      semanas (foco + prescrição textual + deload), audiência academia/modalidade,
+      data de início opcional. Admin "Periodização" (CRUD + builder de semanas) +
+      portal (semana atual destacada). Coleção `mesocycles`. Helper `meso.dart`
+      (`currentMesoWeek`) +7 testes. Ver `docs/plano-musculacao-e1e2.md`.
+- [x] **E2. Calculadora de 1RM e metas de carga** ✅ — calculadora (Epley + tabela
+      de %1RM) na AppBar de Treinos; metas de carga por exercício (aluno define) com
+      progresso na tela de evolução. `strength_math` estendido +5 testes. Coleção
+      `strengthGoals`.
 - [x] **E3. Metas de objetivo** ✅ **coberto por A3** — meta numérica (peso-alvo /
       %gordura-alvo) no aluno + barra de progresso no portal, e objetivo categórico
       (hipertrofia/emagrecimento/condicionamento/manutenção) na avaliação.
 
 **🥋 Karatê**
-- [ ] **E4. Biblioteca de katas** — recorte do currículo B1, com vídeo por kata e
-      exigência por faixa.
+- [x] **E4. Biblioteca de katas** ✅ — Karatê já é suportado pelo currículo B1
+      (faixas + técnicas + vídeo). Entregue `karateStarterTemplate` (katas Shotokan
+      + kihon/kumite por faixa) e o seed generalizado no montador (antes só BJJ).
+      O instrutor monta a biblioteca de katas no B1 com 1 toque.
 
 **🥋 Judô**
-- [ ] **E5. Checklist nage-waza / katame-waza / kata** — recorte do currículo B1
-      no vocabulário do judô.
+- [x] **E5. Checklist nage-waza / katame-waza / kata** ✅ — Judô idem (B1). Entregue
+      `judoStarterTemplate` (nage-waza/katame-waza/ukemi por grau, estilo Gokyo) +
+      seed. Teste valida que os gradeId dos templates existem nas faixas (+5 testes).
 
 ---
 
@@ -139,7 +177,8 @@
 - [x] **F1. `storage.rules`** ✅ — criado e endurecido na A3 (fotos de avaliação
       **privadas**: staff + próprio aluno; fallback sem `read` público). Base pronta
       para uploads futuros (vídeos de técnica B1/A5).
-- [ ] **F2. Push/FCM real** — cliente + tokens + APNs (iOS). Habilita **A2**.
+- [x] **F2. Push/FCM real** — ✅ cliente implementado (ver A2). Falta só a config
+      de console do dono (chave APNs) + release.
 - [~] **F3. Índices Firestore** — adicionado o índice `physicalAssessments`
       (studentId ASC + date DESC) na A3. Novos conforme cada feature futura
       (conteúdo por sport, reservas por turma/data).
@@ -153,9 +192,9 @@
 2. ~~**A6 + A5 — Registro de treino + biblioteca de exercícios**~~ ✅ **FEITO**
    (6 fases; falta teste manual + merge). 1RM Epley cobre parte de E2.
 3. ~~**B1→B4 — Currículo + requisitos de graduação**~~ ✅ **FEITO** (6 fases).
-4. **A1 — Reserva de aula com vaga/waitlist** → operação (turmas lotando).
-   **← PRÓXIMO sugerido.**
-5. **A2 + F2 — Push real** → retenção (lembretes).
+4. ~~**A1 — Reserva de aula com vaga/waitlist**~~ ✅ **FEITO** (4 fases; falta
+   deploy + teste manual). Lembrete de aula fica p/ A2 (depende de push real).
+5. **A2 + F2 — Push real** → retenção (lembretes). **← PRÓXIMO sugerido.**
 6. **C1→C3 — Sparring/rounds/cartel** → diferenciador para trocação.
 7. **A4 — Gamificação** → camada de engajamento sobre o resto.
 8. **E* / D1 — Específicas** (periodização, 1RM, kata, weight cut) → refinamento.

@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/ranking_entry.dart';
 import '../models/student.dart';
 import '../services/services.dart';
+import '../services/ranking_service.dart';
 import 'auth_provider.dart';
 
 /// Current student provider - fetches the student linked to the logged-in user
@@ -253,6 +255,20 @@ final studentMonthlyAttendanceProvider = FutureProvider.family<int, String>((
     studentId: studentId,
   );
   return attendance.length;
+});
+
+/// Student's GERAL ranking position for the current month (A4 surfacing).
+/// Null when unranked / no academy. Scope is academy-wide; the per-category
+/// milestones are computed server-side separately.
+final studentMonthlyRankProvider =
+    FutureProvider.family<int?, String>((ref, studentId) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+  if (currentUser?.academyId == null) return null;
+  final service = RankingService(currentUser!.academyId!);
+  return service.getStudentRank(
+    studentId: studentId,
+    period: RankingPeriod.month,
+  );
 });
 
 /// Next class for student provider

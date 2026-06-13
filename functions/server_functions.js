@@ -5625,3 +5625,339 @@ exports.scheduledCardExpiryWarning = onSchedule(
     });
     return null;
   });
+
+// ===========================================================================
+// A1 — Reserva de aula com vaga + lista de espera (class booking)
+// Capacity + waitlist are server-authoritative: ALL writes to classOccurrences
+// and classBookings happen here (Firestore rules deny client writes), so the
+// counter can never be tampered with. The client only reads them.
+// ===========================================================================
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const BOOKING_DEFAULTS = {
+  windowDays: 7,
+  cancelCutoffMinutes: 60,
+  maxActiveBookingsPerStudent: 3,
+};
+
+/// "HH:mm" -> minutes since midnight (0 on malformed). Mirrors the Dart helper.
+function bk_hmToMinutes(hm) {
+  const parts = String(hm || '').split(':');
+  if (parts.length !== 2) return 0;
+  return (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+}
+
+/// "HH:mm" -> "HHmm" normalized via minutes (so "9:5" -> "0905"). Mirrors Dart.
+function bk_hmCompact(hm) {
+  const mins = bk_hmToMinutes(hm);
+  const h = String(Math.floor(mins / 60)).padStart(2, '0');
+  const m = String(mins % 60).padStart(2, '0');
+  return `${h}${m}`;
+}
+
+/// 0=Sun..6=Sat for a yyyyMMdd string, computed in UTC (date-only, TZ-safe).
+function bk_weekdayFromDateStr(date) {
+  const y = parseInt(date.slice(0, 4), 10);
+  const mo = parseInt(date.slice(4, 6), 10);
+  const d = parseInt(date.slice(6, 8), 10);
+  return new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
+}
+
+/// True when 2+ schedule slots fall on the same weekday (occ-id disambiguation).
+function bk_hasMultiPerDay(schedule) {
+  const seen = new Set();
+  for (const s of schedule || []) {
+    if (seen.has(s.dayOfWeek)) return true;
+    seen.add(s.dayOfWeek);
+  }
+  return false;
+}
+
+/// Deterministic occurrence id — must match `class_occurrences.dart`.
+function bk_occurrenceId(classId, date, startTime, multiPerDay) {
+  const base = `${classId}_${date}`;
+  return multiPerDay ? `${base}_${bk_hmCompact(startTime)}` : base;
+}
+
+/// Resolves the caller's relationship to the target student, or throws.
+/// Uses getUserAcademyMembership(uid, academyId) — NOT getUserAcademyInfo — so
+/// multi-academy members (cujo academyId selecionado != primário) não são
+/// barrados ao reservar/cancelar na academia em que estão de fato matriculados.
+async function bk_resolvePermission(uid, academyId, studentId) {
+  const info = await getUserAcademyMembership(uid, academyId);
+  if (!info) {
+    throw new HttpsError('permission-denied', 'Access denied: invalid academy');
+  }
+  const isStaff = info.role === 'admin' || info.role === 'instructor';
+  if (isStaff) return { isStaff: true, bookedBy: 'staff' };
+  if (info.studentId && info.studentId === studentId) {
+    return { isStaff: false, bookedBy: 'self' };
+  }
+  // Responsible adult booking for a dependent.
+  const stuSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
+  if (stuSnap.exists && stuSnap.data()?.responsibleUserId === uid) {
+    return { isStaff: false, bookedBy: 'responsible' };
+  }
+  throw new HttpsError('permission-denied', 'Access denied: cannot book for another student');
+}
+
+async function bk_loadBookingConfig(academyId) {
+  const snap = await db.doc(`academies/${academyId}`).get();
+  const d = snap.data() || {};
+  return {
+    enabled: d.bookingEnabled === true,
+    windowDays: Number.isFinite(d.bookingWindowDays) ? d.bookingWindowDays : BOOKING_DEFAULTS.windowDays,
+    cancelCutoffMinutes: Number.isFinite(d.bookingCancelCutoffMinutes)
+      ? d.bookingCancelCutoffMinutes : BOOKING_DEFAULTS.cancelCutoffMinutes,
+    maxActive: Number.isFinite(d.maxActiveBookingsPerStudent)
+      ? d.maxActiveBookingsPerStudent : BOOKING_DEFAULTS.maxActiveBookingsPerStudent,
+  };
+}
+
+exports.reserveClassSlot = onCall(async (request) => {
+  const { auth } = request;
+  if (!auth) throw new HttpsError('unauthenticated', 'Login required.');
+  const data = request.data || {};
+  const { academyId, classId, date, startTime, studentId, slotStartMillis } = data;
+  if (!academyId || !classId || !date || !startTime || !studentId || !slotStartMillis) {
+    throw new HttpsError('invalid-argument',
+      'Missing required fields: academyId, classId, date, startTime, studentId, slotStartMillis');
+  }
+
+  const perm = await bk_resolvePermission(auth.uid, academyId, studentId);
+  const cfg = await bk_loadBookingConfig(academyId);
+  if (!cfg.enabled && !perm.isStaff) {
+    throw new HttpsError('failed-precondition', 'Booking is disabled for this academy.');
+  }
+
+  const classRef = db.doc(`academies/${academyId}/classes/${classId}`);
+  const classSnap = await classRef.get();
+  if (!classSnap.exists) throw new HttpsError('not-found', 'Class not found.');
+  const cls = classSnap.data();
+  if (cls.isActive === false) {
+    throw new HttpsError('failed-precondition', 'Class is not active.');
+  }
+
+  // The requested slot must exist in the weekly schedule.
+  const dow = bk_weekdayFromDateStr(date);
+  const schedule = Array.isArray(cls.schedule) ? cls.schedule : [];
+  const slot = schedule.find((s) => s.dayOfWeek === dow && s.startTime === startTime);
+  if (!slot) throw new HttpsError('invalid-argument', 'No class slot at that day/time.');
+
+  const now = Date.now();
+  const multiPerDay = bk_hasMultiPerDay(schedule);
+  const occId = bk_occurrenceId(classId, date, startTime, multiPerDay);
+  const occRef = db.doc(`academies/${academyId}/classOccurrences/${occId}`);
+  const bookingRef = db.doc(`academies/${academyId}/classBookings/${occId}__${studentId}`);
+
+  // Idempotency BEFORE the limit check: re-reserving an existing active booking
+  // is a no-op and must never trip the per-student limit (the booking is one of
+  // the counted ones). The transaction re-checks this authoritatively.
+  const existing = await bookingRef.get();
+  if (existing.exists && existing.data().status !== 'cancelled') {
+    return { status: existing.data().status, position: 0 };
+  }
+
+  if (!perm.isStaff) {
+    if (slotStartMillis <= now) {
+      throw new HttpsError('failed-precondition', 'Class already started.');
+    }
+    if (slotStartMillis > now + (cfg.windowDays + 1) * DAY_MS) {
+      throw new HttpsError('failed-precondition', `Booking window is ${cfg.windowDays} days.`);
+    }
+    // Eligibility mirrors the QR self-check-in rule: enrolled, explicitly open,
+    // or no roster at all (empty/absent studentIds => open class).
+    const roster = Array.isArray(cls.studentIds) ? cls.studentIds : [];
+    const eligible = cls.isOpenClass === true || roster.length === 0 || roster.includes(studentId);
+    if (!eligible) {
+      throw new HttpsError('permission-denied', 'Student is not eligible for this class.');
+    }
+    // Per-student active future bookings limit.
+    const activeSnap = await db.collection(`academies/${academyId}/classBookings`)
+      .where('studentId', '==', studentId)
+      .where('status', 'in', ['confirmed', 'waitlist'])
+      .where('slotStart', '>=', admin.firestore.Timestamp.fromMillis(now))
+      .get();
+    if (activeSnap.size >= cfg.maxActive) {
+      throw new HttpsError('failed-precondition',
+        `Limite de ${cfg.maxActive} reservas ativas atingido.`);
+    }
+  }
+
+  const stuSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
+  const studentName = stuSnap.data()?.fullName || '';
+  const maxStudents = Number.isFinite(cls.maxStudents) ? cls.maxStudents : null;
+  const slotStartTs = admin.firestore.Timestamp.fromMillis(slotStartMillis);
+
+  return db.runTransaction(async (tx) => {
+    const occDoc = await tx.get(occRef);
+    const bDoc = await tx.get(bookingRef);
+    if (bDoc.exists && bDoc.data().status !== 'cancelled') {
+      // Idempotent: already booked. UI re-reads occurrence/roster for position.
+      return { status: bDoc.data().status, position: 0 };
+    }
+
+    let confirmedCount = occDoc.exists ? (occDoc.data().confirmedCount || 0) : 0;
+    let waitlistCount = occDoc.exists ? (occDoc.data().waitlistCount || 0) : 0;
+
+    let status;
+    let waitlistSeq = null;
+    let position = 0;
+    if (maxStudents === null || confirmedCount < maxStudents) {
+      status = 'confirmed';
+      confirmedCount += 1;
+    } else {
+      status = 'waitlist';
+      waitlistCount += 1;
+      waitlistSeq = now;
+      position = waitlistCount;
+    }
+
+    tx.set(occRef, {
+      classId, className: cls.name || '', sport: cls.sport || null,
+      category: cls.category || null,
+      date, slotStart: slotStartTs, startTime, endTime: slot.endTime || '',
+      dayOfWeek: dow, maxStudents,
+      confirmedCount, waitlistCount,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    tx.set(bookingRef, {
+      occId, classId, className: cls.name || '', sport: cls.sport || null,
+      studentId, studentName,
+      date, slotStart: slotStartTs, startTime, endTime: slot.endTime || '',
+      status, waitlistSeq,
+      bookedBy: perm.bookedBy, bookedByUid: auth.uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      cancelledAt: null,
+    }, { merge: true });
+
+    return { status, position };
+  });
+});
+
+exports.cancelClassReservation = onCall(async (request) => {
+  const { auth } = request;
+  if (!auth) throw new HttpsError('unauthenticated', 'Login required.');
+  const data = request.data || {};
+  const { academyId, classId, date, startTime, studentId, slotStartMillis } = data;
+  if (!academyId || !classId || !date || !startTime || !studentId) {
+    throw new HttpsError('invalid-argument', 'Missing required fields.');
+  }
+
+  const perm = await bk_resolvePermission(auth.uid, academyId, studentId);
+  const cfg = await bk_loadBookingConfig(academyId);
+
+  // Trust the client-provided occId when present: cancel only ever targets the
+  // caller's OWN booking ({occId}__{studentId}, and studentId is permission-
+  // checked), so this is safe and survives the class/schedule being edited or
+  // deleted after the booking was made (recomputing could diverge). Fall back
+  // to recomputation for older clients.
+  let occId = data.occId;
+  if (!occId) {
+    const classSnap = await db.doc(`academies/${academyId}/classes/${classId}`).get();
+    const schedule = classSnap.exists && Array.isArray(classSnap.data().schedule)
+      ? classSnap.data().schedule : [];
+    occId = bk_occurrenceId(classId, date, startTime, bk_hasMultiPerDay(schedule));
+  }
+  const occRef = db.doc(`academies/${academyId}/classOccurrences/${occId}`);
+  const bookingRef = db.doc(`academies/${academyId}/classBookings/${occId}__${studentId}`);
+
+  // Pre-read the booking: needed for the cancel cutoff (server-derived slot
+  // start) and for the next waitlist candidate (promotion happens in the tx).
+  const preBooking = await bookingRef.get();
+
+  // Student-side cancel cutoff (staff bypass). The client's slotStartMillis is
+  // only a hint; fall back to the booking's stored slotStart so a non-staff
+  // caller cannot skip the window by simply omitting it.
+  if (!perm.isStaff && preBooking.exists) {
+    const storedMs = preBooking.data().slotStart?.toMillis?.();
+    const effectiveMs = Number.isFinite(slotStartMillis) ? slotStartMillis : storedMs;
+    if (Number.isFinite(effectiveMs)) {
+      const deadline = effectiveMs - cfg.cancelCutoffMinutes * 60 * 1000;
+      if (Date.now() >= deadline) {
+        throw new HttpsError('failed-precondition',
+          `Cancelamento permitido só até ${cfg.cancelCutoffMinutes} min antes.`);
+      }
+    }
+  }
+
+  // Next waitlist candidate (promotion happens in the tx).
+  let candidateRef = null;
+  if (preBooking.exists && preBooking.data().status === 'confirmed') {
+    const wlSnap = await db.collection(`academies/${academyId}/classBookings`)
+      .where('occId', '==', occId)
+      .where('status', '==', 'waitlist')
+      .orderBy('waitlistSeq', 'asc')
+      .limit(1)
+      .get();
+    if (!wlSnap.empty) candidateRef = wlSnap.docs[0].ref;
+  }
+
+  const result = await db.runTransaction(async (tx) => {
+    const bDoc = await tx.get(bookingRef);
+    if (!bDoc.exists || bDoc.data().status === 'cancelled') {
+      return { noop: true };
+    }
+    const occDoc = await tx.get(occRef);
+    let confirmedCount = occDoc.exists ? (occDoc.data().confirmedCount || 0) : 0;
+    let waitlistCount = occDoc.exists ? (occDoc.data().waitlistCount || 0) : 0;
+    const wasConfirmed = bDoc.data().status === 'confirmed';
+
+    let candDoc = null;
+    if (wasConfirmed && candidateRef) {
+      candDoc = await tx.get(candidateRef);
+    }
+
+    tx.update(bookingRef, {
+      status: 'cancelled',
+      cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    let promotedStudentId = null;
+    if (wasConfirmed) {
+      confirmedCount = Math.max(0, confirmedCount - 1);
+      if (candDoc && candDoc.exists && candDoc.data().status === 'waitlist') {
+        tx.update(candidateRef, {
+          status: 'confirmed',
+          waitlistSeq: null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        confirmedCount += 1;
+        waitlistCount = Math.max(0, waitlistCount - 1);
+        promotedStudentId = candDoc.data().studentId;
+      }
+    } else {
+      waitlistCount = Math.max(0, waitlistCount - 1);
+    }
+
+    tx.set(occRef, {
+      confirmedCount, waitlistCount,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    return { promotedStudentId, className: bDoc.data().className || '' };
+  });
+
+  // Best-effort notify the promoted student outside the transaction.
+  if (result && result.promotedStudentId) {
+    try {
+      const uid = await getStudentUserId(result.promotedStudentId, academyId);
+      if (uid) {
+        const title = 'Vaga confirmada!';
+        const msg = `Você saiu da lista de espera de ${result.className}. Sua vaga está confirmada.`;
+        await createInternalNotification(academyId, uid, 'class_booking', 'high', title, msg, {
+          actionUrl: '/portal/reservas', actionLabel: 'Ver reservas',
+          studentId: result.promotedStudentId, expiresInDays: 7,
+        });
+        await sendToUser(uid, title, msg, { type: 'class_booking', academyId });
+      }
+    } catch (e) {
+      console.error('promote notify failed:', e);
+    }
+  }
+
+  return { promotedStudentId: (result && result.promotedStudentId) || null };
+});

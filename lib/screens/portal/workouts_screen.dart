@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/feedback_utils.dart';
+import 'one_rep_max_screen.dart';
+import 'mesocycle_view_screen.dart';
 import '../../core/number_format.dart';
 import '../../core/theme.dart';
 import '../../models/workout_plan.dart';
@@ -62,6 +65,22 @@ class _WorkoutsScreenState extends ConsumerState<WorkoutsScreen> {
       appBar: AppBar(
         title: const Text('Treinos'),
         backgroundColor: AppTheme.surface,
+        actions: [
+          IconButton(
+            tooltip: 'Periodização',
+            icon: const Icon(LucideIcons.calendarRange),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const MesocycleViewScreen()),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Calculadora de 1RM',
+            icon: const Icon(LucideIcons.calculator),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const OneRepMaxScreen()),
+            ),
+          ),
+        ],
       ),
       body: _loading
           ? PolishSkeleton.list(count: 6)

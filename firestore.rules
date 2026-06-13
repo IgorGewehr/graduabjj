@@ -910,6 +910,75 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Reserva de aula (A1) — capacidade + fila SERVER-AUTHORITATIVE.
+      // TODA escrita acontece nas Cloud Functions (reserveClassSlot /
+      // cancelClassReservation) via Admin SDK, que IGNORA estas regras. O
+      // cliente nunca escreve a vaga -> contador impossivel de fraudar.
+      // ============================================
+      match /classOccurrences/{occId} {
+        // Qualquer membro le as vagas (X/Y) para montar a tela de reserva.
+        allow read: if belongsToAcademy(academyId);
+        // Escrita so via callable (Admin SDK). Cliente nao escreve.
+        allow write: if false;
+      }
+
+      match /classBookings/{bookingId} {
+        allow read: if isStaffOrMonitor(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
+        // Escrita so via callable (Admin SDK). Cliente nao escreve.
+        allow write: if false;
+      }
+
+      // ============================================
+      // Trocação (C1): registro de sessão de trocação — o aluno escreve/le os
+      // seus; staff/responsavel le. Espelha workoutExecutions.
+      // ============================================
+      match /strikingSessions/{sessionId} {
+        allow read: if isStaffOrMonitor(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
+        allow create: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, request.resource.data.studentId);
+        allow update, delete: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, resource.data.studentId);
+      }
+
+      // ============================================
+      // Trocação (C3): cartel/ficha de luta — cartel OFICIAL: só staff escreve;
+      // aluno/responsavel le o seu. Espelha assessments (avaliacao tecnica).
+      // ============================================
+      match /fightRecords/{recordId} {
+        allow read: if isStaffOrMonitor(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
+        allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
+      // Trocação (C2): biblioteca de combinações — staff escreve; qualquer
+      // membro le. Nao e sensivel. Espelha exercises/syllabus.
+      // ============================================
+      match /combos/{comboId} {
+        allow read: if belongsToAcademy(academyId);
+        allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
+      // Musculação (E2): metas de carga — o aluno escreve/le as suas; staff le.
+      // Espelha workoutExecutions.
+      // ============================================
+      match /strengthGoals/{goalId} {
+        allow read: if isStaffOrMonitor(academyId);
+        allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
+        allow create: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, request.resource.data.studentId);
+        allow update, delete: if belongsToAcademy(academyId)
+                      && isOwnStudentRecord(academyId, resource.data.studentId);
+      }
+
+      // ============================================
       // Notifications
       // ============================================
       match /notifications/{notificationId} {
@@ -955,6 +1024,19 @@ service cloud.firestore {
       // ============================================
       // Workout Plans (structured training — all modalities)
       // ============================================
+      // ============================================
+      // Mesociclos (E1) — mesmo modelo de audiência de workoutPlans.
+      // ============================================
+      match /mesocycles/{mesoId} {
+        allow read, write: if isAcademyStaff(academyId);
+        allow read: if belongsToAcademy(academyId)
+                    && (
+                      resource.data.audience == 'academy'
+                      || resource.data.audience == 'sport'
+                      || isAssignedStudent(academyId, resource.data.assignedStudentIds)
+                    );
+      }
+
       match /workoutPlans/{planId} {
         // Staff manage everything.
         allow read, write: if isAcademyStaff(academyId);

@@ -14,6 +14,8 @@ enum FeatureId {
   workouts, // Treinos      -> AcademySettings.workoutPlansEnabled
   videos, // Vídeos         -> AcademySettings.trainingVideosEnabled
   evolution, // Evolução    -> AcademySettings.physicalEvolutionEnabled
+  booking, // Reservar aula -> AcademySettings.bookingEnabled
+  striking, // Trocação      -> AcademySettings.strikingEnabled
 }
 
 extension FeatureIdX on FeatureId {
@@ -177,6 +179,14 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     section: NavSection.gestao,
   ),
   NavEntry(
+    key: 'admin_reservas',
+    label: 'Reservas',
+    icon: LucideIcons.calendarCheck,
+    route: '/admin/reservas',
+    section: NavSection.gestao,
+    feature: FeatureId.booking,
+  ),
+  NavEntry(
     key: 'admin_graduacao',
     label: 'Graduação',
     icon: LucideIcons.award,
@@ -259,6 +269,22 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     lockable: true,
   ),
   NavEntry(
+    key: 'admin_combinacoes',
+    label: 'Combinações',
+    icon: Icons.sports_mma_outlined,
+    route: '/admin/combinacoes',
+    section: NavSection.conteudo,
+    feature: FeatureId.striking,
+  ),
+  NavEntry(
+    key: 'admin_periodizacao',
+    label: 'Periodização',
+    icon: LucideIcons.calendarRange,
+    route: '/admin/periodizacao',
+    section: NavSection.conteudo,
+    feature: FeatureId.workouts,
+  ),
+  NavEntry(
     key: 'admin_loja',
     label: 'Loja',
     icon: LucideIcons.store,
@@ -306,6 +332,15 @@ const List<NavEntry> kPortalNavCatalog = <NavEntry>[
     section: NavSection.treinos,
   ),
   NavEntry(
+    key: 'portal_reservas',
+    label: 'Reservar aula',
+    icon: LucideIcons.calendarCheck,
+    route: '/portal/reservas',
+    section: NavSection.treinos,
+    feature: FeatureId.booking,
+    portalGate: PortalContextGate.hideForMonitor,
+  ),
+  NavEntry(
     key: 'portal_jornada',
     label: 'Jornada',
     icon: LucideIcons.history,
@@ -342,6 +377,14 @@ const List<NavEntry> kPortalNavCatalog = <NavEntry>[
     route: '/portal/treinos',
     section: NavSection.treinos,
     feature: FeatureId.workouts,
+  ),
+  NavEntry(
+    key: 'portal_trocacao',
+    label: 'Trocação',
+    icon: Icons.sports_mma_outlined,
+    route: '/portal/trocacao',
+    section: NavSection.treinos,
+    feature: FeatureId.striking,
   ),
   NavEntry(
     key: 'portal_videos',
