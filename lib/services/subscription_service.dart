@@ -303,12 +303,18 @@ class SubscriptionCharge {
   final DateTime? paidAt;
   final int? cycle;
 
+  /// Cobrança indevida (type 'subscription_overcharge', needsRefund): dinheiro
+  /// a devolver, não um ciclo da assinatura — o histórico a exibe destacada
+  /// como 'Reembolso pendente'.
+  final bool overcharge;
+
   const SubscriptionCharge({
     required this.id,
     required this.amount,
     required this.referenceMonth,
     required this.paidAt,
     required this.cycle,
+    this.overcharge = false,
   });
 
   factory SubscriptionCharge.fromFirestore(DocumentSnapshot doc) {
@@ -321,6 +327,8 @@ class SubscriptionCharge {
           (data['paidAt'] as Timestamp?)?.toDate() ??
           (data['createdAt'] as Timestamp?)?.toDate(),
       cycle: (data['recurringCycle'] as num?)?.toInt(),
+      overcharge: data['type'] == 'subscription_overcharge' ||
+          data['overcharge'] == true,
     );
   }
 }

@@ -68,9 +68,15 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
   }
 
   Future<void> _resolveGateway() async {
-    final resolved = await ref
-        .read(paymentGatewayProvider(FirebaseService.academyId).future);
-    if (mounted) setState(() => _gateway = resolved);
+    try {
+      final resolved = await ref
+          .read(paymentGatewayProvider(FirebaseService.academyId).future);
+      if (mounted) setState(() => _gateway = resolved);
+    } catch (_) {
+      // Falha transitória ao resolver: fica null e o Confirmar re-resolve
+      // (com await) antes de decidir pular o sheet — nunca degrada para
+      // 'sem gateway' silenciosamente.
+    }
   }
 
   // --- Confirm -----------------------------------------------------------
@@ -130,10 +136,51 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
   /// no gateway is connected, the order still exists as pending and the student
   /// is told to arrange payment with the academy.
   Future<void> _openPaymentSheet(StoreOrder order) async {
-    final gateway = _gateway;
+    var gateway = _gateway;
     final currentUser = ref.read(currentUserProvider).valueOrNull;
 
-    if (gateway == null || !gateway.pixEnabled || currentUser == null) {
+    // Resolução do initState ainda não concluiu (ou falhou): AGUARDA aqui em
+    // vez de pular o pagamento silenciosamente — o pedido já existe e o aluno
+    // precisa ver as opções de PIX/cartão.
+    if (gateway == null) {
+      try {
+        // Invalida antes: um erro de rede no initState fica cacheado no
+        // FutureProvider; sem isso o retry releria o mesmo erro.
+        ref.invalidate(paymentGatewayProvider(FirebaseService.academyId));
+        gateway = await ref
+            .read(paymentGatewayProvider(FirebaseService.academyId).future);
+        // Atribuição direta (sem capturar `gateway` em closure) para manter a
+        // promoção de não-nulo até o uso no PaymentMethodSheet.
+        _gateway = gateway;
+        if (mounted) setState(() {});
+      } catch (_) {
+        gateway = null;
+      }
+      if (!mounted) return;
+    }
+
+    if (gateway == null) {
+      // Falha ao resolver mesmo após retry: o pedido segue pendente e pode
+      // ser pago pela lista de pedidos.
+      context.showWarning(
+          'Não foi possível carregar o pagamento online. Conclua o pagamento '
+          'em "Meus pedidos" ou combine com a academia.');
+      _goToOrders();
+      return;
+    }
+
+    // Promoção não atravessa closures para locais reatribuídos — fixa o valor
+    // não-nulo num final para uso no builder do sheet.
+    final resolvedGateway = gateway;
+
+    // Resolução CONCLUÍDA sem gateway conectado: avisa antes de navegar (em
+    // vez de despejar o aluno na lista sem explicação).
+    if (!resolvedGateway.pixEnabled || currentUser == null) {
+      if (resolvedGateway == PaymentGateway.none) {
+        context.showWarning(
+            'Pagamento online não configurado — combine o pagamento '
+            'diretamente com a academia.');
+      }
       _goToOrders();
       return;
     }
@@ -172,7 +219,7 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
           studentName: currentUser.displayName,
           paymentMethodPolicy: order.paymentMethodPolicy,
         ),
-        gateway: gateway,
+        gateway: resolvedGateway,
         // Card is offered only when the order policy allows it AND the academy
         // enabled store card. PIX is gated inside the sheet by the same policy.
         storeCreditCardEnabled: availability.creditCard,

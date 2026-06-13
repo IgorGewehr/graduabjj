@@ -232,6 +232,12 @@ class Payment {
 
   // Computed properties
   bool get isPaid => status == PaymentStatus.paid;
+
+  /// Cobrança indevida de assinatura (lote 1: type 'subscription_overcharge',
+  /// status 'paid', needsRefund) — dinheiro a DEVOLVER, nunca receita. Toda
+  /// soma/contagem de receita deve pular estes docs; listagens os exibem com
+  /// destaque 'Reembolso pendente'.
+  bool get isOvercharge => type == 'subscription_overcharge';
   bool get isOverdue =>
       status != PaymentStatus.paid &&
       status != PaymentStatus.cancelled &&
@@ -954,6 +960,10 @@ class PaymentService {
         countCancelled++;
         continue;
       }
+
+      // Cobrança indevida a reembolsar (needsRefund) — nunca soma como
+      // receita nem entra no esperado/taxa de cobrança.
+      if (p.isOvercharge) continue;
 
       // Only count active payments (pending, overdue, paid) in expected
       totalExpected += p.value;

@@ -1,28 +1,30 @@
 'use strict';
 
-// QA — CORE pilar (gamificação): adversarial proof of the non-atomic
+// QA — CORE pilar (gamificação): executable specification of the (FIXED)
 // query-before-create race in upsertAutoAchievement.
 //
-// ANCHOR: functions/server_functions.js:1177-1211 (upsertAutoAchievement)
-//   const existing = await ref.where('studentId','==',sid)
-//                              .where('autoKey','==',key).limit(1).get();
-//   if (!existing.empty) return false;
-//   await ref.add({ ... });        // <-- auto-id, no txn, no .create()
+// ANCHOR: functions/server_functions.js:1185-1225 (upsertAutoAchievement)
+//   const docId = `${studentId}_${autoKey}`;
+//   await docRef.create({ ... });   // atomic: throws ALREADY_EXISTS (code 6)
+//   catch err.code === 6 -> return false (no-op)
 //
-// The idempotency guard is a READ-then-WRITE with no transaction and no
-// deterministic doc-id. Under exact concurrency (daily cron 07:30 overlapping
-// the on-demand recomputeStudentMilestones callable, or two rapid clicks) two
-// executions can both observe existing.empty === true and BOTH add(), minting a
-// duplicate milestone for the same (studentId, autoKey).
+// Historico: a versao auditada fazia READ-then-WRITE (query where studentId +
+// autoKey, depois ref.add() com auto-id) sem transacao. Sob concorrencia exata
+// (cron diaria 07:30 sobrepondo o callable recomputeStudentMilestones, ou dois
+// cliques rapidos) duas execucoes observavam existing.empty === true e AMBAS
+// faziam add(), duplicando o milestone do mesmo (studentId, autoKey). O fix
+// (commit 7952bc0) adotou id deterministico + .create() atomico.
 //
 // upsertAutoAchievement is module-internal (not exported) and captures
 // `db = admin.firestore()` at require-time, so we cannot inject a mock into the
 // real function without the emulator. Instead we model the EXACT control flow of
-// both the current (buggy) strategy and the proposed fix against a tiny
-// Firestore-shaped fake with a deterministic interleave scheduler, proving:
-//   (a) the current query-then-add shape DUPLICATES under interleaving, and
-//   (b) the proposed deterministic-doc-id + create() shape does NOT.
-// This is an executable specification of the bug + its fix contract.
+// both the LEGACY (pre-fix) strategy and the CURRENT production strategy against
+// a tiny Firestore-shaped fake with a deterministic interleave scheduler, proving:
+//   (a) the legacy query-then-add shape DUPLICATES under interleaving (why the
+//       fix was needed), and
+//   (b) the production deterministic-doc-id + create() shape does NOT.
+// A SOURCE CANARY then asserts production still uses shape (b) — it flips if
+// anyone regresses to query-before-create.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -38,7 +40,7 @@ function makeCollection() {
   let auto = 0;
   return {
     store,
-    // Query that matches the production filter: studentId + autoKey.
+    // Query that matches the legacy filter: studentId + autoKey.
     queryMatching(studentId, autoKey, gate) {
       return {
         async get() {
@@ -67,17 +69,18 @@ function makeCollection() {
   };
 }
 
-// Current production strategy (query-before-create, auto-id, no txn).
-// Faithful to server_functions.js:1185-1210.
-async function upsertCurrent(col, studentId, autoKey, gate) {
+// LEGACY (pre-7952bc0) strategy: query-before-create, auto-id, no txn.
+// Kept as the executable proof of WHY the fix exists.
+async function upsertLegacy(col, studentId, autoKey, gate) {
   const existing = await col.queryMatching(studentId, autoKey, gate).get();
   if (!existing.empty) return false;
   await col.add({ studentId, autoKey });
   return true;
 }
 
-// Proposed fix: deterministic doc-id + create() (atomic; ALREADY_EXISTS => no-op).
-async function upsertFixed(col, studentId, autoKey) {
+// CURRENT production strategy (server_functions.js:1192-1224): deterministic
+// doc-id + create() (atomic; ALREADY_EXISTS => no-op).
+async function upsertProduction(col, studentId, autoKey) {
   const id = `${studentId}_${autoKey}`;
   try {
     col.docCreate(id, { studentId, autoKey });
@@ -88,16 +91,16 @@ async function upsertFixed(col, studentId, autoKey) {
   }
 }
 
-test('SEQUENTIAL: current strategy is correctly idempotent (no dup)', async () => {
+test('SEQUENTIAL: legacy strategy was correctly idempotent (no dup)', async () => {
   const col = makeCollection();
-  const a = await upsertCurrent(col, 's1', 'streak_7');
-  const b = await upsertCurrent(col, 's1', 'streak_7');
+  const a = await upsertLegacy(col, 's1', 'streak_7');
+  const b = await upsertLegacy(col, 's1', 'streak_7');
   assert.equal(a, true, 'first creates');
   assert.equal(b, false, 'second is a no-op');
   assert.equal(col.store.size, 1, 'exactly one milestone after sequential calls');
 });
 
-test('CONCURRENT: current strategy DUPLICATES (the bug) under exact interleave', async () => {
+test('CONCURRENT: legacy strategy DUPLICATES under exact interleave (the historical bug)', async () => {
   const col = makeCollection();
 
   // Two executions for the SAME (studentId, autoKey): cron worker vs on-demand
@@ -107,8 +110,8 @@ test('CONCURRENT: current strategy DUPLICATES (the bug) under exact interleave',
   let releaseReads;
   const readGate = new Promise((r) => { releaseReads = r; });
 
-  const exec1 = upsertCurrent(col, 's1', 'streak_7', readGate);
-  const exec2 = upsertCurrent(col, 's1', 'streak_7', readGate);
+  const exec1 = upsertLegacy(col, 's1', 'streak_7', readGate);
+  const exec2 = upsertLegacy(col, 's1', 'streak_7', readGate);
 
   // Both reads observe an empty collection, THEN both proceed to add().
   releaseReads();
@@ -119,44 +122,51 @@ test('CONCURRENT: current strategy DUPLICATES (the bug) under exact interleave',
   assert.equal(
     col.store.size,
     2,
-    'BUG: two duplicate milestones for the same (studentId, autoKey)'
+    'legacy bug: two duplicate milestones for the same (studentId, autoKey)'
   );
 });
 
-test('CONCURRENT: proposed fix (deterministic id + create) is dup-free', async () => {
+test('CONCURRENT: production strategy (deterministic id + create) is dup-free', async () => {
   const col = makeCollection();
 
   // Same interleave intent, but create() on a deterministic id is atomic: the
   // second create() throws ALREADY_EXISTS and the upsert no-ops.
   const [r1, r2] = await Promise.all([
-    upsertFixed(col, 's1', 'streak_7'),
-    upsertFixed(col, 's1', 'streak_7'),
+    upsertProduction(col, 's1', 'streak_7'),
+    upsertProduction(col, 's1', 'streak_7'),
   ]);
 
   // Exactly one wins, the other no-ops; never two docs.
   assert.equal(r1 !== r2, true, 'exactly one create succeeds, the other no-ops');
-  assert.equal(col.store.size, 1, 'FIX: single milestone even under concurrency');
+  assert.equal(col.store.size, 1, 'single milestone even under concurrency');
   assert.ok(col.store.has('s1_streak_7'), 'doc id is deterministic ${studentId}_${autoKey}');
 });
 
-// Guard: the production source still uses the non-atomic shape (ref.add + a
-// query-before-create, with NO runTransaction and NO .create()). If a future
-// refactor adopts the fix, this test flips and should be updated — it is the
-// canary that the bug is still present.
-test('SOURCE CANARY: production upsertAutoAchievement is still non-atomic', () => {
+// Guard: the production source uses the ATOMIC shape (deterministic doc id +
+// .create() with ALREADY_EXISTS treated as no-op). If a future refactor regresses
+// to query-before-create / auto-id add(), this test flips — it is the canary
+// that keeps the race closed.
+test('SOURCE CANARY: production upsertAutoAchievement is atomic (id deterministico + create)', () => {
   const fs = require('fs');
   const path = require('path');
   const src = fs.readFileSync(
     path.join(__dirname, '..', 'server_functions.js'),
     'utf8'
   );
-  // Isolate the function body.
+  // Isolate the function body (ends at the first column-0 closing brace).
   const start = src.indexOf('async function upsertAutoAchievement');
   assert.ok(start > 0, 'upsertAutoAchievement present');
-  const body = src.slice(start, start + 1500);
+  const end = src.indexOf('\n}', start);
+  assert.ok(end > start, 'function body delimited');
+  const body = src.slice(start, end);
 
-  assert.match(body, /\.where\('studentId'/, 'still query-before-create');
-  assert.match(body, /await ref\.add\(/, 'still uses auto-id ref.add()');
-  assert.doesNotMatch(body, /runTransaction/, 'no transaction (race open)');
-  assert.doesNotMatch(body, /\.create\(/, 'no atomic .create() (race open)');
+  // The fix contract (proven dup-free above) is in place:
+  assert.match(body, /const docId = `\$\{studentId\}_\$\{autoKey\}`/,
+    'deterministic doc id `${studentId}_${autoKey}`');
+  assert.match(body, /await docRef\.create\(/, 'atomic .create() (not add/set)');
+  assert.match(body, /err\.code === 6/, 'ALREADY_EXISTS (code 6) treated as no-op');
+
+  // And the legacy racy shape is gone:
+  assert.doesNotMatch(body, /\.where\(/, 'REGRESSION: query-before-create is back');
+  assert.doesNotMatch(body, /\.add\(/, 'REGRESSION: auto-id add() is back');
 });

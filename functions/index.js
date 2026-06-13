@@ -1233,39 +1233,62 @@ async function mpHandlePayment(payment, res) {
     return res.status(200).json({received: true, academyId, status});
   }
 
-  const snap = await academyRef.get();
-
-  // Idempotência: mesma cobrança já processada.
-  if (snap.get('subscription.externalPaymentId') === chargeId) {
-    return res.status(200).json({success: true, academyId, action: 'duplicate'});
-  }
-
   // Período: external_reference > metadata.period > valor pago.
   const metaPeriod = payment.metadata &&
     (payment.metadata.period || payment.metadata.Period);
   let daysToAdd = mpPeriodToDays(refPeriod) || mpPeriodToDays(metaPeriod);
   if (daysToAdd === 0) daysToAdd = mpAmountToDays(payment.transaction_amount);
 
-  // Estende a partir do maior entre hoje e o paidUntil atual.
-  const current = snap.get('subscription.paidUntil');
-  const now = new Date();
-  let base = now;
-  if (current && typeof current.toDate === 'function' && current.toDate() > now) {
-    base = current.toDate();
-  }
-  const paidUntil = new Date(base);
-  paidUntil.setDate(paidUntil.getDate() + daysToAdd);
+  // Concessão TRANSACIONAL com dedupe definitivo: o doc determinístico
+  // paywallPayments/{chargeId} é criado via tx.create() na mesma transação
+  // que estende o paidUntil — entregas concorrentes/duplicadas e re-entregas
+  // tardias de um pagamento antigo encontram o doc e não concedem de novo.
+  // (O check do externalPaymentId cobre cobranças processadas antes deste fix.)
+  const payDocRef = academyRef.collection('paywallPayments').doc(chargeId);
+  const paidUntil = await db.runTransaction(async (tx) => {
+    const dupSnap = await tx.get(payDocRef);
+    const snap = await tx.get(academyRef);
+    if (dupSnap.exists ||
+        snap.get('subscription.externalPaymentId') === chargeId) {
+      return null; // já processado
+    }
 
-  await academyRef.update({
-    'subscription.plan': 'pro',
-    'subscription.status': 'active',
-    'subscription.paidUntil': Timestamp.fromDate(paidUntil),
-    'subscription.lastPaymentAt': FieldValue.serverTimestamp(),
-    'subscription.lastEvent': 'payment_approved',
-    'subscription.externalPaymentId': chargeId,
-    'subscription.gateway': 'mercadopago',
-    'updatedAt': FieldValue.serverTimestamp(),
+    // Estende a partir do maior entre hoje e o paidUntil atual.
+    const current = snap.get('subscription.paidUntil');
+    const now = new Date();
+    let base = now;
+    if (current && typeof current.toDate === 'function' && current.toDate() > now) {
+      base = current.toDate();
+    }
+    const until = new Date(base);
+    until.setDate(until.getDate() + daysToAdd);
+
+    tx.create(payDocRef, {
+      chargeId,
+      status: 'approved',
+      amount: Number(payment.transaction_amount || 0), // REAIS
+      daysAdded: daysToAdd,
+      paidUntil: Timestamp.fromDate(until),
+      payerEmail: payerEmail || null,
+      processedAt: FieldValue.serverTimestamp(),
+    });
+    tx.update(academyRef, {
+      'subscription.plan': 'pro',
+      'subscription.status': 'active',
+      'subscription.paidUntil': Timestamp.fromDate(until),
+      'subscription.lastPaymentAt': FieldValue.serverTimestamp(),
+      'subscription.lastEvent': 'payment_approved',
+      'subscription.externalPaymentId': chargeId,
+      'subscription.gateway': 'mercadopago',
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return until;
   });
+
+  if (!paidUntil) {
+    console.log('[mpWebhook] pagamento já processado — ignorado', {academyId, chargeId});
+    return res.status(200).json({success: true, academyId, action: 'duplicate'});
+  }
   console.log('[mpWebhook] acesso concedido', {academyId, chargeId, daysToAdd, paidUntil});
   return res.status(200).json({success: true, academyId, action: 'granted', paidUntil});
 }
@@ -1327,8 +1350,14 @@ exports.mercadoPagoWebhook = onRequest(
     ).toLowerCase();
 
     // ---- Validação de assinatura (x-signature) ----
-    // header: "ts=<ms>,v1=<hmac>"; manifest = id:<data.id>;request-id:<x-request-id>;ts:<ts>;
-    if (webhookSecret) {
+    // header: "ts=...,v1=<hmac>"; manifest = id:<data.id>;request-id:<x-request-id>;ts:<ts>;
+    // FAIL CLOSED: sem o secret configurado não dá pra autenticar o chamador —
+    // recusa (espelha o mercadoPagoMarketplaceWebhook em server_functions.js).
+    if (!webhookSecret) {
+      console.error('[mpWebhook] MP_WEBHOOK_SECRET não configurado — recusando webhook');
+      return res.status(401).json({error: 'webhook secret not configured'});
+    }
+    {
       const xSignature = req.header('x-signature') || '';
       const xRequestId = req.header('x-request-id') || '';
       let ts = '';
@@ -1346,6 +1375,16 @@ exports.mercadoPagoWebhook = onRequest(
       if (!valid) {
         console.warn('[mpWebhook] assinatura inválida — rejeitado');
         return res.status(401).json({error: 'invalid signature'});
+      }
+      // Frescor do ts (anti-replay): rejeita assinaturas fora da janela de
+      // 5 min. O MP manda o ts em segundos ou milissegundos conforme a
+      // versão — normaliza pra ms antes de comparar.
+      const tsNum = Number(ts);
+      const tsMs = tsNum < 1e12 ? tsNum * 1000 : tsNum;
+      if (!Number.isFinite(tsNum) || tsNum <= 0 ||
+          Math.abs(Date.now() - tsMs) > 5 * 60 * 1000) {
+        console.warn('[mpWebhook] ts da assinatura fora da janela — possível replay', {ts});
+        return res.status(401).json({error: 'stale signature timestamp'});
       }
     }
 

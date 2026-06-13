@@ -189,6 +189,15 @@ class MercadoPagoService {
         subscriptionId: data['subscriptionId'] as String?,
         status: status,
       );
+    } on MpCardTokenizationException catch (e) {
+      // Mensagem pt-BR acionável do tokenizer (ex.: 'CVV inválido.') — exibe
+      // direto, em vez do genérico 'verifique os dados'.
+      return (
+        success: false,
+        message: e.message,
+        subscriptionId: null,
+        status: null,
+      );
     } on FirebaseFunctionsException catch (e) {
       // e.message vem pt-BR do backend (ex.: failed-precondition de
       // assinatura duplicada) — exibe direto ao usuario.
