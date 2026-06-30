@@ -95,6 +95,10 @@ class GlobalUser {
   // Profile visibility
   final bool isProfilePublic;
 
+  /// Quando o usuário concluiu/pulou o onboarding de boas-vindas (null = nunca
+  /// viu → o tour dispara no 1º acesso). Por-usuário, cross-device (Firestore).
+  final DateTime? onboardingSeenAt;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -112,6 +116,7 @@ class GlobalUser {
     this.highestBelt,
     this.highestStripes,
     this.isProfilePublic = false,
+    this.onboardingSeenAt,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -136,6 +141,7 @@ class GlobalUser {
       highestBelt: data['highestBelt'],
       highestStripes: data['highestStripes'],
       isProfilePublic: data['isProfilePublic'] ?? false,
+      onboardingSeenAt: _parseDate(data['onboardingSeenAt']),
       createdAt: _parseDate(data['createdAt']) ?? DateTime.now(),
       updatedAt: _parseDate(data['updatedAt']) ?? DateTime.now(),
     );
@@ -176,6 +182,7 @@ class GlobalUser {
     String? highestBelt,
     int? highestStripes,
     bool? isProfilePublic,
+    DateTime? onboardingSeenAt,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -193,6 +200,7 @@ class GlobalUser {
       highestBelt: highestBelt ?? this.highestBelt,
       highestStripes: highestStripes ?? this.highestStripes,
       isProfilePublic: isProfilePublic ?? this.isProfilePublic,
+      onboardingSeenAt: onboardingSeenAt ?? this.onboardingSeenAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

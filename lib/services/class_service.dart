@@ -4,6 +4,19 @@ import '../core/sports.dart';
 import '../models/student.dart';
 import 'firebase_service.dart';
 
+/// Converte "HH:MM" em minutos do dia. Retorna null em horário malformado
+/// (vazio, "19", "19:00:00" parcial, não-numérico) — um doc de schedule sujo
+/// NÃO pode derrubar isHappeningNow/getCurrentClass (que rodam na home do
+/// aluno com int.parse cru e quebravam a tela inteira).
+int? _hhmmToMinutes(String hhmm) {
+  final parts = hhmm.split(':');
+  if (parts.length < 2) return null;
+  final h = int.tryParse(parts[0].trim());
+  final m = int.tryParse(parts[1].trim());
+  if (h == null || m == null || h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return h * 60 + m;
+}
+
 /// Class Schedule Model
 class ClassSchedule {
   final int dayOfWeek; // 0 = Sunday, 6 = Saturday
@@ -135,10 +148,9 @@ class BJJClass {
     for (final s in schedule) {
       if (s.dayOfWeek != currentDayOfWeek) continue;
 
-      final startParts = s.startTime.split(':').map(int.parse).toList();
-      final endParts = s.endTime.split(':').map(int.parse).toList();
-      final startMinutes = startParts[0] * 60 + startParts[1];
-      final endMinutes = endParts[0] * 60 + endParts[1];
+      final startMinutes = _hhmmToMinutes(s.startTime);
+      final endMinutes = _hhmmToMinutes(s.endTime);
+      if (startMinutes == null || endMinutes == null) continue;
 
       if (currentMinutes >= startMinutes && currentMinutes <= endMinutes) {
         return true;
@@ -218,10 +230,9 @@ class ClassService {
       for (final schedule in cls.schedule) {
         if (schedule.dayOfWeek != dayOfWeek) continue;
 
-        final startParts = schedule.startTime.split(':').map(int.parse).toList();
-        final endParts = schedule.endTime.split(':').map(int.parse).toList();
-        final startMinutes = startParts[0] * 60 + startParts[1];
-        final endMinutes = endParts[0] * 60 + endParts[1];
+        final startMinutes = _hhmmToMinutes(schedule.startTime);
+        final endMinutes = _hhmmToMinutes(schedule.endTime);
+        if (startMinutes == null || endMinutes == null) continue;
 
         // Check if within 30 min before start or during class
         if (currentMinutes >= startMinutes - 30 && currentMinutes <= endMinutes) {

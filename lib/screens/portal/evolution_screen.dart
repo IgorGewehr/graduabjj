@@ -13,6 +13,7 @@ import '../../models/physical_assessment.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/feature_disabled_state.dart';
 import '../../widgets/polish/polish.dart';
 
 /// Portal "Minha Evolução" — student-facing physical-assessment progress:
@@ -26,6 +27,21 @@ class EvolutionScreen extends ConsumerWidget {
     // The portal shell (portal_shell.dart) already provides the Scaffold,
     // AppBar and bottom nav, so this screen returns body content directly —
     // adding our own Scaffold/AppBar here would stack a second app bar.
+    //
+    // Defense in depth: mesmo acessível por deep link / navegação obsoleta,
+    // a Evolução fica escondida quando a academia desligou a funcionalidade
+    // (espelha a visibilidade no menu, que usa physicalEvolutionEnabled ?? false).
+    final evolutionEnabled = ref.watch(
+      academySettingsProvider
+          .select((s) => s.valueOrNull?.physicalEvolutionEnabled ?? false),
+    );
+    if (!evolutionEnabled) {
+      return const FeatureDisabledState(
+        icon: LucideIcons.trendingUp,
+        title: 'Evolução indisponível',
+        subtitle: 'Sua academia não está usando a Minha Evolução.',
+      );
+    }
     final studentAsync = ref.watch(currentStudentProvider);
     return studentAsync.when(
       loading: () => ListView(

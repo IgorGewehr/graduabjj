@@ -52,6 +52,8 @@ import 'screens/portal/cart_screen.dart';
 import 'screens/portal/store_checkout_screen.dart';
 import 'screens/portal/store_orders_screen.dart';
 import 'screens/admin/store_orders_admin_screen.dart';
+import 'screens/admin/devices_screen.dart';
+import 'screens/admin/subscriptions_screen.dart';
 // Academy management screens
 import 'screens/portal/academies_screen.dart';
 import 'screens/portal/add_academy_screen.dart';
@@ -64,6 +66,8 @@ import 'screens/portal/public_profile_screen.dart';
 import 'providers/portal_providers.dart';
 import 'screens/splash_screen.dart';
 import 'screens/paywall_screen.dart';
+import 'screens/kiosk/kiosk_screen.dart';
+import 'widgets/onboarding/onboarding_gate.dart';
 import 'widgets/common/back_button_handler.dart';
 // Admin screens
 import 'screens/admin/admin_screens.dart';
@@ -207,6 +211,11 @@ class GraduaBJJApp extends ConsumerWidget {
               child!,
               if (isCreatingAccount)
                 _AccountCreationOverlay(studentName: studentName),
+              // Onboarding de boas-vindas — dispara o carrossel certo por papel
+              // no 1º acesso e some ao concluir (persistido por usuário). Acima
+              // do router p/ sobreviver a rebuilds; abaixo do overlay de criação
+              // de conta (que tem prioridade via isCreatingAccount).
+              const OnboardingGate(),
             ],
           ),
         );
@@ -499,6 +508,10 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // If ready and sitting on an auth/splash page, redirect based on role.
       if (isAuthRoute || isSplash) {
+        // Um usuário logado pode pousar EXPLICITAMENTE em /link-code para
+        // vincular a conta (ex.: aluno sem ficha vindo do onboarding). Não
+        // rebater para o portal — senão o CTA "Inserir código" morre na chegada.
+        if (isLinkCode && user != null) return null;
         if (user != null) {
           // Admins always go to AdminShell.
           if (user.isAdmin) {
@@ -513,9 +526,18 @@ final routerProvider = Provider<GoRouter>((ref) {
             final hasFinancial = user.hasPermission('financial:view') ||
                 user.hasPermission('financial:create');
 
-            // Instructor who was a student AND has no financial perm →
-            // send to the monitor/chamada portal experience.
-            if (hasStudentId && !hasFinancial) {
+            // Some management permissions only have UI inside AdminShell
+            // (e.g. the Campeonatos / Graduação screens). A student-instructor
+            // holding one of those must reach /admin — /portal has no
+            // competition-creation or graduation-management surface.
+            final hasAdminOnlyManagement =
+                user.hasPermission('competitions:create') ||
+                user.hasPermission('graduation:manage');
+
+            // Instructor who was a student AND has no financial perm AND no
+            // admin-only management perm → send to the monitor/chamada portal
+            // experience.
+            if (hasStudentId && !hasFinancial && !hasAdminOnlyManagement) {
               print('[ROUTER] Redirecting student-instructor (no financial) to /portal');
               return '/portal';
             }
@@ -528,6 +550,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         }
         print('[ROUTER] Redirecting to /portal');
         return '/portal';
+      }
+
+      // Kiosk/catraca: rota fullscreen fora dos shells. Defesa em profundidade —
+      // só admin abre o totem (o botão em Settings só aparece com a feature
+      // ligada, mas a URL direta precisa barrar aluno/não-admin).
+      if (state.matchedLocation == '/kiosk') {
+        if (user == null) return '/login';
+        if (!user.isAdmin) return '/portal';
       }
 
       // Ready AND already sitting on a post-login route → we've landed. Latch
@@ -585,6 +615,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           context: context,
           state: state,
           child: const CreateAcademyScreen(),
+        ),
+      ),
+
+      // Kiosk / Catraca — totem fullscreen, FORA dos shells (sem AppBar, sem
+      // navegação e sem o gate de assinatura). Lê o stream de accessEvents da
+      // academia e mostra ✅ Bem-vindo / ❌ Financeiro pendente.
+      GoRoute(
+        path: '/kiosk',
+        pageBuilder: (context, state) => _buildPageWithFadeTransition(
+          context: context,
+          state: state,
+          child: const KioskScreen(),
         ),
       ),
 
@@ -1062,6 +1104,22 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
+            path: '/admin/assinaturas',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminSubscriptionsScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/catracas',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminDevicesScreen(),
+            ),
+          ),
+          GoRoute(
             path: '/admin/graduacao',
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,
@@ -1075,6 +1133,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const SyllabusScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/ranking',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const RankingScreen(forStaff: true),
             ),
           ),
           GoRoute(

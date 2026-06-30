@@ -9,6 +9,7 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../services/services.dart';
 import '../../services/store_service.dart';
@@ -54,7 +55,9 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
           ref.invalidate(productsProvider);
           ref.invalidate(storeStatsProvider);
         },
-        child: CustomScrollView(
+        child: ContentBounded(
+          maxWidth: kContentMaxWidthList,
+          child: CustomScrollView(
           slivers: [
             // Header
             SliverToBoxAdapter(
@@ -304,6 +307,7 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
             // Bottom padding
             const SliverToBoxAdapter(child: SizedBox(height: 100)),
           ],
+        ),
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(

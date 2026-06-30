@@ -14,7 +14,11 @@ enum SportId {
   kickboxing,
   boxing,
   lutalivre,
-  musculacao;
+  musculacao,
+  // MMA has no universal belt system — tracked as a presence/check-in modality
+  // (GradeSystem.none), like boxing/musculacao. Appended last so the .index of
+  // existing values never shifts.
+  mma;
 
   String get value => name;
 
@@ -307,6 +311,17 @@ const Map<SportId, SportDefinition> sports = {
     adultGrades: _lutalivreGrades,
     icon: Icons.sports_kabaddi_outlined,
   ),
+  // MMA — no universal graduation. Presence/check-in modality only (like boxe).
+  SportId.mma: SportDefinition(
+    id: SportId.mma,
+    label: 'MMA',
+    labelShort: 'MMA',
+    gradeSystem: GradeSystem.none,
+    supportsKids: false,
+    supportsStripes: false,
+    adultGrades: [],
+    icon: Icons.sports_mma_outlined,
+  ),
   // Musculação has no graduation system (GradeSystem.none) and no class
   // schedule — check-in and display are handled differently from martial arts.
   SportId.musculacao: SportDefinition(
@@ -329,6 +344,7 @@ const List<SportId> sportOptions = [
   SportId.judo,
   SportId.kickboxing,
   SportId.boxing,
+  SportId.mma,
   SportId.lutalivre,
   SportId.musculacao,
 ];
@@ -434,6 +450,7 @@ const Map<SportId, Color> sportChipColors = {
   SportId.judo: Color(0xFF16A34A),
   SportId.kickboxing: Color(0xFFEA580C),
   SportId.boxing: Color(0xFF171717),
+  SportId.mma: Color(0xFF991B1B),
   SportId.lutalivre: Color(0xFF0891B2),
   SportId.musculacao: Color(0xFF475569),
 };

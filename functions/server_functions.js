@@ -24,6 +24,16 @@ const crypto = require('crypto');
 const db = admin.firestore();
 const messaging = admin.messaging();
 
+// ---- Catraca / ingestão de acesso (Arquitetura C) --------------------------
+// A CF `ingestAccessEvent` é exportada por index.js a partir de
+// ./access_control/ingest.js (implementação ÚNICA, com check-in por turma + gate
+// de inadimplência, revisada). NÃO duplicar aqui (evita export conflitante).
+
+// Definição CANÔNICA de "vencido" (BR wall-clock), compartilhada com o gate de
+// inadimplência da catraca (access_control/financial_gate.js). Fonte ÚNICA da
+// verdade: cron de cobrança e portão NUNCA discordam de quem está em atraso.
+const { isOverdueBR, daysOverdueBR } = require('./access_control/overdue_util');
+
 // ============================================
 // Helper Functions
 // ============================================
@@ -109,32 +119,32 @@ async function sendToTopic(topic, title, body, data) {
 }
 
 async function getStudentUserId(studentId, academyId) {
-  // Primary: query userAcademyMapping to find the user linked to this student
-  const mappingsSnapshot = await db
-    .collection('userAcademyMapping')
-    .get();
-
-  for (const mappingDoc of mappingsSnapshot.docs) {
-    const data = mappingDoc.data();
-    const academyDetail = data.academyDetails?.[academyId];
-    if (academyDetail?.studentId === studentId) {
-      return mappingDoc.id; // doc ID is the userId
-    }
+  // Auditoria (MED correctness/custo): antes esta função VARRIA a coleção
+  // userAcademyMapping INTEIRA (uma leitura por usuário da plataforma toda) a
+  // cada chamada — chamada N vezes por run de cron => O(usuarios × cobranças).
+  // O ponteiro reverso aluno→usuário já existe no próprio doc do aluno
+  // (linkedUserId), então lemos PRIMEIRO o doc do aluno (1 leitura direta).
+  let student = null;
+  try {
+    const studentDoc = await db
+      .collection('academies')
+      .doc(academyId)
+      .collection('students')
+      .doc(studentId)
+      .get();
+    student = studentDoc.exists ? (studentDoc.data() || null) : null;
+  } catch (_) {
+    // segue sem quebrar — tenta o fallback abaixo
   }
 
-  // Fallback: check linkedUserId on the student document
-  const studentDoc = await db
-    .collection('academies')
-    .doc(academyId)
-    .collection('students')
-    .doc(studentId)
-    .get();
+  if (student && student.linkedUserId) return student.linkedUserId;
 
-  if (!studentDoc.exists) {
-    return null;
-  }
-  const student = studentDoc.data();
-  return student?.linkedUserId || null;
+  // Fallback (dados legados sem linkedUserId no aluno): tenta o índice reverso
+  // direto pela própria conta do aluno, se o doc do aluno apontar para um uid
+  // candidato. Sem um índice reverso por studentId, evitamos a varredura da
+  // coleção inteira e simplesmente seguimos sem uid (o cron faz null-guard e
+  // não quebra a base toda por um aluno sem conta vinculada).
+  return null;
 }
 
 // Billing recipient for a student's charges: the responsible adult (kids ->
@@ -194,11 +204,29 @@ async function sendWhatsAppServer(phone, message, academyId) {
         type: 'billing_reminder',
       }),
     });
-    return { sent: res.ok };
+    // Auditoria (idempotência/precisão): só considera 'sent' com a CONFIRMAÇÃO
+    // no corpo da resposta (body.success===true), não apenas res.ok — um proxy
+    // pode devolver 200 com {success:false} (número inválido, fila cheia) e
+    // marcar 'sent' indevidamente suprimiria o reenvio do lembrete de cobrança.
+    if (!res.ok) return { sent: false };
+    let body = null;
+    try { body = await res.json(); } catch (_) { body = null; }
+    if (body && body.success === true) return { sent: true };
+    return { sent: false, skipped: 'not_confirmed' };
   } catch (e) {
     console.error('[S7] sendWhatsAppServer failed:', e && e.message);
     return { sent: false };
   }
+}
+
+// ---- 1b. Phone normalization (port of Dart _normalizePhone) --------------
+// Auditoria (LOW): o proxy de WhatsApp espera o número só com dígitos e prefixo
+// 55 (Brasil). Normaliza no SERVIDOR antes de enviar (não confia no formato
+// gravado no cadastro). Retorna '' quando não há dígitos.
+function normalizePhoneServer(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits === '') return '';
+  return digits.startsWith('55') ? digits : `55${digits}`;
 }
 
 // ---- 2. PIX block resolver (JS port of Dart injectPaymentInfo) -----------
@@ -240,14 +268,30 @@ const DEFAULT_WHATSAPP_TEMPLATES = {
   'D+30': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com mais de 30 dias de atraso. Caso a situacao nao seja regularizada, infelizmente precisaremos suspender seu acesso. Entre em contato urgente para negociarmos.[[PIX]]\n\nRegularize agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
 };
 
+// Auditoria (LOW ux): a régua de "mensalidade atrasada" (com ameaça de
+// suspensão de acesso a partir de D+15/D+30) só faz sentido para
+// type=='monthly_tuition'. Cobranças avulsas (aula particular, loja, etc.) usam
+// um wording próprio, mais leve, SEM ameaça de suspensão — suspender o acesso
+// por uma aula avulsa não paga não é a política. Mesmos placeholders.
+const DEFAULT_WHATSAPP_TEMPLATES_GENERIC = {
+  'D+0': 'Oi {nome}! Passando para lembrar que hoje, dia {vencimento}, vence sua cobranca de {valor} ({descricao}) com a {academia}. Qualquer duvida, estamos a disposicao.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'D+1': 'Ola {nome}! Aqui e a {academia}. Identificamos que sua cobranca de {valor} ({descricao}) venceu em {vencimento}. Caso ja tenha pago, desconsidere. Caso contrario, pedimos a regularizacao. Obrigado![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'D+3': 'Ola {nome}! Sua cobranca de {valor} ({descricao}) da {academia} esta com 3 dias de atraso (vencimento: {vencimento}). Quando puder, regularize. Em caso de duvidas, estamos a disposicao![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'D+7': 'Ola {nome}, sua cobranca de {valor} ({descricao}) da {academia} esta com {dias} dias de atraso. Quando possivel, entre em contato para combinar o pagamento.[[PIX]]\n\nPara facilitar, pague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'D+15': 'Ola {nome}, sua cobranca de {valor} ({descricao}) da {academia} esta com {dias} dias de atraso. Por favor, entre em contato para regularizarmos.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'D+30': 'Ola {nome}, sua cobranca de {valor} ({descricao}) da {academia} segue em aberto ha mais de 30 dias. Entre em contato para negociarmos.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+};
+
 // Mirrors the Dart _applyTemplate replaceAll (all occurrences).
-function applyBillingTemplate(tpl, { nome, valor, vencimento, dias, academia }) {
+function applyBillingTemplate(tpl, { nome, valor, vencimento, dias, academia, descricao }) {
   return String(tpl || '')
     .split('{nome}').join(nome != null ? String(nome) : '')
     .split('{valor}').join(valor != null ? String(valor) : '')
     .split('{vencimento}').join(vencimento != null ? String(vencimento) : '')
     .split('{dias}').join(dias != null ? String(dias) : '')
-    .split('{academia}').join(academia != null ? String(academia) : '');
+    .split('{academia}').join(academia != null ? String(academia) : '')
+    // Auditoria: placeholder usado pelos templates genéricos (não-mensalidade).
+    .split('{descricao}').join(descricao != null ? String(descricao) : '');
 }
 
 // ---- 4. Stage resolver (mirrors Dart _classifyStage thresholds) ----------
@@ -276,6 +320,10 @@ function formatBrDate(date) {
   const yyyy = d.getFullYear();
   return `${dd}/${mm}/${yyyy}`;
 }
+
+// Detecção de vencido (isOverdueBR / daysOverdueBR) movida para o util
+// compartilhado access_control/overdue_util.js — fonte ÚNICA da verdade com o
+// gate de inadimplência da catraca. Importadas no topo deste arquivo.
 
 // ---- 5. Best-effort PIX for a reminder (graceful degradation) ------------
 // GATES on the academy having mpConnected AND the financial unpaid. Sources the
@@ -387,6 +435,10 @@ async function sendBillingReminderWhatsApp(
     if (settings.whatsappEnabled === false) return;
 
     // Resolve recipient phone from the student doc (effectivePhone semantics).
+    // Auditoria (LGPD): respeita o opt-out POR ALUNO (whatsappOptOut===true) —
+    // o gate por academia (settings.whatsappEnabled) continua acima; este é o
+    // consentimento individual do aluno. Quando o aluno pediu para não receber
+    // WhatsApp, não envia (o push/notificação interna continua no cron).
     let phone;
     try {
       const stuSnap = await db
@@ -395,12 +447,16 @@ async function sendBillingReminderWhatsApp(
         .get();
       if (stuSnap.exists) {
         const stu = stuSnap.data() || {};
+        if (stu.whatsappOptOut === true) return; // LGPD: opt-out do aluno
         phone = stu.category === 'kids' ? stu.guardian?.phone : stu.phone;
       }
     } catch (_) {
       // no phone -> gate below
     }
-    if (!phone || String(phone).trim() === '') return;
+    // Auditoria (LOW): normaliza no servidor (dígitos + prefixo 55) antes de
+    // mandar ao proxy, em vez de confiar no formato gravado no cadastro.
+    phone = normalizePhoneServer(phone);
+    if (!phone) return;
 
     // Stage-level dedup: each reminder stage (D+0, D+1, D+3, ...) goes out at
     // most once per charge, so a charge sitting overdue (or due-soon) for days
@@ -422,9 +478,15 @@ async function sendBillingReminderWhatsApp(
       pix = await generateReminderPix(academyId, financial);
     }
 
+    // Auditoria (LOW ux): só a régua de mensalidade usa o wording de
+    // "mensalidade atrasada" (com ameaça de suspensão). Cobranças avulsas
+    // (aula particular, loja, etc.) caem no template genérico, mais leve.
+    const isTuition = (financial.type || 'monthly_tuition') === 'monthly_tuition';
+    const defaults = isTuition
+      ? DEFAULT_WHATSAPP_TEMPLATES
+      : DEFAULT_WHATSAPP_TEMPLATES_GENERIC;
     const customTpl = settings.messageTemplates?.whatsapp?.[stage];
-    const tpl = customTpl || DEFAULT_WHATSAPP_TEMPLATES[stage] ||
-      DEFAULT_WHATSAPP_TEMPLATES['D+1'];
+    const tpl = customTpl || defaults[stage] || defaults['D+1'];
 
     const filled = applyBillingTemplate(tpl, {
       nome: financial.studentName || '',
@@ -432,6 +494,7 @@ async function sendBillingReminderWhatsApp(
       vencimento,
       dias,
       academia: academyName || '',
+      descricao: financial.description || 'cobranca',
     });
     const msg = mpInjectPaymentInfo(filled, pix.pixCode, pix.ticketUrl);
 
@@ -881,45 +944,73 @@ exports.scheduledOverdueCheck = functions.pubsub
       const academyId = academyDoc.id;
       const academy = academyDoc.data();
 
-      // Skip if no admin user
-      if (!academy.adminUserId) {
-        console.log(`Academy ${academyId} has no admin user`);
-        continue;
-      }
+      // Auditoria (HIGH correctness): try/catch POR ACADEMIA (espelha o cron de
+      // gamificação) — um doc malformado / falha de leitura de UMA academia não
+      // pode abortar o run de cobrança de toda a base.
+      try {
+        // Skip if no admin user
+        if (!academy.adminUserId) {
+          console.log(`Academy ${academyId} has no admin user`);
+          continue;
+        }
 
-      // Find overdue financials
-      const financialsSnapshot = await db
-        .collection('academies')
-        .doc(academyId)
-        .collection('financials')
-        .where('status', '==', 'pending')
-        .get();
+        // Auditoria (HIGH product): consulta status in ['pending','overdue'].
+        // Antes lia só 'pending' e virava o doc para 'overdue' no MESMO run, de
+        // modo que nas execuções seguintes o doc 'overdue' não era mais
+        // varrido => a escada de lembretes D+3/D+7/D+15/D+30 NUNCA disparava.
+        const financialsSnapshot = await db
+          .collection('academies')
+          .doc(academyId)
+          .collection('financials')
+          .where('status', 'in', ['pending', 'overdue'])
+          .get();
 
-      let overdueCount = 0;
-      let totalOverdueAmount = 0;
+        let overdueCount = 0;
+        let totalOverdueAmount = 0;
 
-      // S7: read the per-academy WhatsApp/PIX reminder settings once.
-      const billingSettings = await getBillingReminderSettings(academyId);
-      const academyName = academy.name || academy.academyName || '';
+        // S7: read the per-academy WhatsApp/PIX reminder settings once.
+        const billingSettings = await getBillingReminderSettings(academyId);
+        const academyName = academy.name || academy.academyName || '';
 
-      for (const financialDoc of financialsSnapshot.docs) {
-        const financial = financialDoc.data();
-        const dueDate = financial.dueDate.toDate();
+        for (const financialDoc of financialsSnapshot.docs) {
+          const financial = financialDoc.data();
 
-        // Check if overdue
-        if (dueDate < now) {
+          // Auditoria (HIGH correctness): null-guard em dueDate. Um doc sem
+          // dueDate (ou com tipo inesperado) não pode derrubar o loop inteiro.
+          if (!financial.dueDate || typeof financial.dueDate.toDate !== 'function') {
+            continue;
+          }
+          const dueDate = financial.dueDate.toDate();
+
+          // Auditoria (LOW): vencido = passou do FIM do dia do vencimento (BRT),
+          // evitando "atrasada há 0 dias" no próprio dia às 09:00.
+          if (!isOverdueBR(dueDate, now)) continue;
+
           overdueCount++;
-          totalOverdueAmount += financial.amount;
+          totalOverdueAmount += (Number(financial.amount) || 0);
 
           // Update status to overdue if not already
           if (financial.status !== 'overdue') {
             await financialDoc.ref.update({ status: 'overdue' });
           }
 
-          // Calculate days overdue
-          const daysOverdue = Math.floor(
-            (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)
-          );
+          // Dias de atraso por dia-calendário BR (sem off-by-one).
+          const daysOverdue = daysOverdueBR(dueDate, now);
+          const stage = resolveStage(daysOverdue);
+
+          // Auditoria (HIGH product): deduplicação POR ESTÁGIO em TODOS os
+          // canais (push + interna + WhatsApp). Só dispara o lembrete quando o
+          // estágio MUDA (D+1 → D+3 → D+7 ...). Sem isso, com status 'overdue'
+          // agora varrido todo dia, o aluno receberia push/notificação TODA
+          // execução. O mesmo estágio nunca é reenviado.
+          if (financial.lastReminderStage === stage) continue;
+
+          // Auditoria (LOW ux): copy diferente para não-mensalidade (aula
+          // avulsa/particular) — sem o wording de "mensalidade atrasada".
+          const isTuition = (financial.type || 'monthly_tuition') === 'monthly_tuition';
+          const valorFmt = (Number(financial.amount) || 0).toFixed(2);
+          const noun = isTuition ? 'Sua mensalidade' : `Sua cobranca (${financial.description || 'avulsa'})`;
+          const nounAcc = isTuition ? 'Sua mensalidade' : `Sua cobrança (${financial.description || 'avulsa'})`;
 
           // Notify the billing recipient (responsible adult for kids, else
           // the student) about the overdue payment (push + internal)
@@ -927,8 +1018,8 @@ exports.scheduledOverdueCheck = functions.pubsub
           if (userId) {
             await sendToUser(
               userId,
-              'Pagamento Atrasado',
-              `Sua mensalidade de R$ ${(Number(financial.amount) || 0).toFixed(2)} esta atrasada ha ${daysOverdue} dias.`,
+              isTuition ? 'Pagamento Atrasado' : 'Cobranca em aberto',
+              `${noun} de R$ ${valorFmt} esta em aberto ha ${daysOverdue} dia(s).`,
               {
                 type: 'financial',
                 id: financialDoc.id,
@@ -936,8 +1027,8 @@ exports.scheduledOverdueCheck = functions.pubsub
               }
             );
             await createInternalNotification(academyId, userId, 'financial', 'high',
-              'Pagamento Atrasado',
-              `Sua mensalidade de R$ ${(Number(financial.amount) || 0).toFixed(2)} está atrasada há ${daysOverdue} dias.`,
+              isTuition ? 'Pagamento Atrasado' : 'Cobrança em aberto',
+              `${nounAcc} de R$ ${valorFmt} está em aberto há ${daysOverdue} dia(s).`,
               { actionUrl: '/portal/financeiro', actionLabel: 'Regularizar',
                 financialId: financialDoc.id, expiresInDays: 30 }
             );
@@ -950,32 +1041,47 @@ exports.scheduledOverdueCheck = functions.pubsub
             academyName,
             billingSettings,
             { ...financial, id: financialDoc.id },
-            resolveStage(daysOverdue),
+            stage,
             daysOverdue
           );
-        }
-      }
 
-      // Notify admin about overdue summary (push + internal)
-      if (overdueCount > 0) {
-        const adminId = academy.ownerId || academy.adminUserId;
-        const totalFormatted = (Number(totalOverdueAmount) || 0).toFixed(2);
-        const summaryMsg = `Voce tem ${overdueCount} pagamento(s) atrasado(s) totalizando R$ ${totalFormatted}.`;
-        await sendToUser(
-          adminId,
-          'Resumo de Pagamentos Atrasados',
-          summaryMsg,
-          {
-            type: 'overdue_summary',
-            academyId,
+          // Auditoria (HIGH product): persiste o estágio coberto para TODOS os
+          // canais (não só WhatsApp), garantindo que push/interna também não
+          // reenviem o mesmo estágio na próxima execução. Best-effort.
+          try {
+            await financialDoc.ref.update({
+              lastReminderStage: stage,
+              lastReminderAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          } catch (_) {
+            // dedup marker é não-crítico
           }
-        );
-        await createInternalNotification(academyId, adminId, 'financial', 'high',
-          'Resumo de Pagamentos Atrasados',
-          summaryMsg,
-          { actionUrl: '/financeiro', actionLabel: 'Ver financeiro', expiresInDays: 7 }
-        );
-        console.log(`Notified admin of academy ${academyId} about ${overdueCount} overdue payments`);
+        }
+
+        // Notify admin about overdue summary (push + internal)
+        if (overdueCount > 0) {
+          const adminId = academy.ownerId || academy.adminUserId;
+          const totalFormatted = (Number(totalOverdueAmount) || 0).toFixed(2);
+          const summaryMsg = `Voce tem ${overdueCount} pagamento(s) atrasado(s) totalizando R$ ${totalFormatted}.`;
+          await sendToUser(
+            adminId,
+            'Resumo de Pagamentos Atrasados',
+            summaryMsg,
+            {
+              type: 'overdue_summary',
+              academyId,
+            }
+          );
+          await createInternalNotification(academyId, adminId, 'financial', 'high',
+            'Resumo de Pagamentos Atrasados',
+            summaryMsg,
+            { actionUrl: '/financeiro', actionLabel: 'Ver financeiro', expiresInDays: 7 }
+          );
+          console.log(`Notified admin of academy ${academyId} about ${overdueCount} overdue payments`);
+        }
+      } catch (e) {
+        // Auditoria (HIGH correctness): isola a falha à academia atual.
+        console.error(`[overdueCheck] academy ${academyId} failed`, e && e.message);
       }
     }
 
@@ -994,7 +1100,7 @@ exports.scheduledDueSoonReminder = functions.pubsub
     console.log('Running scheduled due soon reminder');
 
     const now = new Date();
-    const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const startNow = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const academiesSnapshot = await db.collection('academies').get();
 
@@ -1002,35 +1108,68 @@ exports.scheduledDueSoonReminder = functions.pubsub
       const academyId = academyDoc.id;
       const academy = academyDoc.data();
 
-      // S7: read the per-academy WhatsApp/PIX reminder settings once.
-      const billingSettings = await getBillingReminderSettings(academyId);
-      const academyName = academy.name || academy.academyName || '';
+      // Auditoria (HIGH correctness): try/catch POR ACADEMIA — falha de uma
+      // academia não aborta o run a-vencer de toda a base.
+      try {
+        // S7: read the per-academy WhatsApp/PIX reminder settings once.
+        const billingSettings = await getBillingReminderSettings(academyId);
+        const academyName = academy.name || academy.academyName || '';
 
-      // Find pending financials due within 3 days
-      const financialsSnapshot = await db
-        .collection('academies')
-        .doc(academyId)
-        .collection('financials')
-        .where('status', '==', 'pending')
-        .get();
+        // Auditoria (LOW): antecedência configurável por academia. Default D-7 e
+        // D-2 (avisa uma semana antes e na reta final). Sanitiza para inteiros
+        // positivos e ordena desc para deduplicar pelo MAIOR offset elegível.
+        const rawOffsets = Array.isArray(billingSettings.dueSoonOffsets)
+          ? billingSettings.dueSoonOffsets
+          : [7, 2];
+        const offsets = Array.from(new Set(
+          rawOffsets.map((n) => Math.trunc(Number(n))).filter((n) => n > 0)
+        )).sort((a, b) => b - a);
+        const maxOffset = offsets.length ? offsets[0] : 0;
+        if (maxOffset === 0) continue; // a-vencer desligado para esta academia
 
-      for (const financialDoc of financialsSnapshot.docs) {
-        const financial = financialDoc.data();
-        const dueDate = financial.dueDate.toDate();
+        // Find pending financials due within the largest configured window.
+        const financialsSnapshot = await db
+          .collection('academies')
+          .doc(academyId)
+          .collection('financials')
+          .where('status', '==', 'pending')
+          .get();
 
-        // Check if due within 3 days (but not overdue)
-        if (dueDate > now && dueDate <= threeDaysFromNow) {
-          const daysUntilDue = Math.ceil(
-            (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+        for (const financialDoc of financialsSnapshot.docs) {
+          const financial = financialDoc.data();
+
+          // Auditoria (HIGH correctness): null-guard em dueDate.
+          if (!financial.dueDate || typeof financial.dueDate.toDate !== 'function') {
+            continue;
+          }
+          const dueDate = financial.dueDate.toDate();
+          const startDue = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+          const daysUntilDue = Math.round(
+            (startDue.getTime() - startNow.getTime()) / (1000 * 60 * 60 * 24)
           );
+
+          // Só a-vencer (futuro). Vencido é tratado pelo scheduledOverdueCheck.
+          if (daysUntilDue <= 0 || daysUntilDue > maxOffset) continue;
+
+          // Auditoria (LOW): só dispara num offset CONFIGURADO (ex.: 7 ou 2),
+          // não em todo dia da janela. O estágio (ex.: 'due-7') deduplica para
+          // não reenviar o mesmo aviso a-vencer. Campo separado do overdue
+          // (lastDueSoonStage) para as duas réguas não colidirem.
+          if (!offsets.includes(daysUntilDue)) continue;
+          const dueStage = `due-${daysUntilDue}`;
+          if (financial.lastDueSoonStage === dueStage) continue;
+
+          const isTuition = (financial.type || 'monthly_tuition') === 'monthly_tuition';
+          const noun = isTuition ? 'Sua mensalidade' : `Sua cobranca (${financial.description || 'avulsa'})`;
+          const nounAcc = isTuition ? 'Sua mensalidade' : `Sua cobrança (${financial.description || 'avulsa'})`;
+
           const userId = await getBillingRecipientUid(financial.studentId, academyId);
           if (userId) {
             const amtFormatted = (Number(financial.amount) || 0).toFixed(2);
-            const reminderMsg = `Sua mensalidade de R$ ${amtFormatted} vence em ${daysUntilDue} dia(s).`;
             await sendToUser(
               userId,
               'Lembrete de Pagamento',
-              reminderMsg,
+              `${noun} de R$ ${amtFormatted} vence em ${daysUntilDue} dia(s).`,
               {
                 type: 'financial',
                 id: financialDoc.id,
@@ -1039,18 +1178,17 @@ exports.scheduledDueSoonReminder = functions.pubsub
             );
             await createInternalNotification(academyId, userId, 'financial', 'normal',
               'Lembrete de Pagamento',
-              reminderMsg,
+              `${nounAcc} de R$ ${amtFormatted} vence em ${daysUntilDue} dia(s).`,
               { actionUrl: '/portal/financeiro', actionLabel: 'Ver detalhes',
                 financialId: financialDoc.id, expiresInDays: 7 }
             );
             console.log(`Sent due soon reminder to user ${userId} for financial ${financialDoc.id}`);
           }
 
-          // S7: the WhatsApp 'D+0' courtesy text reads "vence hoje", so only send
-          // it on the due date itself (<= 1 day out), not across the whole 1-3 day
-          // window — otherwise the student gets a "due today" message up to 3 days
-          // early. The 2-3 day window keeps only the internal push/notification
-          // above. INERT until WHATSAPP_API_KEY is set (gate in sendWhatsAppServer).
+          // S7: WhatsApp courtesy. O template 'D+0' diz "vence hoje", então só
+          // mandamos no dia do vencimento (daysUntilDue===1, isto é, vence
+          // amanhã/ainda dá pra pagar hoje). Os demais offsets (D-7/D-2) mantêm
+          // só push/interna. INERT até WHATSAPP_API_KEY (gate no sender).
           if (daysUntilDue <= 1) {
             await sendBillingReminderWhatsApp(
               academyId,
@@ -1061,11 +1199,254 @@ exports.scheduledDueSoonReminder = functions.pubsub
               0
             );
           }
+
+          // Persist o estágio a-vencer coberto (best-effort) p/ deduplicar.
+          try {
+            await financialDoc.ref.update({
+              lastDueSoonStage: dueStage,
+              lastDueSoonAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          } catch (_) {
+            // marcador de dedup é não-crítico
+          }
         }
+      } catch (e) {
+        console.error(`[dueSoonReminder] academy ${academyId} failed`, e && e.message);
       }
     }
 
     console.log('Due soon reminder completed');
+    return null;
+  });
+
+// ============================================================
+// Auditoria (HIGH product / FEATURE): geração AGENDADA de mensalidades
+// ============================================================
+//
+// Hoje a geração mensal (lib/services/payment_service.dart generateMonthlyTuitions)
+// é 100% MANUAL — depende do dono clicar o botão. Alunos PIX/dinheiro que não
+// recebem a mensalidade gerada simplesmente "evaporam" sem nunca virar
+// 'inadimplentes', furando toda a régua de cobrança acima.
+//
+// Esta CF espelha a lógica do cliente no servidor, é IDEMPOTENTE por
+// (academyId, studentId, referenceMonth) e (planId), e roda diariamente para
+// pegar a virada do mês em qualquer fuso/horário.
+//
+// SEGURO POR PADRÃO: só gera para academias com settings.billing.autoTuitionEnabled
+// === true (FALSE por padrão). Sem a flag, NÃO cria nenhuma cobrança — para não
+// começar a faturar em produção sem o dono habilitar explicitamente. O botão
+// manual continua existindo. REVISAR MODELO DE COBRANÇA ANTES DE HABILITAR.
+
+// Mapeia o número de meses de cada período (espelha BillingPeriod.months).
+function billingPeriodMonths(value) {
+  switch (value) {
+    case 'quarterly': return 3;
+    case 'semiannual': return 6;
+    case 'annual': return 12;
+    default: return 1; // monthly + legados
+  }
+}
+
+// referenceMonth canônico 'YYYY-MM' a partir de um Date (wall-clock BR).
+function referenceMonthKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+// Gera as mensalidades de UMA academia para o mês de referência. Idempotente:
+// não cria se já existe uma cobrança não-cancelada para o mesmo (studentId,
+// planId, referenceMonth). Para planos não-mensais, respeita o período (só
+// cobra quando passou o intervalo desde o último vencimento). Retorna nº criado.
+async function generateAcademyTuitions(academyId, refDate) {
+  const acadRef = db.collection('academies').doc(academyId);
+  const referenceMonth = referenceMonthKey(refDate);
+  const refYear = refDate.getFullYear();
+  const refMonth = refDate.getMonth() + 1; // 1-12
+  let created = 0;
+
+  // Planos ativos da academia.
+  let plansSnap;
+  try {
+    plansSnap = await acadRef.collection('plans').where('isActive', '==', true).get();
+  } catch (e) {
+    console.error(`[autoTuition] plans read failed ${academyId}`, e && e.message);
+    return 0;
+  }
+  if (plansSnap.empty) return 0;
+
+  // Alunos ativos (para nome + filtro de status, espelhando o cliente).
+  const activeStudents = new Map(); // studentId -> data
+  try {
+    const stuSnap = await acadRef.collection('students').where('status', '==', 'active').get();
+    for (const s of stuSnap.docs) activeStudents.set(s.id, s.data() || {});
+  } catch (e) {
+    console.error(`[autoTuition] students read failed ${academyId}`, e && e.message);
+    return 0;
+  }
+
+  // Cobranças do mês de referência (dedup mensal) — uma leitura, não N+1.
+  const monthCharges = [];
+  try {
+    const fSnap = await acadRef.collection('financials')
+      .where('referenceMonth', '==', referenceMonth)
+      .get();
+    for (const f of fSnap.docs) {
+      const d = f.data() || {};
+      if (d.status === 'cancelled') continue;
+      monthCharges.push({ studentId: d.studentId, planId: d.planId || null });
+    }
+  } catch (e) {
+    console.error(`[autoTuition] financials(month) read failed ${academyId}`, e && e.message);
+    return 0;
+  }
+
+  for (const planDoc of plansSnap.docs) {
+    const plan = planDoc.data() || {};
+    const planId = planDoc.id;
+    const periodValue = plan.billingPeriod || 'monthly';
+    const months = billingPeriodMonths(periodValue);
+    // Planos cartão+mensal são assinatura recorrente automática no MP (decisão
+    // de produto): NÃO geramos mensalidade avulsa para eles aqui — o débito sai
+    // pela assinatura. Espelha Plan.isRecurring no cliente.
+    const policy = plan.paymentMethodPolicy || 'both';
+    if (periodValue === 'monthly' && policy === 'cardOnly') continue;
+
+    const customValues = plan.customValues || {};
+    const customDueDays = plan.customDueDays || {};
+    const effectiveValue = (plan.periodValue != null ? plan.periodValue : plan.monthlyValue) || 0;
+    const defaultDueDay = plan.defaultDueDay != null ? plan.defaultDueDay : 10;
+    const studentIds = Array.isArray(plan.studentIds) ? plan.studentIds : [];
+
+    for (const studentId of studentIds) {
+      const stu = activeStudents.get(studentId);
+      if (!stu) continue; // só alunos ativos
+
+      const value = customValues[studentId] != null ? customValues[studentId] : effectiveValue;
+      if (!(Number(value) > 0)) continue; // espelha .where((s) => s.value > 0)
+
+      // Dedup / elegibilidade do período.
+      if (periodValue === 'monthly') {
+        const already = monthCharges.some((c) => c.studentId === studentId && c.planId === planId);
+        if (already) continue;
+      } else {
+        // Não-mensal: só cobra se passou o intervalo desde o último vencimento.
+        let due = true;
+        try {
+          const histSnap = await acadRef.collection('financials')
+            .where('studentId', '==', studentId)
+            .where('planId', '==', planId)
+            .where('type', '==', 'monthly_tuition')
+            .get();
+          const actives = histSnap.docs
+            .map((d) => d.data() || {})
+            .filter((d) => d.status !== 'cancelled' && d.dueDate && typeof d.dueDate.toDate === 'function');
+          if (actives.length > 0) {
+            actives.sort((a, b) => b.dueDate.toDate().getTime() - a.dueDate.toDate().getTime());
+            const lastDue = actives[0].dueDate.toDate();
+            const nextBilling = new Date(lastDue.getFullYear(), lastDue.getMonth() + months, lastDue.getDate());
+            const ny = nextBilling.getFullYear();
+            const nm = nextBilling.getMonth() + 1;
+            due = ny < refYear || (ny === refYear && nm <= refMonth);
+          }
+        } catch (e) {
+          // Em caso de falha de leitura, NÃO gera (seguro por padrão: evita
+          // cobrança duplicada). Loga e segue.
+          console.error(`[autoTuition] period check failed ${academyId}/${studentId}`, e && e.message);
+          due = false;
+        }
+        if (!due) continue;
+      }
+
+      // Vencimento: dia do aluno (tuitionDay > custom > default), clampado ao
+      // último dia do mês de referência (espelha o cliente).
+      const lastDayOfMonth = new Date(refYear, refMonth, 0).getDate();
+      const rawDueDay = (stu.tuitionDay != null ? stu.tuitionDay
+        : (customDueDays[studentId] != null ? customDueDays[studentId] : defaultDueDay));
+      const clampedDay = rawDueDay > lastDayOfMonth ? lastDayOfMonth : rawDueDay;
+      const dueDate = new Date(refYear, refMonth - 1, clampedDay);
+
+      const description = periodValue === 'monthly'
+        ? 'Mensalidade'
+        : (plan.name || 'Plano');
+
+      try {
+        // financials.amount é REAIS (canônico). Espelha PaymentService.create.
+        await acadRef.collection('financials').add({
+          academyId,
+          studentId,
+          studentName: stu.fullName || stu.name || '',
+          amount: Number(value),
+          type: 'monthly_tuition',
+          dueDate: admin.firestore.Timestamp.fromDate(dueDate),
+          status: 'pending',
+          description,
+          referenceMonth,
+          planId,
+          paymentMethodPolicy: policy,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdBy: 'system:autoTuition',
+        });
+        // Atualiza o cache em memória para não duplicar dentro do mesmo run se
+        // o aluno aparecer em mais de um plano (defensivo).
+        monthCharges.push({ studentId, planId });
+        created++;
+      } catch (e) {
+        console.error(`[autoTuition] create failed ${academyId}/${studentId}`, e && e.message);
+      }
+    }
+  }
+
+  return created;
+}
+
+exports.generateAcademyTuitions = generateAcademyTuitions;
+
+/**
+ * Scheduled: Daily at 6:00 AM (Brasilia Time).
+ * Action: per academy COM A FLAG LIGADA (settings.billing.autoTuitionEnabled),
+ * gera as mensalidades do mês corrente de forma idempotente. SEGURO POR PADRÃO:
+ * flag FALSE por padrão => nenhuma cobrança criada sem o dono habilitar.
+ * REVISAR MODELO DE COBRANÇA ANTES DE HABILITAR.
+ */
+exports.scheduledMonthlyTuitionGeneration = functions.pubsub
+  .schedule('0 6 * * *')
+  .timeZone('America/Sao_Paulo')
+  .onRun(async () => {
+    console.log('Running scheduled monthly tuition generation');
+    const now = new Date();
+    const academiesSnapshot = await db.collection('academies').get();
+    let totalCreated = 0;
+
+    for (const academyDoc of academiesSnapshot.docs) {
+      const academyId = academyDoc.id;
+      try {
+        // Gate por academia (FALSE por padrão). Lê settings/billing.
+        let enabled = false;
+        try {
+          const billingSnap = await db
+            .collection('academies').doc(academyId)
+            .collection('settings').doc('billing')
+            .get();
+          enabled = billingSnap.exists && billingSnap.data()?.autoTuitionEnabled === true;
+        } catch (_) {
+          enabled = false; // sem settings => desligado
+        }
+        if (!enabled) continue;
+
+        const created = await generateAcademyTuitions(academyId, now);
+        totalCreated += created;
+        if (created > 0) {
+          console.log(`[autoTuition] academy ${academyId}: ${created} cobranca(s) gerada(s)`);
+        }
+      } catch (e) {
+        // Falha de uma academia não aborta a base toda.
+        console.error(`[autoTuition] academy ${academyId} failed`, e && e.message);
+      }
+    }
+
+    console.log(`Monthly tuition generation completed (${totalCreated} created)`);
     return null;
   });
 
@@ -1216,6 +1597,33 @@ async function upsertAutoAchievement(academyId, fields) {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       createdBy: 'system:gamification',
     });
+
+    // Auditoria (MED retention): marco NOVO de streak/ranking — avisa o aluno
+    // (push + notificação interna). Idempotente: só chega aqui quando .create()
+    // teve sucesso (marco inédito); se já existia (ALREADY_EXISTS) cai no catch
+    // e NÃO re-notifica. Best-effort: falha de notificação não desfaz o marco.
+    try {
+      const uid = await getStudentUserId(studentId, academyId);
+      if (uid) {
+        const title = fields.type === 'rankingPosition'
+          ? 'Novo marco no ranking!'
+          : 'Nova conquista de sequência!';
+        const body = fields.title || 'Voce desbloqueou uma nova conquista.';
+        await sendToUser(uid, title, body, {
+          type: 'achievement',
+          achievementType: fields.type || '',
+          academyId,
+        });
+        await createInternalNotification(
+          academyId, uid, 'achievement', 'normal',
+          title, fields.description || body,
+          { actionUrl: '/portal/perfil', actionLabel: 'Ver conquistas', expiresInDays: 30 }
+        );
+      }
+    } catch (notifyErr) {
+      console.error('[gamification] milestone notify failed', notifyErr && notifyErr.message);
+    }
+
     return true;
   } catch (err) {
     // ALREADY_EXISTS (gRPC code 6) -> the milestone is already present: no-op.
@@ -1429,6 +1837,42 @@ async function isAcademyStaff(uid, academyId) {
   const details = data.academyDetails || {};
   const entry = details[academyId];
   return !!(entry && (entry.role === 'admin' || entry.role === 'instructor'));
+}
+
+/**
+ * Returns true when `uid` has the grantable extra `permission` in `academyId`.
+ * Mirrors the Firestore-rules helper hasExtraPermission(academyId, permission):
+ * reads ONLY userAcademyMapping.academyDetails[academyId].extraPermissions
+ * (the same single source the rules trust), so CF authorization can't diverge
+ * from the client-write authorization. Returns the membership role alongside so
+ * callers can express "admin always; instructor needs <permission>" in one read.
+ *
+ * Used to close the gap where a demand action (e.g. granting attendance) runs
+ * server-side via the Admin SDK — which bypasses Firestore rules — and would
+ * otherwise let any instructor act despite the rules requiring the extra
+ * permission for the equivalent client write.
+ */
+async function getMembershipWithExtraPerms(uid, academyId) {
+  if (!uid || !academyId) return { role: null, extraPermissions: [] };
+  const snap = await db.collection('userAcademyMapping').doc(uid).get();
+  if (!snap.exists) return { role: null, extraPermissions: [] };
+  const entry = ((snap.data() || {}).academyDetails || {})[academyId] || {};
+  const perms = Array.isArray(entry.extraPermissions) ? entry.extraPermissions : [];
+  return { role: entry.role || null, extraPermissions: perms };
+}
+
+/**
+ * "admin always; instructor only with `permission`" gate, matching the rules
+ * pattern isAcademyAdmin || (isAcademyInstructor && hasExtraPermission(...)).
+ * Admins are unconditionally allowed; instructors must carry the permission;
+ * everyone else is denied.
+ */
+async function staffCanWithPermission(uid, academyId, permission) {
+  const { role, extraPermissions } =
+    await getMembershipWithExtraPerms(uid, academyId);
+  if (role === 'admin') return true;
+  if (role === 'instructor') return extraPermissions.includes(permission);
+  return false;
 }
 
 /**
@@ -2368,6 +2812,15 @@ exports.requestWithdrawal = onCall(async (request) => {
     );
   }
 
+  // 4b. Gate barato de defesa em profundidade (auditoria — fluxo LATENTE):
+  // saque é parte do AbacatePay, que está DESLIGADO em prod (só Mercado Pago).
+  // Exige abacatePayEnabled===true antes de qualquer chamada externa, igual aos
+  // demais endpoints AbacatePay deste arquivo. NÃO refatora o resto do fluxo.
+  if (academyData.abacatePayEnabled !== true) {
+    throw new HttpsError('failed-precondition',
+      'Saque não está disponível para esta academia.');
+  }
+
   // 5. Validate amount
   const amountValidation = validateAmount(amount);
   if (!amountValidation.valid) {
@@ -2590,10 +3043,15 @@ async function mpRequest(method, path, { body, token, idempotencyKey } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (idempotencyKey) headers['X-Idempotency-Key'] = idempotencyKey;
+  // Auditoria MP (refresh OAuth concorrente): timeout < LOCK_STALE_MS (30s) para
+  // que um holder do mpTokenLock travado num /oauth/token lento ABORTE e libere
+  // o lock ANTES de outra invocação reivindicá-lo como stale — fechando a janela
+  // do double-refresh que rotacionaria o refresh_token 2x e quebraria a conexão.
   const r = await fetch(`${MP_API_BASE}${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(20 * 1000),
   });
   const json = await r.json().catch(() => ({}));
   if (!r.ok) {
@@ -2716,13 +3174,31 @@ async function getMpAccessToken(academyId) {
       throw new HttpsError('failed-precondition',
         'A conexão com o Mercado Pago expirou. Reconecte a conta nas configurações.');
     }
-    await ref.set({
+    // Auditoria MP (rotação de refresh_token perdida): o MP ROTACIONA o
+    // refresh_token a cada refresh — se a gravação local falhar APÓS o sucesso no
+    // MP, o refresh_token rotacionado se perde e o próximo ciclo falha. Persiste
+    // persistência-primeiro com 1 retry; se ainda falhar, sinaliza mpNeedsReauth
+    // (como o catch de falha do refresh) para o admin reconectar em vez de
+    // descobrir via cobranças falhando, e lança um erro recuperável.
+    const tokenWrite = {
       accessToken: tok.access_token,
       refreshToken: tok.refresh_token || fresh.refreshToken,
       expiresAt: admin.firestore.Timestamp.fromMillis(
         Date.now() + (Number(tok.expires_in) || 0) * 1000),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
+    };
+    try {
+      await ref.set(tokenWrite, { merge: true });
+    } catch (writeErr) {
+      await new Promise((r) => setTimeout(r, 300));
+      try {
+        await ref.set(tokenWrite, { merge: true });
+      } catch (writeErr2) {
+        await academyRef.set({ mpNeedsReauth: true }, { merge: true }).catch(() => {});
+        throw new HttpsError('unavailable',
+          'Falha ao salvar o token do Mercado Pago. Tente novamente.');
+      }
+    }
     // Successful refresh — clear any stale reconnect flag (best-effort).
     await academyRef.set(
       { mpNeedsReauth: admin.firestore.FieldValue.delete() }, { merge: true }
@@ -2751,9 +3227,16 @@ exports.startMercadoPagoConnect = onCall({ secrets: MP_MKT_SECRETS }, async (req
   if (!academyId) throw new HttpsError('invalid-argument', 'academyId é obrigatório.');
   await requireAdminOf(request, academyId);
 
-  const nonce = crypto.randomBytes(8).toString('hex');
+  // Auditoria MP (hardening do state OAuth): nonce de 16 bytes (128 bits) em vez
+  // de 8 — margem ampla contra adivinhação mesmo sendo single-use/TTL 10min. E
+  // persiste o uid do admin que INICIOU o connect (oauthAdminUid) para auditoria
+  // forense de quem disparou o fluxo (o callback é sem-auth por exigência do
+  // OAuth2 — redirect batido pelo browser). A fronteira de segurança real segue
+  // sendo a academia, já amarrada no state.
+  const nonce = crypto.randomBytes(16).toString('hex');
   await db.doc(`academies/${academyId}/private/mpAuth`).set({
     oauthNonce: nonce,
+    oauthAdminUid: request.auth?.uid || '',
     oauthStartedAt: admin.firestore.FieldValue.serverTimestamp(),
   }, { merge: true });
 
@@ -2796,7 +3279,84 @@ exports.mercadoPagoOAuthCallback = onRequest({ secrets: MP_MKT_SECRETS }, async 
         redirect_uri: mpOAuthRedirect(),
       },
     });
-    await ref.set({
+    // Auditoria MP (troca de conta órfã): se já existe um mpAuth de uma conta MP
+    // DIFERENTE (mpUserId distinto do tok.user_id que está chegando) e há
+    // assinaturas recorrentes ATIVAS, sobrescrever o token agora deixaria os
+    // preapprovals da conta antiga ÓRFÃOS — o MP seguiria cobrando os cartões
+    // dos alunos numa conta que o app não gerencia mais. Antes de sobrescrever,
+    // cancela esses preapprovals usando AINDA o token ANTIGO (best-effort); o
+    // que não der para cancelar vira órfão registrado + alerta ao admin. O
+    // reconnect MAIS COMUM (reauth da MESMA conta via mpNeedsReauth) tem o MESMO
+    // mpUserId e NÃO entra aqui — nenhum cancelamento indevido. Retrocompat: se
+    // não havia conta anterior (primeiro connect), oldMpUserId é vazio e pula.
+    const oldMpUserId = snap.exists ? String(snap.data().mpUserId || '') : '';
+    const newMpUserId = String(tok.user_id || '');
+    if (oldMpUserId && newMpUserId && oldMpUserId !== newMpUserId) {
+      try {
+        const oldToken = snap.data().accessToken;
+        const activeSubs = await db
+          .collection(`academies/${academyId}/subscriptions`)
+          .where('status', 'in', ['pending', 'authorized', 'paused'])
+          .get();
+        const switchOrphans = [];
+        for (const subDoc of activeSubs.docs) {
+          const sub = subDoc.data();
+          if (!sub.mpPreapprovalId) continue;
+          let cancelled = false;
+          try {
+            if (oldToken) {
+              await mpRequest('PUT', `/preapproval/${sub.mpPreapprovalId}`,
+                { token: oldToken, body: { status: 'cancelled' } });
+              cancelled = true;
+            }
+          } catch (err) {
+            // PUT pode falhar com o preapproval já cancelado — confirma via GET.
+            try {
+              const pa = await mpRequest('GET',
+                `/preapproval/${sub.mpPreapprovalId}`, { token: oldToken });
+              cancelled = !!pa && pa.status === 'cancelled';
+            } catch (_) { cancelled = false; }
+          }
+          if (cancelled) {
+            await subDoc.ref.update({
+              status: 'cancelled',
+              lastEvent: 'cancelled_by_account_switch',
+              updatedAt: FV.serverTimestamp(),
+            }).catch(() => {});
+          } else {
+            switchOrphans.push(String(sub.mpPreapprovalId));
+            await subDoc.ref.update({
+              cancelPendingAtMp: true,
+              lastEvent: 'account_switch_orphan',
+              updatedAt: FV.serverTimestamp(),
+            }).catch(() => {});
+          }
+        }
+        if (switchOrphans.length) {
+          await db.doc(`academies/${academyId}`).set({
+            mpHasOrphanPreapprovals: true,
+            mpOrphanPreapprovalIds: switchOrphans,
+          }, { merge: true }).catch(() => {});
+          await notifyAdminCF(academyId, 'payment_overdue',
+            'Assinaturas da conta antiga para cancelar no Mercado Pago',
+            'Voce conectou uma conta diferente do Mercado Pago e algumas ' +
+            'assinaturas recorrentes da conta anterior NAO puderam ser ' +
+            'canceladas pelo app. Cancele-as manualmente no painel da conta ' +
+            'ANTIGA para os cartoes dos alunos nao continuarem sendo cobrados.' +
+            ` IDs: ${switchOrphans.join(', ')}.`, {}).catch(() => {});
+        }
+      } catch (e) {
+        console.error('[mpOAuthCallback] cancelamento na troca de conta falhou',
+          e && e.message);
+      }
+    }
+    // Auditoria MP (atomicidade do connect): grava tokens + flag mpConnected num
+    // ÚNICO batch atômico. Antes eram duas escritas separadas — uma falha entre
+    // elas deixava a academia com token vivo mas mpConnected ausente e o nonce
+    // já consumido. set(merge) no doc da academia (em vez de update) evita
+    // lançar caso o doc não exista e preserva o resto dos campos.
+    const batch = db.batch();
+    batch.set(ref, {
       accessToken: tok.access_token,
       refreshToken: tok.refresh_token,
       mpUserId: String(tok.user_id || ''),
@@ -2809,7 +3369,7 @@ exports.mercadoPagoOAuthCallback = onRequest({ secrets: MP_MKT_SECRETS }, async 
     }, { merge: true });
     // Public flags on the academy doc + per-academy opt-in: switch off the
     // legacy gateways so NEW charges route to MP.
-    await db.doc(`academies/${academyId}`).update({
+    batch.set(db.doc(`academies/${academyId}`), {
       mpConnected: true,
       mpUserId: String(tok.user_id || ''),
       mpPublicKey: tok.public_key || '',
@@ -2818,12 +3378,17 @@ exports.mercadoPagoOAuthCallback = onRequest({ secrets: MP_MKT_SECRETS }, async 
       abacatePayEnabled: false,
       asaasEnabled: false,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    }, { merge: true });
+    await batch.commit();
     return res.status(200).send(mpCallbackHtml(
       'Mercado Pago conectado!',
       'Sua conta foi conectada. Volte ao app para continuar.', false));
   } catch (e) {
     console.error('[mpOAuthCallback] erro', e.message, e.data);
+    // Auditoria MP (nonce single-use): consome o nonce TAMBÉM na falha da troca
+    // code->token, garantindo que cada state seja invalidado em qualquer desfecho
+    // (sucesso, expiração ou erro) — não sobrevive por até 10 min para reuso.
+    await ref.update({ oauthNonce: admin.firestore.FieldValue.delete() }).catch(() => {});
     return res.status(500).send(mpCallbackHtml(
       'Falha ao conectar',
       'Ocorreu um erro. Volte ao app e tente novamente.', true));
@@ -2865,6 +3430,10 @@ exports.disconnectMercadoPago = onCall({ secrets: MP_MKT_SECRETS }, async (reque
   const activeSubs = await db.collection(`academies/${academyId}/subscriptions`)
     .where('status', 'in', ['pending', 'authorized', 'paused'])
     .get();
+  // Auditoria MP (observabilidade): IDs dos preapprovals que ficaram órfãos
+  // (token irrecuperável) — persistidos no doc da academia para a UI exibir um
+  // aviso destacado e persistente até o admin cancelá-los no painel do MP.
+  const orphanPreapprovalIds = [];
   if (!activeSubs.empty) {
     let token = null;
     let failed = 0;
@@ -2921,7 +3490,9 @@ exports.disconnectMercadoPago = onCall({ secrets: MP_MKT_SECRETS }, async (reque
       // subs (preservando o status: NÃO são 'cancelled' — podem seguir vivas
       // no MP) e avisa o admin para cancelá-las manualmente no painel.
       for (const subDoc of activeSubs.docs) {
-        if (!subDoc.data().mpPreapprovalId) continue;
+        const pid = subDoc.data().mpPreapprovalId;
+        if (!pid) continue;
+        orphanPreapprovalIds.push(String(pid));
         await subDoc.ref.update({
           cancelPendingAtMp: true,
           lastEvent: 'disconnect_token_revoked',
@@ -2934,7 +3505,9 @@ exports.disconnectMercadoPago = onCall({ secrets: MP_MKT_SECRETS }, async (reque
           'A conexao com o Mercado Pago foi revogada e as assinaturas ' +
           'recorrentes NAO puderam ser canceladas pelo app. Cancele-as ' +
           'manualmente no painel do Mercado Pago para os cartoes dos alunos ' +
-          'nao continuarem sendo cobrados.', {});
+          'nao continuarem sendo cobrados.' +
+          (orphanPreapprovalIds.length
+            ? ` IDs: ${orphanPreapprovalIds.join(', ')}.` : ''), {});
       } catch (_) { /* best-effort */ }
     } else if (failed > 0) {
       throw new HttpsError('unavailable',
@@ -2944,12 +3517,42 @@ exports.disconnectMercadoPago = onCall({ secrets: MP_MKT_SECRETS }, async (reque
     }
   }
 
+  // Auditoria MP (revoke OAuth no disconnect): antes de apagar localmente,
+  // enquanto o token ainda é válido, tenta DESAUTORIZAR a aplicação na conta do
+  // lojista no MP — honra plenamente a intenção do admin e encurta a janela de
+  // um refresh_token longo eventualmente vazado. Best-effort: NUNCA bloqueia o
+  // disconnect se a revogação falhar (retrocompat — o disconnect já cancelou os
+  // preapprovals acima, que é o risco financeiro real). Lê o doc de auth antes
+  // do delete; não loga o token em texto plano.
+  try {
+    const authSnap = await db.doc(`academies/${academyId}/private/mpAuth`).get();
+    const auth = authSnap.exists ? authSnap.data() : null;
+    const mpUserId = auth && auth.mpUserId ? String(auth.mpUserId) : '';
+    if (auth && auth.accessToken && mpUserId) {
+      // Endpoint de desautorização do MP: remove a aplicação (client_id) das
+      // aplicações autorizadas do usuário/lojista, invalidando os tokens OAuth.
+      await mpRequest('DELETE',
+        `/users/${mpUserId}/applications/${process.env.MP_OAUTH_CLIENT_ID}`,
+        { token: auth.accessToken });
+    }
+  } catch (e) {
+    console.error('[disconnectMercadoPago] revoke OAuth falhou (non-fatal)',
+      e && e.message);
+  }
+
   await db.doc(`academies/${academyId}/private/mpAuth`).delete().catch(() => {});
   await db.doc(`academies/${academyId}`).update({
     mpConnected: false,
     mpUserId: admin.firestore.FieldValue.delete(),
     mpPublicKey: admin.firestore.FieldValue.delete(),
     mpLiveMode: admin.firestore.FieldValue.delete(),
+    // Auditoria MP (observabilidade): se sobraram preapprovals órfãos (token
+    // irrecuperável), persiste a lista para a UI alertar de forma destacada;
+    // senão limpa qualquer flag de um disconnect anterior.
+    mpHasOrphanPreapprovals: orphanPreapprovalIds.length > 0,
+    mpOrphanPreapprovalIds: orphanPreapprovalIds.length
+      ? orphanPreapprovalIds
+      : admin.firestore.FieldValue.delete(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   return { success: true };
@@ -2994,6 +3597,57 @@ function mapMpPixError(e) {
       'Dados do pagador invalidos (CPF/e-mail). Confira seu CPF e tente novamente.');
   }
   return new HttpsError('internal', 'Falha ao gerar a cobranca PIX.');
+}
+
+/** Auditoria (UX): mapeia a recusa de CARTÃO do Mercado Pago em mensagens
+ * pt-BR acionáveis (espelha o mapMpPixError). Sem isso o aluno só via um
+ * 'internal' opaco ("Falha ao processar o cartao.") e não sabia se era saldo,
+ * CVV, limite, dados etc. Usa o status_detail do MP (campo canônico de motivo)
+ * e, como fallback, o texto bruto de e.data/e.message. Retorna sempre um
+ * HttpsError; o RAW já foi logado pelo chamador. */
+function mapMpCardError(e, statusDetail) {
+  const detail = String(statusDetail || '').toLowerCase();
+  const text = `${detail} ${e && e.data ? JSON.stringify(e.data) : ''} ` +
+    `${e && e.message ? e.message : ''}`.toLowerCase();
+  const fp = (msg) => new HttpsError('failed-precondition', msg);
+  // status_detail típicos do MP (cc_rejected_*) → mensagem acionável.
+  if (text.includes('insufficient_amount') || text.includes('insufficient')) {
+    return fp('Cartao recusado por saldo/limite insuficiente. Use outro cartao.');
+  }
+  if (text.includes('call_for_authorize') || text.includes('authorize')) {
+    return fp('O banco pediu autorizacao para esta compra. Ligue para o seu ' +
+      'banco e autorize, ou use outro cartao.');
+  }
+  if (text.includes('security_code') || text.includes('cvv')) {
+    return fp('Codigo de seguranca (CVV) invalido. Confira e tente novamente.');
+  }
+  if (text.includes('expiration') || text.includes('expired') ||
+      text.includes('card_expired')) {
+    return fp('Cartao vencido ou data de validade invalida. Use outro cartao.');
+  }
+  if (text.includes('card_number') || text.includes('invalid_card')) {
+    return fp('Numero do cartao invalido. Confira os dados e tente novamente.');
+  }
+  if (text.includes('card_disabled') || text.includes('blacklist') ||
+      text.includes('blocked')) {
+    return fp('Cartao bloqueado ou desabilitado. Use outro cartao ou fale com o banco.');
+  }
+  if (text.includes('high_risk') || text.includes('fraud') ||
+      text.includes('rejected_by_bank')) {
+    return fp('Pagamento recusado pelo banco emissor. Tente outro cartao ou ' +
+      'fale com o seu banco.');
+  }
+  if (text.includes('max_attempts') || text.includes('duplicated_payment')) {
+    return fp('Muitas tentativas seguidas. Aguarde alguns minutos e tente novamente.');
+  }
+  if (text.includes('identification') || text.includes('cpf') ||
+      text.includes('docnumber')) {
+    return fp('CPF do pagador invalido. Confira o CPF e tente novamente.');
+  }
+  if (text.includes('email')) {
+    return fp('E-mail do pagador invalido. Confira o e-mail da sua conta.');
+  }
+  return new HttpsError('internal', 'Falha ao processar o cartao.');
 }
 
 /**
@@ -3109,6 +3763,46 @@ async function createMpPix({ academyId, transactionAmount, description, external
   // each mint creates a fresh, payable PIX.
   const idempotencyKey =
     `${externalReference}:${admin.firestore.Timestamp.now().toMillis()}`;
+
+  // Auditoria MP (PIX órfão / self-heal por external_reference): como a key de
+  // idempotência é ÚNICA por mint e o external_reference é FIXO, um crash entre
+  // o 200 do MP e o finRef.update perderia o id/QR de um PIX já criado, sem a
+  // adoção de órfão que a assinatura tem. Antes de cunhar um novo, busca no MP um
+  // PIX pending/in_process VIVO com este external_reference e, se o valor bater,
+  // ADOTA-O (reusa id/QR) em vez de criar uma 2ª cobrança pagável. Best-effort:
+  // se a busca falhar, segue para o mint normal.
+  try {
+    const found = await mpRequest('GET',
+      `/v1/payments/search?external_reference=${encodeURIComponent(externalReference)}` +
+      '&sort=date_created&criteria=desc',
+      { token });
+    const results = (found && (found.results || found.elements)) || [];
+    const wanted = Number(transactionAmount.toFixed(2));
+    const orphan = results.find((p) =>
+      p && (p.status === 'pending' || p.status === 'in_process') &&
+      p.payment_method_id === 'pix' &&
+      Math.abs((Number(p.transaction_amount) || 0) - wanted) <= 0.01 &&
+      p.point_of_interaction && p.point_of_interaction.transaction_data &&
+      p.point_of_interaction.transaction_data.qr_code &&
+      // só adota se ainda não expirou (date_of_expiration no futuro, quando há)
+      (!p.date_of_expiration || new Date(p.date_of_expiration).getTime() > Date.now()));
+    if (orphan) {
+      const otx = orphan.point_of_interaction.transaction_data;
+      console.warn('[createMpPix] PIX órfão adotado', orphan.id, externalReference);
+      return {
+        paymentId: String(orphan.id),
+        pixCode: otx.qr_code,
+        qrCodeBase64: otx.qr_code_base64 || '',
+        ticketUrl: otx.ticket_url || '',
+        expiresAt: orphan.date_of_expiration
+          ? new Date(orphan.date_of_expiration) : expiresAt,
+      };
+    }
+  } catch (searchErr) {
+    console.error('[createMpPix] busca de PIX órfão falhou',
+      searchErr && searchErr.message);
+  }
+
   let payment;
   try {
     payment = await mpRequest('POST', '/v1/payments', {
@@ -3139,11 +3833,23 @@ async function createMpPix({ academyId, transactionAmount, description, external
   }
   const tx = payment.point_of_interaction &&
     payment.point_of_interaction.transaction_data;
+  // Auditoria (UX): o MP pode devolver 200 com o pagamento criado mas SEM
+  // transaction_data (qr_code vazio) — tipicamente conta sem chave PIX. NÃO
+  // persistir gatewayPaymentId + QR vazio (geraria um PIX impagável gravado no
+  // doc, bloqueando regeneração até expirar): trata como falha e lança o mesmo
+  // erro acionável do MP rejeitar a cobrança.
+  if (!tx || !tx.qr_code) {
+    throw mapMpPixError({
+      status: payment.status,
+      data: { message: 'pix without qr render: transaction_data ausente' },
+      message: 'PIX sem QR (transaction_data ausente)',
+    });
+  }
   return {
     paymentId: String(payment.id),
-    pixCode: (tx && tx.qr_code) || '',
-    qrCodeBase64: (tx && tx.qr_code_base64) || '',
-    ticketUrl: (tx && tx.ticket_url) || '',
+    pixCode: tx.qr_code,
+    qrCodeBase64: tx.qr_code_base64 || '',
+    ticketUrl: tx.ticket_url || '',
     expiresAt,
   };
 }
@@ -3173,15 +3879,21 @@ function mpPixReuseResponse(d) {
 /** Adquire o lock de mint de PIX para um financial/pedido. Retorna
  * { acquired:true } (chame o MP e depois limpe pixMintAt/pixMintBy) ou
  * { reuse: data } (outro mint concorrente já produziu um PIX válido). */
-async function mpAcquirePixMint(docRef, uid) {
+async function mpAcquirePixMint(docRef, uid, expectedAmount) {
   const pixExpMs = (d) =>
     (d.pixExpiresAt && typeof d.pixExpiresAt.toMillis === 'function')
       ? d.pixExpiresAt.toMillis() : 0;
   const mintAtMs = (d) =>
     (d.pixMintAt && typeof d.pixMintAt.toMillis === 'function')
       ? d.pixMintAt.toMillis() : 0;
+  // Auditoria MP: além de vivo, o PIX só é "fresco" para reuso se o valor cunhado
+  // (pixAmount) ainda bate com o valor esperado atual (quando informado).
+  // Retrocompat: sem expectedAmount ou sem pixAmount (PIX legado), não bloqueia.
+  const amountOk = (d) =>
+    typeof expectedAmount !== 'number' || typeof d.pixAmount !== 'number' ||
+    Math.abs(expectedAmount - d.pixAmount) <= 0.01;
   const hasFreshPix = (d) =>
-    d.gatewayPaymentId && d.pixCode && pixExpMs(d) > Date.now();
+    d.gatewayPaymentId && d.pixCode && pixExpMs(d) > Date.now() && amountOk(d);
 
   const tryAcquire = () => db.runTransaction(async (tx) => {
     const s = await tx.get(docRef);
@@ -3282,7 +3994,14 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
   // opening the same charge get the SAME code (no double charge).
   const existingExpiry = fin.pixExpiresAt && typeof fin.pixExpiresAt.toMillis === 'function'
     ? fin.pixExpiresAt.toMillis() : 0;
-  if (fin.gatewayPaymentId && fin.pixCode && existingExpiry > Date.now()) {
+  // Auditoria MP: só reusa o PIX vivo se o valor cunhado (pixAmount) ainda bater
+  // com o valor atual da cobrança (1-centavo). Se o admin editou o valor, o QR
+  // antigo serviria um valor obsoleto — cai fora e cunha novo. Retrocompat: PIX
+  // legado sem pixAmount (app antigo) é reusado normalmente.
+  const finPixAmountOk = typeof fin.pixAmount !== 'number' ||
+    Math.abs((Number(fin.amount) || 0) - fin.pixAmount) <= 0.01;
+  if (fin.gatewayPaymentId && fin.pixCode && existingExpiry > Date.now() &&
+      finPixAmountOk) {
     return {
       pixCode: fin.pixCode,
       qrCodeUrl: fin.pixQrCode || '',
@@ -3296,8 +4015,11 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
   // Mirror the marketplace reference: fail fast with a clear message instead of
   // letting Mercado Pago reject an incomplete payer (which surfaced to students
   // as a generic "falha na cobranca PIX").
+  // Auditoria (correção): valida o CPF pelo CHECKSUM (validateCPF), não só pelo
+  // comprimento — um CPF de 11 dígitos com dígitos verificadores errados era
+  // aceito e o MP recusava depois com erro genérico.
   const cpfDigits = String(payerCpf || '').replace(/\D/g, '');
-  if (cpfDigits.length < 11) {
+  if (!validateCPF(cpfDigits)) {
     throw new HttpsError('failed-precondition',
       'Para pagar via PIX e necessario um CPF valido. Informe seu CPF e tente novamente.');
   }
@@ -3314,9 +4036,26 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
       'E necessario um e-mail valido na sua conta para gerar a cobranca PIX.');
   }
 
+  // Auditoria MP (anti double-charge bidirecional): se este MESMO doc tem um
+  // CARTÃO pendente vivo (in_process/3DS — gravado por createMpCardPayment),
+  // cunhar o PIX agora deixaria as DUAS cobranças pagáveis. Cancela o cartão
+  // pendente ANTES de mintar (mpCancelPixPayment cancela qualquer pagamento
+  // pending/in_process, serve para cartão também). Espelha o guard cartão→PIX.
+  await mpCancelLivePendingCard(academyId, finRef);
+
+  // Auditoria MP (PIX com valor antigo): se há um PIX vivo cunhado com um valor
+  // DIVERGENTE do atual (admin editou o valor), cancela-o no MP antes de cunhar
+  // o novo — senão o QR antigo continuaria pagável com o valor obsoleto e o
+  // settle recusaria o crédito (dinheiro preso). Retrocompat: sem pixAmount não age.
+  if (typeof fin.pixAmount === 'number' &&
+      Math.abs((Number(fin.amount) || 0) - fin.pixAmount) > 0.01 &&
+      fin.gatewayPaymentId && fin.pixCode) {
+    await mpCancelPixPayment(academyId, fin.gatewayPaymentId, {});
+  }
+
   // Anti-race (achado #24): serializa o mint via lock transacional no doc —
   // dois aparelhos concorrentes geram UM PIX só (o perdedor reusa o do vencedor).
-  const mint = await mpAcquirePixMint(finRef, request.auth.uid);
+  const mint = await mpAcquirePixMint(finRef, request.auth.uid, Number(fin.amount) || 0);
   if (mint.reuse) return mpPixReuseResponse(mint.reuse);
 
   let pix;
@@ -3341,6 +4080,10 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
     gatewayPaymentId: pix.paymentId,
     paymentGateway: 'mercadopago',
     pixExpiresAt: expiresAt,
+    // Auditoria MP (PIX reaproveitado com valor antigo): persiste o valor (REAIS)
+    // com que o QR foi cunhado para o reuse guard revalidar contra fin.amount —
+    // se o valor da cobrança mudar, NÃO reusa o QR velho (cunha novo).
+    pixAmount: Number(fin.amount) || 0,
     pixMintAt: admin.firestore.FieldValue.delete(),
     pixMintBy: admin.firestore.FieldValue.delete(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -3412,7 +4155,13 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
 
   const existingExpiry = order.pixExpiresAt && typeof order.pixExpiresAt.toMillis === 'function'
     ? order.pixExpiresAt.toMillis() : 0;
-  if (order.gatewayPaymentId && order.pixCode && existingExpiry > Date.now()) {
+  // Auditoria MP: só reusa se o valor cunhado (pixAmount) ainda bate com o total
+  // autoritativo recomputado (1-centavo). Retrocompat: PIX legado sem pixAmount
+  // é reusado normalmente (espelha o caminho da mensalidade).
+  const orderPixAmountOk = typeof order.pixAmount !== 'number' ||
+    Math.abs(expectedReais - order.pixAmount) <= 0.01;
+  if (order.gatewayPaymentId && order.pixCode && existingExpiry > Date.now() &&
+      orderPixAmountOk) {
     return {
       pixCode: order.pixCode,
       qrCodeUrl: order.pixQrCode || '',
@@ -3426,8 +4175,10 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
   // Mirror the mensalidade path: fail fast with a clear message instead of
   // letting Mercado Pago reject an incomplete payer (which surfaced to users
   // as a generic "falha na cobranca PIX").
+  // Auditoria (correção): valida o CPF pelo CHECKSUM (validateCPF), não só pelo
+  // comprimento — espelha o caminho da mensalidade.
   const cpfDigits = String(payerCpf || '').replace(/\D/g, '');
-  if (cpfDigits.length < 11) {
+  if (!validateCPF(cpfDigits)) {
     throw new HttpsError('failed-precondition',
       'Para pagar via PIX e necessario um CPF valido. Informe seu CPF e tente novamente.');
   }
@@ -3444,9 +4195,21 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
       'E necessario um e-mail valido na sua conta para gerar a cobranca PIX.');
   }
 
+  // Auditoria MP (anti double-charge bidirecional): cancela um CARTÃO pendente
+  // vivo deste pedido antes de cunhar o PIX (espelha o guard da mensalidade).
+  await mpCancelLivePendingCard(academyId, orderRef);
+
+  // Auditoria MP (PIX com valor antigo): cancela um PIX vivo cunhado com valor
+  // divergente do total atual antes de cunhar o novo (espelha a mensalidade).
+  if (typeof order.pixAmount === 'number' &&
+      Math.abs(expectedReais - order.pixAmount) > 0.01 &&
+      order.gatewayPaymentId && order.pixCode) {
+    await mpCancelPixPayment(academyId, order.gatewayPaymentId, {});
+  }
+
   // Anti-race (achado #24): serializa o mint via lock transacional no doc —
   // dois aparelhos concorrentes geram UM PIX só (o perdedor reusa o do vencedor).
-  const mint = await mpAcquirePixMint(orderRef, request.auth.uid);
+  const mint = await mpAcquirePixMint(orderRef, request.auth.uid, expectedReais);
   if (mint.reuse) return mpPixReuseResponse(mint.reuse);
 
   let pix;
@@ -3471,6 +4234,9 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
     gatewayPaymentId: pix.paymentId,
     paymentGateway: 'mercadopago',
     pixExpiresAt: expiresAt,
+    // Auditoria MP (PIX reaproveitado com valor antigo): valor (REAIS) com que o
+    // QR foi cunhado, para o reuse guard revalidar contra o total autoritativo.
+    pixAmount: expectedReais,
     pixMintAt: admin.firestore.FieldValue.delete(),
     pixMintBy: admin.firestore.FieldValue.delete(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -3574,6 +4340,78 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
   // transaction_amount is always REAIS for MP.
   const transactionAmount = expectedCentavos / 100;
   const token = await getMpAccessToken(academyId);
+
+  // Auditoria MP (anti double-charge cartão→cartão): se este MESMO doc já tem um
+  // CARTÃO pendente vivo (in_process/3DS — cardPendingPaymentId gravado abaixo),
+  // cobrar OUTRO cartão agora deixaria as DUAS cobranças pagáveis. Mata o cartão
+  // pendente ANTES de tokenizar a nova cobrança (espelha o guard PIX→cartão e o
+  // simétrico cartão→PIX em createMpPixPayment).
+  {
+    const cardGuard = await mpCancelLivePendingCard(academyId, ref);
+    // Auditoria MP (cartão pendente JÁ APROVADO porém não liquidado): se no
+    // intervalo o cartão anterior foi aprovado, NÃO cobramos de novo — o
+    // doc ainda não virou 'paid' inline (aprovação assíncrona só liquida pelo
+    // webhook), então o guard de status='paid' (acima) ainda não barra. Espelha
+    // exatamente o branch PIX→cartão (alreadyApproved / !cancelled).
+    if (cardGuard.alreadyApproved) {
+      throw new HttpsError('failed-precondition',
+        'Este pagamento ja foi aprovado, aguarde a confirmacao.');
+    }
+    if (!cardGuard.cancelled) {
+      // Não foi possível garantir que o cartão pendente foi cancelado no MP →
+      // recusa a 2ª cobrança para não arriscar a dupla. O aluno re-tenta.
+      throw new HttpsError('failed-precondition',
+        'Ha um pagamento com cartao em andamento para esta cobranca. ' +
+        'Aguarde alguns segundos e tente novamente.');
+    }
+  }
+
+  // Auditoria (anti double-charge): se este MESMO doc já tem um PIX VIVO não
+  // pago (gatewayPaymentId + pixCode + pixExpiresAt no futuro), cobrar o cartão
+  // agora deixaria as DUAS cobranças pagáveis ao mesmo tempo — a família podia
+  // pagar o cartão e o PIX. Cancela o PIX em aberto ANTES de cobrar o cartão
+  // (reusa o mesmo cancelamento do callable cancelMpPix). Se o PIX já estiver
+  // aprovado, NÃO cobramos o cartão: o doc já foi/serásettleado pelo webhook.
+  {
+    const pixExpMs = recData.pixExpiresAt &&
+      typeof recData.pixExpiresAt.toMillis === 'function'
+      ? recData.pixExpiresAt.toMillis() : 0;
+    const hasLivePix = recData.paymentGateway === 'mercadopago' &&
+      recData.gatewayPaymentId && recData.pixCode && pixExpMs > Date.now();
+    if (hasLivePix) {
+      const cancel = await mpCancelPixPayment(academyId, recData.gatewayPaymentId,
+        { token });
+      if (cancel.alreadyApproved) {
+        throw new HttpsError('failed-precondition',
+          'Esta cobranca ja foi paga via PIX. Atualize a tela.');
+      }
+      if (!cancel.cancelled) {
+        // Não conseguimos garantir que o PIX foi morto → recusa o cartão para
+        // não arriscar a cobrança dupla. O aluno re-tenta em instantes.
+        throw new HttpsError('failed-precondition',
+          'Ha um PIX em aberto para esta cobranca. Aguarde alguns segundos e ' +
+          'tente o cartao novamente, ou pague pelo PIX ja gerado.');
+      }
+      // Auditoria MP (PIX órfão no doc → cartão bloqueado por até 24h): o PIX
+      // foi cancelado no MP acima, mas os campos pix* seguiam no doc. Numa 2ª
+      // tentativa de cartão o guard hasLivePix os relia (pixExpiresAt ainda no
+      // futuro) e recusava o cartão por um PIX que já está MORTO. Apaga os
+      // campos pix* e o gatewayPaymentId — espelha o que o settle já faz — para
+      // que hasLivePix volte a ser FALSE. Retrocompat: doc sem esses campos só
+      // recebe deletes no-op. Best-effort: não trava a cobrança do cartão.
+      await ref.update({
+        pixCode: admin.firestore.FieldValue.delete(),
+        pixQrCode: admin.firestore.FieldValue.delete(),
+        pixTicketUrl: admin.firestore.FieldValue.delete(),
+        pixExpiresAt: admin.firestore.FieldValue.delete(),
+        pixAmount: admin.firestore.FieldValue.delete(),
+        gatewayPaymentId: admin.firestore.FieldValue.delete(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }).catch((e) => console.error(
+        '[createMpCardPayment] limpeza pix órfão falhou', docId, e.message));
+    }
+  }
+
   const cpf = String(payerCpf || '').replace(/\D/g, '');
   const nameParts = String(studentName || '').trim().split(/\s+/);
   const externalReference = `${academyId}:${isOrder ? 'order' : 'fin'}:${docId}`;
@@ -3593,6 +4431,15 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
   if (!resolvedEmail || !resolvedEmail.includes('@')) {
     throw new HttpsError('failed-precondition',
       'E necessario um e-mail valido na sua conta para pagar com cartao.');
+  }
+
+  // Auditoria (correção): exige CPF VÁLIDO por checksum também no cartão (antes
+  // o CPF era opcional e só ia no payer.identification quando tinha 11 dígitos).
+  // O MP usa o CPF do pagador na análise antifraude; sem ele a recusa era comum
+  // e o aluno via erro genérico. Simetria com o caminho PIX (validateCPF).
+  if (!validateCPF(cpf)) {
+    throw new HttpsError('failed-precondition',
+      'Para pagar com cartao e necessario um CPF valido. Informe seu CPF e tente novamente.');
   }
 
   let payment;
@@ -3626,12 +4473,34 @@ exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request
     });
   } catch (e) {
     console.error('[createMpCardPayment] erro', e.message, e.data);
-    throw new HttpsError('internal', 'Falha ao processar o cartao.');
+    // Auditoria (UX): mapeia a recusa do MP (status_detail / e.data.cause) em
+    // mensagem pt-BR acionável em vez de um 'internal' opaco. O detalhe pode vir
+    // no corpo do erro do MP (e.data.status_detail) ou na causa.
+    const detail = (e && e.data && (e.data.status_detail ||
+      (Array.isArray(e.data.cause) && e.data.cause[0] &&
+        (e.data.cause[0].description || e.data.cause[0].code)))) || '';
+    throw mapMpCardError(e, detail);
   }
 
   // Synchronous approval → settle now; webhook covers async/3DS later.
   if (payment.status === 'approved') {
     await mpMktSettle({ academyId, type: isOrder ? 'order' : 'fin', docId }, payment);
+  } else if (payment.status === 'in_process' || payment.status === 'pending') {
+    // Auditoria MP (anti double-charge bidirecional): cartão em análise/3DS NÃO
+    // grava estado no doc, então o guard PIX (createMpPixPayment) não sabia que
+    // havia um cartão vivo e gerava um PIX pagável em paralelo → cobrança dupla
+    // na direção inversa. Persiste o paymentId do cartão pendente + validade,
+    // para o guard simétrico do PIX cancelá-lo antes de cunhar (espelha o
+    // finRef.update do PIX vivo). Best-effort: não bloqueia a resposta do cartão.
+    await ref.update({
+      cardPendingPaymentId: String(payment.id),
+      cardPendingStatus: payment.status,
+      cardPendingExpiresAt: admin.firestore.Timestamp.fromMillis(
+        Date.now() + 60 * 60 * 1000), // ~1h: 3DS/análise costuma resolver antes
+      paymentGateway: 'mercadopago',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }).catch((e) => console.error(
+      '[createMpCardPayment] cardPending persist falhou', docId, e.message));
   }
 
   return {
@@ -3794,11 +4663,21 @@ async function mpSubSettleCycle(academyId, subscriptionId, token,
       return { ok: true, overcharge: true,
         preapprovalId: sub.mpPreapprovalId };
     }
-    tx.set(finRef, {
+    const settledAmount = amount > 0 ? amount : (Number(sub.recurringValue) || 0);
+    // Auditoria MP (espelha o settleMismatch do avulso): se o valor cobrado pelo
+    // MP divergir do recurringValue esperado da assinatura (> ~1 centavo),
+    // sinaliza amountMismatch no financial e alerta o admin pós-tx — o `amount`
+    // gravado é SEMPRE o efetivamente cobrado (não há perda), mas a divergência
+    // (ex.: admin mudou o preço do plano e o preapproval segue no valor antigo)
+    // fica visível em vez de passar silenciosa.
+    const expectedRecurring = Number(sub.recurringValue) || 0;
+    const amountMismatch = expectedRecurring > 0 && amount > 0 &&
+      Math.abs(settledAmount - expectedRecurring) > 0.01;
+    const finData = {
       academyId,
       studentId: sub.studentId,
       studentName: sub.studentName || '',
-      amount: amount > 0 ? amount : (Number(sub.recurringValue) || 0),
+      amount: settledAmount,
       type: 'monthly_tuition',
       status: 'paid',
       description: 'Mensalidade (assinatura)',
@@ -3814,7 +4693,15 @@ async function mpSubSettleCycle(academyId, subscriptionId, token,
       paymentDate: FV.serverTimestamp(),
       createdAt: FV.serverTimestamp(),
       updatedAt: FV.serverTimestamp(),
-    });
+    };
+    if (amountMismatch) {
+      finData.amountMismatch = {
+        expected: expectedRecurring,
+        charged: settledAmount,
+        at: admin.firestore.Timestamp.now(),
+      };
+    }
+    tx.set(finRef, finData);
     const subUpdate = {
       chargesPaid: cycle,
       lastPaymentId: paymentId,
@@ -3848,7 +4735,9 @@ async function mpSubSettleCycle(academyId, subscriptionId, token,
     }
     tx.update(subRef, subUpdate);
     return { ok: true, cycle, months: Number(sub.months) || 0,
-      preapprovalId: sub.mpPreapprovalId };
+      preapprovalId: sub.mpPreapprovalId,
+      mismatch: amountMismatch
+        ? { expected: expectedRecurring, charged: settledAmount } : null };
   });
 
   if (!result.ok) return;
@@ -3912,6 +4801,19 @@ async function mpSubSettleCycle(academyId, subscriptionId, token,
       `Assinatura: cobranca de R$ ${(amount || 0).toFixed(2)} recebida no cartao.`,
       { subscriptionId });
   } catch (_) { /* notify is best-effort */ }
+  // Auditoria MP: alerta de divergência de valor (espelha o settleMismatch do
+  // avulso). O ciclo FOI creditado (o dinheiro entrou), mas o valor diverge do
+  // esperado do plano — admin confere/atualiza o preapproval.
+  if (result.mismatch) {
+    try {
+      await notifyAdminCF(academyId, 'payment_overdue',
+        'Assinatura com valor divergente',
+        `A assinatura cobrou R$ ${result.mismatch.charged.toFixed(2)}, mas o ` +
+        `valor esperado do plano e R$ ${result.mismatch.expected.toFixed(2)}. ` +
+        'A cobranca foi registrada; confira o valor da assinatura no Mercado Pago.',
+        { subscriptionId });
+    } catch (_) { /* notify is best-effort */ }
+  }
 }
 
 /** Webhook: an authorized_payment event for a subscription. */
@@ -3958,7 +4860,24 @@ async function mpSubHandleAuthorizedPayment(academyId, authPayId) {
       chargeDate: (ap.payment && ap.payment.date_approved) ||
         ap.debit_date || ap.date_created,
     });
-  } else if (payStatus === 'rejected' || payStatus === 'cancelled') {
+  } else if (MP_REVERSAL_STATUSES.includes(payStatus)) {
+    // Auditoria MP (completude defensiva): refund/chargeback do MP chegam pelo
+    // tópico `payment` (onde mpSubHandleReversal já trata) — mas se um
+    // authorized_payment for entregue com o payment já estornado, reverte aqui
+    // também pelo MESMO handler idempotente, evitando que chargesPaid/financial
+    // fiquem 'paid' indevidamente. Passa ap.payment (objeto com .id/.status/
+    // .transaction_amount), não ap. NÃO trata 'cancelled' como reversão de ciclo:
+    // só refunded/charged_back (cancelled de ciclo é tentativa fracassada, abaixo).
+    if (payStatus === 'refunded' || payStatus === 'charged_back') {
+      await mpSubHandleReversal(academyId, subRef.id, ap.payment);
+    } else {
+      // 'cancelled' aqui = tentativa de cobrança cancelada (dunning), não estorno.
+      await subRef.update({
+        lastEvent: `payment_${payStatus}`,
+        updatedAt: FV.serverTimestamp(),
+      });
+    }
+  } else if (payStatus === 'rejected') {
     // Dunning: do NOT settle. The preapproval will move to paused; the sync
     // handler flags needsReauth. Record the failed attempt for visibility.
     await subRef.update({
@@ -4128,29 +5047,39 @@ exports.createMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (reques
   const dupSnap = await db.collection(`academies/${academyId}/subscriptions`)
     .where('studentId', '==', studentId)
     .where('planId', '==', planId)
-    .where('status', 'in', ['pending', 'authorized', 'paused'])
+    .where('status', 'in', ['pending', 'authorized', 'paused', 'error'])
     .get();
   const STALE_PENDING_MS = 60 * 60 * 1000; // 1h
+  const ORPHAN_RISK_MS = 24 * 60 * 60 * 1000; // 24h
   let hasLiveSub = false;
   for (const dupDoc of dupSnap.docs) {
     const dup = dupDoc.data();
     const createdMs = dup.createdAt && typeof dup.createdAt.toMillis === 'function'
       ? dup.createdAt.toMillis() : 0;
+    const ageMs = createdMs > 0 ? (Date.now() - createdMs) : Infinity;
     const isStaleAbort = dup.status === 'pending' && !dup.mpPreapprovalId &&
-      createdMs > 0 && (Date.now() - createdMs) > STALE_PENDING_MS;
+      createdMs > 0 && ageMs > STALE_PENDING_MS;
     if (isStaleAbort) {
       await dupDoc.ref.update({
         status: 'abandoned',
         lastEvent: 'abandoned_stale_pending',
         updatedAt: FV.serverTimestamp(),
       }).catch(() => { /* best-effort: não bloqueia a criação */ });
+    } else if (dup.status === 'error') {
+      // Uma criação que FALHOU só bloqueia um novo retry quando pode esconder um
+      // preapproval órfão VIVO no MP — a busca no catch não confirmou o
+      // cancelamento (possibleOrphan) ou um id já ficou gravado. Uma falha comum
+      // (cartão recusado, sem órfão) NÃO bloqueia o aluno de tentar de novo.
+      if (ageMs < ORPHAN_RISK_MS && (dup.mpPreapprovalId || dup.possibleOrphan === true)) {
+        hasLiveSub = true;
+      }
     } else {
       hasLiveSub = true;
     }
   }
   if (hasLiveSub) {
     throw new HttpsError('failed-precondition',
-      'Já existe uma assinatura ativa deste plano para este aluno.');
+      'Já existe uma assinatura ativa (ou em verificação) deste plano para este aluno.');
   }
 
   const planSnap = await db.doc(`academies/${academyId}/plans/${planId}`).get();
@@ -4249,16 +5178,49 @@ exports.createMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (reques
     });
   } catch (e) {
     console.error('[createMpSubscription] erro', e.message, e.data);
-    await subRef.update({
-      status: 'error', lastEvent: 'create_failed', updatedAt: FV.serverTimestamp(),
-    });
-    const text = `${e.data ? JSON.stringify(e.data) : ''} ${e.message || ''}`
-      .toLowerCase();
-    if (text.includes('card_token') || text.includes('token')) {
-      throw new HttpsError('failed-precondition',
-        'Não foi possível usar este cartão. Digite os dados do cartão novamente.');
+    // O POST pode ter CRIADO o preapproval no MP e falhado só na RESPOSTA
+    // (timeout/erro parcial). Marcar 'error' sem mpPreapprovalId esconderia esse
+    // preapproval ÓRFÃO da guarda de duplicidade -> um retry criaria um SEGUNDO
+    // preapproval cobrando o mesmo cartão todo mês. Procura no MP pelo
+    // external_reference (único deste sub) e, se o órfão existir, ADOTA-o
+    // (segue para o pós-processamento de sucesso abaixo, reaproveitando-o).
+    let recovered = null;
+    let searchFailed = false;
+    try {
+      const found = await mpRequest('GET',
+        `/preapproval/search?external_reference=${encodeURIComponent(externalReference)}`,
+        { token });
+      const results = (found && (found.results || found.elements)) || [];
+      recovered = results.find((r) => r && r.id) || null;
+    } catch (searchErr) {
+      searchFailed = true;
+      console.error('[createMpSubscription] busca de preapproval órfão falhou',
+        searchErr.message);
     }
-    throw new HttpsError('internal', 'Falha ao criar a assinatura.');
+    if (recovered) {
+      console.warn('[createMpSubscription] preapproval órfão adotado',
+        recovered.id, 'sub', subId);
+      pa = recovered; // cai no pós-processamento de sucesso abaixo
+    } else {
+      // Falha real (MP não criou preapproval) OU não confirmada. possibleOrphan=
+      // true só quando a busca FALHOU: a guarda de duplicidade passa a bloquear
+      // retries por 24h e o reconcile pode procurar/cancelar o órfão depois. Uma
+      // falha comum (cartão recusado, sem órfão) deixa possibleOrphan=false e
+      // permite o aluno tentar de novo.
+      await subRef.update({
+        status: 'error',
+        lastEvent: 'create_failed',
+        possibleOrphan: searchFailed,
+        updatedAt: FV.serverTimestamp(),
+      });
+      const text = `${e.data ? JSON.stringify(e.data) : ''} ${e.message || ''}`
+        .toLowerCase();
+      if (text.includes('card_token') || text.includes('token')) {
+        throw new HttpsError('failed-precondition',
+          'Não foi possível usar este cartão. Digite os dados do cartão novamente.');
+      }
+      throw new HttpsError('internal', 'Falha ao criar a assinatura.');
+    }
   }
 
   const status = pa.status === 'authorized' ? 'authorized' : (pa.status || 'pending');
@@ -4303,6 +5265,33 @@ async function _loadOwnedSubscription(request, academyId, subscriptionId) {
   if (!snap.exists) throw new HttpsError('not-found', 'Assinatura não encontrada.');
   await assertCanPayFor(request, academyId, snap.data().studentId);
   return { subRef, sub: snap.data() };
+}
+
+/** Recusa operações que RE-AUTORIZARIAM uma cobrança no MP (resume / troca de
+ * cartão) quando o termo da assinatura já acabou (auditoria — achado LOW):
+ * reativar um preapproval cujo termo de N meses já foi quitado faria o MP
+ * cobrar ALÉM do contratado. Espelha o `beyondTerm` do mpSubSettleCycle:
+ * termo esgotado por contagem (months>0 && chargesPaid>=months) OU pela data
+ * (now>=termEndsAt). Estado terminal (cancelled/completed) também é rejeitado.
+ * NÃO altera o doc — só lança failed-precondition. Retrocompatível: assinaturas
+ * sem `months`/`termEndsAt` (months<=0 = sem fim) nunca são bloqueadas. */
+function assertSubscriptionStillBillable(sub) {
+  const status = sub && sub.status;
+  if (status === 'cancelled' || status === 'completed') {
+    throw new HttpsError('failed-precondition', status === 'completed'
+      ? 'Esta assinatura já foi concluída.'
+      : 'Esta assinatura já está cancelada.');
+  }
+  const months = Number(sub && sub.months) || 0;
+  const chargesPaid = Number(sub && sub.chargesPaid) || 0;
+  const byCount = months > 0 && chargesPaid >= months;
+  const termEndsMs = sub && sub.termEndsAt &&
+    typeof sub.termEndsAt.toMillis === 'function' ? sub.termEndsAt.toMillis() : 0;
+  const byDate = termEndsMs > 0 && Date.now() >= termEndsMs;
+  if (byCount || byDate) {
+    throw new HttpsError('failed-precondition',
+      'O período contratado desta assinatura já foi concluído.');
+  }
 }
 
 exports.cancelMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
@@ -4403,6 +5392,9 @@ exports.resumeMpSubscription = onCall({ secrets: MP_MKT_SECRETS }, async (reques
   if (sub.status !== 'paused') {
     throw new HttpsError('failed-precondition', 'A assinatura não está pausada.');
   }
+  // Auditoria: revalida o termo antes de reautorizar no MP — retomar uma
+  // assinatura cujo período já acabou faria o MP cobrar além do contratado.
+  assertSubscriptionStillBillable(sub);
   if (sub.mpPreapprovalId) {
     // Sem try/catch: se o PUT falhar, propaga SEM tocar no doc — o aluno
     // re-tenta e o estado local segue refletindo o MP ('paused').
@@ -4432,6 +5424,10 @@ exports.updateSubscriptionCard = onCall({ secrets: MP_MKT_SECRETS }, async (requ
   if (!sub.mpPreapprovalId) {
     throw new HttpsError('failed-precondition', 'Assinatura sem preapproval.');
   }
+  // Auditoria: revalida o termo antes de reautorizar com o cartão novo — trocar
+  // o cartão de uma assinatura cujo período já acabou (status 'authorized' no
+  // body) reativaria cobranças além do contratado.
+  assertSubscriptionStillBillable(sub);
   const token = await getMpAccessToken(academyId);
   let pa;
   try {
@@ -4469,6 +5465,121 @@ exports.updateSubscriptionCard = onCall({ secrets: MP_MKT_SECRETS }, async (requ
 // calls this after the local mark-paid; failure here never blocks mark-paid.
 // Requires the academy admin. Only cancels payments still in a cancellable
 // state (pending/in_process) — never touches an already-approved one.
+/** Cancela no MP um pagamento PIX ainda cancelável (pending/in_process).
+ * Núcleo reutilizável do callable cancelMpPix — usado também ao cobrar o
+ * cartão de um doc que ainda tem PIX vivo (auditoria, anti double-charge).
+ * Best-effort por padrão: nunca lança a menos que throwOnError=true.
+ * Retorna { cancelled, status }. */
+async function mpCancelPixPayment(academyId, paymentId, { token, throwOnError } = {}) {
+  try {
+    const tok = token || await getMpAccessToken(academyId);
+    const current = await mpRequest('GET', `/v1/payments/${paymentId}`, { token: tok });
+    if (current.status !== 'pending' && current.status !== 'in_process') {
+      // Já aprovado → NÃO cancela (seria estorno, fora de escopo). Se já estava
+      // aprovado, sinaliza para o chamador via flag dedicada.
+      return { cancelled: false, status: current.status,
+        alreadyApproved: current.status === 'approved' };
+    }
+    const updated = await mpRequest('POST', `/v1/payments/${paymentId}`, {
+      token: tok,
+      body: { status: 'cancelled' },
+    });
+    return { cancelled: updated.status === 'cancelled', status: updated.status };
+  } catch (e) {
+    console.error('[mpCancelPixPayment] erro', e && e.message);
+    if (throwOnError) throw e;
+    return { cancelled: false, status: 'error' };
+  }
+}
+
+/**
+ * Auditoria MP (anti double-charge bidirecional): cancela no MP um CARTÃO
+ * pendente vivo gravado no doc por createMpCardPayment (cardPendingPaymentId +
+ * cardPendingExpiresAt no futuro), para que ele não fique pagável em paralelo a
+ * um PIX recém-cunhado. Reusa mpCancelPixPayment (cancela qualquer pagamento
+ * pending/in_process — vale para cartão). Limpa os marcadores no doc.
+ * Best-effort: nunca lança (não trava a geração do PIX).
+ * Retorna o resultado de mpCancelPixPayment ({ cancelled, status, alreadyApproved })
+ * ou { cancelled: true, noop: true } quando não havia cartão pendente vivo —
+ * para o chamador cartão→cartão poder RECUSAR a nova cobrança se o cartão
+ * pendente já foi APROVADO (mas ainda não liquidado) ou não pôde ser cancelado.
+ */
+async function mpCancelLivePendingCard(academyId, docRef) {
+  try {
+    const snap = await docRef.get();
+    if (!snap.exists) return { cancelled: true, noop: true };
+    const d = snap.data();
+    if (!d.cardPendingPaymentId) {
+      return { cancelled: true, noop: true };
+    }
+    // Auditoria MP (TTL local não é autoridade): o cardPendingExpiresAt (~1h) é
+    // só um palpite. Decidir liberar uma 2ª cobrança apenas pelo relógio local
+    // arriscava a dupla quando o 3DS/análise demora mais que 1h e o cartão segue
+    // pagável. Sempre consulta o ESTADO REAL no MP (mpCancelPixPayment faz GET e
+    // no-op em status terminal); o TTL vira apenas uma dica suave: marcadores
+    // muito velhos ainda são checados no MP antes de liberar a nova cobrança.
+    const result = await mpCancelPixPayment(academyId, d.cardPendingPaymentId, {});
+    // O cartão pendente está NÃO-PAGÁVEL quando foi cancelado agora OU já estava
+    // num estado terminal não-aprovado (rejected/cancelled/refunded) — em ambos
+    // os casos uma nova cobrança de cartão é segura. APROVADO é o único terminal
+    // que ainda pode liquidar: NÃO é seguro e preserva os marcadores.
+    const terminalNotPayable = result.cancelled ||
+      (!result.alreadyApproved && result.status &&
+        result.status !== 'pending' && result.status !== 'in_process' &&
+        result.status !== 'error');
+    // Auditoria MP (cartão→cartão com cartão JÁ APROVADO porém não liquidado):
+    // só limpa os marcadores quando o pagamento ficou terminal não-pagável. Se
+    // foi APROVADO (alreadyApproved), PRESERVA os marcadores — o webhook/settle
+    // ainda vai liquidá-lo — e devolve o estado para o chamador recusar a 2ª
+    // cobrança em vez de duplicar.
+    if (terminalNotPayable) {
+      await docRef.update({
+        cardPendingPaymentId: admin.firestore.FieldValue.delete(),
+        cardPendingStatus: admin.firestore.FieldValue.delete(),
+        cardPendingExpiresAt: admin.firestore.FieldValue.delete(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }).catch(() => { /* best-effort */ });
+    }
+    // Normaliza `cancelled` para o chamador cartão→cartão: terminal-não-pagável
+    // libera a nova cobrança; só alreadyApproved/erro/pendente-não-cancelável a barram.
+    return { ...result, cancelled: result.cancelled || terminalNotPayable };
+  } catch (e) {
+    console.error('[mpCancelLivePendingCard] erro', e && e.message);
+    // Falha indeterminada: não afirma que cancelou. O chamador cartão→cartão
+    // trata como "não foi possível garantir o cancelamento" e recusa a cobrança.
+    return { cancelled: false, status: 'error' };
+  }
+}
+
+/**
+ * Auditoria MP (cardPending* obsoleto): quando o webhook processa um cartão em
+ * estado terminal não-aprovado (rejected/cancelled), apaga os marcadores
+ * cardPending* do doc — mas SÓ se o cardPendingPaymentId gravado for exatamente
+ * este pagamento (não apaga marcadores de outra tentativa). Best-effort; nunca
+ * lança. parsed = { type:'fin'|'order', docId }.
+ */
+async function mpClearCardPendingIfMatches(academyId, parsed, paymentId) {
+  try {
+    if (!parsed || (parsed.type !== 'fin' && parsed.type !== 'order')) return;
+    const docRef = parsed.type === 'order'
+      ? db.doc(`academies/${academyId}/storeOrders/${parsed.docId}`)
+      : db.doc(`academies/${academyId}/financials/${parsed.docId}`);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(docRef);
+      if (!snap.exists) return;
+      if (String(snap.data().cardPendingPaymentId || '') !== paymentId) return;
+      tx.update(docRef, {
+        cardPendingPaymentId: admin.firestore.FieldValue.delete(),
+        cardPendingStatus: admin.firestore.FieldValue.delete(),
+        cardPendingExpiresAt: admin.firestore.FieldValue.delete(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+  } catch (e) {
+    console.error('[mpClearCardPendingIfMatches] erro', e && e.message);
+  }
+}
+
 exports.cancelMpPix = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
   const { academyId, paymentId } = request.data || {};
   if (!request.auth) throw new HttpsError('unauthenticated', 'User must be authenticated');
@@ -4540,6 +5651,17 @@ exports.mercadoPagoMarketplaceWebhook = onRequest(
         console.warn('[mpMktWebhook] assinatura inválida');
         return res.status(401).json({ error: 'invalid signature' });
       }
+      // Frescor do ts (anti-replay, auditoria): rejeita assinaturas fora da
+      // janela de ~5 min — espelha o mercadoPagoWebhook do index.js. O MP manda
+      // o ts em segundos ou ms conforme a versão; normaliza pra ms antes de
+      // comparar. Sem isso, uma assinatura válida capturada pode ser reenviada.
+      const tsNum = Number(ts);
+      const tsMs = tsNum < 1e12 ? tsNum * 1000 : tsNum;
+      if (!Number.isFinite(tsNum) || tsNum <= 0 ||
+          Math.abs(Date.now() - tsMs) > 5 * 60 * 1000) {
+        console.warn('[mpMktWebhook] ts da assinatura fora da janela — possível replay', { ts });
+        return res.status(401).json({ error: 'stale signature timestamp' });
+      }
     }
 
     const type = String(req.query.type || req.query.topic ||
@@ -4594,12 +5716,52 @@ exports.mercadoPagoMarketplaceWebhook = onRequest(
           await mpMktHandleReversal(parsed, payment);
           return res.status(200).json({ success: true, kind: 'reversal' });
         }
+        // Auditoria MP (limpeza dos marcadores cardPending*): cartão em estado
+        // terminal não-aprovado (rejected/cancelled) deve apagar os marcadores
+        // cardPending* do doc para não deixarem estado obsoleto por ~1h até
+        // expirar. Só limpa se cardPendingPaymentId === payment.id (não apaga
+        // marcadores de outra tentativa em curso). Best-effort.
+        if (payment.status === 'rejected' || payment.status === 'cancelled') {
+          await mpClearCardPendingIfMatches(acad, parsed, String(payment.id));
+        }
         return res.status(200).json({ received: true, status: payment.status });
+      }
+      // Auditoria MP (estorno PARCIAL silencioso): o MP re-notifica o MESMO
+      // paymentId ainda como status='approved' quando há um estorno PARCIAL
+      // (transaction_amount_refunded > 0 e < transaction_amount). Sem tratamento,
+      // o doc seguia 'paid' pelo valor cheio e o dinheiro devolvido sumia da
+      // conciliação. Detecta ANTES do settle e registra um refundEvent parcial
+      // idempotente + alerta o admin, SEM desfazer o pagamento integral.
+      const refunded = Number(payment.transaction_amount_refunded) || 0;
+      const total = Number(payment.transaction_amount) || 0;
+      if (refunded > 0.005 && refunded < total - 0.005) {
+        await mpMktHandlePartialRefund(parsed, payment, refunded);
+        return res.status(200).json({ success: true, kind: 'partial_refund' });
       }
       await mpMktSettle(parsed, payment);
       return res.status(200).json({ success: true });
     } catch (e) {
       console.error('[mpMktWebhook] erro', e.message);
+      // Auditoria MP (retry-storm de academia desconectada/sem token): o
+      // getMpAccessToken lança 'failed-precondition' tanto p/ "nunca conectou"
+      // (sem refreshToken) quanto p/ "refresh quebrado momentaneamente". Para o
+      // 1º, retry NUNCA resolve → responde 200 (descarta). Para o 2º (transitório)
+      // mantém 500/retry, pois o evento ainda pode liquidar após a reconexão.
+      // Distingue lendo o mpAuth: ausência de refreshToken = nunca conectou.
+      if (e instanceof HttpsError && e.code === 'failed-precondition') {
+        try {
+          const authSnap = await db.doc(`academies/${acad}/private/mpAuth`).get();
+          if (!authSnap.exists || !authSnap.data().refreshToken) {
+            return res.status(200).json({ received: true, skipped: 'no_token' });
+          }
+        } catch (_) { /* cai no 500/retry abaixo */ }
+      }
+      // Auditoria MP (tópico vazio / id não-payment): notificação genérica sem
+      // type cujo dataId NÃO é um payment válido faz o GET /v1/payments dar 404.
+      // Retry não vai materializar um payment inexistente → responde 200.
+      if (e && e.status === 404) {
+        return res.status(200).json({ received: true, skipped: 'not_a_payment' });
+      }
       return res.status(500).json({ error: e.message }); // 500 => MP retries
     }
   });
@@ -4762,6 +5924,30 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
             snap.data().gatewayPaymentId !== chargeId) {
           return { didSettle: false, duplicatePayment: true };
         }
+        // Auditoria MP (double-pay silencioso): pedido já 'paid' SEM um
+        // gatewayPaymentId do MP (marcado "pago"/cash manualmente) e agora chega
+        // um pagamento MP aprovado para o MESMO pedido → o PIX em aberto foi pago
+        // DEPOIS do cash. Espelha o branch financial (5585-5590): NÃO credita de
+        // novo, mas sinaliza duplicidade alertável para o admin reembolsar.
+        if (!snap.data().gatewayPaymentId) {
+          return { didSettle: false, duplicatePayment: true };
+        }
+        // Auditoria MP (cash-then-PIX do MESMO QR): o mark-paid cash de pedido
+        // (_killLivePixOnPaid) limpa os campos pix* mas NÃO apaga o
+        // gatewayPaymentId do PIX vivo cunhado. Se o cancelMpPix best-effort
+        // falhou e o cliente pagou aquele MESMO PIX, o webhook chega com
+        // gatewayPaymentId === chargeId — escapando do guard acima (5745) e do
+        // !gatewayPaymentId. Distingue do settle real do MP pela AUSÊNCIA de
+        // `stockSettled` (campo só escrito por este mpMktSettle; cash-mark via
+        // app nunca o grava): pedido 'paid' com o MESMO chargeId mas que NUNCA
+        // passou pelo settle do MP = pagou cash e depois pagou o PIX → duplicata
+        // alertável (espelha o branch financial 5916-5921). Retrocompat: settle
+        // legítimo do MP sempre define stockSettled (false→true), então NÃO cai
+        // aqui; pedido do app antigo sem PIX cunhado nunca tem gatewayPaymentId.
+        if (snap.data().gatewayPaymentId === chargeId &&
+            snap.data().stockSettled === undefined) {
+          return { didSettle: false, duplicatePayment: true };
+        }
         // Re-entrega do webhook com o decremento de estoque pendente (crash
         // entre o commit da tx e o loop de estoque, achado #30): completa o
         // efeito em vez de retornar direto.
@@ -4814,6 +6000,14 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
         pixQrCode: admin.firestore.FieldValue.delete(),
         pixTicketUrl: admin.firestore.FieldValue.delete(),
         pixExpiresAt: admin.firestore.FieldValue.delete(),
+        // Auditoria MP (cardPending* obsoleto): cartão que passou por in_process/
+        // 3DS e aprovou só via webhook deixava os marcadores cardPending* vivos
+        // (mpClearCardPendingIfMatches só limpa em rejected/cancelled). Limpa-os
+        // no settle de APROVADO — o doc já é 'paid' e os guards curto-circuitam,
+        // mas o estado fica consistente. Retrocompat: delete no-op se ausentes.
+        cardPendingPaymentId: admin.firestore.FieldValue.delete(),
+        cardPendingStatus: admin.firestore.FieldValue.delete(),
+        cardPendingExpiresAt: admin.firestore.FieldValue.delete(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       return { didSettle: true, items: snap.data().items };
@@ -4838,17 +6032,45 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
       return; // already settled, missing doc, duplicate, or mismatch
     }
     const items = settle.items;
+    const oversold = []; // produtos que esgotaram no settle (conciliação)
     if (Array.isArray(items)) {
       for (const item of items) {
         const productRef = db.doc(`academies/${academyId}/storeProducts/${item.productId}`);
-        const p = await productRef.get();
-        if (p.exists && p.data()?.stockType === 'in_stock') {
-          await productRef.update({
-            stockQuantity: admin.firestore.FieldValue.increment(-item.quantity),
+        // Auditoria MP (oversell server-side): decrementa o estoque DENTRO de uma
+        // transação com PISO em 0 — lê o estoque atual e nunca deixa negativo.
+        // Dois pedidos concorrentes na última unidade não furam mais o piso; o
+        // 2º registra `oversell` para conciliação (a academia recebeu 2x e pode
+        // reembolsar). Só vale p/ stockType==='in_stock' com quantidade finita.
+        const res = await db.runTransaction(async (tx) => {
+          const p = await tx.get(productRef);
+          if (!p.exists || p.data()?.stockType !== 'in_stock') return null;
+          const cur = Number(p.data().stockQuantity);
+          if (!Number.isFinite(cur)) return null; // estoque ilimitado/indefinido
+          const qty = Number(item.quantity) || 0;
+          const next = Math.max(0, cur - qty); // piso em 0 (sem estoque negativo)
+          tx.update(productRef, {
+            stockQuantity: next,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
-        }
+          // Faltou estoque para atender este item por inteiro → conciliação.
+          return cur - qty < 0
+            ? { productId: item.productId, requested: qty, available: cur }
+            : null;
+        }).catch((e) => {
+          console.error('[mpMktSettle] stock decrement falhou', item.productId, e.message);
+          return null;
+        });
+        if (res) oversold.push(res);
       }
+    }
+    if (oversold.length) {
+      // Estoque esgotado no momento do pagamento: avisa o admin para conciliar
+      // (reembolsar/repor). NÃO bloqueia o pedido — o dinheiro já entrou.
+      const code = docId.slice(-6).toUpperCase();
+      await notifyAdminCF(academyId, 'order_paid', 'Estoque esgotado no pedido pago',
+        `Pedido #${code} foi pago, mas ${oversold.length} item(ns) ficaram sem ` +
+        'estoque suficiente. Confira para repor o estoque ou reembolsar.',
+        { orderId: docId }).catch(() => { /* best-effort */ });
     }
     // Decremento concluído — desarma o flag (achado #30). Best-effort: se
     // falhar, a re-entrega do webhook completa de novo (increment idempotente
@@ -4885,6 +6107,19 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
       // para conciliação + alerta de reembolso (fora da tx).
       if (snap.data().gatewayPaymentId &&
           snap.data().gatewayPaymentId !== chargeId) {
+        return { didSettle: false, duplicatePayment: true };
+      }
+      // Auditoria MP (double-charge silencioso): cobrança já 'paid' SEM um
+      // gatewayPaymentId do MP — foi marcada paga FORA do MP (markAsPaid de
+      // mensalidade → paymentGateway 'manual'; markPrivateLessonGiven cash →
+      // 'cash'; legado/AbacatePay) e agora chega um pagamento MP aprovado para o
+      // MESMO financial → o PIX em aberto foi pago DEPOIS. NÃO credita de novo,
+      // mas sinaliza duplicidade alertável (admin reembolsa). INCONDICIONAL,
+      // espelhando o branch order (5940): um settle MP legítimo SEMPRE grava
+      // gatewayPaymentId, então 'paid' sem id NUNCA é o caminho normal do MP —
+      // cobre 'manual', 'cash' e gateways legados (a versão anterior só checava
+      // 'cash'/ausente e deixava o caso 'manual' cair no no-op silencioso).
+      if (!snap.data().gatewayPaymentId) {
         return { didSettle: false, duplicatePayment: true };
       }
       // Aula particular já paga mas com a presença ainda não concedida (crash
@@ -4930,6 +6165,12 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
       pixQrCode: admin.firestore.FieldValue.delete(),
       pixTicketUrl: admin.firestore.FieldValue.delete(),
       pixExpiresAt: admin.firestore.FieldValue.delete(),
+      // Auditoria MP (cardPending* obsoleto): espelha o branch order — cartão
+      // aprovado só via webhook (in_process/3DS) deixava cardPending* vivos.
+      // Limpa no settle de APROVADO. Retrocompat: delete no-op se ausentes.
+      cardPendingPaymentId: admin.firestore.FieldValue.delete(),
+      cardPendingStatus: admin.firestore.FieldValue.delete(),
+      cardPendingExpiresAt: admin.firestore.FieldValue.delete(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     return { didSettle: true, finData: snap.data() };
@@ -4981,19 +6222,28 @@ async function mpMktSettle({ academyId, type, docId }, payment) {
  * MESMO grantPrivateLessonAttendance idempotente do caminho do webhook, de modo
  * que conceder manual e depois receber o webhook (ou vice-versa) nunca duplica
  * a presença nem o contador. */
-exports.markPrivateLessonGiven = onCall(async (request) => {
+// Secrets MP_MKT_SECRETS: necessários para o cancelamento best-effort do PIX
+// em aberto quando a aula é marcada "paga em dinheiro" (auditoria, achado de
+// double-charge) — getMpAccessToken pode precisar renovar o token OAuth.
+exports.markPrivateLessonGiven = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login required.');
   const { academyId, financialId, markPaidCash, staffName } = request.data || {};
   if (!academyId || !financialId) {
     throw new HttpsError('invalid-argument',
       'academyId e financialId são obrigatórios.');
   }
-  const membership = await getUserAcademyMembership(request.auth.uid, academyId);
-  const isStaff = membership &&
-    (membership.role === 'admin' || membership.role === 'instructor');
-  if (!isStaff) {
+  // Granting the private-lesson presence writes an attendance doc server-side
+  // (grantPrivateLessonAttendance, via the Admin SDK — bypasses Firestore
+  // rules). To stay consistent with the attendance-create rule (admins always;
+  // instructors need the grantable 'attendance:take'), enforce the same gate
+  // here. Without this, an instructor without 'attendance:take' — who is blocked
+  // from manual attendance on the client — could still mark presence through
+  // this callable. Admins are unaffected; instructors who already mark
+  // attendance carry the permission, so existing flows keep working.
+  if (!(await staffCanWithPermission(
+    request.auth.uid, academyId, 'attendance:take'))) {
     throw new HttpsError('permission-denied',
-      'Apenas admin ou professor pode conceder a presença.');
+      'Apenas admin, ou professor com permissão de presença, pode conceder a presença.');
   }
 
   const finRef = db.doc(`academies/${academyId}/financials/${financialId}`);
@@ -5010,11 +6260,28 @@ exports.markPrivateLessonGiven = onCall(async (request) => {
   // Pagamento presencial em dinheiro: marca a cobrança como paga (cash) antes
   // de conceder a presença. Idempotente — só marca se ainda não estava paga.
   if (markPaidCash === true && fin.status !== 'paid') {
+    // Auditoria (anti double-charge): marcar "pago em dinheiro" precisa MATAR o
+    // PIX MP em aberto e LIMPAR os campos pix* do financial — espelha o que o
+    // PaymentService.markAsPaid faz no cliente. Sem isso o PIX já enviado
+    // continuava pagável e a família podia pagar de novo (cobrança dupla
+    // silenciosa). Best-effort: cancela ANTES de marcar paga e nunca bloqueia o
+    // mark-paid se o cancelamento falhar (reusa o cancelMpPix via helper).
+    const pixPaymentId = fin.paymentGateway === 'mercadopago' &&
+      fin.gatewayPaymentId && fin.pixCode ? fin.gatewayPaymentId : null;
+    if (pixPaymentId) {
+      await mpCancelPixPayment(academyId, pixPaymentId).catch((e) =>
+        console.error('[markPrivateLessonGiven] cancel PIX falhou', e && e.message));
+    }
     await finRef.update({
       status: 'paid',
       method: 'cash',
       paymentGateway: 'cash',
       paymentDate: admin.firestore.FieldValue.serverTimestamp(),
+      // Limpa o PIX em aberto para que não seja mais exibido/pagável.
+      pixCode: admin.firestore.FieldValue.delete(),
+      pixQrCode: admin.firestore.FieldValue.delete(),
+      pixTicketUrl: admin.firestore.FieldValue.delete(),
+      pixExpiresAt: admin.firestore.FieldValue.delete(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   }
@@ -5036,8 +6303,10 @@ exports.markPrivateLessonGiven = onCall(async (request) => {
 const MP_REVERSAL_STATUSES = ['refunded', 'charged_back', 'cancelled'];
 
 /** Estorno de pagamento avulso (financial ou pedido da loja). Marca o doc como
- * 'refunded'/'chargeback', restaura o estoque do pedido (idempotente via flag
- * stockRestorePending) e notifica o admin. Nunca relança para o webhook. */
+ * 'refunded'/'chargeback', restaura o estoque do pedido (atômico: o flip do
+ * status e os increments de estoque comitam na MESMA transação — restauração
+ * exatamente-uma-vez, sem over-restore) e notifica o admin. Nunca relança para
+ * o webhook. */
 async function mpMktHandleReversal({ academyId, type, docId }, payment) {
   const chargeId = String(payment.id);
   const newStatus = payment.status === 'charged_back' ? 'chargeback' : 'refunded';
@@ -5054,18 +6323,34 @@ async function mpMktHandleReversal({ academyId, type, docId }, payment) {
 
   if (type === 'order') {
     const orderRef = db.doc(`academies/${academyId}/storeOrders/${docId}`);
+    // Auditoria MP (over-restore): a restauração do estoque agora roda DENTRO da
+    // MESMA transação que vira o pedido para refunded/chargeback. O flip do
+    // status e os increments de estoque comitam atomicamente juntos — eliminando
+    // a janela pendente em que duas re-entregas concorrentes do webhook
+    // restauravam o estoque em dobro. Re-entregas viram no-op (status já não é
+    // 'paid'). Firestore exige TODAS as leituras antes das escritas: lemos o
+    // pedido e, se for restaurar, os produtos, antes de qualquer update.
     const r = await db.runTransaction(async (tx) => {
       const snap = await tx.get(orderRef);
       if (!snap.exists) return { handled: false };
       const d = snap.data();
-      // Re-entrega com a restauração de estoque pendente (crash entre o
-      // commit e o loop de estoque): completa o efeito sem re-notificar.
-      if ((d.status === 'refunded' || d.status === 'chargeback') &&
-          d.gatewayPaymentId === chargeId && d.stockRestorePending === true) {
-        return { handled: false, restock: true, items: d.items };
-      }
       if (d.status !== 'paid' || d.gatewayPaymentId !== chargeId) {
-        return { handled: false }; // outro pagamento/estado — não mexe
+        // Já estornado (idempotente), re-entrega ou outro pagamento — não mexe.
+        return { handled: false };
+      }
+      const willRestock = d.stockSettled !== false; // settle decrementou?
+      // Pré-lê os produtos a restaurar (todas as leituras ANTES das escritas).
+      const items = Array.isArray(d.items) ? d.items : [];
+      const restores = [];
+      if (willRestock) {
+        for (const item of items) {
+          const productRef =
+            db.doc(`academies/${academyId}/storeProducts/${item.productId}`);
+          const p = await tx.get(productRef);
+          if (p.exists && p.data()?.stockType === 'in_stock') {
+            restores.push({ ref: productRef, qty: Number(item.quantity) || 0 });
+          }
+        }
       }
       const update = {
         status: newStatus,
@@ -5073,37 +6358,22 @@ async function mpMktHandleReversal({ academyId, type, docId }, payment) {
         refundEvent,
         updatedAt: FV.serverTimestamp(),
       };
-      let restock = false;
-      if (d.stockSettled === false) {
-        // O decremento do settle NUNCA rodou (crash antes do loop): consome o
-        // pendente em vez de restaurar — efeito líquido nulo no estoque, e a
-        // re-entrega do 'approved' não decrementa mais (doc não está 'paid').
+      if (!willRestock) {
+        // O decremento do settle NUNCA rodou (crash antes do loop): apenas marca
+        // settled — efeito líquido nulo no estoque, e a re-entrega do 'approved'
+        // não decrementa mais (doc não está 'paid').
         update.stockSettled = true;
-      } else {
-        update.stockRestorePending = true; // flag de idempotência da restauração
-        restock = true;
       }
       tx.update(orderRef, update);
-      return { handled: true, restock, items: d.items };
-    });
-    if (r.restock && Array.isArray(r.items)) {
-      for (const item of r.items) {
-        const productRef =
-          db.doc(`academies/${academyId}/storeProducts/${item.productId}`);
-        const p = await productRef.get();
-        if (p.exists && p.data()?.stockType === 'in_stock') {
-          await productRef.update({
-            stockQuantity: FV.increment(item.quantity),
-            updatedAt: FV.serverTimestamp(),
-          });
-        }
+      // Increments de estoque na MESMA transação → restauração exatamente-uma-vez.
+      for (const rst of restores) {
+        tx.update(rst.ref, {
+          stockQuantity: FV.increment(rst.qty),
+          updatedAt: FV.serverTimestamp(),
+        });
       }
-      await orderRef.update({
-        stockRestorePending: FV.delete(),
-        updatedAt: FV.serverTimestamp(),
-      }).catch((e) => console.error(
-        '[mpMktHandleReversal] stockRestorePending clear falhou', docId, e.message));
-    }
+      return { handled: true, restock: willRestock && restores.length > 0 };
+    });
     if (r.handled) {
       const code = docId.slice(-6).toUpperCase();
       await notifyAdminCF(academyId, 'order_paid',
@@ -5140,6 +6410,61 @@ async function mpMktHandleReversal({ academyId, type, docId }, payment) {
       `Um pagamento de R$ ${amount.toFixed(2)} foi ${verb} no Mercado Pago. ` +
       `A cobranca foi marcada como estornada — confira no app.`,
       { financialId: docId });
+  }
+}
+
+/**
+ * Auditoria MP (estorno PARCIAL silencioso): o MP devolveu PARTE do valor mas o
+ * pagamento continua 'approved' (transaction_amount_refunded entre 0 e o total).
+ * NÃO desfaz o pagamento integral — só registra um refundEvent parcial no doc
+ * (idempotente por (paymentId, valor acumulado refunded) via partialRefundKey) e
+ * alerta o admin para conciliação, já que o doc seguiria refletindo o valor
+ * cheio e a receita ficaria superestimada até a conferência manual. O doc precisa
+ * estar 'paid' com o MESMO gatewayPaymentId. Best-effort; nunca relança ao MP.
+ */
+async function mpMktHandlePartialRefund({ academyId, type, docId }, payment, refundedAmount) {
+  const chargeId = String(payment.id);
+  const refunded = Number(refundedAmount) || 0; // REAIS
+  const total = Number(payment.transaction_amount) || 0; // REAIS
+  const docRef = type === 'order'
+    ? db.doc(`academies/${academyId}/storeOrders/${docId}`)
+    : db.doc(`academies/${academyId}/financials/${docId}`);
+  // Chave idempotente: paymentId + valor acumulado devolvido (2 casas). Estornos
+  // parciais sucessivos (refunded cresce) geram chaves distintas → cada degrau é
+  // registrado uma vez; re-entregas do webhook com o mesmo total são no-op.
+  const partialRefundKey = `${chargeId}:${refunded.toFixed(2)}`;
+  const r = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(docRef);
+    if (!snap.exists) return { handled: false };
+    const d = snap.data();
+    if (d.status !== 'paid' || d.gatewayPaymentId !== chargeId) {
+      return { handled: false }; // outro pagamento, doc não pago, ou estado mudou
+    }
+    if (d.partialRefundKey === partialRefundKey) {
+      return { handled: false }; // já registrado este degrau (idempotente)
+    }
+    tx.update(docRef, {
+      partialRefundKey,
+      partialRefundEvent: {
+        paymentId: chargeId,
+        refundedAmount: refunded,
+        totalAmount: total,
+        at: admin.firestore.Timestamp.now(),
+      },
+      updatedAt: FV.serverTimestamp(),
+    });
+    return { handled: true };
+  });
+  if (r.handled) {
+    const target = type === 'order' ? { orderId: docId } : { financialId: docId };
+    const notifType = type === 'order' ? 'order_paid' : 'payment_received';
+    await notifyAdminCF(academyId, notifType,
+      'Estorno parcial no Mercado Pago',
+      `Foram devolvidos R$ ${refunded.toFixed(2)} de um pagamento de ` +
+      `R$ ${total.toFixed(2)} (pagamento ${chargeId}). A cobranca segue marcada ` +
+      `como paga pelo valor cheio — confira e concilie manualmente no Mercado Pago.`,
+      target).catch((e) =>
+      console.error('[mpMktHandlePartialRefund] notify falhou', docId, e.message));
   }
 }
 

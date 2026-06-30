@@ -188,13 +188,16 @@ class _MonitorStudentDetailScreenState
   }
 
   Widget _buildSliverAppBar() {
+    final sport = _student!.getPrimarySport();
+    final grade = _student!.getGrade(sport);
+    final gradeId = grade?.currentGrade ?? 'white';
+    final isWhite = gradeId == 'white';
+
     return SliverAppBar(
       expandedHeight: 200,
       pinned: true,
-      backgroundColor: _getBeltColor(_student!.currentBelt, sportId: _student!.getPrimarySport()),
-      foregroundColor: _student!.currentBelt == 'white'
-          ? Colors.black
-          : Colors.white,
+      backgroundColor: _getBeltColor(gradeId, sportId: sport),
+      foregroundColor: isWhite ? Colors.black : Colors.white,
       actions: [
         // Generate link code button (only if student not linked)
         if (_student != null && _student!.linkedUserId == null)
@@ -217,8 +220,8 @@ class _MonitorStudentDetailScreenState
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                _getBeltColor(_student!.currentBelt, sportId: _student!.getPrimarySport()),
-                _getBeltColor(_student!.currentBelt, sportId: _student!.getPrimarySport()).withValues(alpha: 0.7),
+                _getBeltColor(gradeId, sportId: sport),
+                _getBeltColor(gradeId, sportId: sport).withValues(alpha: 0.7),
               ],
             ),
           ),
@@ -245,15 +248,13 @@ class _MonitorStudentDetailScreenState
                                   alpha: 0.3,
                                 ),
                                 child: Text(
-                                  _student!.fullName
-                                      .substring(0, 1)
-                                      .toUpperCase(),
+                                  _student!.fullName.isNotEmpty
+                                      ? _student!.fullName[0].toUpperCase()
+                                      : '?',
                                   style: TextStyle(
                                     fontSize: 32,
                                     fontWeight: FontWeight.bold,
-                                    color: _student!.currentBelt == 'white'
-                                        ? Colors.black
-                                        : Colors.white,
+                                    color: isWhite ? Colors.black : Colors.white,
                                   ),
                                 ),
                               ),
@@ -268,9 +269,7 @@ class _MonitorStudentDetailScreenState
                               style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color: _student!.currentBelt == 'white'
-                                    ? Colors.black
-                                    : Colors.white,
+                                color: isWhite ? Colors.black : Colors.white,
                               ),
                             ),
                             const SizedBox(height: 4),
@@ -296,17 +295,16 @@ class _MonitorStudentDetailScreenState
   }
 
   Widget _buildBeltBadge() {
-    final beltNames = {
-      'white': 'Branca',
-      'blue': 'Azul',
-      'purple': 'Roxa',
-      'brown': 'Marrom',
-      'black': 'Preta',
-      'grey': 'Cinza',
-      'yellow': 'Amarela',
-      'orange': 'Laranja',
-      'green': 'Verde',
-    };
+    final sport = _student!.getPrimarySport();
+    // Esportes sem sistema de graduação (boxe/MMA/musculação) não têm faixa.
+    if (getSport(sport).gradeSystem == GradeSystem.none) {
+      return const SizedBox.shrink();
+    }
+
+    final grade = _student!.getGrade(sport);
+    final gradeId = grade?.currentGrade ?? 'white';
+    final stripes = grade?.currentStripes ?? 0;
+    final isWhite = gradeId == 'white';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -318,22 +316,18 @@ class _MonitorStudentDetailScreenState
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            beltNames[_student!.currentBelt] ?? _student!.currentBelt,
+            _getBeltName(gradeId, sportId: sport),
             style: TextStyle(
-              color: _student!.currentBelt == 'white'
-                  ? Colors.black
-                  : Colors.white,
+              color: isWhite ? Colors.black : Colors.white,
               fontWeight: FontWeight.w500,
             ),
           ),
-          if (_student!.currentStripes > 0) ...[
+          if (stripes > 0) ...[
             const SizedBox(width: 4),
             Text(
-              '${_student!.currentStripes} grau(s)',
+              '$stripes grau(s)',
               style: TextStyle(
-                color: _student!.currentBelt == 'white'
-                    ? Colors.black54
-                    : Colors.white70,
+                color: isWhite ? Colors.black54 : Colors.white70,
               ),
             ),
           ],
@@ -343,6 +337,9 @@ class _MonitorStudentDetailScreenState
   }
 
   Widget _buildStatusBadge() {
+    final sport = _student!.getPrimarySport();
+    final gradeId = _student!.getGrade(sport)?.currentGrade ?? 'white';
+    final isWhite = gradeId == 'white';
     final statusColors = {
       StudentStatus.active: AppTheme.success,
       StudentStatus.inactive: AppTheme.textSecondary,
@@ -361,7 +358,7 @@ class _MonitorStudentDetailScreenState
       child: Text(
         _student!.status.label,
         style: TextStyle(
-          color: _student!.currentBelt == 'white' ? Colors.black : Colors.white,
+          color: isWhite ? Colors.black : Colors.white,
           fontWeight: FontWeight.w500,
         ),
       ),
@@ -429,28 +426,44 @@ class _MonitorStudentDetailScreenState
             ]),
           ],
 
-          // Medical Info
-          if (_student!.medicalNotes != null &&
-              _student!.medicalNotes!.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            _buildSectionTitle('Observacoes Medicas'),
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.divider),
-              ),
-              child: Text(
-                _student!.medicalNotes!,
-                style: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-            ),
-          ],
+          // Medical Info — dado sensível: só staff real (admin ou quem pode
+          // gerenciar alunos) vê. Monitores comuns não têm acesso.
+          Builder(
+            builder: (context) {
+              if (_student!.medicalNotes == null ||
+                  _student!.medicalNotes!.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              final currentUser = ref.watch(currentUserProvider).valueOrNull;
+              final canSeeMedical = currentUser != null &&
+                  (currentUser.isAdmin ||
+                      currentUser.hasPermission('students:manage'));
+              if (!canSeeMedical) return const SizedBox.shrink();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 24),
+                  _buildSectionTitle('Observacoes Medicas'),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.divider),
+                    ),
+                    child: Text(
+                      _student!.medicalNotes!,
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
 
           // Turmas section — visible to admins and users with students:manage
           Builder(
@@ -649,11 +662,186 @@ class _MonitorStudentDetailScreenState
     );
   }
 
+  /// Full-width "Adicionar presença" button for the attendance tab. Visible
+  /// only to admins / professors with the 'attendance:take' extra permission.
+  /// Registers a manual presence WITHOUT creating any charge.
+  Widget _buildAddPresenceButton() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: _showAddPresenceDialog,
+          icon: const Icon(LucideIcons.plus, size: 16),
+          label: const Text('Adicionar presença'),
+        ),
+      ),
+    );
+  }
+
+  /// Registers a MANUAL presence for the student — no charge is created. Uses
+  /// [AttendanceService.markManualPresence], which allows multiple presences on
+  /// the same day (non-colliding doc id).
+  void _showAddPresenceDialog() {
+    DateTime selectedDate = DateTime.now();
+    final noteController = TextEditingController();
+    final sports = _student?.getSports() ?? [SportId.bjj];
+    SportId sport = _student?.getPrimarySport() ?? SportId.bjj;
+    final parentContext = context;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Adicionar presença'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Registra uma presença manual para o aluno, sem gerar '
+                      'cobrança.',
+                      style: AppTheme.bodySmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Data',
+                      style: AppTheme.bodySmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: selectedDate,
+                          firstDate: DateTime.now()
+                              .subtract(const Duration(days: 365)),
+                          lastDate: DateTime.now(),
+                        );
+                        if (picked != null) {
+                          setDialogState(() => selectedDate = picked);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: AppTheme.divider),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.calendar,
+                                size: 16, color: AppTheme.textSecondary),
+                            const SizedBox(width: 8),
+                            Text(
+                              DateFormat('dd/MM/yyyy').format(selectedDate),
+                              style: AppTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (sports.length > 1) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        'Esporte',
+                        style: AppTheme.bodySmall
+                            .copyWith(color: AppTheme.textSecondary),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: sports.map((s) {
+                          return ChoiceChip(
+                            label: Text(getSport(s).label),
+                            selected: sport == s,
+                            onSelected: (_) =>
+                                setDialogState(() => sport = s),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: noteController,
+                      decoration: const InputDecoration(
+                        labelText: 'Observação (opcional)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    Navigator.of(dialogContext).pop();
+                    final currentUser =
+                        ref.read(currentUserProvider).valueOrNull;
+                    final note = noteController.text.trim();
+                    try {
+                      await AttendanceService(FirebaseService.academyId)
+                          .markManualPresence(
+                        studentId: widget.studentId,
+                        studentName: _student?.fullName ?? '',
+                        verifiedBy: currentUser?.id ?? '',
+                        verifiedByName: currentUser?.displayName ?? '',
+                        date: selectedDate,
+                        sport: sport.value,
+                        note: note.isEmpty ? null : note,
+                      );
+                    } catch (e) {
+                      if (parentContext.mounted) {
+                        parentContext.showError('Erro ao registrar presença');
+                      }
+                      return;
+                    }
+                    if (parentContext.mounted) {
+                      parentContext.showSuccess('Presença registrada');
+                    }
+                    _loadData();
+                  },
+                  child: const Text('Registrar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildAttendanceTab() {
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    // Even on the monitor (read-only) screen, an admin or a professor with the
+    // 'attendance:take' extra permission can grant a manual presence.
+    final canTakeAttendance = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('attendance:take'));
+
     if (_attendances.isEmpty) {
-      return const PolishedEmptyState(
-        icon: LucideIcons.clipboardX,
-        title: 'Nenhuma presenca registrada',
+      return Column(
+        children: [
+          if (canTakeAttendance) _buildAddPresenceButton(),
+          Expanded(
+            child: PolishedEmptyState(
+              icon: LucideIcons.clipboardX,
+              title: 'Nenhuma presenca registrada',
+              subtitle: canTakeAttendance
+                  ? 'Toque em "Adicionar presença" para registrar uma presença manual.'
+                  : null,
+            ),
+          ),
+        ],
       );
     }
 
@@ -666,9 +854,13 @@ class _MonitorStudentDetailScreenState
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: grouped.length,
+      itemCount: grouped.length + (canTakeAttendance ? 1 : 0),
       itemBuilder: (context, index) {
-        final month = grouped.keys.elementAt(index);
+        if (canTakeAttendance && index == 0) {
+          return _buildAddPresenceButton();
+        }
+        final groupIndex = canTakeAttendance ? index - 1 : index;
+        final month = grouped.keys.elementAt(groupIndex);
         final items = grouped[month]!;
 
         return Column(

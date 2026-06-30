@@ -6,6 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/navigation/nav_catalog.dart';
 import '../../core/navigation/nav_resolver.dart';
+import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../models/academy.dart';
 import '../../providers/auth_provider.dart';
@@ -65,7 +66,9 @@ class AdminShell extends ConsumerWidget {
       exitMessage: 'Pressione voltar novamente para sair',
       child: Scaffold(
         backgroundColor: AppTheme.background,
-        appBar: MediaQuery.of(context).size.width < 768
+        // AppBar mobile só no compact (<600); em medium/expanded o logo + sino
+        // vivem na Rail/Sidebar lateral.
+        appBar: context.isCompact
             ? AppBar(
                 backgroundColor: AppTheme.surface,
                 elevation: 0,
@@ -164,9 +167,13 @@ class AdminShell extends ConsumerWidget {
             Expanded(
               child: Row(
                 children: [
-                  // Sidebar for larger screens
-                  if (MediaQuery.of(context).size.width >= 768)
-                    AdminSidebar(currentPath: location),
+                  // Navegação lateral adaptativa: Sidebar expandida (250px) no
+                  // expanded/large (>=1024); NavigationRail só-ícones (72px) no
+                  // medium (600-1024); nada no compact (usa o BottomNav abaixo).
+                  if (context.isWide)
+                    AdminSidebar(currentPath: location)
+                  else if (context.isMedium)
+                    AdminRail(currentPath: location),
                   // Main content — gentle cross-fade on route change.
                   Expanded(
                     child: AnimatedSwitcher(
@@ -184,7 +191,7 @@ class AdminShell extends ConsumerWidget {
             ),
           ],
         ),
-        bottomNavigationBar: MediaQuery.of(context).size.width < 768
+        bottomNavigationBar: context.isCompact
             ? AdminBottomNav(currentPath: location)
             : null,
       ),
@@ -569,6 +576,175 @@ class _SidebarLockBadge extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Admin NavigationRail — só-ícones (72px) para o degrau `medium` (600–1024).
+/// Mesma fonte do catálogo resolvido da Sidebar; cada entrada vira um ícone com
+/// tooltip. Logo no topo, sino + logout embaixo (paridade com o AppBar mobile).
+class AdminRail extends ConsumerWidget {
+  final String currentPath;
+
+  const AdminRail({super.key, required this.currentPath});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(academySettingsProvider).valueOrNull;
+    final user = ref.watch(currentUserProvider).valueOrNull;
+    final resolved = resolveAdminCatalog(
+      catalog: kAdminNavCatalog,
+      settings: settings,
+      user: user,
+    ).where((r) => !r.isHidden).toList();
+
+    return Container(
+      width: 72,
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(right: BorderSide(color: AppTheme.divider, width: 1)),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 12),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: (settings?.logoUrl ?? '').isEmpty ? AppTheme.primary : null,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: (settings?.logoUrl ?? '').isEmpty
+                ? Center(
+                    child: Text(
+                      settings?.name.isNotEmpty == true
+                          ? settings!.name[0].toUpperCase()
+                          : 'A',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                      ),
+                    ),
+                  )
+                : AppCachedImage(
+                    imageUrl: settings!.logoUrl,
+                    width: 40,
+                    height: 40,
+                    fit: BoxFit.cover,
+                  ),
+          ),
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              children: [
+                for (final r in resolved)
+                  _RailItem(
+                    entry: r.entry,
+                    currentPath: currentPath,
+                    locked: r.isLocked,
+                  ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          _AdminNotificationBell(),
+          IconButton(
+            tooltip: 'Sair',
+            icon: const Icon(Icons.logout, size: 20),
+            onPressed: () async {
+              final confirmed = await FeedbackUtils.showConfirmDialog(
+                context,
+                title: 'Sair da conta',
+                message: 'Tem certeza que deseja sair?',
+                confirmText: 'Sair',
+                icon: Icons.logout,
+              );
+              if (!confirmed) return;
+              await ref.read(authServiceProvider).signOut();
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+/// Item icon-only da Rail: tooltip com o label, realce ativo em pílula, e um
+/// cadeado pequeno quando a feature está bloqueada (discovery).
+class _RailItem extends StatelessWidget {
+  final NavEntry entry;
+  final String currentPath;
+  final bool locked;
+
+  const _RailItem({
+    required this.entry,
+    required this.currentPath,
+    required this.locked,
+  });
+
+  bool get isActive =>
+      currentPath == entry.route || currentPath.startsWith('${entry.route}/');
+
+  @override
+  Widget build(BuildContext context) {
+    final active = isActive && !locked;
+    final color = locked
+        ? AppTheme.textDisabled
+        : active
+            ? AppTheme.primary
+            : AppTheme.textSecondary;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      child: Tooltip(
+        message:
+            locked ? '${entry.label} — ative nas configurações' : entry.label,
+        preferBelow: false,
+        child: Material(
+          color: active
+              ? AppTheme.primary.withValues(alpha: 0.1)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              if (locked && entry.feature != null) {
+                context.go(settingsDeepLinkFor(entry.feature!));
+              } else {
+                context.go(entry.route);
+              }
+            },
+            child: SizedBox(
+              height: 48,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Icon(
+                    active ? (entry.activeIcon ?? entry.icon) : entry.icon,
+                    color: color,
+                    size: 22,
+                  ),
+                  if (locked)
+                    const Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Icon(
+                        LucideIcons.lock,
+                        size: 10,
+                        color: AppTheme.warning,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

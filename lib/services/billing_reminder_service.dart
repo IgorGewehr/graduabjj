@@ -998,6 +998,17 @@ class BillingNotificationService {
     final results = <NotificationResult>[];
     int sent = 0, failed = 0, skipped = 0;
 
+    // AUDITORIA (idempotency): unifica o dedup por estágio com o cron
+    // server-side. O envio em massa pelo app antes NÃO lia nem gravava
+    // lastReminderStage, duplicando a cobrança com o cron e permitindo
+    // reenvio ilimitado do mesmo estágio. Agora lê o lastReminderStage atual
+    // de cada financial direto do Firestore e só envia/conta um estágio que
+    // ainda não foi coberto, gravando o marcador após o envio.
+    final financialsRef = FirebaseFirestore.instance
+        .collection('academies')
+        .doc(academyId)
+        .collection('financials');
+
     for (final item in financials) {
       final studentId = item['studentId'] as String? ?? '';
       final contact = contacts[studentId];
@@ -1013,6 +1024,27 @@ class BillingNotificationService {
       final dueDate = item['dueDate'] as DateTime;
       final daysOverdue = item['daysOverdue'] as int? ?? 0;
       final financialId = item['id'] as String? ?? '';
+
+      // AUDITORIA (idempotency): mesmo critério do cron (server_functions.js
+      // sendBillingReminderWhatsApp) — se o estágio atual já foi enviado
+      // (lastReminderStage == stage), pula sem reenviar. Em caso de falha de
+      // leitura, é conservador e NÃO pula (prefere enviar a perder a cobrança,
+      // já que sendWhatsApp em si é o ponto de envio). Itens sem id não têm
+      // como deduplicar, então seguem o fluxo normal.
+      String? lastReminderStage;
+      if (financialId.isNotEmpty) {
+        try {
+          final snap = await financialsRef.doc(financialId).get();
+          final data = snap.data();
+          lastReminderStage = data?['lastReminderStage'] as String?;
+        } catch (_) {
+          lastReminderStage = null;
+        }
+      }
+      if (lastReminderStage == stage.value) {
+        skipped++;
+        continue;
+      }
 
       final msg = customMessage ??
           generateWhatsAppMessage(
@@ -1038,6 +1070,19 @@ class BillingNotificationService {
       results.add(result);
       if (result.success) {
         sent++;
+        // AUDITORIA (idempotency): grava o marcador de dedup só quando o envio
+        // de fato ocorreu, idêntico ao cron, para que o mesmo estágio não seja
+        // reenviado nem pelo app nem pelo cron no mesmo período.
+        if (financialId.isNotEmpty) {
+          try {
+            await financialsRef.doc(financialId).update({
+              'lastReminderStage': stage.value,
+              'lastReminderAt': Timestamp.fromDate(DateTime.now()),
+            });
+          } catch (_) {
+            // best-effort: marcador de dedup é não-crítico.
+          }
+        }
       } else {
         failed++;
       }

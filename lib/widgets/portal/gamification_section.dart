@@ -23,8 +23,13 @@ class GamificationSection extends ConsumerWidget {
         student.monthlyAttendanceGoal, settings?.monthlyAttendanceGoal ?? 0);
     final monthCount =
         ref.watch(studentMonthlyAttendanceProvider(student.id)).valueOrNull ?? 0;
-    final rank =
-        ref.watch(studentMonthlyRankProvider(student.id)).valueOrNull;
+    // Privacidade: respeita rankingVisibleToStudents — se a academia escondeu o
+    // ranking dos alunos, NÃO vaza a posição aqui (meta mensal e conquistas
+    // seguem). Default true (academias legadas). Espelha o gate do ranking_screen.
+    final rankingVisible = settings?.rankingVisibleToStudents ?? true;
+    final rank = rankingVisible
+        ? ref.watch(studentMonthlyRankProvider(student.id)).valueOrNull
+        : null;
     final achievements =
         ref.watch(studentAchievementsProvider(student.id)).valueOrNull ??
             const [];

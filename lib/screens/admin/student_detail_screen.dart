@@ -18,6 +18,7 @@ import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
 import '../../services/belt_progression_service.dart';
 import '../../services/services.dart';
+import '../../services/team_service.dart';
 import '../../widgets/common/animated_belt.dart';
 import '../../widgets/common/belt_badge.dart';
 import '../../widgets/common/profile_photo_picker.dart';
@@ -302,82 +303,115 @@ class _AdminStudentDetailScreenState
   }
 
   Widget _buildSliverAppBar() {
+    // Gate AppBar/menu actions by permission (admin passa em tudo via
+    // hasPermission, mas mantemos isAdmin explícito por clareza).
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    final canEdit = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('students:edit'));
+    final canPromote = currentUser != null &&
+        (currentUser.isAdmin ||
+            currentUser.hasPermission('graduation:manage'));
+    final canManage = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('students:manage'));
+    final canDelete = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('students:delete'));
+
+    final menuItems = <PopupMenuEntry<String>>[
+      if (canPromote)
+        const PopupMenuItem(
+          value: 'promote',
+          child: Row(
+            children: [
+              Icon(Icons.military_tech),
+              SizedBox(width: 8),
+              Text('Graduar'),
+            ],
+          ),
+        ),
+      if (canManage)
+        PopupMenuItem(
+          value: 'toggle_status',
+          child: Row(
+            children: [
+              Icon(
+                _student!.status == StudentStatus.active
+                    ? Icons.person_off
+                    : Icons.person,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _student!.status == StudentStatus.active
+                    ? 'Desativar'
+                    : 'Ativar',
+              ),
+            ],
+          ),
+        ),
+      // Only show if student doesn't have a linked account
+      if (canManage && _student!.linkedUserId == null)
+        const PopupMenuItem(
+          value: 'generate_code',
+          child: Row(
+            children: [
+              Icon(LucideIcons.link),
+              SizedBox(width: 8),
+              Text('Gerar Codigo de Acesso'),
+            ],
+          ),
+        ),
+      // Transferir (saiu da academia) — só para quem ainda não saiu.
+      if (canManage && _student!.status != StudentStatus.transferred)
+        const PopupMenuItem(
+          value: 'transfer',
+          child: Row(
+            children: [
+              Icon(LucideIcons.logOut),
+              SizedBox(width: 8),
+              Text('Marcar como transferido'),
+            ],
+          ),
+        ),
+      if (canDelete)
+        const PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_forever, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Apagar definitivamente',
+                  style: TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
+    ];
+
     return SliverAppBar(
       expandedHeight: 200,
       pinned: true,
       actions: [
-        IconButton(
-          icon: const Icon(Icons.edit),
-          onPressed: () async {
-            final result = await context.push(
-              '/admin/alunos/${widget.studentId}/editar',
-            );
-            if (result == true && mounted) {
-              _loadData();
-            }
-          },
-        ),
-        PopupMenuButton<String>(
-          onSelected: (value) {
-            if (value == 'promote') _showPromoteDialog();
-            if (value == 'toggle_status') _toggleStatus();
-            if (value == 'generate_code') _generateLinkCode();
-            if (value == 'delete') _showHardDeleteConfirmation();
-          },
-          itemBuilder: (context) => [
-            const PopupMenuItem(
-              value: 'promote',
-              child: Row(
-                children: [
-                  Icon(Icons.military_tech),
-                  SizedBox(width: 8),
-                  Text('Graduar'),
-                ],
-              ),
-            ),
-            PopupMenuItem(
-              value: 'toggle_status',
-              child: Row(
-                children: [
-                  Icon(
-                    _student!.status == StudentStatus.active
-                        ? Icons.person_off
-                        : Icons.person,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _student!.status == StudentStatus.active
-                        ? 'Desativar'
-                        : 'Ativar',
-                  ),
-                ],
-              ),
-            ),
-            // Only show if student doesn't have a linked account
-            if (_student!.linkedUserId == null)
-              const PopupMenuItem(
-                value: 'generate_code',
-                child: Row(
-                  children: [
-                    Icon(LucideIcons.link),
-                    SizedBox(width: 8),
-                    Text('Gerar Codigo de Acesso'),
-                  ],
-                ),
-              ),
-            const PopupMenuItem(
-              value: 'delete',
-              child: Row(
-                children: [
-                  Icon(Icons.delete_forever, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('Apagar definitivamente',
-                      style: TextStyle(color: Colors.red)),
-                ],
-              ),
-            ),
-          ],
-        ),
+        if (canEdit)
+          IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () async {
+              final result = await context.push(
+                '/admin/alunos/${widget.studentId}/editar',
+              );
+              if (result == true && mounted) {
+                _loadData();
+              }
+            },
+          ),
+        if (menuItems.isNotEmpty)
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'promote') _showPromoteDialog();
+              if (value == 'toggle_status') _toggleStatus();
+              if (value == 'generate_code') _generateLinkCode();
+              if (value == 'transfer') _showTransferDialog();
+              if (value == 'delete') _showHardDeleteConfirmation();
+            },
+            itemBuilder: (context) => menuItems,
+          ),
       ],
       flexibleSpace: FlexibleSpaceBar(
         background: Container(
@@ -1473,12 +1507,26 @@ class _AdminStudentDetailScreenState
   }
 
   Widget _buildAttendanceTab() {
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    // Presence-only professors (extra permission 'attendance:take') and admins
+    // can grant a manual presence. This is decoupled from any charge.
+    final canTakeAttendance = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('attendance:take'));
+
     if (_attendances.isEmpty) {
-      return const PolishedEmptyState(
-        icon: LucideIcons.clipboardX,
-        title: 'Nenhuma presença registrada',
-        subtitle:
-            'As presenças do aluno aparecerão aqui assim que forem registradas',
+      return Column(
+        children: [
+          if (canTakeAttendance) _buildAddPresenceButton(),
+          Expanded(
+            child: PolishedEmptyState(
+              icon: LucideIcons.clipboardX,
+              title: 'Nenhuma presença registrada',
+              subtitle: canTakeAttendance
+                  ? 'Toque em "Adicionar presença" para registrar uma presença manual.'
+                  : 'As presenças do aluno aparecerão aqui assim que forem registradas',
+            ),
+          ),
+        ],
       );
     }
 
@@ -1502,6 +1550,7 @@ class _AdminStudentDetailScreenState
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (canTakeAttendance) _buildAddPresenceButton(),
         if (showSportFilter) _buildAttendanceSportFilter(sports),
         if (grouped.isEmpty)
           const Padding(
@@ -1596,7 +1645,175 @@ class _AdminStudentDetailScreenState
     );
   }
 
+  /// Full-width "Adicionar presença" button shown at the top of the attendance
+  /// tab. Visible only to admins / professors with the 'attendance:take' extra
+  /// permission. Registers a manual presence WITHOUT creating any charge.
+  Widget _buildAddPresenceButton() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: _showAddPresenceDialog,
+          icon: const Icon(LucideIcons.plus, size: 16),
+          label: const Text('Adicionar presença'),
+        ),
+      ),
+    );
+  }
+
+  /// Registers a MANUAL presence for the student — no charge is created. Lets a
+  /// professor confirm the student trained (extra session, make-up, courtesy).
+  /// Uses [AttendanceService.markManualPresence], which allows multiple
+  /// presences on the same day (non-colliding doc id).
+  void _showAddPresenceDialog() {
+    DateTime selectedDate = DateTime.now();
+    final noteController = TextEditingController();
+    final sports = _student?.getSports() ?? [SportId.bjj];
+    SportId sport = _student?.getPrimarySport() ?? SportId.bjj;
+    final parentContext = context;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Adicionar presença'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Registra uma presença manual para o aluno, sem gerar '
+                      'cobrança.',
+                      style: AppTheme.bodySmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Data',
+                      style: AppTheme.bodySmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: selectedDate,
+                          firstDate: DateTime.now()
+                              .subtract(const Duration(days: 365)),
+                          lastDate: DateTime.now(),
+                        );
+                        if (picked != null) {
+                          setDialogState(() => selectedDate = picked);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: AppTheme.divider),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.calendar,
+                                size: 16, color: AppTheme.textSecondary),
+                            const SizedBox(width: 8),
+                            Text(
+                              DateFormat('dd/MM/yyyy').format(selectedDate),
+                              style: AppTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (sports.length > 1) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        'Esporte',
+                        style: AppTheme.bodySmall
+                            .copyWith(color: AppTheme.textSecondary),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: sports.map((s) {
+                          return ChoiceChip(
+                            label: Text(getSport(s).label),
+                            selected: sport == s,
+                            onSelected: (_) =>
+                                setDialogState(() => sport = s),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: noteController,
+                      decoration: const InputDecoration(
+                        labelText: 'Observação (opcional)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    Navigator.of(dialogContext).pop();
+                    final currentUser =
+                        ref.read(currentUserProvider).valueOrNull;
+                    final note = noteController.text.trim();
+                    try {
+                      await AttendanceService(FirebaseService.academyId)
+                          .markManualPresence(
+                        studentId: widget.studentId,
+                        studentName: _student?.fullName ?? '',
+                        verifiedBy: currentUser?.id ?? '',
+                        verifiedByName: currentUser?.displayName ?? '',
+                        date: selectedDate,
+                        sport: sport.value,
+                        note: note.isEmpty ? null : note,
+                      );
+                    } catch (e) {
+                      if (parentContext.mounted) {
+                        parentContext.showError('Erro ao registrar presença');
+                      }
+                      return;
+                    }
+                    if (parentContext.mounted) {
+                      parentContext.showSuccess('Presença registrada');
+                    }
+                    _loadData();
+                  },
+                  child: const Text('Registrar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildFinancialTab() {
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    // Creating charges (avulsa / aula particular) requires the
+    // 'financial:create' extra permission (admins always allowed). A
+    // presence-only professor can still grant presences from the attendance
+    // tab, but never opens a charge dialog from here.
+    final canCreateCharge = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('financial:create'));
+
     final aulasParticulares =
         _payments.where((p) => p.isPrivateLesson).toList();
     final mensalidades = _payments
@@ -1608,9 +1825,11 @@ class _AdminStudentDetailScreenState
       return PolishedEmptyState(
         icon: LucideIcons.dollarSign,
         title: 'Nenhum pagamento registrado',
-        subtitle: 'Crie uma cobrança avulsa para começar.',
-        actionLabel: 'Cobrança Avulsa',
-        onAction: _showAvulsaPaymentDialog,
+        subtitle: canCreateCharge
+            ? 'Crie uma cobrança avulsa para começar.'
+            : 'As cobranças do aluno aparecerão aqui.',
+        actionLabel: canCreateCharge ? 'Cobrança Avulsa' : null,
+        onAction: canCreateCharge ? _showAvulsaPaymentDialog : null,
       );
     }
 
@@ -1658,14 +1877,17 @@ class _AdminStudentDetailScreenState
                           ),
                         ),
                       ),
-                      GestureDetector(
-                        onTap: () => _showCustomValueDialog(plan),
-                        child: const Icon(
-                          LucideIcons.pencil,
-                          size: 18,
-                          color: AppTheme.textSecondary,
+                      // Editar valor custom / dia de vencimento é admin-only
+                      // (a regra de Firestore também é admin-only).
+                      if (currentUser?.isAdmin == true)
+                        GestureDetector(
+                          onTap: () => _showCustomValueDialog(plan),
+                          child: const Icon(
+                            LucideIcons.pencil,
+                            size: 18,
+                            color: AppTheme.textSecondary,
+                          ),
                         ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -1767,23 +1989,25 @@ class _AdminStudentDetailScreenState
               ),
             ),
             const Spacer(),
-            GestureDetector(
-              onTap: _showAvulsaPaymentDialog,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(LucideIcons.plus, size: 14, color: AppTheme.primary),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Adicionar',
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.primary,
-                      fontWeight: FontWeight.w600,
+            if (canCreateCharge)
+              GestureDetector(
+                onTap: _showAvulsaPaymentDialog,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(LucideIcons.plus,
+                        size: 14, color: AppTheme.primary),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Adicionar',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
           ],
         ),
         const SizedBox(height: 8),
@@ -1812,23 +2036,25 @@ class _AdminStudentDetailScreenState
               ),
             ),
             const Spacer(),
-            GestureDetector(
-              onTap: _showPrivateLessonDialog,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(LucideIcons.plus, size: 14, color: AppTheme.primary),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Aula Particular',
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.primary,
-                      fontWeight: FontWeight.w600,
+            if (canCreateCharge)
+              GestureDetector(
+                onTap: _showPrivateLessonDialog,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(LucideIcons.plus,
+                        size: 14, color: AppTheme.primary),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Aula Particular',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
           ],
         ),
         const SizedBox(height: 8),
@@ -2286,6 +2512,14 @@ class _AdminStudentDetailScreenState
   }
 
   void _showCustomValueDialog(Plan plan) {
+    // Admin-only (alinhado à regra de Firestore).
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser?.isAdmin != true) {
+      if (mounted) {
+        context.showError('Você não tem permissão para esta ação.');
+      }
+      return;
+    }
     final studentValue = plan.getStudentValue(widget.studentId);
     final controller = TextEditingController(
       text: studentValue.toStringAsFixed(2),
@@ -3958,7 +4192,20 @@ class _AdminStudentDetailScreenState
     );
   }
 
+  /// Defesa em profundidade: confirma a permissão antes de executar a ação,
+  /// mesmo que o item de menu já tenha sido gateado na UI.
+  bool _ensurePermission(String permission) {
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    final allowed = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission(permission));
+    if (!allowed && mounted) {
+      context.showError('Você não tem permissão para esta ação.');
+    }
+    return allowed;
+  }
+
   void _showPromoteDialog() {
+    if (!_ensurePermission('graduation:manage')) return;
     final sports = _student!.getSports();
     SportId selectedSport = _student!.getPrimarySport();
     bool isStripe = true;
@@ -4001,6 +4248,24 @@ class _AdminStudentDetailScreenState
                     ),
                   ),
                 ],
+                if (!hasGrades) ...[
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Icon(Icons.info_outline,
+                          size: 18, color: AppTheme.textSecondary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'A modalidade ${getSport(selectedSport).label} '
+                          'não possui sistema de graduação.',
+                          style: AppTheme.bodySmall
+                              .copyWith(color: AppTheme.textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 if (hasGrades) ...[
                   const SizedBox(height: 8),
                   Text(
@@ -4028,7 +4293,11 @@ class _AdminStudentDetailScreenState
                 child: const Text('Cancelar'),
               ),
               FilledButton(
-                onPressed: () async {
+                // Sem sistema de graduação não há o que confirmar: o botão
+                // fica desativado para não fingir um sucesso (confete + msg).
+                onPressed: !hasGrades
+                    ? null
+                    : () async {
                   try {
                     final service = BeltProgressionService(
                       FirebaseService.academyId,
@@ -4095,6 +4364,7 @@ class _AdminStudentDetailScreenState
   }
 
   void _toggleStatus() async {
+    if (!_ensurePermission('students:manage')) return;
     try {
       final service = StudentService(FirebaseService.academyId);
       final newStatus = _student!.status == StudentStatus.active
@@ -4118,9 +4388,72 @@ class _AdminStudentDetailScreenState
     }
   }
 
+  /// Marca o aluno como TRANSFERIDO (saiu da academia). A ficha e todo o
+  /// histórico (presenças/financeiro) permanecem para consulta — o aluno só sai
+  /// do roster ativo (vai para "Ex-alunos"). Reusa o CF transferStudent.
+  Future<void> _showTransferDialog() async {
+    if (!_ensurePermission('students:manage')) return;
+    final noteController = TextEditingController();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Marcar como transferido'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${_student!.fullName} sairá do quadro de alunos ativos. O '
+              'histórico de presenças e financeiro CONTINUA disponível para '
+              'consulta na aba "Ex-alunos".',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: noteController,
+              decoration: const InputDecoration(
+                labelText: 'Para onde foi? (opcional)',
+                hintText: 'Ex.: mudou de cidade / outra academia',
+              ),
+              maxLength: 120,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppTheme.info),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    final note = noteController.text.trim();
+    noteController.dispose();
+    if (confirm != true) return;
+    try {
+      await teamService.transferStudent(
+        academyId: FirebaseService.academyId,
+        studentId: _student!.id,
+        note: note.isEmpty ? null : note,
+      );
+      if (mounted) {
+        context.showSuccess('Aluno marcado como transferido.');
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) context.showError('Erro ao transferir: $e');
+    }
+  }
+
   /// Exclusão PERMANENTE (hard delete) com cascata. Para apenas desativar o
   /// aluno (reversível), use a opção "Desativar" do menu (_toggleStatus).
   void _showHardDeleteConfirmation() async {
+    if (!_ensurePermission('students:delete')) return;
     final hasLinkedAccount = _student!.linkedUserId != null;
 
     final firstConfirm = await showDialog<bool>(
@@ -4198,6 +4531,7 @@ class _AdminStudentDetailScreenState
   }
 
   Future<void> _generateLinkCode() async {
+    if (!_ensurePermission('students:manage')) return;
     try {
       final linkCodeService = LinkCodeService(FirebaseService.academyId);
       final linkCode = await linkCodeService.generate(

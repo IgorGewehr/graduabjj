@@ -264,14 +264,11 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     // so we use the ProviderContainer directly instead of ref.
     final container = ProviderScope.containerOf(context);
     final authService = ref.read(authServiceProvider);
-    final academyId = _validatedLinkCode!.academyId;
-    final linkCodeService = LinkCodeService(academyId);
     final cpfDigits = _cpfController.text.replaceAll(RegExp(r'\D'), '');
     final phone = _phoneController.text.replaceAll(RegExp(r'\D'), '');
     final email = _emailController.text.trim();
     final password = _passwordController.text;
     final studentName = _validatedLinkCode!.studentName;
-    final studentId = _validatedLinkCode!.studentId;
     final code = _validatedLinkCode!.code;
 
     // Show full-screen overlay (survives GoRouter rebuilds since it's in app.dart builder)
@@ -279,20 +276,18 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     container.read(isCreatingAccountProvider.notifier).state = true;
 
     try {
-      // Create Firebase account with the student name from the link code
-      // This will also update the student document with linkedUserId and CPF
-      final userCredential = await authService.createAccountWithLinkCode(
+      // Create the account and join the academy through the joinAcademy Cloud
+      // Function — it resolves studentId/academyId from the code, claims the
+      // orphan student record (incl. cpf/phone) and marks the code used, all
+      // server-side. The UI/flow here is unchanged.
+      await authService.createAccountWithLinkCode(
         email,
         password,
         studentName,
-        studentId,
-        academyId,
-        cpfDigits.isNotEmpty ? cpfDigits : null,
+        code,
+        cpf: cpfDigits.isNotEmpty ? cpfDigits : null,
         phone: phone.isNotEmpty ? phone : null,
       );
-
-      // Mark the code as used
-      await linkCodeService.markAsUsed(code, userCredential.user!.uid);
 
       // All Firestore documents are created. Force Riverpod to reload user data.
       container.invalidate(currentUserProvider);
@@ -667,19 +662,24 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
           if (_errorMessage != null) const SizedBox(height: 24),
 
-          // Name field (read-only, from link code)
-          TextFormField(
-            initialValue: _validatedLinkCode!.studentName,
-            enabled: false,
-            decoration: InputDecoration(
-              labelText: 'Nome',
-              prefixIcon: const Icon(LucideIcons.user, size: 20),
-              filled: true,
-              fillColor: AppTheme.surface,
-            ),
-          ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.1),
-
-          const SizedBox(height: 16),
+          // Name field (read-only, from link code) — ALUNO apenas. Em modo
+          // instrutor _validatedLinkCode é null e o professor tem o próprio
+          // campo "Nome completo" abaixo; renderizar este campo incondicional-
+          // mente crashava o cadastro do professor (causa da TELA BRANCA no
+          // onboarding por convite).
+          if (!_isInstructorMode) ...[
+            TextFormField(
+              initialValue: _validatedLinkCode!.studentName,
+              enabled: false,
+              decoration: InputDecoration(
+                labelText: 'Nome',
+                prefixIcon: const Icon(LucideIcons.user, size: 20),
+                filled: true,
+                fillColor: AppTheme.surface,
+              ),
+            ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.1),
+            const SizedBox(height: 16),
+          ],
 
           // Instructor: full name field (student name comes from linkCode)
           if (_isInstructorMode) ...[
@@ -917,7 +917,9 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         const SizedBox(height: 8),
 
         Text(
-          'Sua conta foi vinculada ao aluno ${_validatedLinkCode!.studentName}',
+          _isInstructorMode
+              ? 'Conta de professor criada e vinculada à academia.'
+              : 'Sua conta foi vinculada ao aluno ${_validatedLinkCode!.studentName}',
           style: AppTheme.bodyMedium.copyWith(
             color: AppTheme.textSecondary,
           ),

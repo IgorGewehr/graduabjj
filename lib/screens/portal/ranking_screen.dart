@@ -8,8 +8,10 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/ranking_entry.dart';
+import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/ranking_providers.dart';
+import '../../providers/student_provider.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/feature_disabled_state.dart';
 import '../../widgets/polish/polish.dart';
@@ -18,7 +20,13 @@ import '../../widgets/polish/polish.dart';
 /// Kids) + period and see who trained the most. Each row links to that
 /// student's public profile.
 class RankingScreen extends ConsumerStatefulWidget {
-  const RankingScreen({super.key});
+  /// When true, the screen is opened from the ADMIN/professor side: the
+  /// student-visibility gate (rankingVisibleToStudents) is bypassed — staff
+  /// always see the ranking of THEIR students — the title reflects the staff
+  /// view, and a row tap opens the admin student detail instead of the portal
+  /// public profile.
+  final bool forStaff;
+  const RankingScreen({super.key, this.forStaff = false});
 
   @override
   ConsumerState<RankingScreen> createState() => _RankingScreenState();
@@ -33,18 +41,23 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Defense in depth: even reached via deep link / stale nav, the ranking
+    // Staff (admin/professor) ALWAYS see the ranking of their students — the
+    // rankingVisibleToStudents gate only governs the student portal. Defense in
+    // depth for the portal: even reached via deep link / stale nav, the ranking
     // stays hidden when the academy disabled student visibility. Loading/null
     // resolves to true so it shows by default for legacy academies.
-    final rankingVisible = ref.watch(
-      academySettingsProvider.select(
-        (s) => s.valueOrNull?.rankingVisibleToStudents ?? true,
-      ),
-    );
+    final rankingVisible = widget.forStaff ||
+        ref.watch(
+          academySettingsProvider.select(
+            (s) => s.valueOrNull?.rankingVisibleToStudents ?? true,
+          ),
+        );
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(title: const Text('Ranking de Turmas')),
+      appBar: AppBar(
+        title: Text(widget.forStaff ? 'Ranking dos Alunos' : 'Ranking de Turmas'),
+      ),
       body: !rankingVisible
           ? const _RankingUnavailableState()
           : _buildContent(),
@@ -56,15 +69,36 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
     // appears for multi-modality academies; otherwise the ranking is over the
     // single sport (sport filter stays null = all, which is equivalent).
     final classes = ref.watch(classesProvider).valueOrNull ?? const [];
-    final academySports = (<SportId>{for (final c in classes) c.getSport()}
+    var academySports = (<SportId>{for (final c in classes) c.getSport()}
         .toList()
       ..sort((a, b) => a.index.compareTo(b.index)));
+
+    // Aluno (não-staff) vê SÓ a(s) modalidade(s) e a categoria (adulto/kids) em
+    // que ele está. Staff (admin/professor) continua vendo tudo e escolhendo.
+    final isStudentView = !widget.forStaff;
+    final student =
+        isStudentView ? ref.watch(currentStudentProvider).valueOrNull : null;
+    var effectiveCategory = _category;
+    if (student != null) {
+      final studentSports = student.getSports().toSet();
+      final mine = academySports.where(studentSports.contains).toList();
+      academySports = mine.isNotEmpty ? mine : student.getSports();
+      effectiveCategory = student.category == StudentCategory.kids
+          ? RankingCategory.kids
+          : RankingCategory.adult;
+    }
+
     final showSportSelector = academySports.length > 1;
-    final activeSport = showSportSelector
-        ? ((_selectedSport != null && academySports.contains(_selectedSport))
-            ? _selectedSport
-            : academySports.first)
-        : null;
+    // Staff com 1 modalidade usa sport=null (= todas, equivalente). O aluno
+    // SEMPRE escopa numa modalidade dele (nunca "todas"), mesmo sem seletor.
+    final SportId? activeSport = academySports.isEmpty
+        ? null
+        : (showSportSelector || isStudentView)
+            ? ((_selectedSport != null &&
+                    academySports.contains(_selectedSport))
+                ? _selectedSport
+                : academySports.first)
+            : null;
 
     return Column(
       children: [
@@ -75,18 +109,20 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
             onChanged: (s) => setState(() => _selectedSport = s),
           ),
         _RankingHeader(
-          category: _category,
+          category: effectiveCategory,
           period: _period,
           onCategoryChanged: (c) => setState(() => _category = c),
           onPeriodChanged: (p) => setState(() => _period = p),
+          // Aluno: categoria travada na dele (sem seletor); só staff escolhe.
+          showCategorySelector: widget.forStaff,
         ),
-        Expanded(child: _buildLeaderboard(activeSport)),
+        Expanded(child: _buildLeaderboard(activeSport, effectiveCategory)),
       ],
     );
   }
 
-  Widget _buildLeaderboard(SportId? sport) {
-    final key = (category: _category, period: _period, sport: sport?.value);
+  Widget _buildLeaderboard(SportId? sport, RankingCategory category) {
+    final key = (category: category, period: _period, sport: sport?.value);
     final rankingAsync = ref.watch(classRankingProvider(key));
 
     return RefreshIndicator(
@@ -133,8 +169,11 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
               final entry = entries[i];
               return _RankingTile(
                 entry: entry,
-                onTap: () =>
-                    context.push('/portal/profile/${entry.studentId}'),
+                onTap: () => context.push(
+                  widget.forStaff
+                      ? '/admin/alunos/${entry.studentId}'
+                      : '/portal/profile/${entry.studentId}',
+                ),
               ).entrance(index: i);
             },
           );
@@ -191,12 +230,14 @@ class _RankingHeader extends StatelessWidget {
   final RankingPeriod period;
   final ValueChanged<RankingCategory> onCategoryChanged;
   final ValueChanged<RankingPeriod> onPeriodChanged;
+  final bool showCategorySelector;
 
   const _RankingHeader({
     required this.category,
     required this.period,
     required this.onCategoryChanged,
     required this.onPeriodChanged,
+    this.showCategorySelector = true,
   });
 
   @override
@@ -210,30 +251,33 @@ class _RankingHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Audience segmented control
-          SegmentedButton<RankingCategory>(
-            segments: const [
-              ButtonSegment(
-                value: RankingCategory.general,
-                label: Text('Geral'),
-              ),
-              ButtonSegment(
-                value: RankingCategory.adult,
-                label: Text('Adulto'),
-              ),
-              ButtonSegment(
-                value: RankingCategory.kids,
-                label: Text('Kids'),
-              ),
-            ],
-            selected: {category},
-            showSelectedIcon: false,
-            onSelectionChanged: (set) {
-              HapticFeedback.selectionClick();
-              onCategoryChanged(set.first);
-            },
-          ),
-          const SizedBox(height: 12),
+          // Audience segmented control — só staff escolhe; o aluno tem a
+          // categoria travada na dele, então o seletor fica escondido.
+          if (showCategorySelector) ...[
+            SegmentedButton<RankingCategory>(
+              segments: const [
+                ButtonSegment(
+                  value: RankingCategory.general,
+                  label: Text('Geral'),
+                ),
+                ButtonSegment(
+                  value: RankingCategory.adult,
+                  label: Text('Adulto'),
+                ),
+                ButtonSegment(
+                  value: RankingCategory.kids,
+                  label: Text('Kids'),
+                ),
+              ],
+              selected: {category},
+              showSelectedIcon: false,
+              onSelectionChanged: (set) {
+                HapticFeedback.selectionClick();
+                onCategoryChanged(set.first);
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
           // Period segmented control
           SegmentedButton<RankingPeriod>(
             segments: const [

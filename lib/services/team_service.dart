@@ -74,15 +74,41 @@ class TeamService {
   /// Student joining an academy via a 6-char link code. Used both for
   /// first-time signup and for adding a second/third academy to an existing
   /// account. Returns the academyId resolved server-side.
-  Future<String> joinAcademy(String code) async {
-    final result = await _functions
-        .httpsCallable('joinAcademy')
-        .call({'code': code});
+  Future<String> joinAcademy(String code, {String? cpf, String? phone}) async {
+    final result = await _functions.httpsCallable('joinAcademy').call({
+      'code': code,
+      if (cpf != null && cpf.isNotEmpty) 'cpf': cpf,
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
+    });
     final data = Map<String, dynamic>.from(result.data as Map);
     return data['academyId']?.toString() ?? '';
   }
 
   /// Instructor joining an academy via an 8-char invite code. Same flow as
+  /// Transfere um aluno (saiu da academia). Disparado pelo PROFESSOR/admin da
+  /// academia de origem. A ficha vai para status 'transferred' e a associação do
+  /// aluno é arquivada — o histórico (presenças/financeiro) permanece na academia
+  /// para consulta. [note] opcional (ex.: destino).
+  Future<void> transferStudent({
+    required String academyId,
+    required String studentId,
+    String? note,
+  }) async {
+    await _functions.httpsCallable('transferStudent').call({
+      'academyId': academyId,
+      'studentId': studentId,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+  }
+
+  /// O próprio aluno sai de uma academia. Mantém o acesso somente-leitura ao
+  /// histórico dele; arquiva a ficha na academia.
+  Future<void> leaveAcademy(String academyId) async {
+    await _functions
+        .httpsCallable('leaveAcademy')
+        .call({'academyId': academyId});
+  }
+
   /// [joinAcademy] but writes role='instructor' with the extraPermissions
   /// stamped on the code.
   Future<String> redeemInstructorCode(String code) async {

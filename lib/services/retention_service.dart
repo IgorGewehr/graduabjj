@@ -50,6 +50,75 @@ extension RiskLevelExtension on RiskLevel {
   }
 }
 
+/// Auditoria (MED / produto): nível de consequência por inadimplência.
+/// SEGURO POR PADRÃO — o máximo automático é 'warn' (apenas aviso). 'restrict'
+/// NUNCA é aplicado automaticamente; só existe como rótulo para que produto
+/// decida, futuramente e de forma explícita, plugar bloqueios. NENHUM consumidor
+/// deste serviço deve negar check-in/reserva/acesso só por causa deste valor.
+enum DelinquencyConsequence { none, warn, restrict }
+
+extension DelinquencyConsequenceExtension on DelinquencyConsequence {
+  String get value {
+    switch (this) {
+      case DelinquencyConsequence.none:
+        return 'none';
+      case DelinquencyConsequence.warn:
+        return 'warn';
+      case DelinquencyConsequence.restrict:
+        return 'restrict';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case DelinquencyConsequence.none:
+        return 'Sem consequencia';
+      case DelinquencyConsequence.warn:
+        return 'Aviso';
+      case DelinquencyConsequence.restrict:
+        return 'Restricao';
+    }
+  }
+}
+
+/// Política de consequência por academia. SEGURA POR PADRÃO:
+/// - [warnAfterDays]: a partir de quantos dias de atraso exibir um aviso.
+/// - [restrictAfterDays]: a partir de quantos dias de atraso *seria* aplicada a
+///   restrição — porém só tem efeito quando [allowAutoRestrict] for true
+///   (default false). Enquanto false, o helper jamais retorna 'restrict'.
+/// NOTA DE REVISÃO: habilitar [allowAutoRestrict] é decisão de produto e exige
+/// wire-up explícito nas telas de check-in/reserva (outros arquivos/grupos).
+class DelinquencyPolicy {
+  final int warnAfterDays;
+  final int restrictAfterDays;
+  final bool allowAutoRestrict;
+
+  const DelinquencyPolicy({
+    this.warnAfterDays = 1,
+    this.restrictAfterDays = 30,
+    this.allowAutoRestrict = false, // seguro por padrão: nunca restringe sozinho
+  });
+
+  /// Constrói a política a partir do map de config da academia (ex.: doc da
+  /// academia em Firestore). Campos ausentes caem no default seguro.
+  factory DelinquencyPolicy.fromMap(Map<String, dynamic>? config) {
+    if (config == null) return const DelinquencyPolicy();
+    int asInt(dynamic v, int fallback) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? fallback;
+      return fallback;
+    }
+
+    return DelinquencyPolicy(
+      warnAfterDays: asInt(config['delinquencyWarnAfterDays'], 1),
+      restrictAfterDays: asInt(config['delinquencyRestrictAfterDays'], 30),
+      // só restringe se a academia EXPLICITAMENTE ligou a flag.
+      allowAutoRestrict: config['delinquencyAllowAutoRestrict'] == true,
+    );
+  }
+}
+
 /// Risk Factor - a single factor contributing to a student's risk score
 class RiskFactor {
   final String name;
@@ -236,8 +305,13 @@ class RetentionService {
     totalScore += inactivityScore;
 
     // --- Factor 3: Overdue Payments (weight 20) ---
+    // Auditoria (LOW): antes contava só status=='overdue', herdando o furo da
+    // detecção (um doc com dueDate no passado e status 'pending' não entrava).
+    // Agora usa a mesma regra canônica do model Payment.isOverdue: vencido =
+    // dueDate no passado E status fora de {paid, cancelled}. Retrocompatível:
+    // docs já marcados 'overdue' (com dueDate passada) continuam contando.
     final overdueFinancials =
-        financials.where((f) => (f['status'] ?? '') == 'overdue').toList();
+        financials.where((f) => _isFinancialOverdue(f, now)).toList();
     final overdueCount = overdueFinancials.length;
 
     int paymentScore = 0;
@@ -319,6 +393,64 @@ class RetentionService {
       attendanceTrend: attendanceTrend,
       monthsAtAcademy: monthsAtAcademy,
     );
+  }
+
+  // ============================================
+  // Delinquency Consequence (Auditoria MED / produto)
+  // ============================================
+  /// Retorna o NÍVEL de consequência por inadimplência de um aluno, derivado dos
+  /// dias máximos de atraso entre seus financials e da [policy] da academia.
+  ///
+  /// SEGURO POR PADRÃO: o teto automático é 'warn'. 'restrict' só é retornado se
+  /// [policy.allowAutoRestrict] estiver explicitamente ligado pela academia —
+  /// caso contrário, mesmo com atraso alto, devolve 'warn'. Este helper APENAS
+  /// classifica; não bloqueia nada. Para plugar bloqueio de check-in/reserva no
+  /// futuro, o consumidor (telas de check-in/reserva — outros arquivos) deve
+  /// checar `== DelinquencyConsequence.restrict` e então negar a ação. O wire-up
+  /// do bloqueio é decisão de produto (revisar antes de habilitar).
+  DelinquencyConsequence consequenceForStudent(
+    List<Map<String, dynamic>> financials, {
+    DelinquencyPolicy policy = const DelinquencyPolicy(),
+    DateTime? now,
+  }) {
+    final reference = now ?? DateTime.now();
+    final days = maxDaysOverdue(financials, now: reference);
+    return consequenceForDaysOverdue(days, policy: policy);
+  }
+
+  /// Mapeia dias de atraso -> consequência respeitando a política segura.
+  DelinquencyConsequence consequenceForDaysOverdue(
+    int daysOverdue, {
+    DelinquencyPolicy policy = const DelinquencyPolicy(),
+  }) {
+    if (daysOverdue <= 0) return DelinquencyConsequence.none;
+
+    // 'restrict' só quando a academia habilitou explicitamente. Enquanto a flag
+    // estiver desligada (default), rebaixa para 'warn' — nunca bloqueia sozinho.
+    if (policy.allowAutoRestrict && daysOverdue >= policy.restrictAfterDays) {
+      return DelinquencyConsequence.restrict;
+    }
+    if (daysOverdue >= policy.warnAfterDays) {
+      return DelinquencyConsequence.warn;
+    }
+    return DelinquencyConsequence.none;
+  }
+
+  /// Maior atraso (em dias) entre os financials vencidos do aluno. 0 se nenhum.
+  int maxDaysOverdue(
+    List<Map<String, dynamic>> financials, {
+    DateTime? now,
+  }) {
+    final reference = now ?? DateTime.now();
+    int worst = 0;
+    for (final f in financials) {
+      if (!_isFinancialOverdue(f, reference)) continue;
+      final dueDate = _readDate(f, 'dueDate');
+      if (dueDate == null) continue;
+      final d = reference.difference(dueDate).inDays;
+      if (d > worst) worst = d;
+    }
+    return worst;
   }
 
   // ============================================
@@ -404,6 +536,31 @@ class RetentionService {
     if (raw is Timestamp) return raw.toDate();
     if (raw is String) return DateTime.tryParse(raw);
     return null;
+  }
+
+  /// Lê um campo de data arbitrário (Timestamp/DateTime/String) de um map.
+  DateTime? _readDate(Map<String, dynamic> record, String key) {
+    final raw = record[key];
+    if (raw == null) return null;
+    if (raw is DateTime) return raw;
+    if (raw is Timestamp) return raw.toDate();
+    if (raw is String) return DateTime.tryParse(raw);
+    return null;
+  }
+
+  /// Auditoria (LOW): regra canônica de "vencido" para um financial bruto (map),
+  /// espelhando Payment.isOverdue — dueDate no passado E status fora de
+  /// {paid, cancelled}. Mantém compat: se não houver dueDate mas o status já for
+  /// 'overdue', conta como vencido (não perde dados legados pré-filtrados).
+  bool _isFinancialOverdue(Map<String, dynamic> financial, DateTime now) {
+    final status = (financial['status'] ?? '').toString();
+    if (status == 'paid' || status == 'cancelled') return false;
+    final dueDate = _readDate(financial, 'dueDate');
+    if (dueDate != null) {
+      return dueDate.isBefore(now);
+    }
+    // Fallback retrocompatível: docs sem dueDate mas já marcados 'overdue'.
+    return status == 'overdue';
   }
 
   /// Calculates the difference in months between two dates.

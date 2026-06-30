@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/responsive.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/polish/polish.dart';
@@ -185,30 +186,33 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
             )
           : RefreshIndicator(
               onRefresh: _loadData,
-              child: CustomScrollView(
-                slivers: [
-                  const SliverToBoxAdapter(child: SizedBox(height: 16)),
-                  SliverToBoxAdapter(child: _buildHeader()),
-                  SliverToBoxAdapter(child: _buildMonthSelector()),
+              child: ContentBounded(
+                maxWidth: kContentMaxWidthList,
+                child: CustomScrollView(
+                  slivers: [
+                    const SliverToBoxAdapter(child: SizedBox(height: 16)),
+                    SliverToBoxAdapter(child: _buildHeader()),
+                    SliverToBoxAdapter(child: _buildMonthSelector()),
 
-                  // Stats Grid
-                  SliverToBoxAdapter(child: _buildStatsGrid()),
+                    // Stats Grid
+                    SliverToBoxAdapter(child: _buildStatsGrid()),
 
-                  // Tab Bar
-                  SliverToBoxAdapter(child: _buildTabBar()),
+                    // Tab Bar
+                    SliverToBoxAdapter(child: _buildTabBar()),
 
-                  // Tab Content
-                  SliverFillRemaining(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildPlansTab(),
-                        _buildPaymentsTab(),
-                        _buildReportsTab(),
-                      ],
+                    // Tab Content
+                    SliverFillRemaining(
+                      child: TabBarView(
+                        controller: _tabController,
+                        children: [
+                          _buildPlansTab(),
+                          _buildPaymentsTab(),
+                          _buildReportsTab(),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
     );
@@ -2506,7 +2510,8 @@ class _StudentToggleCard extends StatelessWidget {
               ),
               child: Center(
                 child: Text(
-                  student.fullName[0].toUpperCase(),
+                  (student.fullName.isNotEmpty ? student.fullName[0] : '?')
+                      .toUpperCase(),
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 16,

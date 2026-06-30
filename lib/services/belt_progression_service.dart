@@ -832,6 +832,14 @@ class BeltProgressionService {
     required String promotedByName,
     String? notes,
     SportId sportId = SportId.bjj,
+    // Auditoria [MED race-condition]: quando informado, a progressão e a
+    // conquista usam IDs DETERMINÍSTICOS derivados desta chave, escritos em
+    // transação com create-if-absent. Assim duas promoções concorrentes para
+    // o MESMO alvo (ex.: presenças simultâneas em 2 aparelhos) colapsam em uma
+    // só — sem docs duplicados de beltProgressions nem conquistas públicas
+    // duplicadas. Ausente (null) preserva o comportamento legado (auto-id),
+    // usado pela promoção manual do admin onde a repetição é intencional.
+    String? idempotencyKey,
   }) async {
     // Get current student data
     final studentDoc = await _collections.student(studentId).get();
@@ -876,9 +884,9 @@ class BeltProgressionService {
 
     final sportLabel = getSport(sportId).label;
     final gradeLabelStr = getGradeLabel(sportId, newBelt);
+    final isBeltChange = currentBelt != newBelt;
 
-    // Create progression record
-    final progressionRef = await _progressionsRef.add({
+    final progressionPayload = <String, dynamic>{
       'studentId': studentId,
       'previousBelt': currentBelt,
       'previousStripes': currentStripes,
@@ -892,23 +900,9 @@ class BeltProgressionService {
       'notes': notes,
       'sport': sportId.value,
       'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    // Update student — always update legacy fields for BJJ
-    final updateData = <String, dynamic>{
-      'updatedAt': FieldValue.serverTimestamp(),
-      'sportData.${sportId.value}.currentGrade': newBelt,
-      'sportData.${sportId.value}.currentStripes': newStripes,
     };
-    if (sportId == SportId.bjj) {
-      updateData['currentBelt'] = newBelt;
-      updateData['currentStripes'] = newStripes;
-    }
-    await _collections.student(studentId).update(updateData);
 
-    // Create achievement
-    final isBeltChange = currentBelt != newBelt;
-    await _achievementsRef.add({
+    final achievementPayload = <String, dynamic>{
       'studentId': studentId,
       'studentName': studentName,
       'type': isBeltChange ? 'graduation' : 'stripe',
@@ -925,7 +919,52 @@ class BeltProgressionService {
       'isPublic': true,
       'createdAt': FieldValue.serverTimestamp(),
       'createdBy': promotedBy,
-    });
+    };
+
+    // Update student — always update legacy fields for BJJ. Idempotente por
+    // natureza (mesmo alvo → mesmo estado final), então fica fora da transação
+    // de promoção e roda igual nos dois caminhos.
+    final updateData = <String, dynamic>{
+      'updatedAt': FieldValue.serverTimestamp(),
+      'sportData.${sportId.value}.currentGrade': newBelt,
+      'sportData.${sportId.value}.currentStripes': newStripes,
+    };
+    if (sportId == SportId.bjj) {
+      updateData['currentBelt'] = newBelt;
+      updateData['currentStripes'] = newStripes;
+    }
+
+    // Auditoria [MED race-condition]: caminho idempotente. Com idempotencyKey,
+    // a progressão e a conquista recebem IDs determinísticos e são escritas em
+    // UMA transação com create-if-absent — se a progressão já existe (outra
+    // chamada concorrente venceu a corrida), abortamos sem duplicar nada e
+    // retornamos o doc existente.
+    if (idempotencyKey != null) {
+      final progressionRef = _progressionsRef.doc('promo_$idempotencyKey');
+      final achievementRef = _achievementsRef.doc('promo_$idempotencyKey');
+      // A progressão e a conquista só são criadas quando ainda NÃO existem (uma
+      // chamada concorrente que perdeu a corrida vira no-op nesses dois sets, sem
+      // duplicar). Já o update do aluno é IDEMPOTENTE (define o grau-alvo) e é
+      // aplicado SEMPRE — assim, se o doc de progressão já existir mas o aluno
+      // tiver sido revertido/corrigido depois, o estado final do aluno fica
+      // sempre consistente com o alvo (em vez de um no-op total).
+      await FirebaseService.firestore.runTransaction((tx) async {
+        final existing = await tx.get(progressionRef);
+        if (!existing.exists) {
+          tx.set(progressionRef, progressionPayload);
+          tx.set(achievementRef, achievementPayload);
+        }
+        tx.update(_collections.student(studentId), updateData);
+      });
+      final doc = await progressionRef.get();
+      return BeltProgression.fromFirestore(doc);
+    }
+
+    // Caminho legado (sem chave): promoção manual do admin. Mantém auto-id para
+    // preservar repetições intencionais (ex.: graus sucessivos) sem colisão.
+    final progressionRef = await _progressionsRef.add(progressionPayload);
+    await _collections.student(studentId).update(updateData);
+    await _achievementsRef.add(achievementPayload);
 
     final doc = await progressionRef.get();
     return BeltProgression.fromFirestore(doc);

@@ -980,6 +980,8 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         return AppTheme.textDisabled;
       case StudentStatus.suspended:
         return AppTheme.error;
+      case StudentStatus.transferred:
+        return AppTheme.info;
     }
   }
 

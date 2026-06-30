@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
@@ -763,6 +764,55 @@ class StoreService {
     return order;
   }
 
+  /// Auditoria MP: ao marcar um pedido como pago manualmente (cash/offline), o
+  /// PIX vivo cunhado no Mercado Pago continuaria pagável → janela de cobrança
+  /// dupla (webhook trataria como duplicatePayment). Espelha o cancelamento
+  /// server-side da aula particular cash (PaymentService.markPrivateLessonGiven):
+  /// cancela o PIX no MP (best-effort, nunca bloqueia o mark-paid) e limpa os
+  /// campos pix* do doc, tornando o código impagável. Retrocompatível: pedidos
+  /// sem PIX cunhado ou já expirado simplesmente não fazem nada.
+  Future<void> _killLivePixOnPaid(String orderId) async {
+    final docRef = _ordersRef.doc(orderId);
+    final snap = await docRef.get();
+    if (!snap.exists) return;
+    final data = snap.data() as Map<String, dynamic>?;
+    if (data == null) return;
+
+    final gatewayPaymentId = data['gatewayPaymentId'] as String?;
+    final pixCode = data['pixCode'] as String?;
+    final expiresAt = data['pixExpiresAt'];
+    final expiresMs = expiresAt is Timestamp
+        ? expiresAt.toDate().millisecondsSinceEpoch
+        : 0;
+    final hasLivePix = gatewayPaymentId != null &&
+        gatewayPaymentId.isNotEmpty &&
+        pixCode != null &&
+        pixCode.isNotEmpty &&
+        expiresMs > DateTime.now().millisecondsSinceEpoch;
+
+    if (!hasLivePix) return;
+
+    // Limpa o PIX no doc ANTES de cancelar no gateway (mirrors mpMktSettle):
+    // mesmo que o cancelamento remoto falhe, o código local some.
+    await docRef.update({
+      'pixCode': FieldValue.delete(),
+      'pixQrCode': FieldValue.delete(),
+      'pixTicketUrl': FieldValue.delete(),
+      'pixExpiresAt': FieldValue.delete(),
+    });
+
+    // Best-effort: cancela o PIX aberto no MP (callable cancelMpPix, admin-gated).
+    // Nunca bloqueia o mark-paid se o cancelamento falhar.
+    try {
+      await FirebaseFunctions.instance.httpsCallable('cancelMpPix').call({
+        'academyId': academyId,
+        'paymentId': gatewayPaymentId,
+      });
+    } catch (e) {
+      print('[StoreService] cancelMpPix falhou (non-fatal): $e');
+    }
+  }
+
   /// Update order status
   Future<StoreOrder> updateOrderStatus(
     String id,
@@ -799,6 +849,10 @@ class StoreService {
           await decrementStock(item.productId, item.quantity);
         }
       }
+
+      // Auditoria MP: mark-paid manual deve invalidar o PIX vivo no gateway
+      // para fechar a janela de cobrança dupla.
+      await _killLivePixOnPaid(id);
     }
 
     final data = <String, dynamic>{
@@ -827,10 +881,14 @@ class StoreService {
       for (final item in order.items) {
         final product = await getProductById(item.productId);
         if (product != null && product.stockType == StoreStockType.inStock) {
-          await updateStock(
-            item.productId,
-            (product.stockQuantity ?? 0) + item.quantity,
-          );
+          // Auditoria MP: restauração de estoque via increment atômico
+          // (FieldValue.increment), alinhando com decrementStock e o estorno
+          // server-side. Evita perda de increments concorrentes do padrão
+          // anterior read-then-write (updateStock).
+          await _productsRef.doc(item.productId).update({
+            'stockQuantity': FieldValue.increment(item.quantity),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
         }
       }
     }
@@ -871,6 +929,10 @@ class StoreService {
         await decrementStock(item.productId, item.quantity);
       }
     }
+
+    // Auditoria MP: mark-paid manual deve invalidar o PIX vivo no gateway
+    // para fechar a janela de cobrança dupla.
+    await _killLivePixOnPaid(id);
 
     final data = <String, dynamic>{
       'status': StoreOrderStatus.paid.value,

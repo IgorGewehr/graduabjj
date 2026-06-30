@@ -329,6 +329,8 @@ class PaymentService {
             }
             break;
           case PaymentStatus.paid:
+            // Cobrança indevida a reembolsar (needsRefund) não infla o "pago".
+            if (p.isOvercharge) break;
             paidCount++;
             paidTotal += p.value;
             break;
@@ -393,6 +395,8 @@ class PaymentService {
           }
           break;
         case PaymentStatus.paid:
+          // Cobrança indevida a reembolsar (needsRefund) não infla o "pago".
+          if (p.isOvercharge) break;
           paidCount++;
           paidTotal += p.value;
           break;
@@ -654,6 +658,13 @@ class PaymentService {
       // (canonical field, read by the Payment model). The pre-read above still
       // holds the prior gateway/charge id for the PIX cancellation below.
       'paymentGateway': 'manual',
+      // Auditoria MP (double-charge silencioso): apaga o gatewayPaymentId do PIX
+      // original. Se o cancelMpPix abaixo falhar (best-effort) e a família pagar
+      // o PIX ainda em aberto depois, o webhook NÃO pode achar o doc 'paid' com
+      // o MESMO charge id e tratar como no-op idempotente — sem o id, o settle
+      // (server_functions.js:5783/5793) cai no caminho de duplicidade/conciliação
+      // e alerta o admin para reembolsar, em vez de creditar 2x em silêncio.
+      'gatewayPaymentId': FieldValue.delete(),
       'paymentDate': Timestamp.fromDate(paidAt),
       // Kill the live PIX on the doc (mirrors mpMktSettle): an admin marking
       // the charge paid offline must invalidate the already-sent code.
@@ -685,9 +696,46 @@ class PaymentService {
   // Cancel Payment
   // ============================================
   Future<Payment> cancel(String id) async {
-    return update(id, {
+    // Auditoria MP (cobrança fantasma): cancelar NÃO pode deixar o PIX vivo
+    // pagável — senão a família paga uma cobrança que o admin deu por cancelada.
+    // Espelha markAsPaid: pré-lê o gatewayPaymentId ANTES de apagar os campos
+    // pix, invalida o PIX no doc e cancela o PIX no MP (best-effort).
+    // (Assinatura recorrente é cancelada por ação própria — UI de assinatura —,
+    // não por cancelar uma cobrança avulsa do mês.)
+    String? gatewayPaymentId;
+    String? paymentGateway;
+    try {
+      final snap = await _paymentsRef.doc(id).get();
+      final data = snap.data() as Map<String, dynamic>?;
+      gatewayPaymentId = data?['gatewayPaymentId'] as String?;
+      paymentGateway = data?['paymentGateway'] as String?;
+    } catch (_) {
+      // non-fatal: segue o cancel mesmo assim.
+    }
+
+    final payment = await update(id, {
       'status': PaymentStatus.cancelled.value,
+      'gatewayPaymentId': FieldValue.delete(),
+      'pixCode': FieldValue.delete(),
+      'pixQrCode': FieldValue.delete(),
+      'pixTicketUrl': FieldValue.delete(),
+      'pixExpiresAt': FieldValue.delete(),
     });
+
+    if (gatewayPaymentId != null &&
+        gatewayPaymentId.isNotEmpty &&
+        paymentGateway == 'mercadopago') {
+      try {
+        await FirebaseFunctions.instance.httpsCallable('cancelMpPix').call({
+          'academyId': academyId,
+          'paymentId': gatewayPaymentId,
+        });
+      } catch (e) {
+        print('[PaymentService] cancelMpPix on cancel failed (non-fatal): $e');
+      }
+    }
+
+    return payment;
   }
 
   // ============================================

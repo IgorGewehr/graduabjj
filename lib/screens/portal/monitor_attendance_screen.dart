@@ -1208,7 +1208,8 @@ class _AttendanceStudentCard extends StatelessWidget {
               ),
               child: Center(
                 child: Text(
-                  student.fullName[0].toUpperCase(),
+                  (student.fullName.isNotEmpty ? student.fullName[0] : '?')
+                      .toUpperCase(),
                   style: AppTheme.bodyMedium.copyWith(
                     fontWeight: FontWeight.w600,
                     color: AppTheme.textSecondary,

@@ -577,19 +577,16 @@ class StudentService {
   // ============================================
   Future<Map<StudentStatus, int>> getCountByStatus() async {
     final snapshot = await _studentsRef.get();
-    final counts = {
-      StudentStatus.active: 0,
-      StudentStatus.injured: 0,
-      StudentStatus.inactive: 0,
-      StudentStatus.suspended: 0,
-    };
+    // Inicializa TODOS os status (inclui novos como transferred) — senão um
+    // status fora do mapa quebrava com null-check (`counts[status]!`).
+    final counts = {for (final s in StudentStatus.values) s: 0};
 
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       final status = StudentStatusExtension.fromString(
         data['status'] ?? 'active',
       );
-      counts[status] = counts[status]! + 1;
+      counts[status] = (counts[status] ?? 0) + 1;
     }
 
     return counts;

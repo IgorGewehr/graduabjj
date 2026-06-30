@@ -8,6 +8,7 @@ import '../../models/striking_session.dart';
 import '../../providers/providers.dart';
 import '../../services/firebase_service.dart';
 import '../../services/striking_session_service.dart';
+import '../../widgets/feature_disabled_state.dart';
 import '../../widgets/polish/polish.dart';
 import 'cartel_screen.dart';
 import 'combos_view_screen.dart';
@@ -127,6 +128,22 @@ class _StrikingScreenState extends ConsumerState<StrikingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Defense in depth: mesmo acessível por deep link / navegação obsoleta,
+    // a Trocação fica escondida quando a academia desligou a funcionalidade
+    // (espelha a visibilidade no menu, que usa strikingEnabled ?? false).
+    final strikingEnabled = ref.watch(
+      academySettingsProvider.select((s) => s.valueOrNull?.strikingEnabled ?? false),
+    );
+    if (!strikingEnabled) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Trocação')),
+        body: const FeatureDisabledState(
+          icon: LucideIcons.swords,
+          title: 'Trocação indisponível',
+          subtitle: 'Sua academia não está usando a Trocação.',
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Trocação')),
       body: _loading

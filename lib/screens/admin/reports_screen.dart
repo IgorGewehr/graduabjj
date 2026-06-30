@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/responsive.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -721,34 +722,37 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: RefreshIndicator(
-        onRefresh: _loadAllData,
-        child: CustomScrollView(
-          slivers: [
-            // Header
-            SliverToBoxAdapter(child: _buildHeader()),
+      body: ContentBounded(
+        maxWidth: kContentMaxWidthList,
+        child: RefreshIndicator(
+          onRefresh: _loadAllData,
+          child: CustomScrollView(
+            slivers: [
+              // Header
+              SliverToBoxAdapter(child: _buildHeader()),
 
-            // Tabs
-            SliverToBoxAdapter(child: _buildTabBar()),
+              // Tabs
+              SliverToBoxAdapter(child: _buildTabBar()),
 
-            // Content
-            _isLoading
-                ? SliverFillRemaining(child: _buildLoadingState())
-                : SliverToBoxAdapter(
-                    child: SizedBox(
-                      height: MediaQuery.of(context).size.height - 200,
-                      child: TabBarView(
-                        controller: _tabController,
-                        children: [
-                          _buildAttendanceTab(),
-                          _buildFinancialTab(),
-                          _buildStudentsTab(),
-                          _buildRetentionTab(),
-                        ],
+              // Content
+              _isLoading
+                  ? SliverFillRemaining(child: _buildLoadingState())
+                  : SliverToBoxAdapter(
+                      child: SizedBox(
+                        height: MediaQuery.of(context).size.height - 200,
+                        child: TabBarView(
+                          controller: _tabController,
+                          children: [
+                            _buildAttendanceTab(),
+                            _buildFinancialTab(),
+                            _buildStudentsTab(),
+                            _buildRetentionTab(),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-          ],
+            ],
+          ),
         ),
       ),
     );

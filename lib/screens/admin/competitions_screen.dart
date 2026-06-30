@@ -620,6 +620,10 @@ class _AdminCompetitionsScreenState
                                   status: isPast
                                       ? CompetitionStatus.completed
                                       : CompetitionStatus.upcoming,
+                                  createdBy: ref
+                                      .read(currentUserProvider)
+                                      .valueOrNull
+                                      ?.id,
                                 );
 
                                 if (mounted) {
@@ -905,12 +909,20 @@ class _AdminCompetitionsScreenState
   }
 
   void _showCompetitionDetails(Competition competition) {
+    // Derive admin powers from the authenticated user instead of hardcoding
+    // true — anyone who reaches this screen would otherwise get full admin
+    // result/edit/delete actions on the detail screen.
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    final canManage =
+        (currentUser?.isAdmin ?? false) ||
+        (currentUser?.hasPermission('competitions:create') ?? false);
+
     Navigator.of(context)
         .push(
           MaterialPageRoute(
             builder: (context) => CompetitionDetailScreen(
               competitionId: competition.id,
-              isAdmin: true,
+              isAdmin: canManage,
             ),
           ),
         )
@@ -1125,6 +1137,7 @@ class _AdminCompetitionsScreenState
     if (!mounted) return;
 
     Student? selectedStudent;
+    bool isSaving = false;
     final categoryController = TextEditingController();
     final weightController = TextEditingController();
 
@@ -1240,44 +1253,61 @@ class _AdminCompetitionsScreenState
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: () async {
-                        if (selectedStudent == null) {
-                          sheetContext.showWarning('Selecione um aluno');
-                          return;
-                        }
+                      onPressed: isSaving
+                          ? null
+                          : () async {
+                              if (selectedStudent == null) {
+                                sheetContext.showWarning('Selecione um aluno');
+                                return;
+                              }
 
-                        try {
-                          if (_academyId == null) {
-                            sheetContext.showError('Academia nao encontrada');
-                            return;
-                          }
-                          final service = CompetitionEnrollmentService(
-                            _academyId!,
-                          );
-                          await service.enroll(
-                            competitionId: competition.id,
-                            competitionName: competition.name,
-                            studentId: selectedStudent!.id,
-                            studentName: selectedStudent!.fullName,
-                            ageCategory: categoryController.text.isEmpty
-                                ? null
-                                : categoryController.text,
-                            weightCategory: weightController.text.isEmpty
-                                ? null
-                                : weightController.text,
-                          );
+                              setSheetState(() => isSaving = true);
 
-                          if (mounted) {
-                            Navigator.pop(sheetContext);
-                            this.context.showSuccess('Inscricao realizada!');
-                            _loadCompetitions();
-                          }
-                        } catch (e) {
-                          if (mounted) {
-                            this.context.showError('Erro: $e');
-                          }
-                        }
-                      },
+                              try {
+                                if (_academyId == null) {
+                                  setSheetState(() => isSaving = false);
+                                  sheetContext.showError(
+                                    'Academia nao encontrada',
+                                  );
+                                  return;
+                                }
+                                final service = CompetitionEnrollmentService(
+                                  _academyId!,
+                                );
+                                await service.enroll(
+                                  competitionId: competition.id,
+                                  competitionName: competition.name,
+                                  studentId: selectedStudent!.id,
+                                  studentName: selectedStudent!.fullName,
+                                  ageCategory: categoryController.text.isEmpty
+                                      ? null
+                                      : categoryController.text,
+                                  weightCategory: weightController.text.isEmpty
+                                      ? null
+                                      : weightController.text,
+                                );
+
+                                if (mounted) {
+                                  Navigator.pop(sheetContext);
+                                  this.context.showSuccess(
+                                    'Inscricao realizada!',
+                                  );
+                                  _loadCompetitions();
+                                }
+                              } catch (e) {
+                                if (mounted) {
+                                  setSheetState(() => isSaving = false);
+                                }
+                                if (mounted) {
+                                  final msg = e.toString().contains(
+                                        'já está inscrito',
+                                      )
+                                      ? 'Este aluno ja esta inscrito neste campeonato.'
+                                      : 'Erro: $e';
+                                  this.context.showError(msg);
+                                }
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.textPrimary,
                         foregroundColor: Colors.white,
@@ -1286,14 +1316,23 @@ class _AdminCompetitionsScreenState
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(LucideIcons.userPlus, size: 20),
-                          const SizedBox(width: 8),
-                          const Text('Inscrever'),
-                        ],
-                      ),
+                      child: isSaving
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(LucideIcons.userPlus, size: 20),
+                                const SizedBox(width: 8),
+                                const Text('Inscrever'),
+                              ],
+                            ),
                     ),
                   ),
                 ],

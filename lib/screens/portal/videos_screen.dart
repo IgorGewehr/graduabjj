@@ -8,6 +8,7 @@ import '../../models/training_video.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 import '../../widgets/common/sport_chip.dart';
+import '../../widgets/feature_disabled_state.dart';
 import '../../widgets/polish/polish.dart';
 
 /// Student-facing list of training videos assigned to them. Tapping a video
@@ -60,6 +61,27 @@ class _VideosScreenState extends ConsumerState<VideosScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Defense in depth: mesmo acessível por deep link / navegação obsoleta,
+    // os Vídeos ficam escondidos quando a academia desligou a funcionalidade
+    // (espelha a visibilidade no menu, que usa trainingVideosEnabled ?? false).
+    final videosEnabled = ref.watch(
+      academySettingsProvider
+          .select((s) => s.valueOrNull?.trainingVideosEnabled ?? false),
+    );
+    if (!videosEnabled) {
+      return Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: const Text('Videos'),
+          backgroundColor: AppTheme.surface,
+        ),
+        body: const FeatureDisabledState(
+          icon: Icons.video_library_outlined,
+          title: 'Vídeos indisponíveis',
+          subtitle: 'Sua academia não está usando os Vídeos de treino.',
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(

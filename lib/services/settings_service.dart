@@ -158,6 +158,14 @@ class AcademySettings {
   /// [mpConnected] is still true. Defaults to false.
   final bool mpNeedsReauth;
 
+  /// Set pelo backend (troca de conta / disconnect com token revogado) quando
+  /// assinaturas recorrentes (preapprovals) NÃO puderam ser canceladas e ficaram
+  /// ÓRFÃS — ainda cobrando cartões de alunos numa conta MP que o app não
+  /// gerencia mais. Exibido como alerta para o admin agir (reconectar ou
+  /// cancelar no painel do MP). Sem leitor na UI = receita órfã silenciosa.
+  final bool mpHasOrphanPreapprovals;
+  final int mpOrphanPreapprovalCount;
+
   // Auto-graduation Settings
   /// Master toggle for the entire attendance-based graduation feature.
   /// When false: the Graduation tab disappears from admin nav, the student
@@ -226,6 +234,22 @@ class AcademySettings {
   /// is true.
   final bool musculacaoEnabled;
 
+  /// Controle de acesso (catraca) — MAPA server-side em
+  /// academies/{id}.accessControl, o MESMO doc lido por
+  /// functions/access_control/{financial_gate,ingest}.js. Default {} = feature
+  /// DESLIGADA (graceful-off: nada aparece para a academia).
+  final Map<String, dynamic> accessControl;
+
+  /// Catraca habilitada (master switch).
+  bool get accessControlEnabled => accessControl['enabled'] == true;
+
+  /// Marca/modelo selecionada (default/dica de setup; o vendor REAL é por-device).
+  String get accessControlVendor => (accessControl['vendor'] ?? '').toString();
+
+  /// Bloquear inadimplentes no portão (2º nível explícito — ligar a catraca NÃO
+  /// começa a bloquear ninguém sozinho).
+  bool get accessControlBlockOnOverdue => accessControl['blockOnOverdue'] == true;
+
   /// 'manual' → staff records presence (works with current rules, no Cloud
   /// Function); 'qr' → student scans a fixed QR; 'button' → student taps a
   /// check-in button. 'qr'/'button' route through the selfCheckin function.
@@ -265,6 +289,11 @@ class AcademySettings {
   // Monitors (students with additional permissions)
   final List<String> monitorIds;
 
+  /// Passos do checklist de ativação que o dono dispensou ("não vou usar") —
+  /// somem do checklist e não contam contra a conclusão. Ex.: uma academia que
+  /// não vai usar o Mercado Pago dispensa esse passo e o checklist completa.
+  final List<String> onboardingDismissedSteps;
+
   final DateTime? updatedAt;
 
   AcademySettings({
@@ -294,6 +323,8 @@ class AcademySettings {
     this.mpConnected = false,
     this.mpPublicKey,
     this.mpNeedsReauth = false,
+    this.mpHasOrphanPreapprovals = false,
+    this.mpOrphanPreapprovalCount = 0,
     this.autoGraduationEnabled = false,
     this.autoGraduationAttendances,
     this.graduationRequirementsBySport = const {},
@@ -314,6 +345,7 @@ class AcademySettings {
     this.trainingVideosEnabled = false,
     this.physicalEvolutionEnabled = false,
     this.musculacaoEnabled = true,
+    this.accessControl = const {},
     this.musculacaoCheckinMode = 'manual',
     this.operatingHours = OperatingHours.empty,
     this.muaythaiGradeSystem = 'cbmt',
@@ -324,6 +356,7 @@ class AcademySettings {
     this.strikingEnabled = false,
     this.monthlyAttendanceGoal = 0,
     this.monitorIds = const [],
+    this.onboardingDismissedSteps = const [],
     this.updatedAt,
   });
 
@@ -342,6 +375,14 @@ class AcademySettings {
       }
     });
     return out;
+  }
+
+  /// O backend grava mpOrphanPreapprovalIds de forma inconsistente (ora a LISTA
+  /// de ids, ora só a CONTAGEM) — normaliza para um int defensivamente.
+  static int _parseOrphanCount(dynamic v) {
+    if (v is List) return v.length;
+    if (v is num) return v.toInt();
+    return 0;
   }
 
   factory AcademySettings.fromFirestore(DocumentSnapshot doc) {
@@ -375,6 +416,9 @@ class AcademySettings {
       mpConnected: data['mpConnected'] ?? false,
       mpPublicKey: data['mpPublicKey'],
       mpNeedsReauth: data['mpNeedsReauth'] ?? false,
+      mpHasOrphanPreapprovals: data['mpHasOrphanPreapprovals'] == true,
+      mpOrphanPreapprovalCount:
+          _parseOrphanCount(data['mpOrphanPreapprovalIds']),
       autoGraduationEnabled: data['autoGraduationEnabled'] ?? false,
       autoGraduationAttendances: data['autoGraduationAttendances'],
       graduationRequirementsBySport:
@@ -399,6 +443,8 @@ class AcademySettings {
       trainingVideosEnabled: data['trainingVideosEnabled'] ?? false,
       physicalEvolutionEnabled: data['physicalEvolutionEnabled'] ?? false,
       musculacaoEnabled: data['musculacaoEnabled'] ?? true,
+      accessControl: (data['accessControl'] as Map?)?.cast<String, dynamic>() ??
+          const {},
       musculacaoCheckinMode:
           (data['musculacaoCheckinMode'] as String?) ?? 'manual',
       operatingHours: OperatingHours.fromMap(
@@ -416,6 +462,8 @@ class AcademySettings {
       monthlyAttendanceGoal:
           (data['monthlyAttendanceGoal'] as num?)?.toInt() ?? 0,
       monitorIds: List<String>.from(data['monitorIds'] ?? []),
+      onboardingDismissedSteps:
+          List<String>.from(data['onboardingDismissedSteps'] ?? []),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
   }
@@ -820,6 +868,29 @@ class SettingsService {
     }, SetOptions(merge: true));
   }
 
+  /// Atualiza a config de controle de acesso (catraca) no sub-mapa
+  /// academies/{id}.accessControl — o MESMO doc lido por
+  /// functions/access_control/{financial_gate,ingest}.js. Usa dot-paths via
+  /// update() (o doc da academia sempre existe) para mexer só nos campos dados,
+  /// preservando o resto do mapa (ex.: exemptStudentIds/message futuros) e não
+  /// brigando com o save em massa de settings.
+  Future<void> updateAccessControl({
+    required bool enabled,
+    String? vendor,
+    bool? blockOnOverdue,
+    int? graceDays,
+    List<String>? blockTypes,
+  }) async {
+    await _academyRef.update({
+      'accessControl.enabled': enabled,
+      if (vendor != null) 'accessControl.vendor': vendor,
+      if (blockOnOverdue != null) 'accessControl.blockOnOverdue': blockOnOverdue,
+      if (graceDays != null) 'accessControl.graceDays': graceDays,
+      if (blockTypes != null) 'accessControl.blockTypes': blockTypes,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   // ============================================
   // Update Musculação Check-in (mode + operating hours)
   // ============================================
@@ -919,6 +990,14 @@ class SettingsService {
   Future<void> addMonitor(String studentId) async {
     await _academyRef.update({
       'monitorIds': FieldValue.arrayUnion([studentId]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Dispensa um passo do checklist de ativação (o dono optou por não fazê-lo).
+  Future<void> dismissOnboardingStep(String stepId) async {
+    await _academyRef.update({
+      'onboardingDismissedSteps': FieldValue.arrayUnion([stepId]),
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }

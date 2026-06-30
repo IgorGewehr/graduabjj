@@ -80,6 +80,8 @@ class StudentExportService {
         return 'Inativo';
       case StudentStatus.suspended:
         return 'Suspenso';
+      case StudentStatus.transferred:
+        return 'Transferido';
     }
   }
 }

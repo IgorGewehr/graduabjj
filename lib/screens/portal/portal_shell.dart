@@ -6,6 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/navigation/nav_catalog.dart';
 import '../../core/navigation/nav_resolver.dart';
+import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
@@ -125,6 +126,41 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     return const AcademySwitcher();
   }
 
+  /// Entradas visíveis do portal (mesmos feature-flags + gates contextuais do
+  /// menu "Mais"), usadas pela rail do desktop. Mobile não chama (usa BottomNav).
+  List<NavEntry> _resolveVisiblePortalEntries() {
+    final student = ref.read(currentStudentProvider).valueOrNull;
+    final settings = ref.read(academySettingsProvider).valueOrNull;
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    final isKids = student?.category == StudentCategory.kids;
+    final studentId = currentUser?.studentId;
+    final linkedStudentIds = currentUser?.linkedStudentIds ?? const <String>[];
+    final allStudentIds =
+        studentId != null ? [studentId, ...linkedStudentIds] : linkedStudentIds;
+    final monitorIds = settings?.monitorIds ?? const <String>[];
+    final isMonitor = allStudentIds.any(monitorIds.contains);
+    final hasAttendancePerm =
+        currentUser?.hasPermission('attendance:take') == true;
+    final studentDocId = student?.id;
+    final hasPlan = studentDocId != null &&
+        ref.read(studentPlanProvider(studentDocId)).valueOrNull != null;
+    final ctx = PortalNavContext(
+      isKids: isKids,
+      isMonitorOrAttendance: isMonitor || hasAttendancePerm,
+      hasPlan: hasPlan,
+      storePublished: settings?.storePublished ?? false,
+      graduationProgressVisible:
+          settings?.graduationProgressVisibleToStudents ?? false,
+      multiSport: (student?.getSports().length ?? 0) > 1,
+      hasMultipleAcademies: ref.read(hasMultipleAcademiesProvider),
+    );
+    return resolvePortalCatalog(
+      catalog: kPortalNavCatalog,
+      settings: settings,
+      ctx: ctx,
+    ).where((r) => r.isVisible).map((r) => r.entry).toList();
+  }
+
   void _showMoreMenu() {
     final currentLocation = GoRouterState.of(context).matchedLocation;
     final navigator = GoRouter.of(context);
@@ -242,6 +278,11 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     final location = GoRouterState.of(context).matchedLocation;
     final selectedIndex = _getSelectedIndex(location, bottomNavItems);
 
+    // Rail do desktop: só resolve o catálogo quando há largura para ela.
+    final navEntries = context.isDesktop
+        ? _resolveVisiblePortalEntries()
+        : const <NavEntry>[];
+
     // Check if this is the root route (/portal)
     final isRootRoute = location == '/portal';
 
@@ -268,35 +309,48 @@ class _PortalShellState extends ConsumerState<PortalShell> {
           ),
         ),
       ),
-        body: Column(
+        body: Row(
           children: [
-            const UpdateBanner(),
-            Expanded(child: widget.child),
-          ],
-        ),
-        bottomNavigationBar: Container(
-          decoration: BoxDecoration(
-            color: AppTheme.surface.withValues(alpha: 0.95),
-            border: const Border(
-              top: BorderSide(color: AppTheme.divider, width: 1),
-            ),
-          ),
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-              child: Row(
-                children: List.generate(
-                  bottomNavItems.length,
-                  (index) => _BottomNavItem(
-                    item: bottomNavItems[index],
-                    isSelected: selectedIndex == index,
-                    onTap: () => _onItemTapped(index, bottomNavItems),
-                  ),
-                ),
+            // Desktop (medium+): rail só-ícones à esquerda, do catálogo do portal.
+            if (context.isDesktop)
+              _PortalRail(entries: navEntries, currentPath: location),
+            Expanded(
+              child: Column(
+                children: [
+                  const UpdateBanner(),
+                  Expanded(child: widget.child),
+                ],
               ),
             ),
-          ),
+          ],
         ),
+        // BottomNav só no compact; no desktop a navegação vive na rail lateral.
+        bottomNavigationBar: context.isCompact
+            ? Container(
+                decoration: BoxDecoration(
+                  color: AppTheme.surface.withValues(alpha: 0.95),
+                  border: const Border(
+                    top: BorderSide(color: AppTheme.divider, width: 1),
+                  ),
+                ),
+                child: SafeArea(
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    child: Row(
+                      children: List.generate(
+                        bottomNavItems.length,
+                        (index) => _BottomNavItem(
+                          item: bottomNavItems[index],
+                          isSelected: selectedIndex == index,
+                          onTap: () => _onItemTapped(index, bottomNavItems),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            : null,
       ),
     );
   }
@@ -313,6 +367,74 @@ class _NavItem {
     required this.icon,
     required this.path,
   });
+}
+
+/// NavigationRail do portal (desktop): rail só-ícones (72px) a partir das
+/// entradas visíveis do catálogo do portal. A AppBar (com o seletor de academia
+/// e o sino) é mantida; a rail só cuida da navegação que o BottomNav fazia.
+class _PortalRail extends StatelessWidget {
+  final List<NavEntry> entries;
+  final String currentPath;
+
+  const _PortalRail({required this.entries, required this.currentPath});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 72,
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(right: BorderSide(color: AppTheme.divider, width: 1)),
+      ),
+      child: ListView(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        children: [
+          for (final e in entries)
+            _PortalRailItem(entry: e, currentPath: currentPath),
+        ],
+      ),
+    );
+  }
+}
+
+class _PortalRailItem extends StatelessWidget {
+  final NavEntry entry;
+  final String currentPath;
+
+  const _PortalRailItem({required this.entry, required this.currentPath});
+
+  bool get isActive =>
+      currentPath == entry.route || currentPath.startsWith('${entry.route}/');
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isActive ? AppTheme.primary : AppTheme.textSecondary;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      child: Tooltip(
+        message: entry.label,
+        preferBelow: false,
+        child: Material(
+          color: isActive
+              ? AppTheme.primary.withValues(alpha: 0.1)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => context.go(entry.route),
+            child: SizedBox(
+              height: 48,
+              child: Icon(
+                isActive ? (entry.activeIcon ?? entry.icon) : entry.icon,
+                color: color,
+                size: 22,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Bottom nav item widget - Dot indicator style

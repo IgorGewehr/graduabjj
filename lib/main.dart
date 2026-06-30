@@ -16,6 +16,42 @@ import 'app.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Safety-net (hotfix tela-branca): qualquer exceção não capturada num build de
+  // widget vira uma tela de erro AMIGÁVEL em vez do retângulo cinza/branco padrão
+  // do Flutter em release. Evita que uma falha numa tela deixe o usuário olhando
+  // para o nada após o login.
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    // Observabilidade: registra o erro (console + onError/Crashlytics) ANTES de
+    // mostrar o card — senão crashes determinísticos de build ficam invisíveis.
+    FlutterError.presentError(details);
+    return Material(
+      color: const Color(0xFFF7F7F7),
+      child: Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Icon(Icons.error_outline, size: 48, color: Color(0xFF991B1B)),
+              SizedBox(height: 16),
+              Text(
+                'Algo deu errado ao carregar esta tela.\n'
+                'Feche e abra o app novamente.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Color(0xFF333333)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  };
+
+  // Plataformas mobile (Android/iOS) vs desktop (Windows/macOS). Vários serviços
+  // são mobile-only e ficam guardados por isto: FCM/firebase_messaging (sem
+  // suporte em desktop), orientação travada e in-app update.
+  final isMobile = Platform.isAndroid || Platform.isIOS;
+
   // Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
@@ -36,8 +72,17 @@ void main() async {
     cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
 
-  // Initialize Push Notifications
-  await pushNotificationService.initialize();
+  // Initialize Push Notifications — FCM só existe em mobile (firebase_messaging
+  // não tem desktop). No desktop o PC de balcão lê o Firestore por stream.
+  // HOTFIX (crash iOS 26): o firebase_messaging crasha NATIVAMENTE no init em
+  // iOS 26 — crash nativo, então o try-catch Dart de initialize() NÃO pega, e o
+  // app fechava 100% no boot no iPhone (tela branca + crash). Desabilitado no
+  // iOS para ESTANCAR o crash; Android mantém push normalmente.
+  // TODO restaurar push no iOS: atualizar o Firebase iOS SDK para versão
+  // compatível com iOS 26 + revalidar no simulador antes de religar este bloco.
+  if (isMobile && !Platform.isIOS) {
+    await pushNotificationService.initialize();
+  }
 
   // Initialize date formatting for pt_BR
   await initializeDateFormatting('pt_BR', null);
@@ -53,11 +98,13 @@ void main() async {
     ),
   );
 
-  // Set preferred orientations
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+  // Set preferred orientations (mobile-only; no desktop a janela é livre)
+  if (isMobile) {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+  }
 
   runApp(const ProviderScope(child: GraduaBJJApp()));
 

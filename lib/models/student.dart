@@ -3,7 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../core/sports.dart';
 
 /// Student Status
-enum StudentStatus { active, injured, inactive, suspended }
+/// `transferred` = aluno que SAIU da academia (foi para outra ou deixou de
+/// treinar). É um estado terminal/ex-aluno: some do roster ativo, mas a ficha e
+/// todo o histórico (presenças/financeiro) permanecem na academia para consulta.
+enum StudentStatus { active, injured, inactive, suspended, transferred }
 
 extension StudentStatusExtension on StudentStatus {
   String get value {
@@ -16,6 +19,8 @@ extension StudentStatusExtension on StudentStatus {
         return 'inactive';
       case StudentStatus.suspended:
         return 'suspended';
+      case StudentStatus.transferred:
+        return 'transferred';
     }
   }
 
@@ -29,8 +34,14 @@ extension StudentStatusExtension on StudentStatus {
         return 'Inativo';
       case StudentStatus.suspended:
         return 'Suspenso';
+      case StudentStatus.transferred:
+        return 'Transferido';
     }
   }
+
+  /// Ex-aluno: saiu da academia (vai para a aba "Ex-alunos", não no roster ativo).
+  bool get isFormer =>
+      this == StudentStatus.transferred || this == StudentStatus.inactive;
 
   static StudentStatus fromString(String value) {
     switch (value) {
@@ -42,6 +53,8 @@ extension StudentStatusExtension on StudentStatus {
         return StudentStatus.inactive;
       case 'suspended':
         return StudentStatus.suspended;
+      case 'transferred':
+        return StudentStatus.transferred;
       default:
         return StudentStatus.active;
     }
@@ -414,7 +427,9 @@ class Student {
           ? (data['jiujitsuStartDate'] as Timestamp).toDate()
           : null,
       currentBelt: data['currentBelt'] ?? 'white',
-      currentStripes: data['currentStripes'] ?? 0,
+      // num?.toInt(): um doc legado com stripes salvo como double quebrava o
+      // parse inteiro do Student (some o aluno da lista).
+      currentStripes: (data['currentStripes'] as num?)?.toInt() ?? 0,
       category: StudentCategoryExtension.fromString(data['category'] ?? 'adult'),
       teamId: data['teamId'],
       weight: data['weight']?.toDouble(),
@@ -517,7 +532,15 @@ class Student {
   }
 
   // Computed properties
-  String get displayName => nickname ?? fullName.split(' ').first;
+  String get displayName {
+    // Range-safe: nunca retorna vazio. Os call sites de avatar fazem
+    // displayName[0]; um nickname '' (não null) ou fullName vazio causava
+    // RangeError e derrubava listas de alunos/chamada inteiras.
+    final nick = nickname?.trim() ?? '';
+    if (nick.isNotEmpty) return nick;
+    final first = fullName.trim().split(' ').first;
+    return first.isNotEmpty ? first : 'Aluno';
+  }
 
   int get totalAttendanceCount =>
       (initialAttendanceCount ?? 0) + (attendanceCount ?? 0);
@@ -579,7 +602,7 @@ class Student {
     if (data == null) return null;
     return (
       currentGrade: data['currentGrade'] as String? ?? 'white',
-      currentStripes: data['currentStripes'] as int? ?? 0,
+      currentStripes: (data['currentStripes'] as num?)?.toInt() ?? 0,
     );
   }
 

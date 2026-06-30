@@ -55,6 +55,7 @@ const GRANTABLE_EXTRA_PERMISSIONS = new Set([
   'reports:view',
   'competitions:create',
   'graduation:manage',
+  'events:manage',
   'students:manage',
 ]);
 
@@ -145,6 +146,12 @@ exports.joinAcademy = onCall(async (request) => {
   if (!code) {
     throw new HttpsError('invalid-argument', 'Código é obrigatório.');
   }
+
+  // Optional student fields captured by the first-time-signup form. Only ever
+  // persisted when this call CLAIMS an orphan student record (see transaction
+  // below), so they can never overwrite an already-linked student's data.
+  const cpf = ((request.data && request.data.cpf) || '').toString().replace(/\D/g, '') || null;
+  const phone = ((request.data && request.data.phone) || '').toString().replace(/\D/g, '') || null;
 
   // 1. Find code via collectionGroup. Codes are unique by string within each
   //    academy, but we accept the first unused match.
@@ -250,12 +257,19 @@ exports.joinAcademy = onCall(async (request) => {
       });
     }
 
-    // Claim the orphan student record for this caller.
+    // Claim the orphan student record for this caller. The optional signup
+    // fields (cpf/phone) and the account email are stamped in the SAME atomic
+    // write, so the first-time-signup flow keeps capturing them without a
+    // separate, unguarded client write to students/{id}.
     if (studentRefToClaim) {
-      tx.update(studentRefToClaim, {
+      const claimUpdate = {
         linkedUserId: uid,
+        email: userData.email || null,
         updatedAt: FieldValue.serverTimestamp(),
-      });
+      };
+      if (cpf) claimUpdate.cpf = cpf;
+      if (phone) claimUpdate.phone = phone;
+      tx.update(studentRefToClaim, claimUpdate);
     }
 
     // Mark code used
@@ -292,6 +306,86 @@ exports.joinAcademy = onCall(async (request) => {
     academyId,
     studentId: linkedStudentId,
   };
+});
+
+// ============================================================
+// TRANSFERÊNCIA / SAÍDA DE ACADEMIA (preserva histórico)
+// ------------------------------------------------------------
+// Modelo: transferência é mudança de ESTADO, não de DADOS. Nada migra. A ficha
+// e o histórico (presenças/financeiro) PERMANECEM na subcoleção da academia de
+// origem para consulta. A academia é mantida em academyIds do aluno (acesso
+// SOMENTE-LEITURA ao próprio passado) com academyDetails[id].status='archived';
+// a ficha vai para status='transferred' (sai do roster ativo, aba Ex-alunos).
+// Estas escritas tocam o mapping de OUTRO usuário (staff) — proibido nas rules
+// de cliente — por isso rodam aqui no Admin SDK.
+// ============================================================
+
+/** Aplica o estado de transferência: ficha 'transferred' + mapping 'archived'. */
+async function applyTransfer(academyId, studentId, linkedUserId, note) {
+  const batch = db.batch();
+  // Só atualiza a ficha quando há studentId (uma conta de aluno sem ficha
+  // vinculada ainda pode "sair" — só arquiva o mapping).
+  if (studentId) {
+    const studentRef = db.doc(`academies/${academyId}/students/${studentId}`);
+    batch.update(studentRef, {
+      status: 'transferred',
+      ...(note ? {statusNote: note} : {}),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  }
+  if (linkedUserId) {
+    const mappingRef = db.doc(`userAcademyMapping/${linkedUserId}`);
+    // Mantém o id em academyIds (histórico read-only no app do aluno); só marca
+    // o status da associação como arquivada.
+    batch.set(mappingRef, {
+      academyDetails: {[academyId]: {status: 'archived'}},
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+  }
+  await batch.commit();
+}
+
+// transferStudent({academyId, studentId, note?}) — disparado pelo PROFESSOR/admin
+// da academia de origem. "Marcar como transferido".
+exports.transferStudent = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const academyId = ((request.data && request.data.academyId) || '').toString();
+  const studentId = ((request.data && request.data.studentId) || '').toString();
+  const note = ((request.data && request.data.note) || '').toString().slice(0, 200) || null;
+  if (!academyId || !studentId) {
+    throw new HttpsError('invalid-argument', 'academyId e studentId são obrigatórios.');
+  }
+  if (!(await isStaff(uid, academyId))) {
+    throw new HttpsError('permission-denied', 'Apenas a equipe da academia pode transferir um aluno.');
+  }
+  const studentSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
+  if (!studentSnap.exists) {
+    throw new HttpsError('not-found', 'Aluno não encontrado.');
+  }
+  const linkedUserId = studentSnap.get('linkedUserId') || null;
+  await applyTransfer(academyId, studentId, linkedUserId, note);
+  return {success: true, academyId, studentId};
+});
+
+// leaveAcademy({academyId}) — disparado pelo próprio ALUNO ("Sair desta
+// academia"). Mantém o histórico read-only para ele e arquiva a ficha na academia.
+exports.leaveAcademy = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const academyId = ((request.data && request.data.academyId) || '').toString();
+  if (!academyId) {
+    throw new HttpsError('invalid-argument', 'academyId é obrigatório.');
+  }
+  const mappingSnap = await db.doc(`userAcademyMapping/${uid}`).get();
+  const mapping = mappingSnap.exists ? (mappingSnap.data() || {}) : null;
+  const academyIds = (mapping && mapping.academyIds) || [];
+  if (!mapping || !academyIds.includes(academyId)) {
+    throw new HttpsError('failed-precondition', 'Você não faz parte desta academia.');
+  }
+  const studentId = (mapping.academyDetails &&
+      mapping.academyDetails[academyId] &&
+      mapping.academyDetails[academyId].studentId) || null;
+  await applyTransfer(academyId, studentId, uid, null);
+  return {success: true, academyId};
 });
 
 // ============================================================
@@ -575,6 +669,11 @@ exports.demoteToStudent = onCall(async (request) => {
   if (userId === adminUid) {
     throw new HttpsError('failed-precondition', 'Você não pode rebaixar a si mesmo.');
   }
+  // auditoria: impedir que um 2º admin rebaixe o DONO da academia.
+  const academySnap = await db.collection('academies').doc(academyId).get();
+  if (academySnap.exists && (academySnap.data() || {}).ownerId === userId) {
+    throw new HttpsError('permission-denied', 'O dono da academia não pode ser rebaixado.');
+  }
 
   const mappingRef = db.collection('userAcademyMapping').doc(userId);
   const academyUserRef = db
@@ -621,6 +720,11 @@ exports.revokeMember = onCall(async (request) => {
   }
   if (userId === adminUid) {
     throw new HttpsError('failed-precondition', 'Você não pode remover a si mesmo.');
+  }
+  // auditoria: impedir que um 2º admin expulse o DONO da academia.
+  const academySnap = await db.collection('academies').doc(academyId).get();
+  if (academySnap.exists && (academySnap.data() || {}).ownerId === userId) {
+    throw new HttpsError('permission-denied', 'O dono da academia não pode ser removido.');
   }
 
   const mappingRef = db.collection('userAcademyMapping').doc(userId);
@@ -934,17 +1038,25 @@ exports.caktoWebhook = onRequest(
     const payload = req.body || {};
 
     // ---- Autenticação: o Cakto manda o `secret` no corpo (não em header) ----
+    // SECURITY (auditoria P0): FALHA FECHADA. Sem o secret configurado o webhook
+    // NÃO processa nada — caso contrário um caller não autenticado poderia conceder
+    // Pro de graça ou revogar uma academia pagante. Os webhooks do Mercado Pago já
+    // falham fechado; aqui igualamos o comportamento. A função declara o secret em
+    // `secrets: ['CAKTO_WEBHOOK_SECRET']`, então um deploy bem-sucedido implica que
+    // ele existe no Secret Manager.
     const expectedSecret = process.env.CAKTO_WEBHOOK_SECRET;
-    if (expectedSecret) {
-      const provided = Buffer.from(String(payload.secret || ''));
-      const expected = Buffer.from(String(expectedSecret));
-      if (
-        provided.length !== expected.length ||
-        !crypto.timingSafeEqual(provided, expected)
-      ) {
-        console.warn('[caktoWebhook] secret mismatch — requisição rejeitada');
-        return res.status(401).json({error: 'invalid secret'});
-      }
+    if (!expectedSecret) {
+      console.error('[caktoWebhook] CAKTO_WEBHOOK_SECRET ausente — rejeitando (fail-closed)');
+      return res.status(503).json({error: 'webhook secret not configured'});
+    }
+    const provided = Buffer.from(String(payload.secret || ''));
+    const expected = Buffer.from(String(expectedSecret));
+    if (
+      provided.length !== expected.length ||
+      !crypto.timingSafeEqual(provided, expected)
+    ) {
+      console.warn('[caktoWebhook] secret mismatch — requisição rejeitada');
+      return res.status(401).json({error: 'invalid secret'});
     }
 
     const event = String(payload.event || payload.type || '');
@@ -1215,8 +1327,44 @@ async function mpHandlePayment(payment, res) {
   const academyId = academyRef.id;
   const chargeId = String(payment.id);
 
-  // Reembolso / chargeback / cancelado → revoga acesso.
+  // Reembolso / chargeback / cancelado → revoga acesso — MAS só quando o
+  // evento se refere AO pagamento que concedeu a assinatura ativa. Espelha os
+  // handlers de estorno guardados de server_functions.js (mpMktHandleReversal,
+  // mpSubHandleReversal): compara o id da cobrança antes de mexer no estado.
+  //
+  // Sem essa guarda, um PIX abandonado/expirado (status 'cancelled') de uma
+  // tentativa de compra que nunca foi aprovada revogaria a assinatura ATIVA de
+  // um cliente pagante. Por isso:
+  //  - refunded/charged_back: só revoga se for o pagamento atual da assinatura
+  //    (externalPaymentId === chargeId).
+  //  - cancelled: além disso, só revoga se ESTE pagamento já tiver sido
+  //    registrado como aprovado (existe paywallPayments/{chargeId}). Um
+  //    'cancelled' de uma cobrança que nunca foi aprovada não revoga nada.
   if (status === 'refunded' || status === 'charged_back' || status === 'cancelled') {
+    const subSnap = await academyRef.get();
+    const activeChargeId = subSnap.get('subscription.externalPaymentId');
+    // Só IGNORA a reversão quando sabemos que é OUTRA cobrança (a ativa é
+    // conhecida e diferente) — isso evita que um PIX abandonado revogue a
+    // assinatura ativa. Quando activeChargeId está AUSENTE (assinatura legada,
+    // anterior ao rastreio de externalPaymentId), NÃO ignoramos: caímos no
+    // comportamento conservador de revogar no estorno (evita vazamento de
+    // receita — pagar, estornar e manter o Pro).
+    if (activeChargeId && activeChargeId !== chargeId) {
+      console.log('[mpWebhook] reversão ignorada — não é a cobrança ativa',
+          {academyId, status, chargeId, activeChargeId});
+      return res.status(200)
+          .json({received: true, academyId, status, action: 'not_active_charge'});
+    }
+    if (status === 'cancelled') {
+      const approvedDoc =
+        await academyRef.collection('paywallPayments').doc(chargeId).get();
+      if (!approvedDoc.exists) {
+        console.log('[mpWebhook] cancelamento ignorado — cobrança nunca aprovada',
+            {academyId, chargeId});
+        return res.status(200)
+            .json({received: true, academyId, status, action: 'never_approved'});
+      }
+    }
     await academyRef.update({
       'subscription.status': 'cancelled',
       'subscription.plan': 'free',
@@ -1224,7 +1372,7 @@ async function mpHandlePayment(payment, res) {
       'subscription.lastEvent': `payment_${status}`,
       'updatedAt': FieldValue.serverTimestamp(),
     });
-    console.log('[mpWebhook] acesso revogado', {academyId, status});
+    console.log('[mpWebhook] acesso revogado', {academyId, status, chargeId});
     return res.status(200).json({success: true, academyId, action: 'revoked'});
   }
 
@@ -1520,11 +1668,13 @@ exports.createMercadoPagoCheckout = onCall(
   },
 );
 
-/* DESABILITADO TEMPORARIAMENTE — cobrança por e-mail será finalizada depois.
-   Mantido comentado pra não disparar e-mails enquanto não está 100%.
 // ============================================================
-// trialExpiryReminder — agendado (diário). Avisa por e-mail o dono de
-// academias cujo trial vence nas próximas ~48h e que ainda não assinaram.
+// trialExpiryReminder — REABILITADO (auditoria: retenção). Avisa por e-mail
+// o dono de academias cujo trial vence nas próximas ~48h e ainda não
+// assinaram, evitando que caiam no paywall sem aviso prévio (reduz conversão).
+// Seguro por padrão: idempotente (subscription.trialReminderSentAt só grava
+// quando o envio retorna ok) e, se faltar config (NOTIFICATION_API_KEY),
+// apenas loga/tenta sem header e não quebra o agendamento.
 // Reusa o notification-server (mesmo do billing): POST /api/send-email,
 // appId "gestao-raiz" (SMTP do BJJEasy).
 //
@@ -1632,7 +1782,6 @@ exports.trialExpiryReminder = onSchedule(
     console.log(`[trialReminder] checked ${snap.size}, sent ${sent}`);
   },
 );
-*/
 
 // ============================================================
 // Server-side functions (payments + notifications) migrated from the
@@ -1660,3 +1809,14 @@ exports.trialExpiryReminder = onSchedule(
   } = require('./server_functions');
   Object.assign(exports, serverTriggers);
 }
+
+// ============================================================
+// Access control / turnstile ingestion (Arquitetura C — push-cloud).
+// ADITIVO: a única CF nova é `ingestAccessEvent` (endpoint HTTPS público,
+// autenticado por segredo POR DEVICE em academies/{academyId}/devices/{deviceId},
+// idempotente por accessEvents/{deviceId}_{eventId}). Generaliza os 3 fabricantes
+// (Control iD / ZKTeco / Intelbras) via REGISTRY estático de adapters em
+// ./access_control/adapters/*. NÃO toca nenhum fluxo existente. Ver
+// ./access_control/README.md para apontar cada catraca à URL da função.
+// ============================================================
+exports.ingestAccessEvent = require('./access_control/ingest').ingestAccessEvent;

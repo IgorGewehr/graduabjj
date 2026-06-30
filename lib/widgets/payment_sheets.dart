@@ -1349,6 +1349,12 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
   String _cardBrand = '';
   int _installments = 1;
 
+  // Auditoria MP: pagamento em cartao pode voltar 'in_process'/'pending' (NAO e
+  // recusa). Quando isso ocorre travamos novo submit para a mesma cobranca,
+  // evitando que o aluno re-tente e gere uma 2a cobranca pendente duplicada.
+  bool _paymentPending = false;
+  String? _pendingMessage;
+
   @override
   void dispose() {
     _cardNumberController.dispose();
@@ -1466,6 +1472,9 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
   }
 
   Future<void> _handlePayment() async {
+    // Auditoria MP: cobranca ja em analise/3DS pendente — nao reenviar, para
+    // nao gerar uma 2a cobranca pendente para a mesma fatura.
+    if (_paymentPending) return;
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -1525,7 +1534,14 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
           studentName: widget.studentName,
           cardData: cardData,
         );
-        result = CardPaymentResult(success: sub.success, message: sub.message);
+        // Auditoria MP: propaga o status do preapproval. Uma assinatura 'pending'
+        // (emissor ainda não autorizou) NÃO pode aparecer como sucesso verde —
+        // com o status, cai no tratamento de isPending abaixo ("em análise").
+        result = CardPaymentResult(
+          success: sub.success,
+          message: sub.message,
+          status: sub.status,
+        );
       } else if (widget.orderId != null) {
         if (useMp) {
           result = await mp.createStoreOrderCardPayment(
@@ -1600,6 +1616,40 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
         }
       } else {
         throw Exception('Order ID or Financial ID is required');
+      }
+
+      // Auditoria MP: o emissor pode exigir desafio 3DS (three_ds_info). Antes
+      // a UI tratava isso como recusa e o aluno re-tentava, duplicando a
+      // cobranca. Agora abrimos a URL do desafio e travamos novo submit; a
+      // confirmacao chega via webhook (mpMktHandleReversal/settle no backend).
+      if (result.requiresThreeDs) {
+        final uri = Uri.tryParse(result.threeDsUrl!);
+        if (uri != null) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+        if (!mounted) return;
+        setState(() {
+          _paymentPending = true;
+          _errorMessage = null;
+          _pendingMessage =
+              'Confirme a autenticacao do seu banco para concluir o pagamento. Apos aprovar, a confirmacao chega automaticamente.';
+        });
+        return;
+      }
+
+      // Auditoria MP: status 'in_process'/'pending' NAO e recusa. Mostramos
+      // "em analise" e bloqueamos novo submit para a mesma cobranca, evitando
+      // que um retry cunhe uma 2a cobranca pendente (cobranca paga aparecendo
+      // como falha era o vetor de cobranca duplicada).
+      if (result.isPending) {
+        if (!mounted) return;
+        setState(() {
+          _paymentPending = true;
+          _errorMessage = null;
+          _pendingMessage = result.message ??
+              'Pagamento em analise. Aguarde a confirmacao; nao tente cobrar novamente.';
+        });
+        return;
       }
 
       if (result.success) {
@@ -1750,6 +1800,32 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                 ),
                 const SizedBox(height: 24),
 
+                // Auditoria MP: aviso de pagamento em analise / 3DS pendente.
+                // NAO e erro — informa o aluno e o submit fica travado.
+                if (_pendingMessage != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(LucideIcons.clock, color: AppTheme.primary, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _pendingMessage!,
+                            style: AppTheme.bodySmall.copyWith(color: AppTheme.primary),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+
                 // Error Message
                 if (_errorMessage != null) ...[
                   Container(
@@ -1865,7 +1941,9 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: _isLoading ? null : _handlePayment,
+                    // Auditoria MP: trava o botao quando ja ha cobranca em
+                    // analise/3DS pendente, impedindo retry que duplica cobranca.
+                    onPressed: (_isLoading || _paymentPending) ? null : _handlePayment,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
@@ -1886,11 +1964,13 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                             ),
                           )
                         : Text(
-                            _errorMessage != null
-                                ? 'Tentar novamente'
-                                : (widget.isSubscription
-                                    ? 'Assinar'
-                                    : 'Pagar Agora'),
+                            _paymentPending
+                                ? 'Aguardando confirmacao...'
+                                : (_errorMessage != null
+                                    ? 'Tentar novamente'
+                                    : (widget.isSubscription
+                                        ? 'Assinar'
+                                        : 'Pagar Agora')),
                             style: const TextStyle(
                               fontWeight: FontWeight.w600,
                               fontSize: 16,

@@ -449,11 +449,20 @@ class _HeroHeader extends ConsumerWidget {
     // academies//students/... and Storage denies it.
     final academyId = ref.watch(selectedAcademyIdProvider) ?? FirebaseService.academyId;
 
-    // Resolve the grade for the student's primary sport. The flat
-    // currentBelt/currentStripes fields are legacy BJJ-oriented and are only
-    // correct for a BJJ-primary student; getGrade returns the per-sport grade.
+    // Resolve graduation per sport. The flat currentBelt/currentStripes fields
+    // are legacy BJJ-oriented and only correct for a BJJ-primary student;
+    // getGrade returns the per-sport grade. Multimodal students show one belt
+    // per graded sport; presence-only sports (GradeSystem.none — boxe/MMA/
+    // musculação) have no graduation and are shown as a plain chip instead.
     final primarySport = student.getPrimarySport();
-    final grade = student.getGrade(primarySport);
+    final muaythaiVariant =
+        ref.watch(academySettingsProvider).valueOrNull?.muaythaiGradeSystem;
+
+    // Order: primary sport first, then the rest, deduplicated.
+    final sportsList = <SportId>[
+      primarySport,
+      ...student.getSports().where((s) => s != primarySport),
+    ];
 
     return Column(
       children: [
@@ -481,26 +490,18 @@ class _HeroHeader extends ConsumerWidget {
         ),
         const SizedBox(height: 12),
         // Belt hero — animated "evolution morph" (first grade 0° → current
-        // grade/graus) played once on entry, in evidence, in the primary
-        // sport's own color ladder + adornments (BJJ belts, Muay Thai prajied,
-        // etc.). For non-BJJ sports the label below names the grade.
-        AnimatedBelt(
-          belt: grade?.currentGrade ?? 'white',
-          stripes: grade?.currentStripes ?? 0,
-          sportId: primarySport,
-          muaythaiVariant:
-              ref.watch(academySettingsProvider).valueOrNull?.muaythaiGradeSystem,
-          size: BeltSize.large,
-          highlight: true,
-        ),
-        if (primarySport != SportId.bjj) ...[
-          const SizedBox(height: 8),
-          Text(
-            getGradeLabel(primarySport, grade?.currentGrade ?? 'white'),
-            style: AppTheme.bodyMedium.copyWith(
-              color: AppTheme.textSecondary,
-              fontWeight: FontWeight.w600,
-            ),
+        // grade/graus) played once on entry, in evidence, in each sport's own
+        // color ladder + adornments (BJJ belts, Muay Thai prajied, etc.).
+        // For multimodal students we render the primary sport's belt large,
+        // then a compact belt per additional graded sport. Presence-only
+        // sports (GradeSystem.none) have no belt and are shown as a chip.
+        for (var i = 0; i < sportsList.length; i++) ...[
+          if (i > 0) const SizedBox(height: 12),
+          _SportGrade(
+            sport: sportsList[i],
+            grade: student.getGrade(sportsList[i]),
+            muaythaiVariant: muaythaiVariant,
+            isPrimary: i == 0,
           ),
         ],
         const SizedBox(height: 8),
@@ -519,6 +520,86 @@ class _HeroHeader extends ConsumerWidget {
             ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+/// Renders a single sport's graduation in the hero.
+///
+/// Graded sports (BJJ belts, Muay Thai armbands, …) show the [AnimatedBelt]
+/// plus a label naming the grade. Presence-only sports (GradeSystem.none —
+/// boxe/MMA/musculação) have no graduation, so we omit the belt entirely and
+/// show only a chip with the sport name to avoid a meaningless "Branca" belt.
+class _SportGrade extends StatelessWidget {
+  final SportId sport;
+  final ({String currentGrade, int currentStripes})? grade;
+  final String? muaythaiVariant;
+  final bool isPrimary;
+
+  const _SportGrade({
+    required this.sport,
+    required this.grade,
+    required this.muaythaiVariant,
+    required this.isPrimary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final definition = getSport(sport);
+
+    // Presence-only sports have no belt/grade ladder — render just the name.
+    if (definition.gradeSystem == GradeSystem.none) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(definition.icon, size: 16, color: AppTheme.textSecondary),
+            const SizedBox(width: 6),
+            Text(
+              definition.label,
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final gradeId = grade?.currentGrade ?? 'white';
+    final stripes = grade?.currentStripes ?? 0;
+
+    return Column(
+      children: [
+        AnimatedBelt(
+          belt: gradeId,
+          stripes: stripes,
+          sportId: sport,
+          muaythaiVariant: muaythaiVariant,
+          size: isPrimary ? BeltSize.large : BeltSize.small,
+          highlight: isPrimary,
+        ),
+        // Name the grade for every sport except primary BJJ, where the belt
+        // color already reads as the grade.
+        if (!(isPrimary && sport == SportId.bjj)) ...[
+          const SizedBox(height: 6),
+          Text(
+            isPrimary
+                ? getGradeLabel(sport, gradeId)
+                : '${definition.label}: ${getGradeLabel(sport, gradeId)}',
+            style: AppTheme.bodyMedium.copyWith(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -976,9 +1057,9 @@ class _EditPersonalDataSheetState extends State<_EditPersonalDataSheet> {
         'phone': _phoneController.text.trim().isEmpty
             ? null
             : onlyDigits(_phoneController.text),
-        'email': _emailController.text.trim().isEmpty
-            ? null
-            : _emailController.text.trim(),
+        // Email NÃO é persistido aqui: alterá-lo só no doc divergiria do
+        // Firebase Auth (login). Campo é somente leitura na UI; a troca de
+        // email de login é feita pela recepção/admin.
         'cpf': _cpfController.text.trim().isEmpty
             ? null
             : onlyDigits(_cpfController.text),
@@ -1030,6 +1111,9 @@ class _EditPersonalDataSheetState extends State<_EditPersonalDataSheet> {
           controller: _emailController,
           hint: 'seu@email.com',
           keyboardType: TextInputType.emailAddress,
+          readOnly: true,
+          helperText:
+              'Para alterar o email de login, contate a recepção.',
         ),
         _SheetTextField(
           label: 'CPF',
@@ -1475,6 +1559,8 @@ class _SheetTextField extends StatelessWidget {
   final int maxLines;
   final TextInputType? keyboardType;
   final List<TextInputFormatter>? inputFormatters;
+  final bool readOnly;
+  final String? helperText;
 
   const _SheetTextField({
     required this.label,
@@ -1483,6 +1569,8 @@ class _SheetTextField extends StatelessWidget {
     this.maxLines = 1,
     this.keyboardType,
     this.inputFormatters,
+    this.readOnly = false,
+    this.helperText,
   });
 
   @override
@@ -1502,14 +1590,25 @@ class _SheetTextField extends StatelessWidget {
             maxLines: maxLines,
             keyboardType: keyboardType,
             inputFormatters: inputFormatters,
-            style: AppTheme.bodyMedium,
+            readOnly: readOnly,
+            enableInteractiveSelection: !readOnly,
+            style: AppTheme.bodyMedium.copyWith(
+              color: readOnly ? AppTheme.textSecondary : null,
+            ),
             decoration: InputDecoration(
               hintText: hint,
               hintStyle: AppTheme.bodyMedium.copyWith(
                 color: AppTheme.textDisabled,
               ),
+              helperText: helperText,
+              helperMaxLines: 2,
+              helperStyle: AppTheme.labelSmall.copyWith(
+                color: AppTheme.textSecondary,
+              ),
               filled: true,
-              fillColor: AppTheme.surfaceVariant.withValues(alpha: 0.5),
+              fillColor: readOnly
+                  ? AppTheme.surfaceVariant.withValues(alpha: 0.25)
+                  : AppTheme.surfaceVariant.withValues(alpha: 0.5),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,

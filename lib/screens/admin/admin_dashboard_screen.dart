@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/polish/polish.dart';
+import '../../widgets/onboarding/activation_checklist.dart';
 
 /// Admin Dashboard Screen - Matching webapp design
 class AdminDashboardScreen extends ConsumerStatefulWidget {
@@ -23,6 +24,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   List<dynamic>? _overduePayments;
   Map<String, dynamic>? _monthlySummary;
   bool _isLoading = true;
+  bool _loadError = false;
 
   // Stats carousel
   final PageController _statsPageController = PageController(viewportFraction: 0.85);
@@ -41,7 +43,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   }
 
   Future<void> _loadDashboardData() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _loadError = false;
+    });
 
     try {
       final academyId = FirebaseService.academyId;
@@ -59,9 +64,15 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
         _overduePayments = results[1] as List<dynamic>;
         _monthlySummary = results[2] as Map<String, dynamic>;
         _isLoading = false;
+        _loadError = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
+      // Não engolir o erro silenciosamente: sem isso, uma falha de fetch
+      // vira "tudo zero", indistinguível de uma academia nova/vazia.
+      setState(() {
+        _isLoading = false;
+        _loadError = true;
+      });
     }
   }
 
@@ -99,6 +110,15 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     return NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(value);
   }
 
+  /// Staff sem `financial:view` (ex.: instrutor/monitor) NÃO pode ver o
+  /// financeiro da academia no dashboard. Admin tem a permissão por padrão.
+  bool get _canSeeFinancial =>
+      ref
+          .read(currentUserProvider)
+          .valueOrNull
+          ?.hasPermission('financial:view') ??
+      false;
+
   @override
   Widget build(BuildContext context) {
     final currentUser = ref.watch(currentUserProvider);
@@ -109,6 +129,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
       backgroundColor: AppTheme.background,
       body: _isLoading
           ? _buildLoadingState()
+          : _loadError
+          ? _buildErrorState()
           : RefreshIndicator(
               onRefresh: _loadDashboardData,
               child: SingleChildScrollView(
@@ -118,6 +140,13 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                   children: [
                     // Welcome Header
                     _buildWelcomeHeader(userName).fadeInQuick(),
+
+                    // Checklist de ativação "Comece por aqui" — derivado do
+                    // estado real da academia; some sozinho quando 100% pronto.
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(20, 4, 20, 0),
+                      child: ActivationChecklist(),
+                    ),
 
                     // Quick Actions
                     _buildQuickActions().entrance(index: 0),
@@ -129,19 +158,63 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
                     const SizedBox(height: 24),
 
-                    // Monthly Financial Card
-                    _buildMonthlyFinancialCard().entrance(index: 2),
-
-                    const SizedBox(height: 24),
-
-                    // Alerts Section
-                    _buildAlertsSection().entrance(index: 3),
+                    // Financeiro (card de mensalidades + alertas de
+                    // inadimplência) — só para staff com financial:view.
+                    if (_canSeeFinancial) ...[
+                      _buildMonthlyFinancialCard().entrance(index: 2),
+                      const SizedBox(height: 24),
+                      _buildAlertsSection().entrance(index: 3),
+                    ],
 
                     const SizedBox(height: 100),
                   ],
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              LucideIcons.alertTriangle,
+              size: 48,
+              color: AppTheme.warning,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Não foi possível carregar o painel',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Verifique sua conexão e tente novamente. '
+              'Os números abaixo podem estar incompletos enquanto há falha.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _loadDashboardData,
+              icon: const Icon(LucideIcons.refreshCw, size: 18),
+              label: const Text('Tentar novamente'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -243,16 +316,18 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
               onTap: () => context.go('/admin/alunos/novo'),
             ),
           ),
-          const SizedBox(width: 12),
-          // Financeiro
-          Expanded(
-            child: _QuickActionCard(
-              icon: LucideIcons.dollarSign,
-              label: 'Financeiro',
-              isPrimary: false,
-              onTap: () => context.go('/admin/financeiro'),
+          if (_canSeeFinancial) ...[
+            const SizedBox(width: 12),
+            // Financeiro
+            Expanded(
+              child: _QuickActionCard(
+                icon: LucideIcons.dollarSign,
+                label: 'Financeiro',
+                isPrimary: false,
+                onTap: () => context.go('/admin/financeiro'),
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -277,7 +352,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
             onPageChanged: (page) {
               setState(() => _currentStatsPage = page);
             },
-            itemCount: 2,
+            itemCount: _canSeeFinancial ? 2 : 1,
             itemBuilder: (context, index) {
               final cards = [
                 // Alunos Ativos
@@ -291,16 +366,17 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                   subtitle: 'de $totalStudents total',
                   onTap: () => context.go('/admin/alunos'),
                 ),
-                // Receita do Mes
-                _StatsCarouselCard(
-                  icon: LucideIcons.dollarSign,
-                  iconBgColor: AppTheme.successLight,
-                  iconColor: AppTheme.success,
-                  label: 'Receita do Mes',
-                  value: _formatCurrency(monthlyRevenue),
-                  subtitle: '$paidCount pagamentos',
-                  onTap: () => context.go('/admin/financeiro'),
-                ),
+                // Receita do Mes — só com financial:view
+                if (_canSeeFinancial)
+                  _StatsCarouselCard(
+                    icon: LucideIcons.dollarSign,
+                    iconBgColor: AppTheme.successLight,
+                    iconColor: AppTheme.success,
+                    label: 'Receita do Mes',
+                    value: _formatCurrency(monthlyRevenue),
+                    subtitle: '$paidCount pagamentos',
+                    onTap: () => context.go('/admin/financeiro'),
+                  ),
               ];
               return Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),

@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme.dart';
 import '../../models/academy_event.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/portal_providers.dart';
 import '../../services/event_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/polish/polish.dart';
@@ -54,23 +55,115 @@ class _EventDetailBody extends ConsumerWidget {
       eventDetailProvider((academyId: academyId, eventId: eventId)),
     );
 
+    // Visibilidade do Jornal para o aluno: o feed (jornal_screen) já bloqueia,
+    // mas o detalhe é alcançável por deep-link/push/histórico — sem este guard
+    // o aluno abre um post do jornal mesmo com a feature desligada. Eventos
+    // REAIS (PostType.event) seguem visíveis; staff vê tudo (preview).
+    final journalVisible = ref.watch(
+      academySettingsProvider.select(
+        (s) => s.valueOrNull?.journalVisibleToStudents ?? true,
+      ),
+    );
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    final isStaff =
+        (currentUser?.isAdmin ?? false) || (currentUser?.isInstructor ?? false);
+
     return eventAsync.when(
       loading: () => const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       ),
+      // Erro transitório (rede/permissão) NÃO é "inexistente" — oferece retry.
       error: (error, stack) => Scaffold(
         appBar: AppBar(),
-        body: const Center(child: Text('Evento não encontrado.')),
+        body: _EventDetailMessage(
+          icon: LucideIcons.wifiOff,
+          title: 'Não foi possível carregar',
+          subtitle: 'Verifique sua conexão e tente novamente.',
+          onRetry: () => ref.invalidate(
+            eventDetailProvider((academyId: academyId, eventId: eventId)),
+          ),
+        ),
       ),
       data: (event) {
         if (event == null) {
           return Scaffold(
             appBar: AppBar(),
-            body: const Center(child: Text('Evento não encontrado.')),
+            body: const _EventDetailMessage(
+              icon: LucideIcons.fileX,
+              title: 'Evento não encontrado',
+            ),
+          );
+        }
+        // Gate de deep-link do Jornal.
+        if (!journalVisible && !isStaff && event.postType != PostType.event) {
+          return Scaffold(
+            appBar: AppBar(),
+            body: const _EventDetailMessage(
+              icon: LucideIcons.eyeOff,
+              title: 'Conteúdo indisponível',
+              subtitle: 'Este conteúdo não está disponível no momento.',
+            ),
           );
         }
         return _EventLoaded(event: event);
       },
+    );
+  }
+}
+
+/// Estado de mensagem (erro com retry / não encontrado / indisponível) do
+/// detalhe — substitui o texto cru "Evento não encontrado." que mascarava
+/// erros de rede/permissão como inexistência.
+class _EventDetailMessage extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final VoidCallback? onRetry;
+
+  const _EventDetailMessage({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 48, color: AppTheme.textSecondary),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: AppTheme.titleMedium,
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  subtitle!,
+                  textAlign: TextAlign.center,
+                  style: AppTheme.bodySmall
+                      .copyWith(color: AppTheme.textSecondary),
+                ),
+              ],
+              if (onRetry != null) ...[
+                const SizedBox(height: 20),
+                OutlinedButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(LucideIcons.refreshCw, size: 18),
+                  label: const Text('Tentar novamente'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -34,6 +34,8 @@ const List<GrantablePermission> kGrantableExtraPermissions = [
       'Cadastrar torneios e abrir inscrições'),
   GrantablePermission('graduation:manage', 'Graduar alunos',
       'Promover faixas e registrar graduações'),
+  GrantablePermission('events:manage', 'Gerenciar jornal e eventos',
+      'Criar e editar posts do jornal e eventos da academia'),
   GrantablePermission('students:manage', 'Gerenciar alunos',
       'Acessar perfis e adicionar/remover alunos de turmas'),
 ];

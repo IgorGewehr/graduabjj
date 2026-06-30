@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -9,6 +10,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/responsive.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -73,27 +75,45 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       final service = StudentService(academyId);
       final students = await service.getAll();
 
-      // Eligibility snapshot — only loaded when the academy has auto-graduation
-      // enabled. Reading the academy settings is cheap (single doc) and lets
-      // us skip the expensive batch query otherwise.
-      final settings = ref.read(academySettingsProvider).valueOrNull;
-      Map<String, EligibilitySnapshotEntry> eligibility = {};
-      if (settings?.autoGraduationEnabled == true) {
-        final beltService = BeltProgressionService(academyId);
-        final snapshot = await beltService.getEligibilitySnapshot();
-        eligibility = {for (final e in snapshot) e.studentId: e};
-      }
-
+      // PERFORMANCE: mostra a lista IMEDIATAMENTE (getAll é 1 query, rápido). A
+      // eligibility (badges de graduação) é CARA — N+1 sobre presenças/syllabus
+      // por aluno (15-30s p/ 100+ alunos) — e NÃO pode BLOQUEAR a lista. Carrega
+      // em background e preenche os badges quando pronto (a lista aparece na hora
+      // em vez de travar a tela sem feedback útil).
+      if (!mounted) return;
       setState(() {
         _students = students;
-        _eligibilityByStudent = eligibility;
         _applyFilters();
         _isLoading = false;
       });
+
+      final settings = ref.read(academySettingsProvider).valueOrNull;
+      if (settings?.autoGraduationEnabled == true) {
+        unawaited(_loadEligibilityInBackground(academyId));
+      }
     } catch (e) {
       // Surface the failure instead of masquerading as "0 alunos".
-      debugPrint('[StudentsList] load failed (academy=${FirebaseService.academyId}): $e');
-      setState(() => _isLoading = false);
+      debugPrint(
+        '[StudentsList] load failed (academy=${FirebaseService.academyId}): $e',
+      );
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Carrega a snapshot de elegibilidade de graduação em BACKGROUND (não bloqueia
+  /// a lista). Atualiza os badges quando pronto; falha silenciosa (badges apenas
+  /// não aparecem).
+  Future<void> _loadEligibilityInBackground(String academyId) async {
+    try {
+      final snapshot =
+          await BeltProgressionService(academyId).getEligibilitySnapshot();
+      if (!mounted) return;
+      setState(() {
+        _eligibilityByStudent = {for (final e in snapshot) e.studentId: e};
+        _applyFilters();
+      });
+    } catch (e) {
+      debugPrint('[StudentsList] eligibility (background) failed: $e');
     }
   }
 
@@ -116,6 +136,13 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     // Status filter
     if (_statusFilter != null) {
       filtered = filtered.where((s) => s.status == _statusFilter).toList();
+    } else {
+      // Sem filtro explícito: ex-alunos TRANSFERIDOS não poluem o roster ativo.
+      // Eles continuam acessíveis (com todo o histórico) ao selecionar o filtro
+      // "Transferido" — que já aparece porque o sheet itera StudentStatus.values.
+      filtered = filtered
+          .where((s) => s.status != StudentStatus.transferred)
+          .toList();
     }
 
     // Category filter
@@ -173,14 +200,16 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           final gradesA = getGradesForSport(
             sportA,
             category: a.category.value,
-            muaythaiVariant:
-                sportA == SportId.muaythai ? resolveMuaythaiVariant(gradeA) : null,
+            muaythaiVariant: sportA == SportId.muaythai
+                ? resolveMuaythaiVariant(gradeA)
+                : null,
           );
           final gradesB = getGradesForSport(
             sportB,
             category: b.category.value,
-            muaythaiVariant:
-                sportB == SportId.muaythai ? resolveMuaythaiVariant(gradeB) : null,
+            muaythaiVariant: sportB == SportId.muaythai
+                ? resolveMuaythaiVariant(gradeB)
+                : null,
           );
           final aIndex = gradesA.indexWhere((g) => g.id == gradeA);
           final bIndex = gradesB.indexWhere((g) => g.id == gradeB);
@@ -237,53 +266,57 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: RefreshIndicator(
-        onRefresh: _loadStudents,
-        child: CustomScrollView(
-          slivers: [
-            // Multi-academy aware header — shows current academy + switcher
-            SliverToBoxAdapter(
-              child: AcademyPageHeader(
-                icon: LucideIcons.users,
-                title: 'Alunos',
-                description: '${_students.length} alunos cadastrados',
-                actions: [
-                  IconButton(
-                    onPressed: _exportStudents,
-                    icon: const Icon(Icons.download, size: 20),
-                    tooltip: 'Exportar CSV',
-                  ),
-                  IconButton(
-                    onPressed: _loadStudents,
-                    icon: const Icon(LucideIcons.refreshCw, size: 20),
-                    tooltip: 'Atualizar',
-                  ),
-                ],
-              ),
-            ),
-
-            // Search and filters
-            SliverToBoxAdapter(child: _buildSearchAndFilters()),
-
-            // Active filter chips
-            if (_hasActiveFilters())
-              SliverToBoxAdapter(child: _buildActiveFilterChips()),
-
-            // Student list
-            _isLoading
-                ? SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                    sliver: SliverToBoxAdapter(
-                      child: PolishSkeleton.list(count: 6, itemHeight: 88),
+      // ContentBounded: no-op no mobile; no desktop centraliza e limita a lista
+      // em 1200px (evita a tabela esticada edge-to-edge numa janela larga).
+      body: ContentBounded(
+        child: RefreshIndicator(
+          onRefresh: _loadStudents,
+          child: CustomScrollView(
+            slivers: [
+              // Multi-academy aware header — shows current academy + switcher
+              SliverToBoxAdapter(
+                child: AcademyPageHeader(
+                  icon: LucideIcons.users,
+                  title: 'Alunos',
+                  description: '${_students.length} alunos cadastrados',
+                  actions: [
+                    IconButton(
+                      onPressed: _exportStudents,
+                      icon: const Icon(Icons.download, size: 20),
+                      tooltip: 'Exportar CSV',
                     ),
-                  )
-                : _filteredStudents.isEmpty
-                ? SliverFillRemaining(child: _buildEmptyState())
-                : _buildStudentSliverList(),
+                    IconButton(
+                      onPressed: _loadStudents,
+                      icon: const Icon(LucideIcons.refreshCw, size: 20),
+                      tooltip: 'Atualizar',
+                    ),
+                  ],
+                ),
+              ),
 
-            // Bottom padding
-            const SliverToBoxAdapter(child: SizedBox(height: 100)),
-          ],
+              // Search and filters
+              SliverToBoxAdapter(child: _buildSearchAndFilters()),
+
+              // Active filter chips
+              if (_hasActiveFilters())
+                SliverToBoxAdapter(child: _buildActiveFilterChips()),
+
+              // Student list
+              _isLoading
+                  ? SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                      sliver: SliverToBoxAdapter(
+                        child: PolishSkeleton.list(count: 6, itemHeight: 88),
+                      ),
+                    )
+                  : _filteredStudents.isEmpty
+                  ? SliverFillRemaining(child: _buildEmptyState())
+                  : _buildStudentSliverList(),
+
+              // Bottom padding
+              const SliverToBoxAdapter(child: SizedBox(height: 100)),
+            ],
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -300,12 +333,13 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       return;
     }
     try {
-      final csv = StudentExportService(FirebaseService.academyId)
-          .buildCsv(_students);
+      final csv = StudentExportService(
+        FirebaseService.academyId,
+      ).buildCsv(_students);
       final bytes = Uint8List.fromList(utf8.encode(csv));
       final fileName =
           'alunos_${DateFormat('yyyyMMdd').format(DateTime.now())}.csv';
-      final path = await FilePicker.platform.saveFile(
+      final path = await FilePicker.saveFile(
         dialogTitle: 'Exportar alunos',
         fileName: fileName,
         type: FileType.custom,
@@ -515,8 +549,11 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         accountFilter: _accountFilter,
         sortBy: _sortBy,
         muaythaiVariant:
-            ref.read(academySettingsProvider).valueOrNull?.muaythaiGradeSystem ??
-                muaythaiVariantCbmt,
+            ref
+                .read(academySettingsProvider)
+                .valueOrNull
+                ?.muaythaiGradeSystem ??
+            muaythaiVariantCbmt,
         onApply: (status, category, sport, belt, account, sort) {
           setState(() {
             _statusFilter = status;
@@ -552,8 +589,11 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => _QuickAddStudentSheet(
         muaythaiVariant:
-            ref.read(academySettingsProvider).valueOrNull?.muaythaiGradeSystem ??
-                muaythaiVariantCbmt,
+            ref
+                .read(academySettingsProvider)
+                .valueOrNull
+                ?.muaythaiGradeSystem ??
+            muaythaiVariantCbmt,
         onCreated: (student) {
           // Genuine win — a new student joined the academy.
           if (mounted) Celebration.confetti(context);
@@ -568,9 +608,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     final hasFilters = _hasActiveFilters();
     return PolishedEmptyState(
       icon: LucideIcons.users,
-      title: hasFilters
-          ? 'Nenhum aluno encontrado'
-          : 'Nenhum aluno cadastrado',
+      title: hasFilters ? 'Nenhum aluno encontrado' : 'Nenhum aluno cadastrado',
       subtitle: hasFilters
           ? 'Tente ajustar os filtros'
           : 'Adicione o primeiro aluno da academia',
@@ -793,31 +831,31 @@ class _StudentCard extends StatelessWidget {
     return Hero(
       tag: 'student-avatar-${student.id}',
       child: Container(
-      width: 48,
-      height: 48,
-      decoration: BoxDecoration(
-        color: avatarColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: sportColor, width: 2),
-      ),
-      child: student.photoUrl != null
-          ? AppCachedImage(
-              imageUrl: student.photoUrl,
-              width: 48,
-              height: 48,
-              fit: BoxFit.cover,
-              borderRadius: BorderRadius.circular(10),
-            )
-          : Center(
-              child: Text(
-                student.displayName[0].toUpperCase(),
-                style: TextStyle(
-                  color: isLightAvatar ? Colors.black87 : Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 18,
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: avatarColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: sportColor, width: 2),
+        ),
+        child: student.photoUrl != null
+            ? AppCachedImage(
+                imageUrl: student.photoUrl,
+                width: 48,
+                height: 48,
+                fit: BoxFit.cover,
+                borderRadius: BorderRadius.circular(10),
+              )
+            : Center(
+                child: Text(
+                  student.displayName[0].toUpperCase(),
+                  style: TextStyle(
+                    color: isLightAvatar ? Colors.black87 : Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 18,
+                  ),
                 ),
               ),
-            ),
       ),
     );
   }

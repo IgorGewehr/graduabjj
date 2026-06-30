@@ -29,7 +29,11 @@ class _TeamGalleryViewState extends ConsumerState<TeamGalleryView> {
   }
 
   Future<void> _loadPhotos() async {
-    final academyId = ref.read(selectedAcademyIdProvider);
+    // In an admin-only session selectedAcademyIdProvider is never bootstrapped,
+    // so fall back to the authenticated user's academy (mirrors
+    // competition_detail_screen.dart's _resolveAcademyId).
+    final academyId = ref.read(selectedAcademyIdProvider) ??
+        ref.read(currentUserProvider).valueOrNull?.academyId;
     if (academyId == null) return;
 
     setState(() => _isLoading = true);

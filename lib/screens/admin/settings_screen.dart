@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:go_router/go_router.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
@@ -19,6 +20,7 @@ import '../../core/navigation/nav_catalog.dart';
 import '../../core/formatters.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
+import '../../core/access_control/turnstile_registry.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
@@ -74,6 +76,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   // Backend-set flag: MP auth repeatedly failed; admin must reconnect even
   // though mpConnected may still be true.
   bool _mpNeedsReauth = false;
+  // Backend-set: assinaturas recorrentes órfãs cobrando cartões numa conta MP
+  // não mais conectada (troca de conta / disconnect com token revogado).
+  bool _mpHasOrphanPreapprovals = false;
+  int _mpOrphanCount = 0;
   bool _mpBusy = false;
   bool _storeEnabled = false;
   bool _storePublished = false;
@@ -108,6 +114,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   // Musculação check-in (schedule-less)
   bool _musculacaoEnabled = true; // master on/off for the whole feature
   String _musculacaoCheckinMode = 'manual'; // 'manual' | 'qr' | 'button'
+
+  // Controle de acesso (catraca) — config em academies/{id}.accessControl
+  bool _accessControlEnabled = false;
+  String _accessControlVendor = '';
+  bool _accessControlBlockOnOverdue = false;
   final Map<int, ({String open, String close})> _operatingHours = {};
 
   // Muay Thai graduation ladder ('cbmt' | 'cbmtt')
@@ -273,6 +284,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _asaasEnabled = settings.asaasEnabled;
           _mpConnected = settings.mpConnected;
           _mpNeedsReauth = settings.mpNeedsReauth;
+          _mpHasOrphanPreapprovals = settings.mpHasOrphanPreapprovals;
+          _mpOrphanCount = settings.mpOrphanPreapprovalCount;
           _storeEnabled = settings.storeEnabled;
           _storePublished = settings.storePublished;
           _storeCreditCardEnabled = settings.storeCreditCardEnabled;
@@ -290,6 +303,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _physicalEvolutionEnabled = settings.physicalEvolutionEnabled;
           _musculacaoEnabled = settings.musculacaoEnabled;
           _musculacaoCheckinMode = settings.musculacaoCheckinMode;
+          _accessControlEnabled = settings.accessControlEnabled;
+          _accessControlVendor = settings.accessControlVendor;
+          _accessControlBlockOnOverdue = settings.accessControlBlockOnOverdue;
           _operatingHours
             ..clear()
             ..addAll(settings.operatingHours.byDay);
@@ -509,6 +525,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         service.updateJournalVisibility(_journalVisibleToStudents),
         service.updateRankingVisibility(_rankingVisibleToStudents),
         service.updateMusculacaoEnabled(_musculacaoEnabled),
+        service.updateAccessControl(
+          enabled: _accessControlEnabled,
+          vendor: _accessControlVendor.isEmpty ? null : _accessControlVendor,
+          blockOnOverdue: _accessControlBlockOnOverdue,
+        ),
         service.updateMusculacaoCheckin(
           mode: _musculacaoCheckinMode,
           operatingHours: OperatingHours(Map.of(_operatingHours)),
@@ -1213,6 +1234,53 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 16),
+          // Preapprovals órfãos: assinaturas recorrentes que ficaram cobrando
+          // cartões de alunos numa conta MP não mais conectada. Sem este alerta
+          // o admin nunca saberia (a notificação por proxy/push pode falhar).
+          if (_mpHasOrphanPreapprovals) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.error.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.error.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(LucideIcons.alertOctagon,
+                      size: 18, color: AppTheme.error),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _mpOrphanCount > 0
+                              ? 'Assinaturas orfas ($_mpOrphanCount)'
+                              : 'Assinaturas orfas',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.error,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Ha assinaturas recorrentes ainda cobrando cartoes de '
+                          'alunos numa conta do Mercado Pago que nao esta mais '
+                          'conectada. Reconecte essa conta para gerencia-las ou '
+                          'cancele-as no painel do Mercado Pago.',
+                          style: AppTheme.labelSmall
+                              .copyWith(color: AppTheme.error),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           // Reauth required: the connection went stale (token revoked/expired).
           // Surface a clear warning + "Reconectar" CTA even while mpConnected is
           // still true, so payments don't keep silently failing.
@@ -1336,7 +1404,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       builder: (c) => AlertDialog(
         title: const Text('Desconectar Mercado Pago'),
         content: const Text(
-          'Os alunos nao poderao mais pagar via Mercado Pago ate reconectar. Continuar?',
+          'Atencao: ao desconectar, TODAS as assinaturas recorrentes ativas dos '
+          'alunos serao canceladas e NAO voltam sozinhas ao reconectar — cada '
+          'aluno precisara assinar de novo. Ate la, os alunos nao poderao pagar '
+          'via Mercado Pago.\n\nDeseja continuar?',
         ),
         actions: [
           TextButton(
@@ -1344,6 +1415,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             child: const Text('Cancelar'),
           ),
           TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
             onPressed: () => Navigator.pop(c, true),
             child: const Text('Desconectar'),
           ),
@@ -1835,6 +1907,75 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                       }),
                     ),
                   ],
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Controle de Acesso (catraca)
+          _SettingsCard(
+            title: 'Controle de Acesso (Catraca)',
+            icon: LucideIcons.scanFace,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ModernSwitch(
+                  title: 'Habilitar controle de acesso',
+                  subtitle:
+                      'Integra catracas/totem de acesso (check-in automatico). '
+                      'Quando desligado, nada aparece para a academia.',
+                  value: _accessControlEnabled,
+                  onChanged: (value) =>
+                      setState(() => _accessControlEnabled = value),
+                  icon: LucideIcons.scanFace,
+                  iconColor: AppTheme.primary,
+                ),
+                if (_accessControlEnabled) ...[
+                  const Divider(height: 24),
+                  Text(
+                    'Marca/modelo de catraca usada (dica de configuracao; cada '
+                    'catraca cadastrada define o seu proprio fabricante).',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _TurnstileVendorSelector(
+                    value: _accessControlVendor,
+                    onChanged: (v) => setState(() => _accessControlVendor = v),
+                  ),
+                  const Divider(height: 24),
+                  _ModernSwitch(
+                    title: 'Bloquear inadimplentes no portao',
+                    subtitle:
+                        'A catraca nega o giro de quem esta com financeiro '
+                        'vencido. Desligado por padrao — ligar a catraca nao '
+                        'bloqueia ninguem sozinho.',
+                    value: _accessControlBlockOnOverdue,
+                    onChanged: (value) =>
+                        setState(() => _accessControlBlockOnOverdue = value),
+                    icon: LucideIcons.shieldAlert,
+                    iconColor: AppTheme.error,
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () => context.go('/admin/catracas'),
+                        icon: const Icon(LucideIcons.scanFace, size: 18),
+                        label: const Text('Gerenciar catracas'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => context.go('/kiosk'),
+                        icon: const Icon(LucideIcons.monitor, size: 18),
+                        label: const Text('Abrir totem (Kiosk)'),
+                      ),
+                    ],
+                  ),
                 ],
               ],
             ),
@@ -2756,6 +2897,77 @@ class _GraduationModeSelector extends StatelessWidget {
 
 /// Picks which Muay Thai prajied ladder the academy uses. 'cbmt' is the
 /// blue-based CBMT/CMTB system; 'cbmtt' is the CBMTT traditional (white→gold).
+/// Seletor de marca/modelo de catraca — lê de [kTurnstileVendors] (registro
+/// único). Adicionar um fabricante novo é UMA entrada lá; este seletor se
+/// atualiza sozinho (nada muda aqui).
+class _TurnstileVendorSelector extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+  const _TurnstileVendorSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final v in kTurnstileVendors)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: InkWell(
+              onTap: () => onChanged(v.id),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: value == v.id ? AppTheme.primary : AppTheme.border,
+                    width: value == v.id ? 2 : 1,
+                  ),
+                  color: value == v.id
+                      ? AppTheme.primary.withValues(alpha: 0.06)
+                      : null,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      value == v.id
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      color: value == v.id
+                          ? AppTheme.primary
+                          : AppTheme.textSecondary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            v.label,
+                            style: AppTheme.bodyMedium
+                                .copyWith(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            v.integration,
+                            style: AppTheme.labelSmall
+                                .copyWith(color: AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _MuaythaiGradeSystemSelector extends StatelessWidget {
   final String value;
   final ValueChanged<String> onChanged;

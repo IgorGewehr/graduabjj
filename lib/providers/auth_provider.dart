@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -144,14 +143,26 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
 
   // Step 3: Get academy-specific user data
   final academyDetails = mapping.academyDetails?[academyId];
-  final userDoc = await firestore
-      .collection('academies')
-      .doc(academyId)
-      .collection('users')
-      .doc(firebaseUser.uid)
-      .get();
+  // RESILIÊNCIA (hotfix tela-branca pós-login): o read do doc academy-user pode
+  // falhar (permissão transitória, índice ausente, parse de doc recém-criado
+  // pelo CF joinAcademy). NÃO rebaixar o usuário a "grátis" por isso — a mapping
+  // já carrega academyId + role + studentId + extraPermissions. Em erro, cai no
+  // fallback abaixo (monta o AppUser a partir da mapping) em vez de mandar um
+  // membro de academia para um portal vazio (que aparece como tela branca).
+  DocumentSnapshot<Map<String, dynamic>>? userDoc;
+  try {
+    userDoc = await firestore
+        .collection('academies')
+        .doc(academyId)
+        .collection('users')
+        .doc(firebaseUser.uid)
+        .get();
+  } catch (e) {
+    print('[AUTH] academy-user read failed; using mapping fallback: $e');
+    userDoc = null;
+  }
 
-  if (userDoc.exists) {
+  if (userDoc != null && userDoc.exists) {
     final userData = userDoc.data()!;
     print(
       '[AUTH] Found user in academy subcollection: role=${userData['role']}',
@@ -177,13 +188,16 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
     );
   }
 
-  // Fallback: user is linked to academy but doesn't have academy user document yet
-  print('[AUTH] Creating academy user document...');
+  // Fallback: doc ausente OU read falhou acima — monta a partir da mapping (que
+  // já carrega role/studentId/extraPermissions), preservando o contexto de
+  // academia em vez de cair como usuário "grátis" (home vazio = tela branca).
+  print('[AUTH] academy-user doc unavailable; building user from mapping');
   return AppUser.fromGlobalAndAcademy(
     globalUser: globalUser,
     academyId: academyId,
     role: academyDetails?.role ?? UserRole.student,
     studentId: academyDetails?.studentId,
+    extraPermissions: academyDetails?.extraPermissions ?? const [],
   );
 });
 
@@ -551,17 +565,24 @@ class AuthService {
     return credential;
   }
 
-  /// Create account with link code (registers and links to student in one step)
-  /// CRITICAL: academyId must be passed explicitly (from link code validation)
-  /// to ensure multi-tenant correctness during registration
+  /// Create an account from a student link code and join the academy.
+  ///
+  /// The academy join runs entirely through the `joinAcademy` Cloud Function:
+  /// the server resolves academyId + studentId from the [code], writes the
+  /// userAcademyMapping + academy-user doc, marks the code used, and CLAIMS the
+  /// orphan student record (stamping linkedUserId + the optional [cpf]/[phone])
+  /// — all atomically with the Admin SDK and its orphan-claim guard.
+  ///
+  /// This replaces the previous client-side writes (mapping/academyUser/student)
+  /// that bypassed the server guard and allowed an attacker to hijack another
+  /// student's record (account-takeover hardening). The UI/flow is unchanged.
   Future<UserCredential> createAccountWithLinkCode(
     String email,
     String password,
     String displayName,
-    String studentId,
-    String academyId, // Must be passed from validated link code
-    String? cpf, { // Optional CPF to save with student
-    String? phone, // Optional WhatsApp phone to save with student
+    String code, { // 6-char link code; server derives academyId + studentId
+    String? cpf, // Optional CPF to stamp on the claimed student record
+    String? phone, // Optional WhatsApp phone to stamp on the claimed record
   }) async {
     // Create Firebase Auth account
     final credential = await _auth.createUserWithEmailAndPassword(
@@ -572,83 +593,23 @@ class AuthService {
     // Update display name in Firebase Auth
     await credential.user?.updateDisplayName(displayName);
 
-    // Create global user document
+    // Create global user document (also pre-creates the empty academy mapping
+    // that the Cloud Function populates).
     await globalUserService.createGlobalUser(
       userId: credential.user!.uid,
       email: email,
       displayName: displayName,
-      accountType: AccountType.linked, // Already linked to academy
+      accountType: AccountType.linked,
     );
 
-    // Link user to academy
-    await globalUserService.linkUserToAcademy(
-      userId: credential.user!.uid,
-      academyId: academyId,
-      studentId: studentId,
-      role: UserRole.student,
-    );
+    // Secure server-side join: mapping + academy-user doc + orphan student claim
+    // (incl. cpf/phone) + mark-code-used, all atomic. Returns the academyId.
+    final academyId = await teamService.joinAcademy(code, cpf: cpf, phone: phone);
 
-    // Create academy user document
-    await globalUserService.upsertAcademyUser(
-      academyId: academyId,
-      userId: credential.user!.uid,
-      data: {
-        'studentId': studentId,
-        'role': 'student',
-        'email': email,
-        'displayName': displayName,
-        'approvedAt': DateTime.now(),
-        'status': 'active',
-      },
-    );
-
-    // Register FCM token for push notifications
+    // Register FCM token + subscribe to the academy topic for push.
     await pushNotificationService.onUserLogin();
-
-    // Subscribe to academy push notifications topic
-    await pushNotificationService.subscribeToTopic('academy_$academyId');
-
-    // Update student document with linkedUserId and CPF (with retry logic)
-    // This MUST complete before returning to avoid race conditions on first login
-    bool studentUpdated = false;
-    for (int attempt = 0; attempt < 3 && !studentUpdated; attempt++) {
-      try {
-        final updateData = <String, dynamic>{
-          'linkedUserId': credential.user!.uid,
-          'email': email,
-          'updatedAt': FieldValue.serverTimestamp(),
-        };
-
-        // Only add CPF if provided
-        if (cpf != null && cpf.isNotEmpty) {
-          updateData['cpf'] = cpf;
-        }
-
-        // Only add phone if provided
-        if (phone != null && phone.isNotEmpty) {
-          updateData['phone'] = phone;
-        }
-
-        await _firestore
-            .collection('academies')
-            .doc(academyId)
-            .collection('students')
-            .doc(studentId)
-            .update(updateData);
-
-        studentUpdated = true;
-      } catch (e) {
-        debugPrint('Student update attempt ${attempt + 1} failed: $e');
-        if (attempt < 2) {
-          await Future.delayed(Duration(milliseconds: 500));
-        } else {
-          // Account is fully functional (Auth + Firestore docs created).
-          // Only the student.linkedUserId is missing — log and continue so
-          // the user can still sign in. Throwing here would leave a valid
-          // Auth user with no way to re-register (email-already-in-use).
-          debugPrint('CRITICAL: Failed to update student after 3 attempts');
-        }
-      }
+    if (academyId.isNotEmpty) {
+      await pushNotificationService.subscribeToTopic('academy_$academyId');
     }
 
     return credential;

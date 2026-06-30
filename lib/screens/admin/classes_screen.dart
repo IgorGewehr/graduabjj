@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/responsive.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -126,7 +127,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: RefreshIndicator(
+      body: ContentBounded(
+        maxWidth: kContentMaxWidthList,
+        child: RefreshIndicator(
         onRefresh: _loadClasses,
         child: CustomScrollView(
           slivers: [
@@ -174,6 +177,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
             const SliverToBoxAdapter(child: SizedBox(height: 100)),
           ],
         ),
+      ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showCreateClassSheet,

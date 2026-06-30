@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
+import '../../core/validators.dart';
 import '../../services/mp_card_tokenizer.dart'
     show MpCardTokenizationException;
 import '../../services/subscription_service.dart';
@@ -860,11 +861,9 @@ class _UpdateSubscriptionCardSheetState
                   hint: '000.000.000-00',
                   keyboardType: TextInputType.number,
                   inputFormatters: [CpfFormatter()],
-                  validator: (v) {
-                    final digits = (v ?? '').replaceAll(RegExp(r'\D'), '');
-                    if (digits.length != 11) return 'CPF inválido';
-                    return null;
-                  },
+                  // Auditoria: valida o CPF por CHECKSUM (mesma regra do servidor),
+                  // para o erro aparecer no formulário e não só após o submit.
+                  validator: Validators.cpf,
                 ),
                 if (_errorMessage != null) ...[
                   const SizedBox(height: 8),
