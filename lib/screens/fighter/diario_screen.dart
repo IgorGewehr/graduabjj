@@ -1180,6 +1180,92 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
     );
   }
 
+  /// Casa um marco AUTO de graduação ao doc cru. Primeiro tenta match EXATO
+  /// (esporte/grau/graus/dia); se falhar (ex.: data editada em outra tela),
+  /// aceita candidato ÚNICO ignorando a data — nunca chuta entre dois.
+  SelfGraduation? _resolveGradRec(FighterGraduation g, _SelfRecords? self) {
+    if (g.source != 'auto' || self == null) return null;
+    final exact = self.grads
+        .where((s) =>
+            s.sport == g.sport &&
+            s.grade == g.belt &&
+            s.stripes == g.stripes &&
+            DateUtils.isSameDay(s.date, g.date))
+        .firstOrNull;
+    if (exact != null) return exact;
+    final loose = self.grads
+        .where((s) =>
+            s.sport == g.sport && s.grade == g.belt && s.stripes == g.stripes)
+        .toList();
+    return loose.length == 1 ? loose.first : null;
+  }
+
+  /// Idem para competição (esporte/nome/dia; fallback = candidato único por
+  /// esporte+nome, ignorando a data).
+  SelfCompetition? _resolveCompRec(
+      FighterCompetitionMark c, _SelfRecords? self) {
+    if (c.source != 'auto' || self == null) return null;
+    final exact = self.comps
+        .where((s) =>
+            s.sport == c.sport &&
+            s.name == c.name &&
+            DateUtils.isSameDay(s.date, c.date))
+        .firstOrNull;
+    if (exact != null) return exact;
+    final loose = self.comps
+        .where((s) => s.sport == c.sport && s.name == c.name)
+        .toList();
+    return loose.length == 1 ? loose.first : null;
+  }
+
+  /// Long-press num marco VERIFICADO: explica com honestidade por que não dá
+  /// pra editar/remover por aqui (registro da academia = teto — quem corrige
+  /// é o professor). Sem isso o aluno acha que a remoção "não existe".
+  void _verifiedRecordSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: const [
+                  Icon(Icons.verified_outlined, size: 18, color: _ink),
+                  SizedBox(width: 8),
+                  Text('REGISTRO DA ACADEMIA',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.8,
+                          color: _ink)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Esse marco foi registrado pela sua academia e é verificado — '
+                'só o professor pode corrigir ou remover. Os registros que '
+                'VOCÊ adicionou têm a etiqueta "auto" e podem ser editados ou '
+                'excluídos segurando o card.',
+                style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w500,
+                    height: 1.45,
+                    color: _smoke),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _gradTile(
       FighterGraduation g, bool multiSport, _SelfRecords? self) {
     final sportId = SportId.fromString(g.sport);
@@ -1192,19 +1278,11 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
     final effort = (tReach != null && tReach > 0)
         ? '$tReach $unit · ${_monthsLabel(g.monthsToReach)} ATÉ AQUI'
         : '${_monthsLabel(g.monthsToReach)} ATÉ AQUI';
-    // Casa o marco AUTO ao doc cru (mesmo esporte/grau/grau-stripes/data) para
-    // editar/excluir o registro certo. Verificado nunca tem ação.
-    final SelfGraduation? rec = (isAuto && self != null)
-        ? self.grads
-            .where((s) =>
-                s.sport == g.sport &&
-                s.grade == g.belt &&
-                s.stripes == g.stripes &&
-                DateUtils.isSameDay(s.date, g.date))
-            .firstOrNull
-        : null;
+    // Casamento tolerante do marco AUTO ao doc cru (p/ editar/excluir).
+    final SelfGraduation? rec = _resolveGradRec(g, self);
 
-    return Container(
+    // Long-press no card: auto → editar/excluir; verificado → explicação.
+    final tile = Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       decoration: BoxDecoration(
@@ -1286,6 +1364,17 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
           ],
         ],
       ),
+    );
+    return GestureDetector(
+      onLongPress: () {
+        HapticFeedback.mediumImpact();
+        if (rec != null && self != null) {
+          _gradActions(rec, self);
+        } else {
+          _verifiedRecordSheet();
+        }
+      },
+      child: tile,
     );
   }
 
@@ -1369,15 +1458,8 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
         .whereType<String>()
         .where((s) => s.trim().isNotEmpty)
         .join(' · ');
-    // Casa o marco AUTO ao doc cru (mesmo esporte/nome/data).
-    final SelfCompetition? rec = (isAuto && self != null)
-        ? self.comps
-            .where((s) =>
-                s.sport == c.sport &&
-                s.name == c.name &&
-                DateUtils.isSameDay(s.date, c.date))
-            .firstOrNull
-        : null;
+    // Casamento tolerante do marco AUTO ao doc cru (p/ editar/excluir).
+    final SelfCompetition? rec = _resolveCompRec(c, self);
 
     // A "estrada": o esforço entre a competição anterior e esta. Contagem de
     // treinos NULL = indeterminável (baseline do mestre sem data cobre o
@@ -1396,7 +1478,7 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
           '${c.gradesSincePrev > 0 ? ' · ${_gradesLabel(c.gradesSincePrev)}' : ''}';
     }
 
-    return Container(
+    final tile = Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1502,6 +1584,17 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
           ),
         ],
       ),
+    );
+    return GestureDetector(
+      onLongPress: () {
+        HapticFeedback.mediumImpact();
+        if (rec != null && self != null) {
+          _compActions(rec, self);
+        } else {
+          _verifiedRecordSheet();
+        }
+      },
+      child: tile,
     );
   }
 

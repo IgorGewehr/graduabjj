@@ -456,7 +456,12 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
         children: [
           const _Header(),
           const SizedBox(height: 16),
-          PolishSkeleton.list(count: 4, itemHeight: 96),
+          // scrollable:false é OBRIGATÓRIO aqui: dentro de Column em
+          // SingleChildScrollView o ListView interno recebe altura infinita →
+          // "Vertical viewport was given unbounded height" → a TELA INTEIRA
+          // falhava o layout e ficava em branco (e o render object quebrado
+          // envenenava os frames do app todo enquanto a branch vivia no shell).
+          PolishSkeleton.list(count: 4, itemHeight: 96, scrollable: false),
         ],
       ),
     );

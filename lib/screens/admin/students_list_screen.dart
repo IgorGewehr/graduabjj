@@ -325,7 +325,11 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                   ? SliverPadding(
                       padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
                       sliver: SliverToBoxAdapter(
-                        child: PolishSkeleton.list(count: 6, itemHeight: 88),
+                        // scrollable:false: SliverToBoxAdapter dá altura
+                        // infinita ao filho — ListView scrollável aqui quebra
+                        // o layout da tela inteira (viewport unbounded).
+                        child: PolishSkeleton.list(
+                            count: 6, itemHeight: 88, scrollable: false),
                       ),
                     )
                   : _filteredStudents.isEmpty
