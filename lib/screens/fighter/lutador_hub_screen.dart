@@ -626,7 +626,7 @@ class _StatsCard extends ConsumerWidget {
     return _WhiteCard(
       child: Row(
         children: [
-          Expanded(child: _stat('$treinos', 'TREINOS', _T.ink)),
+          Expanded(child: _statVerificado('$treinos')),
           _divider(),
           Expanded(
               child: _stat(mes == null ? '—' : '$mes', 'ESTE MÊS', _T.ink)),
@@ -654,6 +654,33 @@ class _StatsCard extends ConsumerWidget {
                   fontFeatures: _T.tab)),
           const SizedBox(height: 5),
           Text(label, textAlign: TextAlign.center, style: _eyebrow(_T.smoke, 10)),
+        ],
+      );
+
+  /// Variante para "AULAS VERIFICADAS" — exibe ícone de check discreto
+  /// ao lado do rótulo para sinalizar que são presenças da academia.
+  Widget _statVerificado(String value) => Column(
+        children: [
+          Text(value,
+              style: const TextStyle(
+                  color: _T.ink,
+                  fontSize: 30,
+                  height: 1.0,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                  fontFeatures: _T.tab)),
+          const SizedBox(height: 5),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.verified_outlined, size: 10, color: _T.smoke),
+              const SizedBox(width: 3),
+              Text('AULAS VERIFICADAS',
+                  textAlign: TextAlign.center,
+                  style: _eyebrow(_T.smoke, 9)),
+            ],
+          ),
         ],
       );
 }

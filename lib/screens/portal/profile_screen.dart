@@ -2182,6 +2182,14 @@ class _AccountSection extends ConsumerWidget {
                 onTap: () => _openUrl(AppConstants.privacyPolicyUrl),
               ),
               Divider(height: 1, thickness: 1, color: _T.hair),
+              // Notification preferences — acima do logout (LGPD)
+              _AccountTile(
+                icon: LucideIcons.bell,
+                title: 'Notificacoes',
+                onTap: () =>
+                    context.push('/portal/preferencias-notificacoes'),
+              ),
+              Divider(height: 1, thickness: 1, color: _T.hair),
               // Logout — sair da conta (acima do excluir conta)
               _AccountTile(
                 icon: LucideIcons.logOut,

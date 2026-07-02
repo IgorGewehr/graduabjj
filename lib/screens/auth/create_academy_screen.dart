@@ -7,6 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/brand_tokens.dart';
 import '../../providers/auth_provider.dart';
 
 // =============================================================================
@@ -19,7 +20,7 @@ class _C {
   static const bone = Color(0xFFF4F3EF);
   static const card = Color(0xFFFFFFFF);
   static const ink = Color(0xFF0A0A0A);
-  static const blood = Color(0xFFE0301E);
+  static const blood = Brand.blood;
   static const smoke = Color(0xFF6E6E68);
   static const ash = Color(0xFF9A9A93);
   static const List<FontFeature> tab = [FontFeature.tabularFigures()];

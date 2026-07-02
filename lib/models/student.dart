@@ -261,6 +261,59 @@ class BeltHistoryEntry {
   }
 }
 
+/// Dados de retenção e engajamento — gravados exclusivamente pelas Cloud Functions
+/// (onAttendanceWrite + computeRetentionDaily). O cliente NUNCA escreve este mapa:
+/// nem via toFirestore() nem via updates diretos.
+///
+/// Invariante de privacidade: riskScore/riskLevel NUNCA são espelhados em
+/// publicProfiles ou fighterProfiles — dado interno da academia (LGPD).
+class StudentRetention {
+  final DateTime? lastAttendanceDate;
+  final int attendanceLast7d;
+  final int attendanceLast30d;
+
+  /// Buckets semanais ISO (chave 'YYYY-Www', ex.: '2026-W27').
+  /// Semanas ISO começam na segunda-feira. Poda automática: ~9 semanas pela CF.
+  final Map<String, int> weeklyBuckets;
+
+  final int? riskScore;
+
+  /// 'low' | 'medium' | 'high' | 'critical'
+  final String? riskLevel;
+  final DateTime? riskComputedAt;
+
+  const StudentRetention({
+    this.lastAttendanceDate,
+    this.attendanceLast7d = 0,
+    this.attendanceLast30d = 0,
+    this.weeklyBuckets = const {},
+    this.riskScore,
+    this.riskLevel,
+    this.riskComputedAt,
+  });
+
+  factory StudentRetention.fromMap(Map<String, dynamic> map) {
+    // Parse tolerante de weeklyBuckets — ignora chaves/valores malformados.
+    final rawBuckets = map['weeklyBuckets'];
+    final buckets = <String, int>{};
+    if (rawBuckets is Map) {
+      rawBuckets.forEach((k, v) {
+        final val = (v as num?)?.toInt();
+        if (val != null && k is String) buckets[k] = val;
+      });
+    }
+    return StudentRetention(
+      lastAttendanceDate: (map['lastAttendanceDate'] as Timestamp?)?.toDate(),
+      attendanceLast7d: (map['attendanceLast7d'] as num?)?.toInt() ?? 0,
+      attendanceLast30d: (map['attendanceLast30d'] as num?)?.toInt() ?? 0,
+      weeklyBuckets: Map.unmodifiable(buckets),
+      riskScore: (map['riskScore'] as num?)?.toInt(),
+      riskLevel: map['riskLevel'] as String?,
+      riskComputedAt: (map['riskComputedAt'] as Timestamp?)?.toDate(),
+    );
+  }
+}
+
 /// Student Model
 class Student {
   final String id;
@@ -352,6 +405,13 @@ class Student {
   final DateTime updatedAt;
   final String? createdBy;
 
+  // Retenção (leitura — gravado exclusivamente pelas Cloud Functions)
+  final StudentRetention? retention;
+
+  // Histórico de mudança de status (gravado pelo cliente a cada transição real)
+  final DateTime? statusChangedAt;
+  final String? statusChangeReason;
+
   Student({
     required this.id,
     required this.fullName,
@@ -403,6 +463,9 @@ class Student {
     required this.createdAt,
     required this.updatedAt,
     this.createdBy,
+    this.retention,
+    this.statusChangedAt,
+    this.statusChangeReason,
   });
 
   factory Student.fromFirestore(DocumentSnapshot doc) {
@@ -475,6 +538,14 @@ class Student {
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       createdBy: data['createdBy'],
+      // Parse tolerante: mapa ausente → null (aluno sem dados de retenção ainda)
+      retention: data['retention'] is Map
+          ? StudentRetention.fromMap(
+              Map<String, dynamic>.from(data['retention'] as Map),
+            )
+          : null,
+      statusChangedAt: (data['statusChangedAt'] as Timestamp?)?.toDate(),
+      statusChangeReason: data['statusChangeReason'] as String?,
     );
   }
 
@@ -608,6 +679,53 @@ class Student {
     );
   }
 
+  // ============================================
+  // Helpers de Retenção
+  // ============================================
+
+  /// Dias desde a última presença registrada pela CF.
+  /// Retorna null se o aluno nunca treinou ou os dados de retenção ainda não
+  /// foram populados (backfill pendente).
+  int? get daysSinceLastAttendance {
+    if (retention?.lastAttendanceDate == null) return null;
+    return DateTime.now()
+        .difference(retention!.lastAttendanceDate!)
+        .inDays;
+  }
+
+  /// Retorna os 8 buckets semanais ISO mais recentes em ordem CRONOLÓGICA
+  /// (índice 0 = semana mais antiga; índice 7 = semana de [now]).
+  ///
+  /// Chaves ausentes no mapa de retenção valem 0.
+  /// Formato de chave: 'YYYY-Www' (semana ISO, segunda-feira = início).
+  /// Usado pela mini-strip de frequência na ficha do aluno.
+  List<int> last8WeeksBuckets(DateTime now) {
+    if (retention == null) return List.filled(8, 0);
+    return [
+      for (int i = 7; i >= 0; i--)
+        retention!.weeklyBuckets[_isoWeekKey(
+              now.subtract(Duration(days: 7 * i)),
+            )] ??
+            0,
+    ];
+  }
+
+  /// Calcula a chave de semana ISO ('YYYY-Www') para [date].
+  /// Semanas ISO começam na segunda-feira (ISO 8601).
+  ///
+  /// Algoritmo: a quinta-feira de cada semana determina o ano ISO e o número
+  /// da semana — mesmo formato gerado pelo backend Node.js.
+  static String _isoWeekKey(DateTime date) {
+    // weekday: 1 = segunda ... 7 = domingo
+    final thursday = date.add(Duration(days: 4 - date.weekday));
+    final isoYear = thursday.year;
+    final jan1 = DateTime(isoYear, 1, 1);
+    // dayOfYear é 0-based a partir de jan1
+    final dayOfYear = thursday.difference(jan1).inDays;
+    final weekNum = dayOfYear ~/ 7 + 1;
+    return '$isoYear-W${weekNum.toString().padLeft(2, '0')}';
+  }
+
   Student copyWith({
     String? id,
     String? fullName,
@@ -657,6 +775,9 @@ class Student {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? createdBy,
+    StudentRetention? retention,
+    DateTime? statusChangedAt,
+    String? statusChangeReason,
   }) {
     return Student(
       id: id ?? this.id,
@@ -709,6 +830,9 @@ class Student {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       createdBy: createdBy ?? this.createdBy,
+      retention: retention ?? this.retention,
+      statusChangedAt: statusChangedAt ?? this.statusChangedAt,
+      statusChangeReason: statusChangeReason ?? this.statusChangeReason,
     );
   }
 }

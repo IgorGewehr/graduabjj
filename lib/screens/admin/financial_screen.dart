@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../core/feedback_utils.dart';
 import '../../core/responsive.dart';
 import '../../providers/auth_provider.dart';
@@ -1590,7 +1592,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         phone: student!.phone!,
       );
 
-      if (mounted) {
+      final uri = Uri.parse(whatsappLink);
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        // fallback: copia o link no snackbar caso o dispositivo não consiga abrir
         context.showInfo('Abrir WhatsApp: $whatsappLink');
       }
     } catch (e) {

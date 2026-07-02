@@ -3,15 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../core/brand_tokens.dart';
 import '../../core/responsive.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
-import '../../services/services.dart';
 import '../../providers/portal_providers.dart';
+import '../../services/services.dart';
 import '../../widgets/polish/polish.dart';
 
 /// Admin Reports Screen - Complete dashboard with separated stats
@@ -76,32 +77,20 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   // Distribuição por esporte (modalidades não-BJJ): {sportValue: {beltId: count}}.
   Map<String, Map<String, int>> _otherSportDistribution = {};
 
-  // Retention data
-  List<StudentRiskScore> _atRiskStudents = [];
-  RetentionMetrics? _retentionMetrics;
-  bool _isRetentionLoading = true;
-  RiskLevel? _selectedRetentionFilter;
-  final PageController _retentionPageController = PageController(
-    viewportFraction: 0.92,
-  );
-  int _retentionCurrentPage = 0;
-
   @override
   void initState() {
     super.initState();
     _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) setState(() {});
     });
     _loadAllData();
-    _loadRetentionData();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _retentionPageController.dispose();
     super.dispose();
   }
 
@@ -121,148 +110,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     }
 
     setState(() => _isLoading = false);
-  }
-
-  Future<void> _loadRetentionData() async {
-    setState(() => _isRetentionLoading = true);
-
-    try {
-      final academyId = FirebaseService.academyId;
-      final studentService = StudentService(academyId);
-      final collections = Collections(academyId);
-
-      final allStudents = await studentService.getAll();
-
-      // Fetch attendance from last 30 days
-      final now = DateTime.now();
-      final thirtyDaysAgo = now.subtract(const Duration(days: 30));
-      final attendanceSnapshot = await collections.attendance
-          .where(
-            'date',
-            isGreaterThanOrEqualTo: Timestamp.fromDate(thirtyDaysAgo),
-          )
-          .get();
-
-      final attendanceMap = <String, List<Map<String, dynamic>>>{};
-      for (final doc in attendanceSnapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        final studentId = data['studentId'] as String? ?? '';
-        if (studentId.isNotEmpty) {
-          attendanceMap.putIfAbsent(studentId, () => []);
-          attendanceMap[studentId]!.add(data);
-        }
-      }
-
-      // Fetch financials
-      final financialsSnapshot = await collections.payments.get();
-      final financialsMap = <String, List<Map<String, dynamic>>>{};
-      for (final doc in financialsSnapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        final studentId = data['studentId'] as String? ?? '';
-        if (studentId.isNotEmpty) {
-          financialsMap.putIfAbsent(studentId, () => []);
-          financialsMap[studentId]!.add(data);
-        }
-      }
-
-      // Compute risk scores
-      final retentionService = RetentionService();
-      final riskScores = retentionService.getAtRiskStudents(
-        allStudents,
-        attendanceMap,
-        financialsMap,
-      );
-
-      final metrics = retentionService.getRetentionMetrics(
-        allStudents,
-        riskScores,
-      );
-
-      // Compute average frequency
-      final activeStudents = allStudents
-          .where((s) => s.status == StudentStatus.active)
-          .toList();
-      double totalFrequency = 0;
-      for (final student in activeStudents) {
-        final records = attendanceMap[student.id] ?? [];
-        final last30 = records.where((r) {
-          final raw = r['date'];
-          if (raw == null) return false;
-          final date = raw is Timestamp ? raw.toDate() : DateTime.now();
-          return now.difference(date).inDays <= 30;
-        }).length;
-        totalFrequency += last30;
-      }
-      final avgFrequency = activeStudents.isNotEmpty
-          ? totalFrequency / activeStudents.length
-          : 0.0;
-
-      setState(() {
-        _atRiskStudents = riskScores;
-        _retentionMetrics = RetentionMetrics(
-          totalAtRisk: metrics.totalAtRisk,
-          atRiskPercentage: metrics.atRiskPercentage,
-          averageFrequency: avgFrequency,
-          paymentComplianceRate: metrics.paymentComplianceRate,
-          distributionByRisk: metrics.distributionByRisk,
-        );
-        _isRetentionLoading = false;
-      });
-    } catch (e) {
-      debugPrint('Error loading retention data: $e');
-      setState(() => _isRetentionLoading = false);
-    }
-  }
-
-  List<StudentRiskScore> get _filteredRetentionStudents {
-    if (_selectedRetentionFilter == null) return _atRiskStudents;
-    return _atRiskStudents
-        .where((s) => s.level == _selectedRetentionFilter)
-        .toList();
-  }
-
-  Color _riskColor(RiskLevel level) {
-    switch (level) {
-      case RiskLevel.low:
-        return Colors.green;
-      case RiskLevel.medium:
-        return Colors.amber;
-      case RiskLevel.high:
-        return Colors.orange;
-      case RiskLevel.critical:
-        return Colors.red;
-    }
-  }
-
-  List<String> _getSuggestedActions(RiskLevel level) {
-    switch (level) {
-      case RiskLevel.low:
-        return [
-          'Manter acompanhamento regular',
-          'Incentivar participacao em eventos',
-        ];
-      case RiskLevel.medium:
-        return [
-          'Enviar mensagem de acompanhamento',
-          'Verificar satisfacao com as aulas',
-          'Oferecer aula experimental em outro horario',
-        ];
-      case RiskLevel.high:
-        return [
-          'Contato direto por telefone ou WhatsApp',
-          'Agendar conversa presencial',
-          'Oferecer flexibilidade no pagamento',
-          'Avaliar mudanca de plano/horario',
-        ];
-      case RiskLevel.critical:
-        return [
-          'Contato urgente com o aluno',
-          'Reuniao presencial com professor',
-          'Oferecer condicoes especiais de retorno',
-          'Avaliar renegociacao financeira',
-          'Envolver lideranca da academia',
-        ];
-    }
   }
 
   void _changeMonth(int delta) {
@@ -746,7 +593,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
                             _buildAttendanceTab(),
                             _buildFinancialTab(),
                             _buildStudentsTab(),
-                            _buildRetentionTab(),
                           ],
                         ),
                       ),
@@ -799,26 +645,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   }
 
   Widget _buildHeader() {
-    // On retention tab, show only a refresh button
-    if (_tabController.index == 3) {
-      return Container(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-        child: Row(
-          children: [
-            const Spacer(),
-            IconButton(
-              onPressed: _loadRetentionData,
-              icon: const Icon(LucideIcons.refreshCw, size: 20),
-              style: IconButton.styleFrom(
-                backgroundColor: AppTheme.surface,
-                foregroundColor: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
     final isCurrentMonth =
         _selectedMonth.year == DateTime.now().year &&
         _selectedMonth.month == DateTime.now().month;
@@ -945,7 +771,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
           Tab(text: 'Presencas'),
           Tab(text: 'Financeiro'),
           Tab(text: 'Alunos'),
-          Tab(text: 'Retencao'),
         ],
       ),
     );
@@ -2241,6 +2066,54 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
               ),
             );
           }),
+
+          // Atalho para a tela de Retencao
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: () => context.push('/admin/retencao'),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: BoxDecoration(
+                color: Brand.blood.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: Brand.blood.withValues(alpha: 0.18),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Brand.blood.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      LucideIcons.heartPulse,
+                      color: Brand.blood,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      'Ver Retencao',
+                      style: AppTheme.titleSmall.copyWith(
+                        color: Brand.blood,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const Icon(
+                    LucideIcons.arrowRight,
+                    size: 16,
+                    color: Brand.blood,
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -2469,494 +2342,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     return shortNames[fullName] ?? fullName;
   }
 
-  // ============================================
-  // Retention Tab
-  // ============================================
-  Widget _buildRetentionTab() {
-    if (_isRetentionLoading) {
-      return SingleChildScrollView(
-        physics: const NeverScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-        child: PolishSkeleton.shimmer(
-          child: Column(
-            children: [
-              _skeletonBox(height: 110, radius: 16),
-              const SizedBox(height: 16),
-              ...List.generate(
-                4,
-                (_) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _skeletonBox(height: 72, radius: 12),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final filtered = _filteredRetentionStudents;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // KPI Carousel
-          _buildRetentionKpiCards(),
-
-          // Filter Chips
-          _buildRetentionFilterChips(),
-
-          // Student List
-          if (filtered.isEmpty)
-            SizedBox(
-              height: 240,
-              child: PolishedEmptyState(
-                icon: LucideIcons.shieldCheck,
-                accent: AppTheme.success,
-                title: _selectedRetentionFilter != null
-                    ? 'Nenhum aluno neste nivel de risco'
-                    : 'Nenhum aluno em risco!',
-                subtitle: _selectedRetentionFilter != null
-                    ? 'Tente outro filtro'
-                    : 'Otimo trabalho!',
-              ),
-            )
-          else
-            ...filtered.asMap().entries.map(
-                  (e) => _buildRetentionStudentItem(e.value).entrance(
-                    index: e.key,
-                  ),
-                ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRetentionKpiCards() {
-    if (_retentionMetrics == null) return const SizedBox.shrink();
-
-    final dist = _retentionMetrics!.distributionByRisk;
-    final total = _atRiskStudents.length;
-
-    final pages = [
-      // Page 1: Overview
-      _RetentionCarouselPage(
-        children: [
-          _RetentionKpiTile(
-            icon: LucideIcons.users,
-            label: 'Alunos em Risco',
-            value: '${_retentionMetrics!.totalAtRisk}',
-            subtitle: 'de $total ativos',
-          ),
-          _RetentionKpiTile(
-            icon: LucideIcons.trendingDown,
-            label: 'Taxa de Evasao',
-            value: '${_retentionMetrics!.atRiskPercentage.toStringAsFixed(1)}%',
-            subtitle: 'score >= 25',
-          ),
-        ],
-      ),
-      // Page 2: Attendance & Payment
-      _RetentionCarouselPage(
-        children: [
-          _RetentionKpiTile(
-            icon: LucideIcons.calendarCheck,
-            label: 'Frequencia Media',
-            value: _retentionMetrics!.averageFrequency.toStringAsFixed(1),
-            subtitle: 'presencas/mes',
-          ),
-          _RetentionKpiTile(
-            icon: LucideIcons.checkCircle,
-            label: 'Adimplencia',
-            value:
-                '${_retentionMetrics!.paymentComplianceRate.toStringAsFixed(0)}%',
-            subtitle: 'em dia',
-          ),
-        ],
-      ),
-      // Page 3: Risk Distribution
-      _RetentionCarouselPage(
-        children: [
-          _RetentionDistTile(label: 'Baixo', count: dist[RiskLevel.low] ?? 0),
-          _RetentionDistTile(
-            label: 'Medio',
-            count: dist[RiskLevel.medium] ?? 0,
-          ),
-          _RetentionDistTile(label: 'Alto', count: dist[RiskLevel.high] ?? 0),
-          _RetentionDistTile(
-            label: 'Critico',
-            count: dist[RiskLevel.critical] ?? 0,
-          ),
-        ],
-      ),
-    ];
-
-    return Column(
-      children: [
-        SizedBox(
-          height: 120,
-          child: PageView.builder(
-            controller: _retentionPageController,
-            itemCount: pages.length,
-            onPageChanged: (i) => setState(() => _retentionCurrentPage = i),
-            itemBuilder: (context, index) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 4,
-                  vertical: 12,
-                ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.divider),
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 16,
-                  ),
-                  child: pages[index],
-                ),
-              );
-            },
-          ),
-        ),
-        // Dot indicators
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(pages.length, (i) {
-            final isActive = i == _retentionCurrentPage;
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 250),
-              margin: const EdgeInsets.symmetric(horizontal: 3),
-              width: isActive ? 20 : 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: isActive
-                    ? AppTheme.textPrimary
-                    : AppTheme.textDisabled.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(3),
-              ),
-            );
-          }),
-        ),
-        const SizedBox(height: 4),
-      ],
-    );
-  }
-
-  Widget _buildRetentionFilterChips() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            ChoiceChip(
-              label: const Text('Todos'),
-              selected: _selectedRetentionFilter == null,
-              onSelected: (_) =>
-                  setState(() => _selectedRetentionFilter = null),
-              selectedColor: AppTheme.primary,
-              labelStyle: TextStyle(
-                color: _selectedRetentionFilter == null
-                    ? Colors.white
-                    : AppTheme.textPrimary,
-              ),
-            ),
-            const SizedBox(width: 8),
-            ...RiskLevel.values.map((level) {
-              final isSelected = _selectedRetentionFilter == level;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(level.label),
-                  selected: isSelected,
-                  onSelected: (_) => setState(
-                    () => _selectedRetentionFilter = isSelected ? null : level,
-                  ),
-                  selectedColor: _riskColor(level),
-                  labelStyle: TextStyle(
-                    color: isSelected ? Colors.white : AppTheme.textPrimary,
-                  ),
-                ),
-              );
-            }),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRetentionStudentItem(StudentRiskScore riskScore) {
-    final color = _riskColor(riskScore.level);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Card(
-        margin: const EdgeInsets.only(bottom: 8),
-        child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 8,
-          ),
-          onTap: () => _showRetentionDetailBottomSheet(riskScore),
-          leading: Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: color, width: 2.5),
-            ),
-            child: CircleAvatar(
-              backgroundColor: color.withOpacity(0.1),
-              child: Text(
-                riskScore.studentName.isNotEmpty
-                    ? riskScore.studentName[0].toUpperCase()
-                    : '?',
-                style: TextStyle(color: color, fontWeight: FontWeight.w600),
-              ),
-            ),
-          ),
-          title: Text(riskScore.studentName, style: AppTheme.titleMedium),
-          subtitle: Text(
-            'Score: ${riskScore.score} | '
-            'Ultima presenca: ${riskScore.daysSinceLastAttendance} dias atras | '
-            '${riskScore.overduePayments} pagamentos vencidos',
-            style: AppTheme.bodySmall,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          trailing: Chip(
-            label: Text(
-              riskScore.level.label,
-              style: AppTheme.labelSmall.copyWith(
-                color: Colors.white,
-                fontSize: 10,
-              ),
-            ),
-            backgroundColor: color,
-            padding: EdgeInsets.zero,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            visualDensity: VisualDensity.compact,
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showRetentionDetailBottomSheet(StudentRiskScore riskScore) {
-    final color = _riskColor(riskScore.level);
-    final actions = _getSuggestedActions(riskScore.level);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.6,
-          minChildSize: 0.3,
-          maxChildSize: 0.85,
-          expand: false,
-          builder: (context, scrollController) {
-            return SingleChildScrollView(
-              controller: scrollController,
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header
-                  Row(
-                    children: [
-                      Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(color: color, width: 3),
-                        ),
-                        child: CircleAvatar(
-                          radius: 28,
-                          backgroundColor: color.withOpacity(0.1),
-                          child: Text(
-                            riskScore.studentName.isNotEmpty
-                                ? riskScore.studentName[0].toUpperCase()
-                                : '?',
-                            style: TextStyle(
-                              color: color,
-                              fontSize: 24,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              riskScore.studentName,
-                              style: AppTheme.headlineSmall,
-                            ),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Text(
-                                  'Score: ${riskScore.score}',
-                                  style: AppTheme.titleMedium.copyWith(
-                                    color: color,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Chip(
-                                  label: Text(
-                                    riskScore.level.label,
-                                    style: AppTheme.labelSmall.copyWith(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                    ),
-                                  ),
-                                  backgroundColor: color,
-                                  padding: EdgeInsets.zero,
-                                  materialTapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 24),
-                  const Divider(),
-                  const SizedBox(height: 16),
-
-                  // Risk Factors
-                  Text('Fatores de Risco', style: AppTheme.headlineSmall),
-                  const SizedBox(height: 12),
-
-                  if (riskScore.factors.isEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppTheme.success.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            LucideIcons.checkCircle,
-                            color: AppTheme.success,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Nenhum fator de risco identificado',
-                            style: AppTheme.bodyMedium.copyWith(
-                              color: AppTheme.success,
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    ...riskScore.factors.map((factor) {
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppTheme.surfaceVariant,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppTheme.divider),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: color.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  '${factor.score}',
-                                  style: AppTheme.titleMedium.copyWith(
-                                    color: color,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(factor.name, style: AppTheme.titleSmall),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    factor.details,
-                                    style: AppTheme.bodySmall,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Text(
-                              'Peso: ${factor.weight}',
-                              style: AppTheme.labelSmall,
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-
-                  const SizedBox(height: 24),
-
-                  // Suggested Actions
-                  Text('Acoes Sugeridas', style: AppTheme.headlineSmall),
-                  const SizedBox(height: 12),
-
-                  ...actions.map((action) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: color.withOpacity(0.05),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: color.withOpacity(0.2)),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(LucideIcons.arrowRight, size: 16, color: color),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(action, style: AppTheme.bodyMedium),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-
-                  const SizedBox(height: 24),
-
-                  // Close button
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Fechar'),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
 }
 
 /// Mini Stat Card Widget
@@ -3167,97 +2552,3 @@ class _ProgressRow extends StatelessWidget {
   }
 }
 
-/// Carousel Page for retention KPI cards
-class _RetentionCarouselPage extends StatelessWidget {
-  final List<Widget> children;
-  const _RetentionCarouselPage({required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(children: children.expand((w) => [Expanded(child: w)]).toList());
-  }
-}
-
-/// KPI Tile for retention carousel
-class _RetentionKpiTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final String subtitle;
-
-  const _RetentionKpiTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.subtitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 14, color: AppTheme.textSecondary),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label,
-                style: AppTheme.labelSmall.copyWith(
-                  color: AppTheme.textSecondary,
-                  letterSpacing: 0.3,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: AppTheme.headlineSmall.copyWith(
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          subtitle,
-          style: AppTheme.labelSmall.copyWith(color: AppTheme.textDisabled),
-        ),
-      ],
-    );
-  }
-}
-
-/// Distribution Tile for retention carousel
-class _RetentionDistTile extends StatelessWidget {
-  final String label;
-  final int count;
-
-  const _RetentionDistTile({required this.label, required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          '$count',
-          style: AppTheme.headlineSmall.copyWith(
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-          textAlign: TextAlign.center,
-        ),
-      ],
-    );
-  }
-}

@@ -105,6 +105,7 @@ class TrainEntry {
   final List<String> partners; // só self
   final String? feeling; // só self
   final String? verifiedId; // só verified — attendance id (p/ anexar rolas)
+  final String? note; // só self — texto livre "FOCO DO DIA" (≤140 chars)
 
   const TrainEntry({
     required this.source,
@@ -119,6 +120,7 @@ class TrainEntry {
     this.partners = const [],
     this.feeling,
     this.verifiedId,
+    this.note,
   });
 
   bool get isSelf => source == TrainSource.self;
@@ -186,6 +188,10 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
 
   final TextEditingController _techCtrl = TextEditingController();
   final TextEditingController _partnerCtrl = TextEditingController();
+  final TextEditingController _noteCtrl = TextEditingController();
+
+  /// Nota livre "FOCO DO DIA" digitada na fase reward (≤140 chars).
+  String? _note;
 
   // Sensações — tom da tribo, sem exclamação fitness.
   static const Map<String, String> _feelings = {
@@ -212,6 +218,7 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
   void dispose() {
     _techCtrl.dispose();
     _partnerCtrl.dispose();
+    _noteCtrl.dispose();
     super.dispose();
   }
 
@@ -295,6 +302,7 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
           feeling: data['feeling'] as String?,
           techniques: List<String>.from(data['techniques'] ?? const []),
           partners: List<String>.from(data['partners'] ?? const []),
+          note: data['note'] as String?,
         ));
       }
 
@@ -338,6 +346,7 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
     required String? feeling,
     required List<String> techniques,
     required List<String> partners,
+    String? note,
   }) {
     final title = sport != null
         ? getSport(SportId.fromString(sport)).labelShort.toUpperCase()
@@ -353,6 +362,7 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
       feeling: feeling,
       techniques: techniques,
       partners: partners,
+      note: note,
     );
   }
 
@@ -385,6 +395,8 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
       _sparringCount = _kDefaultSparring;
       _intensity = null;
       _feeling = null;
+      _note = null;
+      _noteCtrl.clear();
       _linkedAttendanceId = linkedAttendanceId;
       _techniques.clear();
       _partners.clear();
@@ -546,12 +558,22 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
     _patchLog({'partners': _partners});
   }
 
-  /// Ao sair da edição, reflete os detalhes editados de volta no feed local
-  /// (sem refetch) — mantém o subtítulo da linha self coerente.
+  /// Ao sair da edição/reward, reflete os detalhes editados de volta no feed
+  /// local (sem refetch) — mantém o subtítulo e nota da linha self coerentes.
   void _done() {
     final ref0 = _logRef;
-    if (_editing && ref0 != null) {
-      _feed = _feed.map((e) {
+
+    // Salva a nota se foi digitada e ainda não persistida via onSubmitted.
+    final noteText = _noteCtrl.text.trim();
+    final noteToSave = noteText.isEmpty ? null : noteText;
+    if (ref0 != null && noteToSave != _note) {
+      _note = noteToSave;
+      _patchLog({'note': noteToSave ?? FieldValue.delete()});
+    }
+
+    // Atualiza o feed local (edição OU novo save com detalhes pós-reward).
+    if (ref0 != null) {
+      final updated = _feed.map((e) {
         if (e.selfRef?.path != ref0.path) return e;
         return _selfEntry(
           ref: ref0,
@@ -562,9 +584,12 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
           feeling: _feeling,
           techniques: List<String>.from(_techniques),
           partners: List<String>.from(_partners),
+          note: noteToSave,
         );
       }).toList();
+      _feed = updated;
     }
+
     setState(() {
       _phase = _Phase.idle;
       _editing = false;
@@ -585,6 +610,8 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
       _sparringCount = e.sparringCount > 0 ? e.sparringCount : _kDefaultSparring;
       _intensity = e.intensity;
       _feeling = e.feeling;
+      _note = e.note;
+      _noteCtrl.text = e.note ?? '';
       _techniques
         ..clear()
         ..addAll(e.techniques);
@@ -815,28 +842,70 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
     );
   }
 
-  // ── Cartel de treino: streak · recorde · treinos. SEM foto/nome/faixa —
-  // identidade (foto/nome/faixa) fica no PERFIL; a Jornada foca no TREINO.
+  // ── Cartel de treino: streak · recorde · aulas verificadas. SEM foto/nome/
+  // faixa — identidade fica no PERFIL; a Jornada foca no TREINO.
+  // AULAS VERIFICADAS = totalTrainings (só presenças da academia + baseline).
+  // SESSÕES DE TATAME = união de dias com presença verificada OU self-log no
+  // feed carregado — mostrado como nota discreta abaixo do card.
   Widget _vitrineHero(FighterProfile p) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _hair),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _heroStat(p.currentStreak, 'SEMANAS', accent: true),
+    // União de dias únicos do feed (verificados ∪ self). Boundado pelos ~30+60
+    // docs carregados; suficiente para o contexto de "Jornada".
+    final sessoesTatame = _feed.map((e) => e.date).toSet().length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _hair),
           ),
-          _heroDivider(),
-          Expanded(child: _heroStat(p.recordStreak, 'RECORDE')),
-          _heroDivider(),
-          Expanded(child: _heroStat(p.totalTrainings, 'TREINOS')),
+          child: Row(
+            children: [
+              Expanded(
+                child: _heroStat(p.currentStreak, 'SEMANAS', accent: true),
+              ),
+              _heroDivider(),
+              Expanded(child: _heroStat(p.recordStreak, 'RECORDE')),
+              _heroDivider(),
+              Expanded(
+                child: _heroStatVerificado(p.totalTrainings, 'AULAS VERIFICADAS'),
+              ),
+            ],
+          ),
+        ),
+        if (sessoesTatame > 0) ...[
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Text(
+                '$sessoesTatame SESSÕES DE TATAME',
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                  fontFeatures: _tabular,
+                  color: _smoke,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '· inclui avulsos · não conta pra faixa',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.2,
+                  color: _smoke.withValues(alpha: 0.65),
+                ),
+              ),
+            ],
+          ),
         ],
-      ),
+      ],
     );
   }
 
@@ -859,6 +928,40 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
         ),
         const SizedBox(height: 6),
         Text(label, style: _eyebrow(_smoke, 10)),
+      ],
+    );
+  }
+
+  /// Variante de _heroStat para "AULAS VERIFICADAS" — exibe um ícone de check
+  /// discreto ao lado do rótulo para indicar que são presenças da academia.
+  Widget _heroStatVerificado(int value, String label) {
+    return Column(
+      children: [
+        AnimatedCountUp(
+          value: value,
+          style: const TextStyle(
+            fontSize: 34,
+            height: 1.0,
+            fontWeight: FontWeight.w900,
+            fontFeatures: _tabular,
+            letterSpacing: -1.0,
+            color: _ink,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.verified_outlined, size: 10, color: _smoke),
+            const SizedBox(width: 3),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: _eyebrow(_smoke, 9.5),
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -2646,6 +2749,10 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
                   values: _partners,
                   onRemove: _removePartner,
                 ),
+                const SizedBox(height: 24),
+                const _SectionLabel('FOCO DO DIA'),
+                const SizedBox(height: 10),
+                _focoDoDiaField(),
               ],
             ),
           ),
@@ -2884,6 +2991,61 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  /// Campo opcional "FOCO DO DIA" — texto livre ≤140 chars, persiste em
+  /// training_log.note via _patchLog. Nunca bloqueia o save (onSubmitted apenas
+  /// dispara a persistência; _done() garante o patch mesmo sem Enter pressionado).
+  Widget _focoDoDiaField() {
+    return TextField(
+      controller: _noteCtrl,
+      maxLength: 140,
+      maxLines: 2,
+      minLines: 1,
+      textCapitalization: TextCapitalization.sentences,
+      cursorColor: _blood,
+      style: const TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: _ink,
+        height: 1.4,
+      ),
+      decoration: InputDecoration(
+        hintText: 'FOCO DO DIA — o que você treinou hoje?',
+        hintStyle: TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.2,
+          color: _smoke.withValues(alpha: 0.55),
+        ),
+        counterStyle: TextStyle(
+          fontSize: 10,
+          color: _smoke,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.3,
+        ),
+        isDense: true,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        filled: true,
+        fillColor: _ink.withValues(alpha: 0.04),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: _ink.withValues(alpha: 0.12)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: _ink.withValues(alpha: 0.12)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: _blood, width: 1.6),
+        ),
+      ),
+      onChanged: (v) => setState(() => _note = v.trim().isEmpty ? null : v.trim()),
+      onSubmitted: (v) =>
+          _patchLog({'note': v.trim().isEmpty ? FieldValue.delete() : v.trim()}),
     );
   }
 
@@ -3133,6 +3295,24 @@ class _TrainRow extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.8,
                       color: smoke,
+                    ),
+                  ),
+                ],
+                // Nota "FOCO DO DIA" — só self-log, 3ª linha discreta.
+                if (entry.isSelf &&
+                    entry.note != null &&
+                    entry.note!.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    entry.note!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.1,
+                      color: smoke.withValues(alpha: 0.8),
+                      fontStyle: FontStyle.italic,
                     ),
                   ),
                 ],

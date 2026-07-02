@@ -11,6 +11,7 @@ import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/formatters.dart';
 import '../../core/number_format.dart';
+import '../../core/brand_tokens.dart';
 import '../../core/theme.dart';
 import '../../models/physical_assessment.dart';
 import '../../models/student.dart';
@@ -24,6 +25,7 @@ import '../../widgets/common/belt_badge.dart';
 import '../../widgets/common/profile_photo_picker.dart';
 import '../../widgets/common/sport_chip.dart';
 import '../../widgets/polish/polish.dart';
+import '../../widgets/shared/week_strip.dart';
 import 'physical_assessment_form_screen.dart';
 import 'student_syllabus_tab.dart';
 import 'student_cartel_tab.dart';
@@ -482,6 +484,15 @@ class _AdminStudentDetailScreenState
                                 _buildStatusBadge(),
                               ],
                             ),
+                            // Retenção (§3.3): última presença + risco + strip
+                            // de 8 semanas — o professor vê o hábito do aluno
+                            // sem sair da ficha. Omitido se o backfill ainda
+                            // não populou retention.*.
+                            if (_student!.status == StudentStatus.active &&
+                                _student!.retention != null) ...[
+                              const SizedBox(height: 10),
+                              _buildRetentionRow(),
+                            ],
                           ],
                         ),
                       ),
@@ -493,6 +504,82 @@ class _AdminStudentDetailScreenState
           ),
         ),
       ),
+    );
+  }
+
+  /// Chip "última presença" (verde ≤7d, âmbar ≤14d, blood >14d) + badge de
+  /// risco (high/critical) + WeekStrip das 8 semanas — sobre o header colorido,
+  /// então tudo em pill branca translúcida (mesmo molde do _buildBeltBadge).
+  Widget _buildRetentionRow() {
+    final days = _student!.daysSinceLastAttendance;
+    final riskLevel = _student!.retention?.riskLevel;
+
+    final Color chipColor;
+    final String chipLabel;
+    if (days == null) {
+      chipColor = AppTheme.textSecondary;
+      chipLabel = 'Nunca treinou';
+    } else if (days <= 7) {
+      chipColor = AppTheme.success;
+      chipLabel = days == 0 ? 'Treinou hoje' : 'Última presença há ${days}d';
+    } else if (days <= 14) {
+      chipColor = AppTheme.warning;
+      chipLabel = 'Última presença há ${days}d';
+    } else {
+      chipColor = Brand.blood;
+      chipLabel = 'Última presença há ${days}d';
+    }
+
+    Widget pill(Widget child) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.9),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: child,
+        );
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        pill(Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration:
+                  BoxDecoration(color: chipColor, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              chipLabel,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: chipColor,
+              ),
+            ),
+          ],
+        )),
+        if (riskLevel == 'high' || riskLevel == 'critical')
+          pill(Text(
+            riskLevel == 'critical' ? 'RISCO CRÍTICO' : 'RISCO ALTO',
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.5,
+              color: Brand.blood,
+            ),
+          )),
+        pill(WeekStrip(
+          buckets: _student!.last8WeeksBuckets(DateTime.now()),
+          height: 16,
+          barWidth: 5,
+        )),
+      ],
     );
   }
 
@@ -4441,6 +4528,14 @@ class _AdminStudentDetailScreenState
         studentId: _student!.id,
         note: note.isEmpty ? null : note,
       );
+      // Registrar mudança de status no doc do aluno (a CF não escreve estes campos).
+      // Falha silenciosa: não bloqueia o fluxo de transferência.
+      try {
+        await StudentService(FirebaseService.academyId).update(_student!.id, {
+          'statusChangedAt': FieldValue.serverTimestamp(),
+          'statusChangeReason': 'transferred',
+        });
+      } catch (_) {}
       if (mounted) {
         context.showSuccess('Aluno marcado como transferido.');
         _loadData();

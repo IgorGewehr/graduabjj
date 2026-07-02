@@ -215,8 +215,7 @@ class FeedPost {
   /// headline determinística do marco.
   final String? staffHeadline;
 
-  /// Denorm like counter. Maintained by CF `onLikeWrite` (v2) or
-  /// `FeedPostsService.likeCount()` aggregation (v1).
+  /// Denorm like counter. Mantido pela CF `onFeedLikeWrite` (feed_like_counter.js).
   final int likeCount;
 
   // Denorm author identity — 0 reads on render (same pattern as kudos/trainingPairs).

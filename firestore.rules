@@ -256,7 +256,12 @@ service cloud.firestore {
                       (request.resource.data.role == 'admin' && request.resource.data.isActive == true)
                     );
 
-      // Users can update non-sensitive fields
+      // Users can update non-sensitive fields.
+      // Inclui notificationPrefs {social, training, academy} — opt-out de push
+      // do PRÓPRIO dono (campo ausente = true; billing não é desligável e por
+      // isso não entra no mapa). pushMeta {weekKey, count} (cap semanal de
+      // pushes) é mantido pelas CFs via Admin SDK; outro usuário nunca escreve
+      // aqui (uid == userId), e o dono forjar o próprio contador só afeta a si.
       allow update: if isAuthenticated() && request.auth.uid == userId
                     && !request.resource.data.diff(resource.data).affectedKeys()
                         .hasAny(['role', 'academyId']);
@@ -591,13 +596,20 @@ service cloud.firestore {
         // Monitors can update students (except financial and sensitive fields).
         // responsibleUserId/* gate the kids->adult payer access, so only staff
         // (admins) may set them — never a monitor (a student-level role).
+        // `retention` (radar de churn: lastAttendanceDate/weeklyBuckets/riskScore)
+        // é mantido SÓ pela CF via Admin SDK, e statusChangedAt/statusChangeReason
+        // acompanham transições de `status` (já bloqueado p/ monitor) — nenhum
+        // deles pode ser forjado por um papel de nível aluno. Os branches de
+        // self-update do aluno abaixo usam whitelist (hasOnly) e portanto já
+        // NÃO alcançam esses campos.
         allow update: if isMonitor(academyId)
                       && !request.resource.data.diff(resource.data).affectedKeys()
                           .hasAny(['tuitionValue', 'tuitionDay', 'planId',
                                    'currentBelt', 'currentStripes', 'status',
                                    'beltHistory', 'createdAt', 'createdBy',
                                    'responsibleUserId', 'responsibleStudentId',
-                                   'responsibleName']);
+                                   'responsibleName',
+                                   'retention', 'statusChangedAt', 'statusChangeReason']);
 
         // Students can update only personal info (including photoUrl and registration linking fields) or soft-delete their own record
         allow update: if isOwnStudent(academyId, studentId)
@@ -1381,6 +1393,39 @@ service cloud.firestore {
 
         // No updates or deletes from client
         allow update, delete: if false;
+      }
+
+      // ============================================
+      // Retenção — snapshots diários agregados (radar de churn)
+      // ============================================
+      // Dado INTERNO de retenção (contagens de risco, churn consumado do mês,
+      // taxa de recuperação pós-contato), escrito SÓ pela CF computeRetentionDaily
+      // via Admin SDK — 1 doc/dia/academia (id = YYYY-MM-DD). INVISÍVEL ao aluno:
+      // riskScore/retention nunca são expostos nem espelhados em publicProfiles/
+      // fighterProfiles (LGPD + não estigmatizar).
+      match /retentionSnapshots/{snapId} {
+        allow read: if isAcademyStaff(academyId);
+        allow write: if false; // só CF/Admin SDK
+      }
+
+      // ============================================
+      // Retenção — registro de contatos de reengajamento
+      // ============================================
+      // Staff registra o contato feito com o aluno em risco (whatsapp/push/
+      // phone/inperson); o job diário fecha o outcome (pending -> recovered)
+      // via Admin SDK. Como o billingContactLog: nunca visível ao aluno.
+      match /retentionContacts/{contactId} {
+        allow read: if isAcademyStaff(academyId);
+
+        // No create, byUid tem que ser o próprio autor (rastreabilidade de
+        // quem contatou — não forjável em nome de outro staff).
+        allow create: if isAcademyStaff(academyId)
+                      && request.resource.data.byUid == request.auth.uid;
+
+        // Staff edita (note/outcome) e remove; byUid é imutável no update.
+        allow update: if isAcademyStaff(academyId)
+                      && request.resource.data.byUid == resource.data.byUid;
+        allow delete: if isAcademyStaff(academyId);
       }
 
       // ============================================

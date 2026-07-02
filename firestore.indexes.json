@@ -1,5 +1,6 @@
 {
   "//indexes-doc": "Sprint 5 — paginated APIs added in services rely on the indexes below. Firestore auto-creates single-field indexes (e.g. students.fullName ASC, storeProducts.name ASC); only composite indexes need to be declared here. TODO: if `StudentService.getAllPaginated` is invoked with both `status` filter AND ordering by `fullName`, Firestore will need a composite index — declare it on first runtime warning: `students` (status ASC, fullName ASC). Likewise, `StoreService.getProductsPaginated` with `activeOnly: true` will need `storeProducts` (active ASC, name ASC). Both are NOT critical until those flows are wired into UI.",
+  "//retencao-doc": "Fundação de retenção (REPAGINADA §2/§10): o range por `date` em academies/{aid}/attendance do job diário computeRetentionDaily usa o índice single-field AUTOMÁTICO de `date` — attendance NÃO tem fieldOverride/exemption neste arquivo (verificado 2026-07), então nada a declarar; não criar exemption em attendance sem repor o índice de `date`. Compostos novos: students (status, statusChangedAt) p/ churn consumado do mês; retentionContacts (outcome, at) p/ o job fechar outcomes pending; fieldOverride students.linkedUserId p/ streakRiskCheck via collectionGroup.",
   "indexes": [
     {
       "collectionGroup": "physicalAssessments",
@@ -232,9 +233,36 @@
         { "fieldPath": "hiddenByAuthor", "order": "ASCENDING" },
         { "fieldPath": "occurredAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "//": "Retenção (§2.3): churn consumado do mês — computeRetentionDaily conta transições por (status in [inactive,transferred]) + range em statusChangedAt.",
+      "collectionGroup": "students",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "statusChangedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Retenção (§3.2): fechamento de outcomes — o job diário busca contatos (outcome=='pending') com corte/ordem em `at` (igualdade + range em campos distintos exige composto).",
+      "collectionGroup": "retentionContacts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "outcome", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
+    {
+      "//": "Retenção (§9.1): streakRiskCheck varre alunos com conta vinculada via collectionGroup('students').where('linkedUserId','!=',null) — single-field automático só cobre COLLECTION, então o override habilita COLLECTION_GROUP. ATENÇÃO: override SUBSTITUI o auto-index do campo — COLLECTION ASC precisa ficar listado p/ as queries por academia existentes (student_service.dart:53, index.js:553); nada ordena linkedUserId DESC (equality e != funcionam no ASC).",
+      "collectionGroup": "students",
+      "fieldPath": "linkedUserId",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
     {
       "collectionGroup": "walletTransactions",
       "fieldPath": "abacatePayTransactionId",

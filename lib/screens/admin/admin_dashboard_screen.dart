@@ -9,6 +9,7 @@ import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/polish/polish.dart';
 import '../../widgets/onboarding/activation_checklist.dart';
+import 'widgets/dashboard_radar_sections.dart';
 
 /// Admin Dashboard Screen - Matching webapp design
 class AdminDashboardScreen extends ConsumerStatefulWidget {
@@ -87,15 +88,15 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     final now = DateTime.now();
     final weekdays = [
       'Segunda-feira',
-      'Terca-feira',
+      'Terça-feira',
       'Quarta-feira',
       'Quinta-feira',
       'Sexta-feira',
-      'Sabado',
+      'Sábado',
       'Domingo'
     ];
     final months = [
-      'Janeiro', 'Fevereiro', 'Marco', 'Abril', 'Maio', 'Junho',
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
       'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
     ];
 
@@ -103,7 +104,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     final day = now.day;
     final month = months[now.month - 1];
 
-    return '$weekday, $day De $month';
+    return '$weekday, $day de $month';
   }
 
   String _formatCurrency(double value) {
@@ -153,17 +154,29 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
                     const SizedBox(height: 24),
 
-                    // Stats Carousel
-                    _buildStatsCarousel().entrance(index: 1),
+                    // ── RADAR DO DIA (§6) — ordem por valor de DECISÃO ──
+                    // 1. HOJE: aulas do dia + chamada 1-tap (ação nº 1).
+                    const DashboardHojeCard().entrance(index: 1),
+                    const SizedBox(height: 16),
+                    // 2. RADAR: quem está esfriando + taxa de recuperação.
+                    const DashboardRadarCard().entrance(index: 2),
+                    const SizedBox(height: 16),
+                    // 3. ENGAJAMENTO: streaks, feed e marcos p/ reconhecer.
+                    const DashboardEngajamentoCard().entrance(index: 3),
 
                     const SizedBox(height: 24),
 
-                    // Financeiro (card de mensalidades + alertas de
-                    // inadimplência) — só para staff com financial:view.
+                    // Stats Carousel
+                    _buildStatsCarousel().entrance(index: 4),
+
+                    const SizedBox(height: 24),
+
+                    // 4. FINANCEIRO condensado (mantém tudo) — só para staff
+                    // com financial:view.
                     if (_canSeeFinancial) ...[
-                      _buildMonthlyFinancialCard().entrance(index: 2),
+                      _buildMonthlyFinancialCard().entrance(index: 5),
                       const SizedBox(height: 24),
-                      _buildAlertsSection().entrance(index: 3),
+                      _buildAlertsSection().entrance(index: 6),
                     ],
 
                     const SizedBox(height: 100),
@@ -269,24 +282,40 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   }
 
   Widget _buildWelcomeHeader(String userName) {
+    final isAdmin = ref.read(currentUserProvider).valueOrNull?.isAdmin ?? false;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Text(
-            '${_getGreeting()}, $userName!',
-            style: AppTheme.headlineMedium.copyWith(
-              fontWeight: FontWeight.w700,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_getGreeting()}, $userName!',
+                  style: AppTheme.headlineMedium.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _getFormattedDate(),
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            _getFormattedDate(),
-            style: AppTheme.bodyMedium.copyWith(
-              color: AppTheme.textSecondary,
+          // "Avisar todos" (§4) — broadcast push da academia. Só admin: a
+          // callable valida adminUserId server-side.
+          if (isAdmin)
+            IconButton(
+              onPressed: () =>
+                  showBroadcastDialog(context, FirebaseService.academyId),
+              icon: const Icon(LucideIcons.megaphone, size: 20),
+              tooltip: 'Avisar todos',
             ),
-          ),
         ],
       ),
     );

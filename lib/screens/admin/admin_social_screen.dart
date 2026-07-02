@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/brand_tokens.dart';
 import '../../core/theme.dart';
 import '../../models/feed_post.dart';
 import '../../providers/friend_providers.dart';
@@ -37,13 +38,13 @@ class _AdminSocialScreenState extends State<AdminSocialScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F3EF),
+      backgroundColor: Brand.bone,
       appBar: AppBar(
         title: const Text('Social'),
         bottom: TabBar(
           controller: _tabs,
           labelColor: AppTheme.primary,
-          unselectedLabelColor: const Color(0xFF9A968C),
+          unselectedLabelColor: Brand.ash,
           indicatorColor: AppTheme.primary,
           indicatorWeight: 3,
           labelStyle: const TextStyle(
@@ -136,10 +137,6 @@ class _ModPostCard extends ConsumerStatefulWidget {
 class _ModPostCardState extends ConsumerState<_ModPostCard> {
   bool _busy = false;
 
-  static const _ink = Color(0xFF1A1A1A);
-  static const _ash = Color(0xFF9A968C);
-  static const _blood = Color(0xFFB3261E);
-
   Future<void> _toggleHidden() async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -150,14 +147,14 @@ class _ModPostCardState extends ConsumerState<_ModPostCard> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(hide ? 'POST OCULTADO PARA A ACADEMIA' : 'POST REEXIBIDO'),
-          backgroundColor: _ink,
+          backgroundColor: Brand.ink,
         ));
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('NÃO DEU. TENTE DE NOVO.'),
-          backgroundColor: _blood,
+          backgroundColor: Brand.blood,
         ));
       }
     } finally {
@@ -188,14 +185,14 @@ class _ModPostCardState extends ConsumerState<_ModPostCard> {
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('CANCELAR',
-                style: TextStyle(color: _ash, fontWeight: FontWeight.w800)),
+                style: TextStyle(color: Brand.ash, fontWeight: FontWeight.w800)),
           ),
           if (widget.post.staffHeadline != null)
             TextButton(
               onPressed: () => Navigator.pop(ctx, '__reset__'),
               child: const Text('RESTAURAR ORIGINAL',
                   style:
-                      TextStyle(color: _blood, fontWeight: FontWeight.w800)),
+                      TextStyle(color: Brand.blood, fontWeight: FontWeight.w800)),
             ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
@@ -217,7 +214,7 @@ class _ModPostCardState extends ConsumerState<_ModPostCard> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('NÃO DEU PRA EDITAR.'),
-          backgroundColor: _blood,
+          backgroundColor: Brand.blood,
         ));
       }
     } finally {
@@ -267,7 +264,7 @@ class _ModPostCardState extends ConsumerState<_ModPostCard> {
     final p = widget.post;
     final hidden = p.hiddenByStaff;
     final beltColor = AppTheme.getBeltColor(p.authorBelt);
-    final onBelt = beltColor.computeLuminance() > 0.6 ? _ink : Colors.white;
+    final onBelt = beltColor.computeLuminance() > 0.6 ? Brand.ink : Colors.white;
     final initials = () {
       final parts = p.authorName.trim().split(RegExp(r'\s+'));
       if (parts.isEmpty || parts.first.isEmpty) return '?';
@@ -282,7 +279,7 @@ class _ModPostCardState extends ConsumerState<_ModPostCard> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: hidden
-              ? Border.all(color: _blood.withValues(alpha: 0.4), width: 1.5)
+              ? Border.all(color: Brand.blood.withValues(alpha: 0.4), width: 1.5)
               : null,
           boxShadow: [
             BoxShadow(
@@ -315,16 +312,16 @@ class _ModPostCardState extends ConsumerState<_ModPostCard> {
                           style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w900,
-                              color: _ink)),
+                              color: Brand.ink)),
                       Text(_ago(p.occurredAt),
                           style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: _ash)),
+                              color: Brand.ash)),
                     ],
                   ),
                 ),
-                Icon(_typeIcon, size: 18, color: _ash),
+                Icon(_typeIcon, size: 18, color: Brand.ash),
                 const SizedBox(width: 2),
                 if (_busy)
                   const Padding(
@@ -337,7 +334,7 @@ class _ModPostCardState extends ConsumerState<_ModPostCard> {
                 else
                   PopupMenuButton<String>(
                     icon: const Icon(LucideIcons.moreVertical,
-                        size: 18, color: _ash),
+                        size: 18, color: Brand.ash),
                     onSelected: (v) {
                       if (v == 'hide') _toggleHidden();
                       if (v == 'edit') _editHeadline();
@@ -364,7 +361,7 @@ class _ModPostCardState extends ConsumerState<_ModPostCard> {
                 style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w900,
-                    color: _ink,
+                    color: Brand.ink,
                     height: 1.2)),
             const SizedBox(height: 12),
             Row(
@@ -374,37 +371,37 @@ class _ModPostCardState extends ConsumerState<_ModPostCard> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: _blood.withValues(alpha: 0.1),
+                      color: Brand.blood.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Text('OCULTO',
                         style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w900,
-                            color: _blood,
+                            color: Brand.blood,
                             letterSpacing: 0.5)),
                   ),
                   const SizedBox(width: 10),
                 ],
                 if (p.staffHeadline != null) ...[
-                  const Icon(LucideIcons.pencil, size: 12, color: _ash),
+                  const Icon(LucideIcons.pencil, size: 12, color: Brand.ash),
                   const SizedBox(width: 4),
                   const Text('EDITADO',
                       style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w900,
-                          color: _ash,
+                          color: Brand.ash,
                           letterSpacing: 0.5)),
                   const SizedBox(width: 10),
                 ],
                 const Spacer(),
-                Icon(Icons.favorite, size: 14, color: _ash.withValues(alpha: 0.7)),
+                Icon(Icons.favorite, size: 14, color: Brand.ash.withValues(alpha: 0.7)),
                 const SizedBox(width: 4),
                 Text('${p.likeCount}',
                     style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: _ash)),
+                        color: Brand.ash)),
               ],
             ),
           ],

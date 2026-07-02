@@ -1836,3 +1836,22 @@ exports.enforceSelfGraduationCeiling =
 // sem .count() aggregation por post). Ver ./feed_like_counter.js.
 // ============================================================
 exports.onFeedLikeWrite = require('./feed_like_counter').onFeedLikeWrite;
+
+// ============================================================
+// FUNDAÇÃO DE RETENÇÃO (REPAGINADA §2) — dispatcher onAttendanceWrite
+// (agregados retention.* no aluno + materialização server-side do feed) e
+// job diário computeRetentionDaily (score 40/30/20/10, snapshot histórico,
+// churn consumado, outcomes de contatos). Ver ./retention_functions.js.
+// ============================================================
+exports.onAttendanceWrite = require('./retention_functions').onAttendanceWrite;
+exports.computeRetentionDaily =
+  require('./retention_functions').computeRetentionDaily;
+
+// ============================================================
+// PUSHES DO LOOP DE TREINO/SOCIAL (REPAGINADA §9.1) — todos respeitam
+// notificationPrefs + quiet hours 21h-8h SP + cap 3/semana ('training').
+// Ver ./push_functions.js.
+// ============================================================
+exports.streakRiskCheck = require('./push_functions').streakRiskCheck;
+exports.weeklyRecapSunday = require('./push_functions').weeklyRecapSunday;
+exports.classReminderHourly = require('./push_functions').classReminderHourly;

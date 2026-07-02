@@ -9,6 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/brand_tokens.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/responsive.dart';
 import '../../core/sports.dart';
@@ -43,6 +44,10 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   SportId? _sportFilter;
   String? _beltFilter;
   bool? _accountFilter; // null=all, true=linked, false=unlinked
+  // Retenção (§3.3): null=off; 7/14/30 = "sem treinar há N+ dias".
+  // Usa retention.lastAttendanceDate (CF); aluno sem NENHUMA presença conhecida
+  // só entra na banda 30+ (não polui 7/14 antes do backfill rodar).
+  int? _inactivityFilter;
   String _sortBy = 'name';
 
   // Auto-graduation snapshot (only loaded when feature is on)
@@ -181,6 +186,17 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       }
     }
 
+    // Inactivity filter (Retenção §3.3) — só faz sentido para alunos ativos.
+    if (_inactivityFilter != null) {
+      final n = _inactivityFilter!;
+      filtered = filtered.where((s) {
+        if (s.status != StudentStatus.active) return false;
+        final days = s.daysSinceLastAttendance;
+        if (days == null) return n >= 30; // nunca treinou → só na banda 30+
+        return days >= n;
+      }).toList();
+    }
+
     // Sorting
     switch (_sortBy) {
       case 'name':
@@ -248,7 +264,8 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         _categoryFilter != null ||
         _sportFilter != null ||
         _beltFilter != null ||
-        _accountFilter != null;
+        _accountFilter != null ||
+        _inactivityFilter != null;
   }
 
   void _clearFilters() {
@@ -258,6 +275,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       _sportFilter = null;
       _beltFilter = null;
       _accountFilter = null;
+      _inactivityFilter = null;
       _applyFilters();
     });
   }
@@ -296,6 +314,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
 
               // Search and filters
               SliverToBoxAdapter(child: _buildSearchAndFilters()),
+              SliverToBoxAdapter(child: _buildInactivityChips()),
 
               // Active filter chips
               if (_hasActiveFilters())
@@ -353,6 +372,60 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     } catch (_) {
       if (mounted) context.showError('Erro ao exportar.');
     }
+  }
+
+  /// Chips rápidos de inatividade (Retenção §3.3) — 1 toque para achar quem
+  /// está esfriando, sem abrir o sheet de filtros.
+  Widget _buildInactivityChips() {
+    Widget chip(int days) {
+      final selected = _inactivityFilter == days;
+      return GestureDetector(
+        onTap: () {
+          setState(() {
+            _inactivityFilter = selected ? null : days;
+            _applyFilters();
+          });
+        },
+        child: Container(
+          margin: const EdgeInsets.only(right: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected ? Brand.blood : AppTheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected ? Brand.blood : AppTheme.divider,
+            ),
+          ),
+          child: Text(
+            '$days+ dias',
+            style: AppTheme.labelSmall.copyWith(
+              color: selected ? Colors.white : AppTheme.textSecondary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+      child: Row(
+        children: [
+          Text(
+            'SEM TREINAR HÁ',
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.textDisabled,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(width: 10),
+          chip(7),
+          chip(14),
+          chip(30),
+        ],
+      ),
+    );
   }
 
   Widget _buildSearchAndFilters() {
@@ -498,6 +571,16 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
               onRemove: () {
                 setState(() {
                   _accountFilter = null;
+                  _applyFilters();
+                });
+              },
+            ),
+          if (_inactivityFilter != null)
+            _FilterChip(
+              label: 'Sem treinar $_inactivityFilter+ dias',
+              onRemove: () {
+                setState(() {
+                  _inactivityFilter = null;
                   _applyFilters();
                 });
               },
@@ -710,6 +793,12 @@ class _StudentCard extends StatelessWidget {
                         _buildEligibleBadge(),
                       if (student.status != StudentStatus.active)
                         _buildStatusBadge(),
+                      // Risco de churn (Retenção §3.3): só high/critical, e só
+                      // para ativos — discreto, não polui quem está ok.
+                      if (student.status == StudentStatus.active &&
+                          (student.retention?.riskLevel == 'high' ||
+                              student.retention?.riskLevel == 'critical'))
+                        _buildRiskBadge(),
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -906,6 +995,40 @@ class _StudentCard extends StatelessWidget {
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  /// Badge de risco de churn — ponto blood + dias sem treinar. Mesmo molde
+  /// visual do badge de status.
+  Widget _buildRiskBadge() {
+    final critical = student.retention?.riskLevel == 'critical';
+    final color = critical ? Brand.blood : AppTheme.warning;
+    final days = student.daysSinceLastAttendance;
+    return Container(
+      margin: const EdgeInsets.only(left: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            days != null ? '${days}d' : 'esfriando',
+            style: AppTheme.labelSmall.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ],
       ),
     );

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'brand_tokens.dart';
+
 /// Design tokens for the **Fighter App** (Portal do Lutador) — the anti-"AI-slop"
 /// visual language defined in `docs/b2c/UIUX_DESIGN_PORTAL_LUTADOR_2026-06.md`.
 ///
@@ -33,20 +35,21 @@ import 'package:flutter/material.dart';
 class FighterTheme {
   FighterTheme._();
 
-  // ── Core palette ───────────────────────────────────────────────────────────
+  // ── Core palette (delegados a Brand — tokens canônicos compartilhados) ──────
 
   /// Warm near-white "raw gi / tatame" canvas. The light-mode background.
-  static const Color bone = Color(0xFFFAFAF7);
+  /// Canônico: [Brand.bone] (`0xFFF4F3EF`).
+  static const Color bone = Brand.bone;
 
   /// True black canvas. Dark mode + "stage mode" share cards live here.
-  static const Color ink = Color(0xFF0A0A0A);
+  static const Color ink = Brand.ink;
 
   /// The single owned brand accent — dried blood-red. CTAs, live streak, the
   /// brand mark on a card. The "Strava orange" of BJJ.
-  static const Color blood = Color(0xFFB91C1C);
+  static const Color blood = Brand.blood;
 
   /// Deeper blood, for pressed/hover states and accent fills on dark.
-  static const Color bloodDeep = Color(0xFF7F1D1D);
+  static const Color bloodDeep = Brand.bloodDeep;
 
   /// Decided 1px hairline on light surfaces (a real line, not timid grey).
   static const Color hairline = Color(0xFF1A1A1A);
@@ -56,7 +59,7 @@ class FighterTheme {
 
   /// Neutral ash grey — secondary text / muted labels. Neutral by design so it
   /// never competes with [blood] or a belt color.
-  static const Color ash = Color(0xFF6B6B6B);
+  static const Color ash = Brand.ash;
 
   // ── Derived neutrals (kept minimal & reusable) ─────────────────────────────
 
@@ -92,7 +95,7 @@ class FighterTheme {
   // when used inside the app). The condensed/industrial feel comes from weight,
   // tracking, casing (at call site) and tabular figures — not a new asset.
 
-  static const List<FontFeature> _tabular = [FontFeature.tabularFigures()];
+  static const List<FontFeature> _tabular = Brand.tabular;
 
   /// Colossal hero number for milestones / share cards (e.g. "287", "1.000").
   /// Number-first: pair with a micro-caps [heroLabel] underneath.

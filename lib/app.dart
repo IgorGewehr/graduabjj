@@ -68,6 +68,7 @@ import 'screens/portal/monitor_students_screen.dart';
 import 'screens/portal/monitor_student_detail_screen.dart';
 import 'screens/portal/monitor_student_form_screen.dart';
 import 'screens/portal/public_profile_screen.dart';
+import 'screens/portal/notification_prefs_screen.dart';
 import 'providers/portal_providers.dart';
 import 'screens/splash_screen.dart';
 import 'screens/paywall_screen.dart';
@@ -879,6 +880,15 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const AddAcademyScreen(),
+            ),
+          ),
+          // Notification preferences (opt-out granular — §4 plano repaginada)
+          GoRoute(
+            path: '/portal/preferencias-notificacoes',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const NotificationPrefsScreen(),
             ),
           ),
           // Workout plans (structured training)

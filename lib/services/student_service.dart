@@ -447,6 +447,8 @@ class StudentService {
   Future<void> delete(String id) async {
     await _collections.student(id).update({
       'status': StudentStatus.inactive.value,
+      'statusChangedAt': FieldValue.serverTimestamp(),
+      'statusChangeReason': 'archived',
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -629,13 +631,21 @@ class StudentService {
   // ============================================
   // Update Status
   // ============================================
+  /// Atualiza o status do aluno e registra o momento e motivo da mudança.
+  /// [reason] identifica a origem da transição ('manual_edit', 'archived',
+  /// 'transferred', etc.). Só grava statusChangedAt quando o status realmente
+  /// muda — a responsabilidade de comparar o status anterior fica no call site
+  /// quando necessário (ex.: student_form_screen).
   Future<Student> updateStatus(
     String id,
     StudentStatus status, {
     String? note,
+    String reason = 'manual_edit',
   }) async {
     final data = <String, dynamic>{
       'status': status.value,
+      'statusChangedAt': FieldValue.serverTimestamp(),
+      'statusChangeReason': reason,
       'updatedAt': FieldValue.serverTimestamp(),
     };
     if (note != null) {

@@ -171,6 +171,17 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     ],
   ),
   NavEntry(
+    key: 'admin_retencao',
+    label: 'Retenção',
+    icon: LucideIcons.heartPulse,
+    route: '/admin/retencao',
+    section: NavSection.gestao,
+    // Retenção é gestão de pessoas (identificar/contactar alunos esfriando),
+    // não financeiro — gate igual ao de Alunos (students:manage).
+    // adminBypassesPermission = true (default): admin sempre vê.
+    requiresPermission: 'students:manage',
+  ),
+  NavEntry(
     key: 'admin_chamada',
     label: 'Chamada',
     icon: LucideIcons.clipboardCheck,

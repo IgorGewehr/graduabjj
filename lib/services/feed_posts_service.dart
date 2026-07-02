@@ -130,23 +130,6 @@ class FeedPostsService {
     await _likes.doc('${postId}_$giverUid').delete();
   }
 
-  /// Contagem de likes por post — v1 (sem CF): 1 aggregation-read por postId.
-  ///
-  /// Retorna `Map<postId, count>`. Em v2 (com CF `onLikeWrite`), substituir
-  /// por leitura do campo `likeCount` denormalizado no doc do post (O(0)).
-  Future<Map<String, int>> likeCount(List<String> postIds) async {
-    if (postIds.isEmpty) return const {};
-    final counts = <String, int>{};
-    await Future.wait(
-      postIds.map((postId) async {
-        final agg =
-            await _likes.where('postId', isEqualTo: postId).count().get();
-        counts[postId] = agg.count ?? 0;
-      }),
-    );
-    return counts;
-  }
-
   /// Quais dos [postIds] o usuário [myUid] já curtiu.
   ///
   /// Usa `whereIn(documentId)` em lotes de 30 — mesmo padrão de

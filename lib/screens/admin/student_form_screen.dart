@@ -1685,6 +1685,15 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         };
       }
 
+      // Registrar mudança de status: statusChangedAt + statusChangeReason.
+      // Só grava quando o status realmente mudou (novo != atual no Firestore).
+      if (isEditing &&
+          _existingStudent != null &&
+          _existingStudent!.status != _status) {
+        data['statusChangedAt'] = FieldValue.serverTimestamp();
+        data['statusChangeReason'] = 'manual_edit';
+      }
+
       String studentId;
       if (isEditing) {
         await studentService.update(widget.studentId!, data);
