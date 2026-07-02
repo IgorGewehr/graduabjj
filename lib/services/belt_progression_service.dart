@@ -827,6 +827,14 @@ class BeltProgressionService {
   // ============================================
   // Promote Student (full promotion)
   // ============================================
+  /// Remove um EVENTO do histórico de graduação (correção de erro do staff —
+  /// ex.: grau dado sem querer e já revertido na faixa atual). NÃO toca a
+  /// faixa/grau atual do aluno (sportData) — apaga só o registro histórico.
+  /// Rules: admin ou instrutor com graduation:manage.
+  Future<void> deleteProgression(String progressionId) async {
+    await _collections.beltProgressions.doc(progressionId).delete();
+  }
+
   Future<BeltProgression> promote({
     required String studentId,
     required String studentName,

@@ -17,7 +17,9 @@ import '../../models/physical_assessment.dart';
 import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
+import '../../models/feed_post.dart';
 import '../../services/belt_progression_service.dart';
+import '../../services/feed_posts_service.dart';
 import '../../services/services.dart';
 import '../../services/team_service.dart';
 import '../../widgets/common/animated_belt.dart';
@@ -4422,6 +4424,13 @@ class _AdminStudentDetailScreenState
 
   Widget _buildHistoryTab() {
     final allHistory = <_HistoryItem>[];
+    // Correção de histórico (pedido do produto): professor pode REMOVER um
+    // evento errado — grau dado sem querer, resultado lançado errado. Some da
+    // ficha E da Jornada do aluno (que lê estas mesmas coleções).
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    final canFixHistory = currentUser != null &&
+        (currentUser.isAdmin ||
+            currentUser.hasPermission('graduation:manage'));
 
     // Add progressions
     for (final p in _progressions) {
@@ -4432,6 +4441,7 @@ class _AdminStudentDetailScreenState
           subtitle: p.notes,
           icon: Icons.military_tech,
           color: getGradeColor(p.getSport(), p.newBelt),
+          onDelete: canFixHistory ? () => _deleteProgression(p) : null,
         ),
       );
     }
@@ -4445,6 +4455,7 @@ class _AdminStudentDetailScreenState
           subtitle: a.description,
           icon: Icons.emoji_events,
           color: Colors.amber,
+          onDelete: canFixHistory ? () => _deleteAchievement(a) : null,
         ),
       );
     }
@@ -4485,10 +4496,83 @@ class _AdminStudentDetailScreenState
                 ),
               ],
             ),
+            trailing: item.onDelete == null
+                ? null
+                : IconButton(
+                    icon: Icon(LucideIcons.trash2,
+                        size: 18, color: AppTheme.textSecondary),
+                    tooltip: 'Remover registro',
+                    onPressed: () => _confirmHistoryDelete(item),
+                  ),
           ),
         ).entrance(index: index);
       },
     );
+  }
+
+  Future<void> _confirmHistoryDelete(_HistoryItem item) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover registro?'),
+        content: Text(
+          '"${item.title}" será removido do histórico do aluno e da Jornada '
+          'dele no app.\n\nIsso NÃO altera a faixa/grau atual — corrige só o '
+          'histórico (ex.: grau dado sem querer).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await item.onDelete!();
+      if (mounted) {
+        context.showSuccess('Registro removido.');
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) context.showError('Não foi possível remover: $e');
+    }
+  }
+
+  Future<void> _deleteProgression(BeltProgression p) async {
+    await BeltProgressionService(FirebaseService.academyId)
+        .deleteProgression(p.id);
+    // Best-effort: oculta o post materializado do feed (id determinístico) —
+    // um grau removido não pode continuar celebrado na Galera.
+    final uid = _student?.linkedUserId;
+    if (uid != null && uid.isNotEmpty) {
+      try {
+        await feedPostsService.staffSetHidden(
+          FeedPost.gradId(uid, p.promotionDate, p.newBelt, p.newStripes),
+          true,
+        );
+      } catch (_) {/* post pode nem existir */}
+    }
+  }
+
+  Future<void> _deleteAchievement(Achievement a) async {
+    await AchievementService(FirebaseService.academyId).delete(a.id);
+    final uid = _student?.linkedUserId;
+    final name = a.competitionName ?? a.title;
+    if (uid != null && uid.isNotEmpty && name.trim().isNotEmpty) {
+      try {
+        await feedPostsService.staffSetHidden(
+          FeedPost.compId(uid, a.date, name),
+          true,
+        );
+      } catch (_) {/* post pode nem existir */}
+    }
   }
 
   /// Defesa em profundidade: confirma a permissão antes de executar a ação,
@@ -5274,12 +5358,16 @@ class _HistoryItem {
   final IconData icon;
   final Color color;
 
+  /// Remoção do registro (correção de erro) — null = sem ação.
+  final Future<void> Function()? onDelete;
+
   _HistoryItem({
     required this.date,
     required this.title,
     this.subtitle,
     required this.icon,
     required this.color,
+    this.onDelete,
   });
 }
 
