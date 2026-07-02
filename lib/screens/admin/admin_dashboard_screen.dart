@@ -138,6 +138,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                       padding: EdgeInsets.fromLTRB(20, 4, 20, 0),
                       child: ActivationChecklist(),
                     ),
+                    const SizedBox(height: 16),
 
                     // Quick Actions
                     _buildQuickActions().entrance(index: 0),

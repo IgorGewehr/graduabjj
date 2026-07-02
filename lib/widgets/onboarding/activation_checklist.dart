@@ -178,8 +178,11 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
       ref.invalidate(academySettingsProvider);
     }
 
+    // Mesmo DNA visual dos cards de seção do dashboard (HOJE/RADAR): flat,
+    // hairline divider e raio 16 — nada de sombra destoando no topo da tela.
     return PolishCard(
-      elevated: true,
+      elevated: false,
+      radius: 16,
       padding: const EdgeInsets.fromLTRB(18, 16, 14, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
