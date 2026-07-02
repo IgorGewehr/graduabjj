@@ -301,6 +301,23 @@ exports.joinAcademy = onCall(async (request) => {
     }
   });
 
+  // BAGAGEM DO LUTADOR (multi-academia): a identidade viaja com o atleta —
+  // preenche a ficha nova com graduação/caminhada/pessoais/cartel da academia
+  // de origem (fill-não-sobrescreve; ver ./fighter_baggage.js). Best-effort:
+  // falha aqui nunca desfaz o vínculo.
+  if (linkedStudentId) {
+    try {
+      const {importFighterBaggage} = require('./fighter_baggage');
+      const res = await importFighterBaggage({
+        db, uid, targetAcademyId: academyId, targetStudentId: linkedStudentId,
+      });
+      console.log(`[joinAcademy] bagagem ${uid}@${academyId}: ` +
+          (res.imported.join(' | ') || 'nada a importar'));
+    } catch (e) {
+      console.error('[joinAcademy] bagagem falhou (não-fatal):', e.message);
+    }
+  }
+
   return {
     success: true,
     academyId,
