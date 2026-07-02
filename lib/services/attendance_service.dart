@@ -83,6 +83,7 @@ class AttendanceService {
   Future<List<Attendance>> getByStudent(
     String studentId, {
     int limit = 50,
+    String? sport,
   }) async {
     final query = await _attendanceRef
         .where('studentId', isEqualTo: studentId)
@@ -91,6 +92,15 @@ class AttendanceService {
     var attendance = query.docs
         .map((doc) => Attendance.fromFirestore(doc))
         .toList();
+
+    // Per-sport filter (additive): legacy docs without `sport` count as 'bjj',
+    // mirroring belt_progression_service.getWeightedAttendanceCount. When
+    // sport == null the behaviour is unchanged (global, all sports).
+    if (sport != null) {
+      attendance = attendance
+          .where((a) => (a.sport ?? 'bjj') == sport)
+          .toList();
+    }
 
     // Sort by date descending
     attendance.sort((a, b) => b.date.compareTo(a.date));
@@ -143,6 +153,25 @@ class AttendanceService {
         .where('studentId', isEqualTo: studentId)
         .get();
     return query.size;
+  }
+
+  // ============================================
+  // Get Attendance Count (optionally per sport)
+  //
+  // Counts a student's attendances, optionally filtered by sport. Legacy docs
+  // without a `sport` field count as 'bjj' (same convention as
+  // belt_progression_service.getWeightedAttendanceCount). When sport == null
+  // this returns the global count across all sports.
+  // ============================================
+  Future<int> getAttendanceCount(String studentId, {String? sport}) async {
+    final query = await _attendanceRef
+        .where('studentId', isEqualTo: studentId)
+        .get();
+    if (sport == null) return query.size;
+    return query.docs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return ((data['sport'] as String?) ?? 'bjj') == sport;
+    }).length;
   }
 
   // ============================================
@@ -336,6 +365,12 @@ class AttendanceService {
 
     if (dates.isEmpty) return 0;
 
+    // RESET se a corrente quebrou: só conta se o ÚLTIMO treino foi HOJE ou
+    // ONTEM. Sem isso o streak ficava preso em ≥1 mesmo após semanas parado.
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    if (today.difference(dates.first).inDays > 1) return 0;
+
     // Count consecutive days from most recent
     int streak = 1;
     for (int i = 0; i < dates.length - 1; i++) {
@@ -348,6 +383,61 @@ class AttendanceService {
     }
 
     return streak;
+  }
+
+  /// Info de streak para o dashboard do lutador: streak atual (dias), recorde
+  /// (maior sequência já feita) e quais dias da SEMANA ATUAL (Seg=1..Dom=7)
+  /// tiveram treino. Tudo de uma leitura só (sem custo extra).
+  Future<({int current, int record, Set<int> weekDays})> getStreakInfo(
+      String studentId, {String? sport}) async {
+    final attendance = await getByStudent(studentId, limit: 365, sport: sport);
+    if (attendance.isEmpty) {
+      return (current: 0, record: 0, weekDays: <int>{});
+    }
+    final days = attendance
+        .map((a) => DateTime(a.date.year, a.date.month, a.date.day))
+        .toSet()
+        .toList()
+      ..sort((a, b) => b.compareTo(a)); // desc
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    // Streak atual (reset se o último treino não foi hoje/ontem).
+    int current = 0;
+    if (today.difference(days.first).inDays <= 1) {
+      current = 1;
+      for (var i = 0; i < days.length - 1; i++) {
+        if (days[i].difference(days[i + 1]).inDays == 1) {
+          current++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    // Recorde: maior run de dias consecutivos em todo o histórico.
+    int record = days.isEmpty ? 0 : 1;
+    int run = 1;
+    for (var i = 0; i < days.length - 1; i++) {
+      if (days[i].difference(days[i + 1]).inDays == 1) {
+        run++;
+        if (run > record) record = run;
+      } else {
+        run = 1;
+      }
+    }
+    if (current > record) record = current;
+
+    // Dias da semana atual (segunda → domingo) com treino.
+    final monday = today.subtract(Duration(days: today.weekday - 1));
+    final weekDays = <int>{};
+    for (final d in days) {
+      final diff = d.difference(monday).inDays;
+      if (diff >= 0 && diff <= 6) weekDays.add(d.weekday); // 1=Seg..7=Dom
+    }
+
+    return (current: current, record: record, weekDays: weekDays);
   }
 
   // ============================================

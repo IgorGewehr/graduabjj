@@ -40,9 +40,11 @@ class PaymentGatewayResolver {
         .get();
     final data = doc.data();
     if (data == null) return PaymentGateway.none;
+    // AbacatePay foi ELIMINADO do projeto — nunca mais é um gateway válido
+    // (mesmo que a flag legada abacatePayEnabled ainda exista no doc). Só o
+    // Mercado Pago habilita pagamento pelo app.
     if (data['mpConnected'] == true) return PaymentGateway.mercadoPago;
     if (data['asaasEnabled'] == true) return PaymentGateway.asaas;
-    if (data['abacatePayEnabled'] == true) return PaymentGateway.abacatePay;
     return PaymentGateway.none;
   }
 }

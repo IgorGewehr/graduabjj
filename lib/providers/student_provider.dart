@@ -4,6 +4,8 @@ import '../models/ranking_entry.dart';
 import '../models/student.dart';
 import '../services/services.dart';
 import '../services/ranking_service.dart';
+import '../services/training_log_service.dart';
+import '../services/weekly_streak.dart';
 import 'auth_provider.dart';
 
 /// Current student provider - fetches the student linked to the logged-in user
@@ -92,6 +94,22 @@ final studentAttendanceCountProvider = FutureProvider.family<int, String>((
   return await service.getStudentAttendanceCount(studentId);
 });
 
+/// Per-sport attendance count provider (multi-sport students).
+///
+/// Unlike [studentAttendanceProvider] — which loads only the first page (15
+/// rows) — this returns the TRUE total of attendance docs for the given sport
+/// (legacy null == 'bjj'), so the "total" stat card stays accurate when a sport
+/// filter is active. Keyed by `(studentId, sportValue)`.
+final studentAttendanceCountBySportProvider =
+    FutureProvider.family<int, (String, String)>((ref, key) async {
+      final currentUser = await ref.watch(currentUserProvider.future);
+
+      if (currentUser?.academyId == null) return 0;
+
+      final service = AttendanceService(currentUser!.academyId!);
+      return await service.getAttendanceCount(key.$1, sport: key.$2);
+    });
+
 /// Student achievements provider
 final studentAchievementsProvider =
     FutureProvider.family<List<Achievement>, String>((ref, studentId) async {
@@ -101,6 +119,16 @@ final studentAchievementsProvider =
 
       final service = AchievementService(currentUser!.academyId!);
       return await service.getByStudent(studentId);
+    });
+
+/// Graduações (belt progressions) do aluno — pro hub do lutador listar as
+/// faixas conquistadas na linha de conquistas.
+final studentBeltProgressionsProvider =
+    FutureProvider.family<List<BeltProgression>, String>((ref, studentId) async {
+      final currentUser = await ref.watch(currentUserProvider.future);
+      if (currentUser?.academyId == null) return const [];
+      return BeltProgressionService(currentUser!.academyId!)
+          .getByStudent(studentId);
     });
 
 /// Student medal count provider
@@ -234,6 +262,83 @@ final studentStreakProvider = FutureProvider.family<int, String>((
 
   final service = AttendanceService(currentUser!.academyId!);
   return await service.getStudentStreak(studentId);
+});
+
+/// Feed de CONQUISTAS da academia (graduações, graus, medalhas, marcos) — usado
+/// pelo segmento "Academia" da aba social (só conquistas, sem treino do dia).
+final academyRecentAchievementsProvider =
+    FutureProvider<List<Achievement>>((ref) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+  if (currentUser?.academyId == null) return const [];
+  final all = await AchievementService(currentUser!.academyId!).getRecent(limit: 40);
+  const keep = {
+    AchievementType.graduation,
+    AchievementType.stripe,
+    AchievementType.competition,
+    AchievementType.milestone,
+  };
+  return all.where((a) => keep.contains(a.type)).take(12).toList();
+});
+
+/// Funde os DIAS-TREINADOS de um aluno: presença verificada (`attendance`) +
+/// self-logs (`users/{uid}/training_logs`), deduplicando por DIA (dateOnly) via
+/// Set. [uid] só é passado quando os self-logs são LEGÍVEIS (owner-scoped): o
+/// dono só consegue ler os PRÓPRIOS logs, então para outros alunos [uid] é null
+/// e a fusão usa apenas a presença. Filtro por [sport] (legado null == 'bjj').
+Future<Set<DateTime>> _fusedTrainedDays({
+  required String academyId,
+  required String studentId,
+  String? uid,
+  String? sport,
+}) async {
+  final days = <DateTime>{};
+
+  // Presença verificada (academy-scoped). Bound alto p/ um RECORDE fiel.
+  final attendance = await AttendanceService(academyId)
+      .getByStudent(studentId, limit: 2000, sport: sport);
+  for (final a in attendance) {
+    days.add(DateTime(a.date.year, a.date.month, a.date.day));
+  }
+
+  // Self-logs (owner-scoped). Só quando o uid é o do próprio dono.
+  if (uid != null && uid.isNotEmpty) {
+    final logs = await TrainingLogService(uid).recent(limit: 400);
+    for (final l in logs) {
+      if (sport != null && l.effectiveSport != sport) continue;
+      days.add(DateTime(l.date.year, l.date.month, l.date.day));
+    }
+  }
+
+  return days;
+}
+
+/// Streak SEMANAL rico pro dashboard do lutador: semanas atuais (com GRACE da
+/// semana em curso) + recorde + strip das últimas ~8 semanas. FUNDE presença
+/// verificada + self-logs (dedup por dia) e computa via [computeWeeklyStreak].
+///
+/// Global (todos os esportes) — casa com o comportamento anterior deste
+/// provider. A variante POR ESPORTE é computada no `myShowcaseProvider`
+/// (esporte principal) reusando a mesma função pura.
+final studentStreakInfoProvider = FutureProvider.family<WeeklyStreakResult,
+    String>((ref, studentId) async {
+  final currentUser = await ref.watch(currentUserProvider.future);
+  if (currentUser?.academyId == null) {
+    return (currentWeeks: 0, recordWeeks: 0, weeks: const <WeekCell>[]);
+  }
+
+  // Self-logs são owner-scoped: só funde os do PRÓPRIO usuário. Se o studentId
+  // não for o do aluno logado, uid=null (só presença — não dá pra ler logs
+  // alheios de qualquer forma).
+  final myStudent = await ref.watch(currentStudentProvider.future);
+  final uid =
+      (myStudent != null && myStudent.id == studentId) ? currentUser!.id : null;
+
+  final days = await _fusedTrainedDays(
+    academyId: currentUser!.academyId!,
+    studentId: studentId,
+    uid: uid,
+  );
+  return computeWeeklyStreak(trainedDays: days, now: DateTime.now());
 });
 
 /// Student monthly attendance count provider

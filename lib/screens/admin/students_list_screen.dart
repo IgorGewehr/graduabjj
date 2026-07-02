@@ -1674,18 +1674,6 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
                   label: const Text('Cadastro completo'),
                 ),
               ),
-              Center(
-                child: TextButton.icon(
-                  onPressed: _isSaving
-                      ? null
-                      : () {
-                          Navigator.pop(context);
-                          context.go('/admin/importar-alunos');
-                        },
-                  icon: const Icon(Icons.upload_file, size: 16),
-                  label: const Text('Importar lista (CSV)'),
-                ),
-              ),
             ],
           ),
         ),

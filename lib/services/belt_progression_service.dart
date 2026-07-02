@@ -317,7 +317,11 @@ class BeltProgressionService {
       // Single global threshold for any belt/stripe transition.
       requiredClasses = cfg.threshold!;
     } else {
-      // Legacy fallback: per-belt requirements (BJJ only — other sports always eligible).
+      // Legacy fallback: the hardcoded per-belt table is BJJ-only. Sports
+      // without an explicit config get an empty table → requiredClasses = 0,
+      // which the `requiredClasses > 0` guard below treats as "not eligible"
+      // (instead of the old always-eligible bug). Such sports must be
+      // configured via [requirementsBySport]/[threshold] to graduate.
       final requirements = sportId == SportId.bjj
           ? (stripeRequirements[currentBelt] ?? [0, 0, 0, 0])
           : <int>[];

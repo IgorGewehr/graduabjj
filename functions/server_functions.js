@@ -852,6 +852,10 @@ const PUBLIC_PROFILE_SAFE_FIELDS = [
   'category',
   'isProfilePublic',
   'status',
+  // Auth uid do aluno vinculado. NÃO é PII sensível — é o MESMO uid que já
+  // vive em fighterProfiles (público). Necessário pro social intra-academia:
+  // liga o COLEGA DE TURMA ao perfil/posts dele (studentId → linkedUserId → uid).
+  'linkedUserId',
 ];
 
 /**

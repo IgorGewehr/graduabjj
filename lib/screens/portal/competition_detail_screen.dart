@@ -14,12 +14,13 @@ import '../../widgets/competitions/photo_upload_sheet.dart';
 import '../../widgets/loading_button.dart';
 import '../../widgets/polish/polish.dart';
 
-/// Position display config
+/// Position display config. Ícones MATERIAL (sempre renderizam — emoji e alguns
+/// glifos do lucide saíam como "?" no device). Cor do ícone fica neutra (ink).
 const _positionConfig = {
-  'gold': {'label': 'Ouro', 'icon': '🥇', 'color': 0xFFFFD700},
-  'silver': {'label': 'Prata', 'icon': '🥈', 'color': 0xFFC0C0C0},
-  'bronze': {'label': 'Bronze', 'icon': '🥉', 'color': 0xFFCD7F32},
-  'participant': {'label': 'Participante', 'icon': '🎖️', 'color': 0xFF666666},
+  'gold': {'label': 'Ouro', 'icon': Icons.workspace_premium, 'color': 0xFF0A0A0A},
+  'silver': {'label': 'Prata', 'icon': Icons.workspace_premium, 'color': 0xFF0A0A0A},
+  'bronze': {'label': 'Bronze', 'icon': Icons.workspace_premium, 'color': 0xFF0A0A0A},
+  'participant': {'label': 'Participante', 'icon': Icons.military_tech, 'color': 0xFF6E6E68},
 };
 
 /// Competition Detail Screen - Shows results + gallery for a specific competition
@@ -490,7 +491,7 @@ class _CompetitionDetailScreenState
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text('🏆', style: TextStyle(fontSize: 20)),
+              const Icon(Icons.emoji_events_outlined, size: 20),
               const SizedBox(width: 8),
               Text(
                 'Registrar Resultado da Equipe',
@@ -522,7 +523,7 @@ class _CompetitionDetailScreenState
       ),
       child: Row(
         children: [
-          const Text('🏆', style: TextStyle(fontSize: 36)),
+          const Icon(Icons.emoji_events, size: 34),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -603,9 +604,9 @@ class _CompetitionDetailScreenState
               Text(
                 myResults.length > 1 ? 'MEUS RESULTADOS' : 'MEU RESULTADO',
                 style: AppTheme.labelSmall.copyWith(
-                  color: AppTheme.textSecondary,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.5,
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
                 ),
               ),
               TextButton.icon(
@@ -636,9 +637,10 @@ class _CompetitionDetailScreenState
                 ),
                 child: Row(
                   children: [
-                    Text(
-                      pos['icon'] as String,
-                      style: const TextStyle(fontSize: 36),
+                    Icon(
+                      pos['icon'] as IconData,
+                      size: 30,
+                      color: Color(pos['color'] as int),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -722,7 +724,7 @@ class _CompetitionDetailScreenState
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
-                      LucideIcons.medal,
+                      Icons.workspace_premium,
                       size: 18,
                       color: AppTheme.textSecondary,
                     ),
@@ -835,9 +837,10 @@ class _CompetitionDetailScreenState
                 ),
                 child: Row(
                   children: [
-                    Text(
-                      pos['icon'] as String,
-                      style: const TextStyle(fontSize: 22),
+                    Icon(
+                      pos['icon'] as IconData,
+                      size: 20,
+                      color: Color(pos['color'] as int),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -1120,21 +1123,24 @@ class _CompetitionDetailScreenState
                     spacing: 8,
                     children: [
                       ChoiceChip(
-                        label: const Text('🥇 Campeao'),
+                        avatar: const Icon(Icons.workspace_premium, size: 16),
+                        label: const Text('Campeao'),
                         selected: teamPosition == 'gold',
                         onSelected: (_) =>
                             setSheetState(() => teamPosition = 'gold'),
                         selectedColor: const Color(0xFFFEF3C7),
                       ),
                       ChoiceChip(
-                        label: const Text('🥈 Vice'),
+                        avatar: const Icon(Icons.workspace_premium, size: 16),
+                        label: const Text('Vice'),
                         selected: teamPosition == 'silver',
                         onSelected: (_) =>
                             setSheetState(() => teamPosition = 'silver'),
                         selectedColor: const Color(0xFFF3F4F6),
                       ),
                       ChoiceChip(
-                        label: const Text('🥉 3o Lugar'),
+                        avatar: const Icon(Icons.military_tech, size: 16),
+                        label: const Text('3o Lugar'),
                         selected: teamPosition == 'bronze',
                         onSelected: (_) =>
                             setSheetState(() => teamPosition = 'bronze'),
@@ -1447,9 +1453,12 @@ class _CompetitionDetailScreenState
                     children: _positionConfig.entries.map((entry) {
                       final isSelected = position == entry.key;
                       return ChoiceChip(
-                        label: Text(
-                          '${entry.value['icon']} ${entry.value['label']}',
+                        avatar: Icon(
+                          entry.value['icon'] as IconData,
+                          size: 16,
+                          color: Color(entry.value['color'] as int),
                         ),
+                        label: Text(entry.value['label'] as String),
                         selected: isSelected,
                         onSelected: (_) {
                           setSheetState(() => position = entry.key);

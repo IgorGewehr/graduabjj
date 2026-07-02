@@ -1690,7 +1690,7 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         await studentService.update(widget.studentId!, data);
         studentId = widget.studentId!;
       } else {
-        data['isProfilePublic'] = false;
+        data['isProfilePublic'] = true;
         data['attendanceCount'] = 0;
         data['initialAttendanceCount'] = 0;
         final created = await studentService.createFromMap(data);

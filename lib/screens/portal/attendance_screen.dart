@@ -65,10 +65,20 @@ class AttendanceScreen extends ConsumerWidget {
                       .toList()
                   : allRecords;
 
-              // When a sport filter is active the total reflects the filtered
-              // list; otherwise we trust the server-side aggregate count.
+              // When a sport filter is active the total must be the TRUE
+              // per-sport count: `records` is only the first page (15 rows), so
+              // `records.length` would undercount. Pull the real per-sport total
+              // from a dedicated query and fall back to the page length only
+              // while it loads. Without a filter we trust the global aggregate.
+              final perSportCountAsync = showSportFilter
+                  ? ref.watch(
+                      studentAttendanceCountBySportProvider(
+                        (student.id, selectedSport.value),
+                      ),
+                    )
+                  : null;
               final totalCount = showSportFilter
-                  ? records.length
+                  ? (perSportCountAsync!.valueOrNull ?? records.length)
                   : (countAsync.valueOrNull ?? records.length);
               final thisMonthCount = _getThisMonthCount(records);
               final calendarDays = _getCalendarDays(records);

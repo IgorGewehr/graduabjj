@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -26,7 +25,16 @@ class RankingScreen extends ConsumerStatefulWidget {
   /// view, and a row tap opens the admin student detail instead of the portal
   /// public profile.
   final bool forStaff;
-  const RankingScreen({super.key, this.forStaff = false});
+
+  /// When true, renders only the body (no Scaffold/AppBar) so it can be embedded
+  /// as a tab inside another screen (e.g. the admin SOCIAL screen). The caller
+  /// provides the surrounding Scaffold and background.
+  final bool embedded;
+  const RankingScreen({
+    super.key,
+    this.forStaff = false,
+    this.embedded = false,
+  });
 
   @override
   ConsumerState<RankingScreen> createState() => _RankingScreenState();
@@ -53,8 +61,15 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
           ),
         );
 
+    // Embutido (aba de outra tela): só o corpo, sem Scaffold/AppBar — o pai já
+    // fornece o fundo bone e a barra.
+    if (widget.embedded) {
+      return !rankingVisible ? const _RankingUnavailableState() : _buildContent();
+    }
+
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      // Fundo bone (igual à Galera) pros cards brancos do leaderboard aparecerem.
+      backgroundColor: const Color(0xFFF4F3EF),
       appBar: AppBar(
         title: Text(widget.forStaff ? 'Ranking dos Alunos' : 'Ranking de Turmas'),
       ),
@@ -283,11 +298,11 @@ class _RankingHeader extends StatelessWidget {
             segments: const [
               ButtonSegment(
                 value: RankingPeriod.week,
-                label: Text('Esta Semana'),
+                label: Text('7 Dias'),
               ),
               ButtonSegment(
                 value: RankingPeriod.month,
-                label: Text('Este Mes'),
+                label: Text('30 Dias'),
               ),
             ],
             selected: {period},
@@ -303,12 +318,17 @@ class _RankingHeader extends StatelessWidget {
   }
 }
 
-/// One leaderboard row: medal/rank badge, avatar, name, training count.
+/// One leaderboard row (fighter aesthetic): big tabular rank numeral (líder em
+/// vermelho), avatar, name, training count. Sem medalha laranja/dourada.
 class _RankingTile extends StatelessWidget {
   final RankingEntry entry;
   final VoidCallback onTap;
 
   const _RankingTile({required this.entry, required this.onTap});
+
+  static const _ink = Color(0xFF0A0A0A);
+  static const _red = Color(0xFFE0301E);
+  static const _smoke = Color(0xFF6E6E68);
 
   String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
@@ -319,135 +339,78 @@ class _RankingTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final leader = entry.rank == 1;
     return Pressable(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
-          color: AppTheme.surfaceVariant,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppTheme.border),
+          border: Border.all(color: _ink.withValues(alpha: 0.06)),
         ),
         child: Row(
           children: [
-            _RankBadge(rank: entry.rank),
-            const SizedBox(width: 12),
+            SizedBox(
+              width: 32,
+              child: Text(
+                '${entry.rank}',
+                style: TextStyle(
+                  fontSize: 23,
+                  height: 1.0,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                  color: leader ? _red : _ink,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
             Hero(
               tag: 'profile-avatar-${entry.studentId}',
               child: AppCachedAvatar(
                 imageUrl: entry.photoUrl,
-                radius: 22,
-                backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
-                foregroundColor: AppTheme.primary,
+                radius: 20,
+                backgroundColor: _ink.withValues(alpha: 0.06),
+                foregroundColor: _ink,
                 child: Text(
                   _initials(entry.studentName),
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: const TextStyle(
+                      color: _ink, fontWeight: FontWeight.w800),
                 ),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    entry.studentName,
-                    style: AppTheme.bodyMedium.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${entry.attendanceCount} treinos',
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ],
+              child: Text(
+                entry.studentName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 15.5, fontWeight: FontWeight.w800, color: _ink),
               ),
             ),
-            const Icon(
-              LucideIcons.chevronRight,
-              size: 16,
-              color: AppTheme.textDisabled,
+            const SizedBox(width: 8),
+            Text(
+              '${entry.attendanceCount}',
+              style: const TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w900,
+                fontFeatures: [FontFeature.tabularFigures()],
+                color: _ink,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text('treinos',
+                  style: TextStyle(
+                      fontSize: 10, fontWeight: FontWeight.w700, color: _smoke)),
             ),
           ],
         ),
       ),
     );
-  }
-}
-
-/// Rank indicator: amber/silver/bronze medal disc for the top 3, plain numbered
-/// circle otherwise.
-class _RankBadge extends StatelessWidget {
-  final int rank;
-
-  const _RankBadge({required this.rank});
-
-  @override
-  Widget build(BuildContext context) {
-    Color? medal;
-    switch (rank) {
-      case 1:
-        medal = const Color(0xFFF59E0B); // amber/gold
-        break;
-      case 2:
-        medal = const Color(0xFF9CA3AF); // silver
-        break;
-      case 3:
-        medal = const Color(0xFFEA580C); // bronze/orange
-        break;
-    }
-
-    final bg = medal?.withValues(alpha: 0.15) ?? AppTheme.surface;
-    final fg = medal ?? AppTheme.textSecondary;
-    final isTopThree = medal != null;
-
-    final badge = Container(
-      width: 32,
-      height: 32,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: bg,
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: medal ?? AppTheme.divider,
-          width: medal != null ? 2 : 1,
-        ),
-        boxShadow: medal != null
-            ? [
-                BoxShadow(
-                  color: medal.withValues(alpha: 0.35),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ]
-            : null,
-      ),
-      child: Text(
-        '$rank',
-        style: AppTheme.bodyMedium.copyWith(
-          fontWeight: FontWeight.w700,
-          color: fg,
-        ),
-      ),
-    );
-
-    // Top-3 medals get a restrained scale-in pop (easeOutBack) so the podium
-    // reads instantly; plain ranks stay static.
-    if (!isTopThree) return badge;
-    return badge.animate().scale(
-          begin: const Offset(0.7, 0.7),
-          end: const Offset(1, 1),
-          duration: PolishMotion.normal,
-          curve: Curves.easeOutBack,
-        );
   }
 }
 

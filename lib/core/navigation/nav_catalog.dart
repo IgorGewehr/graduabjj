@@ -101,6 +101,12 @@ class NavEntry {
   /// Admin only (user.isAdmin). Instructor => `hidden`.
   final bool adminOnly;
 
+  /// Requires the academy to have Mercado Pago connected (AcademySettings
+  /// .mpConnected). Not satisfied => `hidden`. Used by admin_assinaturas: sem MP
+  /// o professor não recebe pelo app, então o item de assinaturas não faz
+  /// sentido. Independe de feature/permissão (são checados em conjunto).
+  final bool requiresMpConnected;
+
   /// Context gate of the portal that does not derive from AcademySettings.
   /// Evaluated by the portal resolver. null = no requirement.
   final PortalContextGate? portalGate;
@@ -118,6 +124,7 @@ class NavEntry {
     this.requiresAnyPermission,
     this.adminBypassesPermission = true,
     this.adminOnly = false,
+    this.requiresMpConnected = false,
     this.portalGate,
   });
 }
@@ -198,14 +205,14 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     adminBypassesPermission: false,
   ),
   NavEntry(
-    key: 'admin_ranking',
-    label: 'Ranking',
-    icon: LucideIcons.medal,
-    route: '/admin/ranking',
+    key: 'admin_social',
+    label: 'Social',
+    icon: LucideIcons.flame,
+    route: '/admin/social',
     section: NavSection.gestao,
     // No feature gate: rankingVisibleToStudents só controla a visão do ALUNO.
     // Sem requiresPermission/adminOnly: professor (instrutor) E admin veem o
-    // ranking dos seus alunos.
+    // ranking E a atividade (com moderação) dos seus alunos.
   ),
   NavEntry(
     key: 'admin_campeonatos',
@@ -237,13 +244,6 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     // papel/permissão, espelhando admin_ranking.
     requiresPermission: 'events:manage',
     adminBypassesPermission: true,
-  ),
-  NavEntry(
-    key: 'admin_importar',
-    label: 'Importar alunos',
-    icon: Icons.upload_file,
-    route: '/admin/importar-alunos',
-    section: NavSection.gestao,
   ),
   NavEntry(
     key: 'admin_financeiro',
@@ -280,6 +280,9 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     section: NavSection.financeiro,
     requiresPermission: 'financial:view',
     adminBypassesPermission: false,
+    // Sem Mercado Pago conectado o professor não recebe pelo app, então o item
+    // de Assinaturas desaparece do menu (não há recorrência a gerir).
+    requiresMpConnected: true,
   ),
   NavEntry(
     key: 'admin_treinos',

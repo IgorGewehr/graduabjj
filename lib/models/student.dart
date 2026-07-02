@@ -392,7 +392,9 @@ class Student {
     this.sportsList,
     this.sportData,
     this.primarySport,
-    this.isProfilePublic = false,
+    // Público por PADRÃO (app social): perfil externo/web visível a menos que o
+    // aluno desmarque. Dentro da academia é sempre visível (gate removido).
+    this.isProfilePublic = true,
     this.linkedUserId,
     this.responsibleUserId,
     this.responsibleStudentId,
@@ -464,7 +466,7 @@ class Student {
           ? Map<String, dynamic>.from(data['sportData'])
           : null,
       primarySport: data['primarySport'],
-      isProfilePublic: data['isProfilePublic'] ?? false,
+      isProfilePublic: data['isProfilePublic'] ?? true,
       linkedUserId: data['linkedUserId'],
       responsibleUserId: data['responsibleUserId'],
       responsibleStudentId: data['responsibleStudentId'],

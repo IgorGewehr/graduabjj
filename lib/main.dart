@@ -52,8 +52,20 @@ void main() async {
   // suporte em desktop), orientação travada e in-app update.
   final isMobile = Platform.isAndroid || Platform.isIOS;
 
-  // Initialize Firebase
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // Initialize Firebase.
+  // No ANDROID o FirebaseInitProvider (via google-services.json) AUTO-inicializa
+  // o app [DEFAULT] ANTES do main() → chamar initializeApp de novo lançava
+  // [core/duplicate-app] e CRASHAVA no boot (só no Android; iOS não tem auto-
+  // init). Nesse instante o Firebase.apps do lado Dart ainda está VAZIO (não
+  // enxerga o app criado nativamente), então um guard por isEmpty não basta —
+  // por isso engolimos especificamente o duplicate-app (o app nativo já existe
+  // e é válido). Qualquer outro erro de init continua propagando.
+  try {
+    await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform);
+  } on FirebaseException catch (e) {
+    if (e.code != 'duplicate-app') rethrow;
+  }
 
   // Enable Firestore offline persistence (Sprint 5).
   //

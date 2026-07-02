@@ -92,22 +92,27 @@ final publicStudentProfileProvider = FutureProvider.family<
   // student doc, so a member viewing a peer never hits sensitive data. If the
   // mirror is missing (legacy/not-yet-synced student), the profile is not
   // available → return null.
-  final student =
-      await StudentService(args.academyId).getPublicProfile(args.studentId);
+  final svc = StudentService(args.academyId);
+  // O id pode ser um studentId (strip/ranking) OU um AUTH uid (ex.: autor de um
+  // post do feed). Tenta como studentId; se não achar, resolve pelo linkedUserId
+  // no espelho. Assim colega de mesma academia SEMPRE abre — independe de uid.
+  var student = await svc.getPublicProfile(args.studentId);
+  student ??= await svc.getPublicProfileByUid(args.studentId);
   if (student == null) return null;
+  final sid = student.id; // studentId REAL para as subcoleções
 
   final achievements = await AchievementService(args.academyId)
-      .getPublic(args.studentId)
+      .getPublic(sid)
       .catchError((_) => <Achievement>[]);
 
   final competitionResults = await CompetitionService(args.academyId)
-      .getResultsForStudent(args.studentId)
+      .getResultsForStudent(sid)
       .catchError((_) => <CompetitionResult>[]);
 
   final photos = await CompetitionPhotoService()
       .getPhotosByStudent(
         academyId: args.academyId,
-        studentId: args.studentId,
+        studentId: sid,
       )
       .catchError((_) => <CompetitionPhoto>[]);
 

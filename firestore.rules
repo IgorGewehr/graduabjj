@@ -269,6 +269,126 @@ service cloud.firestore {
         // User can manage their own tokens
         allow read, write: if isAuthenticated() && request.auth.uid == userId;
       }
+
+      // ============================================
+      // B2C lutador — Diário de Rolagem (training logs) + rolls.
+      // Dado PESSOAL do lutador (nasce da pessoa, não da academia). O dono
+      // cria/lê/edita os próprios; agregados derivados ficam em /stats (CF-only).
+      // ============================================
+      match /training_logs/{logId} {
+        allow read: if isAuthenticated() && request.auth.uid == userId;
+        allow create, update, delete:
+          if isAuthenticated() && request.auth.uid == userId;
+      }
+      match /rolls/{rollId} {
+        allow read: if isAuthenticated() && request.auth.uid == userId;
+        allow create, update, delete:
+          if isAuthenticated() && request.auth.uid == userId;
+      }
+      // Agregados materializados (streak/horas/marcos) — só a Cloud Function
+      // (Admin SDK) escreve; o dono apenas lê.
+      match /stats/{statId} {
+        allow read: if isAuthenticated() && request.auth.uid == userId;
+        allow write: if false;
+      }
+    }
+
+    // ============================================
+    // B2C lutador — Espelho público PERSON-LEVEL (fighterProfiles) e de academia
+    // (academyProfiles). ADITIVO: NÃO substitui academies/{id}/publicProfiles
+    // (mantido p/ ranking intra-academia). PII-free, escrito SÓ por Cloud Function
+    // (Admin SDK) via allowlist única. Leitura: pública se discoverable, ou o dono.
+    // ============================================
+    match /fighterProfiles/{userId} {
+      // Perfil PÚBLICO PII-free do lutador (nome, faixa, stats) — qualquer
+      // logado lê (descoberta + amigos cross-academy). O DONO escreve o próprio
+      // espelho (client-side mirror; v1 do sistema de amigos).
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Grafo de amizade (seguir). Doc-id = "{followerUid}_{targetUid}".
+    match /follows/{followId} {
+      allow read: if isAuthenticated()
+                  && (resource.data.followerUid == request.auth.uid
+                      || resource.data.targetUid == request.auth.uid);
+      allow create: if isAuthenticated()
+                    && request.resource.data.followerUid == request.auth.uid
+                    && request.resource.data.followerUid
+                       != request.resource.data.targetUid;
+      allow delete: if isAuthenticated()
+                    && resource.data.followerUid == request.auth.uid;
+    }
+    match /academyProfiles/{academyId} {
+      allow read: if true; // perfil público da academia (PII-free)
+      allow write: if false; // só Admin SDK/CF
+    }
+
+    // ============================================
+    // Feed Social — feedPosts (materializado pelo dono) e likes.
+    // ============================================
+
+    // feedPosts/{postId}: coleção top-level materializada pelo próprio autor
+    // (v1, owner-driven). O postId é DETERMINÍSTICO por marco — ver FeedPost.dart.
+    //
+    // Invariantes de segurança:
+    //  - create: só o próprio autor, com hiddenByAuthor==false gravado (filtro
+    //    server-side depende deste campo presente em todo doc).
+    //  - update: só o autor, e SÓ os campos hiddenByAuthor/hiddenAt (ocultar).
+    //    A regra usa hasOnly para impedir qualquer outro campo — incluindo likeCount,
+    //    que é mantido por CF onLikeWrite (v2) e não forjável pelo cliente.
+    //  - delete: nunca (post determinístico ressurgiria no próximo mirror()).
+    //
+    // Quando CF-produz (v2): trocar create para `if false` (Admin SDK dispensa regra).
+    match /feedPosts/{postId} {
+      allow read: if isAuthenticated();
+
+      allow create: if isAuthenticated()
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.hiddenByAuthor == false
+        // academyId (se presente) tem que ser UMA das academias do autor —
+        // senão qualquer um injetaria post no feed ACADEMIA de terceiros.
+        && (request.resource.data.academyId == null
+            || request.resource.data.academyId in getUserAcademyMapping().academyIds);
+
+      allow update: if isAuthenticated() && (
+        // 1) O AUTOR oculta o próprio post (hiddenByAuthor/hiddenAt).
+        (resource.data.authorUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['hiddenByAuthor', 'hiddenAt']))
+        ||
+        // 2) MODERAÇÃO: o STAFF (admin/professor) da academia do post pode
+        //    ocultar/reexibir (hiddenByStaff) e editar o texto (staffHeadline).
+        //    Restrito aos campos de moderação — não pode forjar likeCount, autor
+        //    ou payload. academyId precisa existir e ser a academia do staff.
+        (resource.data.academyId != null
+          && isAcademyStaff(resource.data.academyId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['hiddenByStaff', 'hiddenByStaffAt', 'staffHeadline']))
+      );
+
+      allow delete: if false;
+    }
+
+    // likes/{postId}_{likerUid}: reusa 1:1 o molde de follows.
+    // Doc-id composto → anti-spam (1 like por par). Self-like bloqueado
+    // client-side (FeedPostsService.like) e aqui (likerUid != authorUid).
+    match /likes/{likeId} {
+      allow read: if isAuthenticated();
+
+      allow create: if isAuthenticated()
+        && request.resource.data.likerUid == request.auth.uid
+        && request.resource.data.likerUid != request.resource.data.authorUid
+        && likeId == request.resource.data.postId + '_' + request.resource.data.likerUid;
+
+      // Idempotência: like() usa .set() — um re-like no mesmo doc é update.
+      // Só o próprio liker, e likerUid imutável (não vira like de outro).
+      allow update: if isAuthenticated()
+        && resource.data.likerUid == request.auth.uid
+        && request.resource.data.likerUid == resource.data.likerUid;
+
+      allow delete: if isAuthenticated()
+        && resource.data.likerUid == request.auth.uid;
     }
 
     // ============================================
@@ -488,7 +608,14 @@ service cloud.firestore {
                           .hasOnly(['photoUrl', 'updatedAt', 'linkedUserId', 'email', 'cpf', 'phone',
                                     'nickname', 'birthDate', 'rg', 'weight',
                                     'address', 'bloodType', 'allergies', 'healthNotes',
-                                    'emergencyContact', 'isProfilePublic'])
+                                    'emergencyContact', 'isProfilePublic',
+                                    // Athlete-managed modalities: the student may set which
+                                    // sports they train (`sports`) and their primary one
+                                    // (`primarySport`). The VERIFIED grade ceiling lives in
+                                    // `sportData` (staff/promotion-only, NOT listed here), so
+                                    // self-declared sports get no ceiling while academy-seeded
+                                    // sports stay capped by self_graduation_guard.js.
+                                    'sports', 'primarySport'])
                          // SECURITY: linkedUserId may only be CLAIMED on an orphan
                          // record (or re-affirmed by the same user) — never re-pointed
                          // away from an already-linked account.
@@ -524,6 +651,42 @@ service cloud.firestore {
         match /timeline/{eventId} {
           allow read: if isStaffOrMonitor(academyId) || isOwnStudent(academyId, studentId);
           allow write: if isAcademyStaff(academyId);
+        }
+
+        // ============================================
+        // Self-declared graduations (JORNADA multi-esporte, F2b)
+        // ============================================
+        // O aluno registra a SUA propria progressao auto-declarada (ex.: faixa
+        // ganha em outra academia / esporte sem federacao). NAO e o TETO
+        // verificado: o aluno NUNCA escreve em beltProgressions (:1097-1103),
+        // que continua server/staff-authoritative. Estas entradas sao sempre
+        // source=="self" e o campo `source` e IMUTAVEL no update.
+        match /selfGraduations/{gradId} {
+          allow read: if isAuthenticated();
+          allow create: if isOwnStudentRecord(academyId, studentId)
+                        && request.resource.data.source == 'self';
+          allow update: if isOwnStudentRecord(academyId, studentId)
+                        && request.resource.data.source == resource.data.source
+                        && resource.data.source == 'self';
+          allow delete: if isOwnStudentRecord(academyId, studentId)
+                        && resource.data.source == 'self';
+        }
+
+        // ============================================
+        // Self-declared competitions (JORNADA multi-esporte, F2b)
+        // ============================================
+        // Resultados de competicao auto-declarados pelo aluno. Mesmo contrato
+        // das selfGraduations: source=="self" obrigatorio e imutavel. NAO
+        // alimenta beltProgressions nem o TETO verificado.
+        match /selfCompetitions/{compId} {
+          allow read: if isAuthenticated();
+          allow create: if isOwnStudentRecord(academyId, studentId)
+                        && request.resource.data.source == 'self';
+          allow update: if isOwnStudentRecord(academyId, studentId)
+                        && request.resource.data.source == resource.data.source
+                        && resource.data.source == 'self';
+          allow delete: if isOwnStudentRecord(academyId, studentId)
+                        && resource.data.source == 'self';
         }
       }
 

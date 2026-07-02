@@ -42,6 +42,21 @@ class StudentService {
     return Student.fromFirestore(doc);
   }
 
+  /// Resolve o espelho público a partir de um AUTH uid (não do studentId) —
+  /// usado quando a navegação chega com o uid (ex.: autor de um post do feed).
+  /// Consulta `publicProfiles` por `linkedUserId == uid` na academia atual.
+  /// Retorna null quando o uid não pertence a nenhum aluno desta academia.
+  Future<Student?> getPublicProfileByUid(String uid) async {
+    if (uid.isEmpty) return null;
+    final q = await _collections.academy
+        .collection('publicProfiles')
+        .where('linkedUserId', isEqualTo: uid)
+        .limit(1)
+        .get();
+    if (q.docs.isEmpty) return null;
+    return Student.fromFirestore(q.docs.first);
+  }
+
   // ============================================
   // Get Student by Linked User ID
   // ============================================
@@ -413,7 +428,7 @@ class StudentService {
       'startDate': Timestamp.fromDate(now),
       'tuitionValue': 0.0,
       'tuitionDay': 10,
-      'isProfilePublic': false,
+      'isProfilePublic': true,
       'attendanceCount': 0,
       'initialAttendanceCount': 0,
       'createdAt': FieldValue.serverTimestamp(),

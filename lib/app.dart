@@ -18,6 +18,10 @@ import 'screens/auth/instructor_code_screen.dart';
 import 'screens/auth/create_academy_screen.dart';
 import 'screens/portal/portal_shell.dart';
 import 'screens/portal/home_screen.dart';
+import 'screens/fighter/lutador_hub_screen.dart';
+import 'screens/fighter/cena_screen.dart';
+import 'screens/fighter/academia_hub_screen.dart';
+import 'screens/fighter/diario_screen.dart';
 import 'screens/portal/event_detail_screen.dart';
 import 'screens/portal/jornal_screen.dart';
 import 'screens/portal/ranking_screen.dart';
@@ -28,6 +32,7 @@ import 'screens/portal/competition_detail_screen.dart';
 import 'screens/portal/schedule_screen.dart';
 import 'screens/portal/qr_scan_screen.dart';
 import 'screens/portal/musculacao_qr_scan_screen.dart';
+import 'screens/admin/admin_social_screen.dart';
 import 'screens/admin/musculacao_admin_screen.dart';
 import 'screens/portal/workouts_screen.dart';
 import 'screens/admin/workout_plans_screen.dart';
@@ -449,15 +454,27 @@ final routerProvider = Provider<GoRouter>((ref) {
   // Watch the coarse bootstrap status (auth + user + academy settings + linked
   // student). This is the single source of truth for "is the session ready to
   // render its shell without a follow-up loading flicker".
-  final bootstrap = ref.watch(appBootstrapProvider);
-  final currentUser = ref.watch(currentUserProvider);
-  final isCreatingAccount = ref.watch(isCreatingAccountProvider);
+  // BUG CRÍTICO (corrigido): antes este provider fazia `ref.watch` do bootstrap
+  // e do currentUser → a CADA reload transitório (ex.: abrir o Perfil dispara um
+  // re-fetch do student/user) o provider RECRIAVA o GoRouter inteiro, que volta
+  // ao `initialLocation: '/'` → o aluno era jogado pro /portal (Lutador) no 1º
+  // clique. Agora o router é criado UMA vez e um refreshListenable re-roda só o
+  // redirect quando bootstrap/user/criação mudam (sem recriar/resetar).
+  final refresh = ValueNotifier<int>(0);
+  ref.listen(appBootstrapProvider, (_, _) => refresh.value++);
+  ref.listen(currentUserProvider, (_, _) => refresh.value++);
+  ref.listen(isCreatingAccountProvider, (_, _) => refresh.value++);
+  ref.onDispose(refresh.dispose);
 
   return GoRouter(
     navigatorKey: navigatorKey,
     initialLocation: '/',
     debugLogDiagnostics: true,
+    refreshListenable: refresh,
     redirect: (context, state) {
+      final bootstrap = ref.read(appBootstrapProvider);
+      final currentUser = ref.read(currentUserProvider);
+      final isCreatingAccount = ref.read(isCreatingAccountProvider);
       final isLoggingIn = state.matchedLocation == '/login';
       final isRegistering = state.matchedLocation == '/register';
       final isLinkCode = state.matchedLocation == '/link-code';
@@ -490,6 +507,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (bootstrap == AppBootstrapStatus.loading) {
         print('[ROUTER] Bootstrap loading...');
         if (_sessionLanded) return null;
+        // Já numa rota pós-login (portal/admin)? FICA — não rebate pro splash
+        // só porque o bootstrap re-resolveu transitoriamente. Sem isso, abrir o
+        // Perfil (ou trocar de aba) podia bouncar /portal/perfil → / → /portal.
+        final loc = state.matchedLocation;
+        if (loc.startsWith('/portal') || loc.startsWith('/admin')) return null;
         return isSplash ? null : '/';
       }
 
@@ -635,8 +657,42 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state, child) => PortalShell(child: child),
         routes: [
           // Main tab routes - instant/crossfade transitions
+          // B2C fighter-first: /portal é o HUB DO LUTADOR (identidade portátil).
           GoRoute(
             path: '/portal',
+            pageBuilder: (context, state) => _buildPageWithFade(
+              context: context,
+              state: state,
+              child: const LutadorHubScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/cena',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const CenaScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/academia',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AcademiaHubScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/diario',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const DiarioScreen(),
+            ),
+          ),
+          // Home antiga (academy-mixed) — mantida acessível em /portal/home.
+          GoRoute(
+            path: '/portal/home',
             pageBuilder: (context, state) => _buildPageWithFade(
               context: context,
               state: state,
@@ -1141,6 +1197,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const RankingScreen(forStaff: true),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/social',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminSocialScreen(),
             ),
           ),
           GoRoute(

@@ -119,14 +119,15 @@ class RankingService {
   /// Computes the [start, end] window for [period] relative to [now]
   /// (local time). Exposed for testing.
   static (DateTime, DateTime) periodRange(RankingPeriod period, DateTime now) {
+    final today = DateTime(now.year, now.month, now.day);
     switch (period) {
       case RankingPeriod.week:
-        // DateTime.weekday: Monday = 1 ... Sunday = 7.
-        final monday = DateTime(now.year, now.month, now.day)
-            .subtract(Duration(days: now.weekday - 1));
-        return (monday, now);
+        // ÚLTIMOS 7 DIAS (rolling: hoje + 6 anteriores) — mais populado e justo
+        // que "semana calendário", que zera toda segunda.
+        return (today.subtract(const Duration(days: 6)), now);
       case RankingPeriod.month:
-        return (DateTime(now.year, now.month, 1), now);
+        // ÚLTIMOS 30 DIAS (rolling: hoje + 29 anteriores).
+        return (today.subtract(const Duration(days: 29)), now);
     }
   }
 

@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +10,7 @@ import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
-import '../../providers/selected_academy_provider.dart';
+import '../../services/self_records_service.dart';
 import '../../services/services.dart';
 import '../../widgets/polish/polish.dart';
 import '../../widgets/sport_tab_bar.dart';
@@ -26,6 +27,187 @@ final studentBeltProgressionsProvider =
       final service = BeltProgressionService(currentUser!.academyId!);
       return await service.getByStudent(studentId);
     });
+
+// ── Self-record helpers for the portal timeline ──────────────────────────────
+
+/// Holds the student's auto-declared records needed to merge them into the
+/// timeline and resolve edit/delete operations.
+class _SelfTimelineRecords {
+  final String academyId;
+  final String studentId;
+  final List<SelfGraduation> grads;
+  final List<SelfCompetition> comps;
+  const _SelfTimelineRecords({
+    required this.academyId,
+    required this.studentId,
+    required this.grads,
+    required this.comps,
+  });
+}
+
+/// Loads self-declared graduations + competitions for the portal timeline.
+/// Invalidated whenever a self record is mutated.
+final _selfTimelineRecordsProvider =
+    FutureProvider.autoDispose.family<_SelfTimelineRecords?, String>((
+  ref,
+  studentId,
+) async {
+  final user = await ref.watch(currentUserProvider.future);
+  final academyId = user?.academyId;
+  if (academyId == null || academyId.isEmpty) return null;
+  final svc = SelfRecordsService(academyId);
+  final grads = await svc.listGraduations(studentId);
+  final comps = await svc.listCompetitions(studentId);
+  return _SelfTimelineRecords(
+    academyId: academyId,
+    studentId: studentId,
+    grads: grads,
+    comps: comps,
+  );
+});
+
+/// Actions available on a self-declared timeline event.
+enum _SelfTimelineAction { editDate, delete }
+
+/// Shows the options bottom sheet for a self-declared timeline event and
+/// executes the chosen action (edit date or delete) via [SelfRecordsService].
+/// Invalidates [_selfTimelineRecordsProvider] and [studentAchievementsProvider]
+/// after any successful mutation so the timeline rebuilds.
+Future<void> _showSelfTimelineOptions(
+  BuildContext context,
+  WidgetRef ref,
+  TimelineEvent event,
+  _SelfTimelineRecords self,
+) async {
+  final isGrad = event.type == TimelineEventType.graduation ||
+      event.type == TimelineEventType.stripe;
+  final docId = event.selfDocId;
+  if (docId == null) return;
+
+  // Show options sheet.
+  final action = await showModalBottomSheet<_SelfTimelineAction>(
+    context: context,
+    backgroundColor: AppTheme.surface,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+    ),
+    builder: (c) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.divider,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          ListTile(
+            leading: Icon(LucideIcons.calendar,
+                size: 20, color: AppTheme.textPrimary),
+            title: Text(
+              'Editar data',
+              style: AppTheme.bodyMedium
+                  .copyWith(fontWeight: FontWeight.w600),
+            ),
+            onTap: () => Navigator.pop(c, _SelfTimelineAction.editDate),
+          ),
+          ListTile(
+            leading: Icon(LucideIcons.trash2, size: 20, color: Colors.red),
+            title: Text(
+              'Excluir',
+              style: AppTheme.bodyMedium.copyWith(
+                color: Colors.red,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            onTap: () => Navigator.pop(c, _SelfTimelineAction.delete),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
+
+  if (action == null) return;
+  if (!context.mounted) return;
+
+  if (action == _SelfTimelineAction.editDate) {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: event.date.isAfter(now) ? now : event.date,
+      firstDate: DateTime(1990),
+      lastDate: now,
+    );
+    if (picked == null) return;
+    try {
+      final svc = SelfRecordsService(self.academyId);
+      if (isGrad) {
+        await svc.updateGraduation(
+            self.studentId, docId, {'date': Timestamp.fromDate(picked)});
+      } else {
+        await svc.updateCompetition(
+            self.studentId, docId, {'date': Timestamp.fromDate(picked)});
+      }
+      ref.invalidate(_selfTimelineRecordsProvider(self.studentId));
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Nao foi possivel atualizar a data.')),
+        );
+      }
+    }
+  } else if (action == _SelfTimelineAction.delete) {
+    if (!context.mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(
+          isGrad ? 'Excluir graduacao?' : 'Excluir competicao?',
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        content: const Text(
+          'Este registro auto-declarado sera removido da sua linha do '
+          'tempo. Nao da para desfazer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child:
+                const Text('Excluir', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final svc = SelfRecordsService(self.academyId);
+      if (isGrad) {
+        await svc.deleteGraduation(self.studentId, docId);
+      } else {
+        await svc.deleteCompetition(self.studentId, docId);
+      }
+      ref.invalidate(_selfTimelineRecordsProvider(self.studentId));
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Nao foi possivel excluir agora.')),
+        );
+      }
+    }
+  }
+}
 
 /// Timeline Screen - Linha do Tempo with enhanced design
 class TimelineScreen extends ConsumerWidget {
@@ -60,6 +242,9 @@ class TimelineScreen extends ConsumerWidget {
           studentCompetitionResultsProvider(student.id),
         );
         final academyInfo = ref.watch(currentAcademyInfoProvider);
+        final selfRecords = ref.watch(
+          _selfTimelineRecordsProvider(student.id),
+        ).valueOrNull;
 
         // Multi-sport students can filter the timeline by sport. Single-sport
         // students never see the selector and get the full, unfiltered list.
@@ -79,6 +264,7 @@ class TimelineScreen extends ConsumerWidget {
             ref.invalidate(studentAttendanceCountProvider(student.id));
             ref.invalidate(studentMedalCountProvider(student.id));
             ref.invalidate(studentCompetitionResultsProvider(student.id));
+            ref.invalidate(_selfTimelineRecordsProvider(student.id));
           },
           child: CustomScrollView(
             slivers: [
@@ -135,6 +321,15 @@ class TimelineScreen extends ConsumerWidget {
                     progressionsAsync,
                     academyInfo?.name,
                     showSportFilter ? selectedSport : null,
+                    selfRecords: selfRecords,
+                    onSelfOptions: selfRecords == null
+                        ? null
+                        : (event) => _showSelfTimelineOptions(
+                              context,
+                              ref,
+                              event,
+                              selfRecords,
+                            ),
                   ),
                 ),
               ),
@@ -146,7 +341,7 @@ class TimelineScreen extends ConsumerWidget {
         );
       },
       loading: () => _buildLoadingState(),
-      error: (_, __) => _buildEmptyState(
+      error: (e, s) => _buildEmptyState(
         'Erro ao carregar',
         'Nao foi possivel carregar sua linha do tempo',
       ),
@@ -158,20 +353,24 @@ class TimelineScreen extends ConsumerWidget {
     AsyncValue<List<Achievement>> achievementsAsync,
     AsyncValue<List<BeltProgression>> progressionsAsync,
     String? academyName,
-    SportId? sportFilter,
-  ) {
+    SportId? sportFilter, {
+    _SelfTimelineRecords? selfRecords,
+    void Function(TimelineEvent)? onSelfOptions,
+  }) {
     final achievements = achievementsAsync.valueOrNull ?? [];
     final progressions = progressionsAsync.valueOrNull ?? [];
 
     // Build the unified, ordered+filtered timeline via the shared motor
-    // (lib/services/timeline_builder.dart). Same precedence/ordering/filter as
-    // before — no widget-level synthesis here anymore.
+    // (lib/services/timeline_builder.dart). Self records are merged inline and
+    // tagged isSelf=true so the UI can offer edit/delete affordances.
     final filteredEvents = buildTimelineEvents(
       student: student,
       achievements: achievements,
       progressions: progressions,
       academyName: academyName,
       sportFilter: sportFilter,
+      selfGraduations: selfRecords?.grads ?? [],
+      selfCompetitions: selfRecords?.comps ?? [],
     );
 
     if (filteredEvents.isEmpty) {
@@ -193,8 +392,13 @@ class TimelineScreen extends ConsumerWidget {
           final index = entry.key;
           final event = entry.value;
           final isLast = index == reversedEvents.length - 1;
-          return _TimelineItem(event: event, isLast: isLast)
-              .entrance(index: index);
+          return _TimelineItem(
+            event: event,
+            isLast: isLast,
+            onOptions: (event.isSelf && onSelfOptions != null)
+                ? () => onSelfOptions(event)
+                : null,
+          ).entrance(index: index);
         }),
       ],
     );
@@ -480,19 +684,19 @@ class _JourneyCardState extends State<_JourneyCard> {
                   children: [
                     if ((medalStats['gold'] ?? 0) > 0)
                       _MedalBadge(
-                        emoji: '🥇',
+                        icon: Icons.workspace_premium,
                         count: medalStats['gold']!,
                         label: 'Ouro',
                       ),
                     if ((medalStats['silver'] ?? 0) > 0)
                       _MedalBadge(
-                        emoji: '🥈',
+                        icon: Icons.workspace_premium,
                         count: medalStats['silver']!,
                         label: 'Prata',
                       ),
                     if ((medalStats['bronze'] ?? 0) > 0)
                       _MedalBadge(
-                        emoji: '🥉',
+                        icon: Icons.workspace_premium,
                         count: medalStats['bronze']!,
                         label: 'Bronze',
                       ),
@@ -643,14 +847,14 @@ class _JourneyCarouselCard extends StatelessWidget {
   }
 }
 
-/// Medal Badge
+/// Medal Badge — uses a Material icon so it renders on all platforms/fonts.
 class _MedalBadge extends StatelessWidget {
-  final String emoji;
+  final IconData icon;
   final int count;
   final String label;
 
   const _MedalBadge({
-    required this.emoji,
+    required this.icon,
     required this.count,
     required this.label,
   });
@@ -662,7 +866,7 @@ class _MedalBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(emoji, style: const TextStyle(fontSize: 24)),
+          Icon(icon, size: 24, color: AppTheme.textPrimary),
           const SizedBox(width: 6),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -692,7 +896,15 @@ class _TimelineItem extends StatelessWidget {
   final TimelineEvent event;
   final bool isLast;
 
-  const _TimelineItem({required this.event, required this.isLast});
+  /// When non-null the card shows a "more" button that calls this callback.
+  /// Only set for self-declared (auto) events that the student can edit/delete.
+  final VoidCallback? onOptions;
+
+  const _TimelineItem({
+    required this.event,
+    required this.isLast,
+    this.onOptions,
+  });
 
   Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) {
     final c = getGradeColor(sportId, belt);
@@ -828,6 +1040,7 @@ class _TimelineItem extends StatelessWidget {
                 children: [
                   // Header row
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Expanded(
                         child: Text(
@@ -837,7 +1050,27 @@ class _TimelineItem extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (event.isSelf) ...[
+                        const SizedBox(width: 6),
+                        const _AutoBadge(),
+                      ],
+                      const SizedBox(width: 6),
                       _TypeChip(type: event.type),
+                      if (onOptions != null) ...[
+                        const SizedBox(width: 4),
+                        GestureDetector(
+                          onTap: onOptions,
+                          behavior: HitTestBehavior.opaque,
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(
+                              Icons.more_horiz,
+                              size: 18,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
 
@@ -992,6 +1225,33 @@ class _TypeChip extends StatelessWidget {
   }
 }
 
+/// Small "AUTO" badge shown on self-declared timeline events.
+class _AutoBadge extends StatelessWidget {
+  const _AutoBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: AppTheme.textSecondary.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Text(
+        'AUTO',
+        style: AppTheme.labelSmall.copyWith(
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+          color: AppTheme.textSecondary,
+        ),
+      ),
+    );
+  }
+}
+
 /// Belt Indicator
 class _BeltIndicator extends StatelessWidget {
   final String belt;
@@ -1043,7 +1303,7 @@ class _BeltIndicator extends StatelessWidget {
   }
 }
 
-/// Position Badge
+/// Position Badge — uses Material icons so it renders reliably on all platforms.
 class _PositionBadge extends StatelessWidget {
   final String position;
 
@@ -1051,28 +1311,28 @@ class _PositionBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    String emoji;
+    IconData icon;
     String label;
     Color color;
 
     switch (position) {
       case 'gold':
-        emoji = '🥇';
+        icon = Icons.workspace_premium;
         label = 'Ouro';
         color = const Color(0xFFD97706);
         break;
       case 'silver':
-        emoji = '🥈';
+        icon = Icons.workspace_premium;
         label = 'Prata';
         color = const Color(0xFF6B7280);
         break;
       case 'bronze':
-        emoji = '🥉';
+        icon = Icons.workspace_premium;
         label = 'Bronze';
         color = const Color(0xFFB45309);
         break;
       default:
-        emoji = '🎖️';
+        icon = Icons.military_tech;
         label = 'Participante';
         color = const Color(0xFF10B981);
     }
@@ -1086,7 +1346,7 @@ class _PositionBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(emoji, style: const TextStyle(fontSize: 18)),
+          Icon(icon, size: 18, color: AppTheme.textPrimary),
           const SizedBox(width: 8),
           Text(
             label,

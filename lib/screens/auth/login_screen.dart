@@ -2,13 +2,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
-import '../../widgets/loading_button.dart';
+
+// =============================================================================
+// Paleta FIGHTER — bone + ink + um acento vermelho. Espelha _C das telas
+// lib/screens/fighter/* (lutador_hub / cena). Só apresentação: nenhuma
+// regra de negócio, controller ou navegação muda por causa disso.
+// =============================================================================
+class _C {
+  _C._();
+  static const bone = Color(0xFFF4F3EF);
+  static const card = Color(0xFFFFFFFF);
+  static const ink = Color(0xFF0A0A0A);
+  static const blood = Color(0xFFE0301E);
+  static const smoke = Color(0xFF6E6E68);
+  static const ash = Color(0xFF9A9A93);
+}
+
+TextStyle _eyebrow(Color c, double s) => TextStyle(
+    color: c, fontSize: s, fontWeight: FontWeight.w800, letterSpacing: 1.4);
 
 /// Login Screen
 class LoginScreen extends ConsumerStatefulWidget {
@@ -95,73 +111,133 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
+  // ── Decoração FIGHTER dos campos: fill ink@4%, hairline, foco vermelho ─────
+  InputDecoration _fieldDecoration({
+    required String hint,
+    required IconData icon,
+    Widget? suffix,
+  }) {
+    OutlineInputBorder border(Color c, double w) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: c, width: w),
+        );
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: const TextStyle(
+          color: _C.ash, fontSize: 15, fontWeight: FontWeight.w600),
+      prefixIcon: Icon(icon, size: 20, color: _C.smoke),
+      suffixIcon: suffix,
+      filled: true,
+      fillColor: _C.ink.withValues(alpha: 0.04),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+      enabledBorder: border(_C.ink.withValues(alpha: 0.10), 1),
+      border: border(_C.ink.withValues(alpha: 0.10), 1),
+      focusedBorder: border(_C.blood, 1.6),
+      errorBorder: border(_C.blood.withValues(alpha: 0.7), 1),
+      focusedErrorBorder: border(_C.blood, 1.6),
+      errorStyle: const TextStyle(
+          color: _C.blood, fontSize: 12.5, fontWeight: FontWeight.w600),
+    );
+  }
+
+  // ── Link discreto em vermelho (esqueci senha / criar conta / instrutor) ────
+  Widget _redLink(String label, VoidCallback onTap, {double size = 14}) {
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        foregroundColor: _C.blood,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+            color: _C.blood, fontSize: size, fontWeight: FontWeight.w800),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: _C.bone,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
             child: Form(
               key: _formKey,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Logo
-                  Image.asset(
-                        'assets/images/bjjeasy_logo.png',
-                        width: 180,
-                        height: 180,
-                      )
-                      .animate()
-                      .fadeIn(duration: 300.ms)
-                      .scale(begin: const Offset(0.8, 0.8)),
+                  // Logo da marca
+                  Center(
+                    child: Image.asset(
+                      'assets/images/bjjeasy_logo.png',
+                      width: 132,
+                      height: 132,
+                    ),
+                  ),
 
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 28),
 
                   // Error message
-                  if (_errorMessage != null)
+                  if (_errorMessage != null) ...[
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: AppTheme.errorLight,
-                        borderRadius: BorderRadius.circular(12),
+                        color: _C.blood.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(14),
                         border: Border.all(
-                          color: AppTheme.error.withOpacity(0.3),
+                          color: _C.blood.withValues(alpha: 0.25),
                         ),
                       ),
                       child: Row(
                         children: [
                           const Icon(
                             LucideIcons.alertCircle,
-                            color: AppTheme.error,
+                            color: _C.blood,
                             size: 20,
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               _errorMessage!,
-                              style: AppTheme.bodyMedium.copyWith(
-                                color: AppTheme.error,
+                              style: const TextStyle(
+                                color: _C.blood,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                                height: 1.3,
                               ),
                             ),
                           ),
                         ],
                       ),
-                    ).animate().fadeIn().shake(),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
 
-                  if (_errorMessage != null) const SizedBox(height: 24),
+                  // Label EMAIL
+                  Padding(
+                    padding: const EdgeInsets.only(left: 2, bottom: 8),
+                    child: Text('EMAIL', style: _eyebrow(_C.ink, 11)),
+                  ),
 
                   // Email field
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                      hintText: 'Email',
-                      prefixIcon: Icon(LucideIcons.mail, size: 20),
+                    style: const TextStyle(
+                        color: _C.ink,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600),
+                    decoration: _fieldDecoration(
+                      hint: 'voce@email.com',
+                      icon: LucideIcons.mail,
                     ),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
@@ -172,9 +248,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       }
                       return null;
                     },
-                  ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.1),
+                  ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
+
+                  // Label SENHA
+                  Padding(
+                    padding: const EdgeInsets.only(left: 2, bottom: 8),
+                    child: Text('SENHA', style: _eyebrow(_C.ink, 11)),
+                  ),
 
                   // Password field
                   TextFormField(
@@ -182,15 +264,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     obscureText: _obscurePassword,
                     textInputAction: TextInputAction.done,
                     onFieldSubmitted: (_) => _handleLogin(),
-                    decoration: InputDecoration(
-                      hintText: 'Senha',
-                      prefixIcon: const Icon(LucideIcons.lock, size: 20),
-                      suffixIcon: IconButton(
+                    style: const TextStyle(
+                        color: _C.ink,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600),
+                    decoration: _fieldDecoration(
+                      hint: '••••••••',
+                      icon: LucideIcons.lock,
+                      suffix: IconButton(
                         icon: Icon(
                           _obscurePassword
                               ? LucideIcons.eyeOff
                               : LucideIcons.eye,
                           size: 20,
+                          color: _C.smoke,
                         ),
                         onPressed: () {
                           setState(() {
@@ -205,102 +292,139 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       }
                       return null;
                     },
-                  ).animate().fadeIn(delay: 400.ms).slideX(begin: -0.1),
+                  ),
 
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 6),
 
                   // Forgot password
                   Align(
                     alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: _handleForgotPassword,
-                      child: Text(
-                        'Esqueci minha senha',
-                        style: AppTheme.labelMedium.copyWith(
-                          color: AppTheme.primary,
-                        ),
+                    child: _redLink(
+                        'Esqueci minha senha', _handleForgotPassword),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // Login button — CTA INK all-caps. Preserva _isLoading e
+                  // _handleLogin (desabilita o toque durante o loading).
+                  GestureDetector(
+                    onTap: _isLoading ? null : _handleLogin,
+                    child: Container(
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: _C.ink,
+                        borderRadius: BorderRadius.circular(14),
                       ),
+                      alignment: Alignment.center,
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : const Text(
+                              'ENTRAR',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
                     ),
-                  ).animate().fadeIn(delay: 500.ms),
+                  ),
 
-                  const SizedBox(height: 24),
-
-                  // Login button — LoadingButton handles spinner+disabled
-                  // animation in one place.
-                  SizedBox(
-                    height: 52,
-                    child: LoadingButton(
-                      isLoading: _isLoading,
-                      onPressed: _handleLogin,
-                      child: const Text('Entrar'),
-                    ),
-                  ).animate().fadeIn(delay: 600.ms).slideY(begin: 0.1),
-
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 22),
 
                   // Register link
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
+                      const Text(
                         'Nao tem uma conta? ',
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.textSecondary,
+                        style: TextStyle(
+                          color: _C.smoke,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      TextButton(
-                        onPressed: () => context.go('/register'),
-                        child: const Text('Criar conta'),
-                      ),
+                      _redLink('Criar academia', () => context.go('/register')),
                     ],
-                  ).animate().fadeIn(delay: 700.ms),
+                  ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
 
                   // Divider
                   Row(
                     children: [
-                      const Expanded(child: Divider()),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Text(
-                          'ou',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
+                      Expanded(
+                        child: Divider(
+                            color: _C.ink.withValues(alpha: 0.10),
+                            thickness: 1),
                       ),
-                      const Expanded(child: Divider()),
+                      Padding(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 14),
+                        child: Text('OU', style: _eyebrow(_C.ash, 11)),
+                      ),
+                      Expanded(
+                        child: Divider(
+                            color: _C.ink.withValues(alpha: 0.10),
+                            thickness: 1),
+                      ),
                     ],
-                  ).animate().fadeIn(delay: 800.ms),
+                  ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
 
-                  // Link Code Button
-                  OutlinedButton.icon(
-                    onPressed: () => context.go('/link-code'),
-                    icon: const Icon(LucideIcons.key, size: 18),
-                    label: const Text('Tenho um codigo de acesso'),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 48),
+                  // Link Code Button — secundário outline
+                  GestureDetector(
+                    onTap: () => context.go('/link-code'),
+                    child: Container(
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: _C.card,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: _C.ink.withValues(alpha: 0.14)),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.key, size: 18, color: _C.ink),
+                          SizedBox(width: 10),
+                          Text(
+                            'TENHO UM CODIGO DE ACESSO',
+                            style: TextStyle(
+                              color: _C.ink,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.6,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ).animate().fadeIn(delay: 900.ms),
+                  ),
 
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
 
-                  TextButton(
+                  Center(
                     // O fluxo /link-code já detecta código de 8 chars e entra
                     // no modo instrutor (cria conta + resgata o convite). O
                     // /codigo-equipe exige usuário logado e era barrado pelo
                     // redirect na tela de login.
-                    onPressed: () => context.go('/link-code'),
-                    child: Text(
+                    child: _redLink(
                       'Recebi codigo de equipe (instrutor)',
-                      style: AppTheme.labelSmall.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
+                      () => context.go('/link-code'),
+                      size: 13,
                     ),
-                  ).animate().fadeIn(delay: 950.ms),
+                  ),
 
                   const SizedBox(height: 24),
 
@@ -310,32 +434,38 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     children: [
                       GestureDetector(
                         onTap: () => _openUrl(AppConstants.termsOfServiceUrl),
-                        child: Text(
+                        child: const Text(
                           'Termos de Uso',
-                          style: AppTheme.labelSmall.copyWith(
-                            color: AppTheme.textSecondary,
+                          style: TextStyle(
+                            color: _C.ash,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
                             decoration: TextDecoration.underline,
                           ),
                         ),
                       ),
-                      Text(
-                        '  |  ',
-                        style: AppTheme.labelSmall.copyWith(
-                          color: AppTheme.textSecondary,
+                      const Text(
+                        '   ·   ',
+                        style: TextStyle(
+                          color: _C.ash,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       GestureDetector(
                         onTap: () => _openUrl(AppConstants.privacyPolicyUrl),
-                        child: Text(
+                        child: const Text(
                           'Politica de Privacidade',
-                          style: AppTheme.labelSmall.copyWith(
-                            color: AppTheme.textSecondary,
+                          style: TextStyle(
+                            color: _C.ash,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
                             decoration: TextDecoration.underline,
                           ),
                         ),
                       ),
                     ],
-                  ).animate().fadeIn(delay: 1000.ms),
+                  ),
                 ],
               ),
             ),

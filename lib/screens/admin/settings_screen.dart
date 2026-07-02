@@ -56,6 +56,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
   // Form controllers
   final _nameController = TextEditingController();
+  // Nome de exibição do professor/admin (globalUser.displayName). É o nome que
+  // aparece nas presenças (verifiedByName) e na Jornada do aluno.
+  final _displayNameController = TextEditingController();
   final _sloganController = TextEditingController();
   final _cnpjController = TextEditingController();
   final _emailController = TextEditingController();
@@ -70,7 +73,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _storeMinAmountController = TextEditingController();
 
   PixKeyType? _pixKeyType;
-  bool _abacatePayEnabled = false;
   bool _asaasEnabled = false;
   bool _mpConnected = false;
   // Backend-set flag: MP auth repeatedly failed; admin must reconnect even
@@ -158,6 +160,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     // Text edits should surface the "unsaved changes" bar like toggles do.
     for (final c in <TextEditingController>[
       _nameController,
+      _displayNameController,
       _sloganController,
       _cnpjController,
       _emailController,
@@ -187,6 +190,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         .join(',');
     return [
       _nameController.text,
+      _displayNameController.text,
       _sloganController.text,
       _cnpjController.text,
       _emailController.text,
@@ -201,7 +205,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _storeMinAmountController.text,
       _autoGraduationAttendancesController.text,
       _pixKeyType?.value ?? '',
-      _abacatePayEnabled,
       _asaasEnabled,
       _storeEnabled,
       _storePublished,
@@ -237,6 +240,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _displayNameController.dispose();
     _sloganController.dispose();
     _cnpjController.dispose();
     _emailController.dispose();
@@ -262,6 +266,12 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       final service = SettingsService(FirebaseService.academyId);
       final settings = await service.getAcademySettings();
 
+      // Nome de exibição do professor/admin (root /users/{uid}.displayName).
+      final globalUser = await ref.read(globalUserProvider.future);
+      if (globalUser != null) {
+        _displayNameController.text = globalUser.displayName;
+      }
+
       if (settings != null) {
         setState(() {
           _settings = settings;
@@ -280,7 +290,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _storeMinAmountController.text =
               settings.storeMinOrderAmount?.toStringAsFixed(2) ?? '';
           _pixKeyType = settings.pixKeyType;
-          _abacatePayEnabled = settings.abacatePayEnabled;
           _asaasEnabled = settings.asaasEnabled;
           _mpConnected = settings.mpConnected;
           _mpNeedsReauth = settings.mpNeedsReauth;
@@ -519,7 +528,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
               ? double.tryParse(_storeMinAmountController.text)
               : null,
         ),
-        service.toggleAbacatePay(_abacatePayEnabled),
         service.toggleAsaas(_asaasEnabled),
         service.toggleStudentCheckin(_studentCheckinEnabled),
         service.updateJournalVisibility(_journalVisibleToStudents),
@@ -545,6 +553,13 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           minSkillPct: int.tryParse(_minSkillPctController.text.trim()),
         ),
         service.updateUseClassWeights(_useClassWeights),
+        // Nome de exibição do professor/admin (root /users/{uid}). É o nome que
+        // aparece nas presenças (verifiedByName) e na Jornada do aluno. Só grava
+        // quando preenchido, para nunca apagar o nome com um campo vazio.
+        if (_displayNameController.text.trim().isNotEmpty)
+          ref.read(authServiceProvider).updateGlobalProfile(
+                displayName: _displayNameController.text.trim(),
+              ),
       ];
 
       var savedOffline = false;
@@ -559,6 +574,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       ref.invalidate(academySettingsProvider);
       ref.invalidate(academyNameProvider);
       ref.invalidate(pixInfoProvider);
+      ref.invalidate(globalUserProvider);
 
       if (mounted) {
         setState(() {
@@ -1035,6 +1051,23 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 ),
                 const SizedBox(height: 16),
                 _ModernTextField(
+                  controller: _displayNameController,
+                  label: 'Nome do professor',
+                  hint: 'Ex: Professor Carlos',
+                  icon: LucideIcons.userCheck,
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Esse e o nome que aparece nas presencas e na Jornada do aluno.',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _ModernTextField(
                   controller: _sloganController,
                   label: 'Frase / Slogan',
                   hint: 'Ex: Transformando vidas atraves do Jiu-Jitsu',
@@ -1194,25 +1227,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           // Mercado Pago (recebimentos do admin via PIX, direto na conta dele)
           _buildMercadoPagoCard(),
-
-          // AbacatePay legado — só enquanto a academia não conectou o MP.
-          if (!_mpConnected) ...[
-            const SizedBox(height: 16),
-            _SettingsCard(
-              title: 'AbacatePay (legado)',
-              icon: LucideIcons.plug,
-              child: _ModernSwitch(
-                title: 'AbacatePay',
-                subtitle: 'Cobranca via PIX (sera substituido pelo Mercado Pago)',
-                value: _abacatePayEnabled,
-                onChanged: (value) {
-                  setState(() => _abacatePayEnabled = value);
-                },
-                icon: LucideIcons.zap,
-                iconColor: Colors.green,
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -1359,7 +1373,40 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 ),
               ],
             )
-          else
+          else ...[
+            // Sem MP conectado o professor não recebe nada pelo app — deixe
+            // isso explícito para que ninguém pense que está cobrando à toa.
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.warning.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: AppTheme.warning.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(LucideIcons.alertTriangle,
+                      size: 18, color: AppTheme.warning),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Sem o Mercado Pago conectado, o professor NAO recebe '
+                      'pagamentos pelo app: os alunos nao conseguem pagar '
+                      'mensalidades nem pedidos da loja por aqui. Conecte sua '
+                      'conta para comecar a receber.',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.warning,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -1374,6 +1421,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 label: Text(_mpBusy ? 'Conectando...' : 'Conectar Mercado Pago'),
               ),
             ),
+          ],
         ],
       ),
     );
@@ -1392,7 +1440,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       setState(() {
         _mpConnected = true;
         _mpNeedsReauth = false;
-        _abacatePayEnabled = false;
         _asaasEnabled = false;
       });
     }

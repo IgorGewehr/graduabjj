@@ -1,14 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
-import '../../core/navigator_key.dart';
 import '../../core/theme.dart';
-import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
-import '../../providers/student_provider.dart';
 import '../../services/global_user_service.dart';
 import 'onboarding_carousel.dart';
 import 'onboarding_slide.dart';
@@ -56,37 +52,18 @@ class _OnboardingGateState extends ConsumerState<OnboardingGate> {
       return const SizedBox.shrink();
     }
 
+    // Onboarding SÓ para o ADMIN/dono da academia (decisão do dono). Aluno e
+    // professor NUNCA veem as mensagens iniciais de boas-vindas.
+    if (!user.isAdmin) return const SizedBox.shrink();
+
     final academyName =
         ref.watch(academySettingsProvider).valueOrNull?.name ?? 'sua academia';
+    final _Tour tour = _adminTour(academyName);
 
-    // Resolve o conjunto de slides + ação final pelo papel efetivo.
-    final _Tour tour;
-    if (user.isAdmin) {
-      tour = _adminTour(academyName);
-    } else if (user.isInstructor) {
-      tour = _professorTour(academyName);
-    } else {
-      // Aluno: se a conta NÃO está vinculada a uma ficha (currentStudent null),
-      // desvia para o fluxo de vincular em vez do tour padrão (resolve o beco
-      // sem saída de hoje).
-      final student = ref.watch(currentStudentProvider).valueOrNull;
-      tour = student == null
-          ? _studentUnlinkedTour()
-          : _studentTour(academyName);
-    }
-
-    Future<void> finish({bool navigateTo = false, bool persist = true}) async {
+    Future<void> finish() async {
       // Esconde já (trava de sessão) — não depende da escrita dar certo.
       if (mounted) setState(() => _dismissed = true);
-      // Navega via navigatorKey (o context do gate está ACIMA do router, então
-      // context.go aqui estouraria "No GoRouter found in context").
-      if (navigateTo && tour.finishRoute != null) {
-        navigatorKey.currentContext?.go(tour.finishRoute!);
-      }
-      // Persiste "viu" cross-device só quando faz sentido. No tour do aluno
-      // NÃO-vinculado, NÃO persistimos: o nudge "conecte sua conta" deve voltar
-      // até a conta ser de fato vinculada (aí o gate troca pro tour de valor).
-      if (!persist) return;
+      // Persiste "viu" cross-device (o admin vê o tour uma única vez).
       try {
         await globalUserService.markOnboardingSeen(user.id);
         ref.invalidate(globalUserProvider);
@@ -95,75 +72,22 @@ class _OnboardingGateState extends ConsumerState<OnboardingGate> {
       }
     }
 
-    final hasRoute = tour.finishRoute != null;
     return OnboardingCarousel(
       slides: tour.slides,
       finishLabel: tour.finishLabel,
-      // Não celebra (confete) quando o tour termina navegando p/ outro lugar.
-      celebrate: !hasRoute,
-      // Tour com rota (não-vinculado): concluir/pular navega e NÃO persiste.
-      // Tour normal: persiste e fica no lugar.
-      onDone: () => finish(navigateTo: hasRoute, persist: !hasRoute),
-      onSkip: () => finish(navigateTo: hasRoute, persist: !hasRoute),
+      celebrate: true,
+      onDone: finish,
+      onSkip: finish,
     );
   }
 }
 
-/// Conteúdo resolvido de um tour (slides + rótulo/rota do CTA final).
+/// Conteúdo resolvido de um tour (slides + rótulo do CTA final).
 class _Tour {
   final List<OnboardingSlide> slides;
   final String finishLabel;
-  final String? finishRoute;
-  const _Tour(this.slides,
-      {this.finishLabel = 'Começar', this.finishRoute});
+  const _Tour(this.slides, {this.finishLabel = 'Começar'});
 }
-
-// ---------------------------------------------------------------------------
-// ALUNO (vinculado) — carrossel curto de VALOR: presença → evolução → tudo num
-// lugar. Personalizado com o nome real da academia.
-// ---------------------------------------------------------------------------
-_Tour _studentTour(String academy) => _Tour([
-      OnboardingSlide(
-        icon: LucideIcons.userCheck,
-        accent: AppTheme.success,
-        eyebrow: 'PASSO 1 DE 3',
-        title: 'Registre sua presença',
-        body:
-            'Faça check-in a cada treino e veja sua frequência e sequência '
-            'crescerem. É o combustível da sua evolução.',
-      ),
-      OnboardingSlide(
-        icon: LucideIcons.trendingUp,
-        accent: AppTheme.getBeltColor('purple'),
-        eyebrow: 'PASSO 2 DE 3',
-        title: 'Evolua e rankeie',
-        body:
-            'Acompanhe seu progresso, suba de faixa/nível e dispute o ranking '
-            'da $academy com a galera.',
-      ),
-      OnboardingSlide(
-        icon: LucideIcons.sparkles,
-        accent: AppTheme.info,
-        eyebrow: 'PASSO 3 DE 3',
-        title: 'Tudo num lugar só',
-        body:
-            'Avisos, eventos, competições, mensalidade e a sua jornada na '
-            '$academy — tudo na palma da mão.',
-      ),
-    ], finishLabel: 'Começar');
-
-// ALUNO (não vinculado) — resolve o beco sem saída: orienta a inserir o código.
-_Tour _studentUnlinkedTour() => const _Tour([
-      OnboardingSlide(
-        icon: LucideIcons.link2,
-        accent: AppTheme.info,
-        eyebrow: 'QUASE LÁ',
-        title: 'Conecte sua conta',
-        body:
-            'Sua conta ainda não está vinculada a um aluno. Use o código de '
-            'convite que a sua academia te enviou para liberar tudo.',
-      ),
-    ], finishLabel: 'Inserir código', finishRoute: '/link-code');
 
 // ---------------------------------------------------------------------------
 // ADMIN (dono) — boas-vindas curtas; a ativação detalhada vive no checklist do
@@ -198,27 +122,3 @@ _Tour _adminTour(String academy) => _Tour([
             'conta — sem taxa da plataforma.',
       ),
     ], finishLabel: 'Configurar academia');
-
-// ---------------------------------------------------------------------------
-// PROFESSOR / INSTRUTOR — mini welcome focado na ação central (chamada).
-// ---------------------------------------------------------------------------
-_Tour _professorTour(String academy) => _Tour([
-      OnboardingSlide(
-        icon: LucideIcons.clipboardCheck,
-        accent: AppTheme.success,
-        eyebrow: 'BEM-VINDO, PROFESSOR',
-        title: 'Sua turma, simples',
-        body:
-            'Faça a chamada da turma em segundos e acompanhe a evolução de '
-            'cada aluno da $academy.',
-      ),
-      OnboardingSlide(
-        icon: LucideIcons.award,
-        accent: AppTheme.getBeltColor('brown'),
-        eyebrow: 'ACOMPANHE',
-        title: 'Gradue e acompanhe',
-        body:
-            'Veja o progresso dos alunos e registre graduações conforme as '
-            'permissões que o admin liberou para você.',
-      ),
-    ], finishLabel: 'Começar');

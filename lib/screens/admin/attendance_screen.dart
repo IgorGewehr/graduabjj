@@ -53,6 +53,13 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
     super.dispose();
   }
 
+  /// Real display name of the logged-in professor/admin to stamp on
+  /// attendance records (verifiedByName). Returns '' when there is no real
+  /// name set — the Jornada treats '' as "sem nome". We never fall back to a
+  /// generic label like "Administrador".
+  String get _verifierName =>
+      ref.read(currentUserProvider).valueOrNull?.displayName.trim() ?? '';
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
 
@@ -226,7 +233,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       final result = await checkinService.confirmCheckins(
         checkinIds,
         'admin',
-        'Administrador',
+        _verifierName,
       );
 
       if (mounted) {
@@ -301,7 +308,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           classId: _selectedClass!.id,
           className: _selectedClass!.name,
           verifiedBy: 'admin',
-          verifiedByName: 'Administrador',
+          verifiedByName: _verifierName,
           date: _selectedDate,
           weight: _selectedClass!.effectiveWeight(),
           sport: _selectedClass!.sport,
@@ -355,7 +362,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           classId: _selectedClass!.id,
           className: _selectedClass!.name,
           verifiedBy: 'admin',
-          verifiedByName: 'Administrador',
+          verifiedByName: _verifierName,
           date: _selectedDate,
           weight: _selectedClass!.effectiveWeight(),
           sport: _selectedClass!.sport,
@@ -433,7 +440,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
         classId: _selectedClass!.id,
         className: _selectedClass!.name,
         verifiedBy: 'admin',
-        verifiedByName: 'Administrador',
+        verifiedByName: _verifierName,
         date: _selectedDate,
         weight: _selectedClass!.effectiveWeight(),
         sport: _selectedClass!.sport,

@@ -73,6 +73,16 @@ class SportDefinition {
   final List<GradeDefinition>? kidsGrades;
   final IconData icon;
 
+  /// Unidade de SPARRING deste esporte, no plural, minúsculo (ex.: 'rolas'
+  /// p/ BJJ; 'rounds' p/ striking; 'randoris' p/ judô). `null` quando o esporte
+  /// não tem sparring (musculação) — nesse caso o log vira check-in simples.
+  /// Multi-modal por design: nada de terminologia fixa de jiu.
+  final String? sparringNoun;
+
+  /// Mesma unidade no singular (ex.: 'rola', 'round', 'randori'). `null` quando
+  /// [sparringNoun] é `null`.
+  final String? sparringNounSingular;
+
   const SportDefinition({
     required this.id,
     required this.label,
@@ -83,6 +93,8 @@ class SportDefinition {
     required this.adultGrades,
     this.kidsGrades,
     required this.icon,
+    this.sparringNoun,
+    this.sparringNounSingular,
   });
 }
 
@@ -250,6 +262,8 @@ const Map<SportId, SportDefinition> sports = {
     adultGrades: _bjjAdultGrades,
     kidsGrades: _bjjKidsGrades,
     icon: Icons.shield_outlined,
+    sparringNoun: 'rolas',
+    sparringNounSingular: 'rola',
   ),
   SportId.muaythai: SportDefinition(
     id: SportId.muaythai,
@@ -260,6 +274,8 @@ const Map<SportId, SportDefinition> sports = {
     supportsStripes: true,
     adultGrades: _muaythaiGradesCbmt,
     icon: Icons.flash_on_outlined,
+    sparringNoun: 'rounds',
+    sparringNounSingular: 'round',
   ),
   SportId.karate: SportDefinition(
     id: SportId.karate,
@@ -270,6 +286,8 @@ const Map<SportId, SportDefinition> sports = {
     supportsStripes: true,
     adultGrades: _karateGrades,
     icon: Icons.shield_outlined,
+    sparringNoun: 'kumites',
+    sparringNounSingular: 'kumite',
   ),
   SportId.judo: SportDefinition(
     id: SportId.judo,
@@ -280,6 +298,8 @@ const Map<SportId, SportDefinition> sports = {
     supportsStripes: false,
     adultGrades: _judoGrades,
     icon: Icons.people_outlined,
+    sparringNoun: 'randoris',
+    sparringNounSingular: 'randori',
   ),
   SportId.kickboxing: SportDefinition(
     id: SportId.kickboxing,
@@ -290,6 +310,8 @@ const Map<SportId, SportDefinition> sports = {
     supportsStripes: true,
     adultGrades: _kickboxingGrades,
     icon: Icons.sports_mma_outlined,
+    sparringNoun: 'rounds',
+    sparringNounSingular: 'round',
   ),
   SportId.boxing: SportDefinition(
     id: SportId.boxing,
@@ -300,6 +322,8 @@ const Map<SportId, SportDefinition> sports = {
     supportsStripes: false,
     adultGrades: [],
     icon: Icons.sports_mma_outlined,
+    sparringNoun: 'rounds',
+    sparringNounSingular: 'round',
   ),
   SportId.lutalivre: SportDefinition(
     id: SportId.lutalivre,
@@ -310,6 +334,8 @@ const Map<SportId, SportDefinition> sports = {
     supportsStripes: true,
     adultGrades: _lutalivreGrades,
     icon: Icons.sports_kabaddi_outlined,
+    sparringNoun: 'rolas',
+    sparringNounSingular: 'rola',
   ),
   // MMA — no universal graduation. Presence/check-in modality only (like boxe).
   SportId.mma: SportDefinition(
@@ -321,6 +347,8 @@ const Map<SportId, SportDefinition> sports = {
     supportsStripes: false,
     adultGrades: [],
     icon: Icons.sports_mma_outlined,
+    sparringNoun: 'rounds',
+    sparringNounSingular: 'round',
   ),
   // Musculação has no graduation system (GradeSystem.none) and no class
   // schedule — check-in and display are handled differently from martial arts.
@@ -354,6 +382,35 @@ const List<SportId> sportOptions = [
 // ============================================
 SportDefinition getSport(SportId sportId) {
   return sports[sportId]!;
+}
+
+// ============================================
+// Helper: Unidade de SPARRING por esporte (multi-modal)
+// ============================================
+/// Retorna a unidade de sparring do esporte — `(one: singular, many: plural)`,
+/// minúsculo. `null` quando o esporte NÃO tem sparring (musculação): nesse caso
+/// o logger vira um check-in "TREINEI" simples, sem número.
+///
+/// Ex.: `sparringUnit(SportId.bjj)` → `(one:'rola', many:'rolas')`;
+///      `sparringUnit(SportId.muaythai)` → `(one:'round', many:'rounds')`.
+///
+/// A UI escolhe singular/plural pelo count e faz `.toUpperCase()`
+/// (ex.: `count == 1 ? unit.one : unit.many` → "5 ROLAS", "1 ROUND").
+({String one, String many})? sparringUnit(SportId sportId) {
+  final s = sports[sportId]!;
+  final many = s.sparringNoun;
+  final one = s.sparringNounSingular;
+  if (many == null || one == null) return null;
+  return (one: one, many: many);
+}
+
+/// Termo de sparring já flexionado pelo [count] (default plural). Conveniência
+/// sobre [sparringUnit]. Retorna `null` para esportes sem sparring.
+/// Ex.: `getSparringTerm(SportId.bjj, count: 1)` → 'rola'.
+String? getSparringTerm(SportId sportId, {int count = 2}) {
+  final u = sparringUnit(sportId);
+  if (u == null) return null;
+  return count == 1 ? u.one : u.many;
 }
 
 // ============================================

@@ -20,11 +20,35 @@ import '../../widgets/common/animated_belt.dart';
 import '../../widgets/common/belt_badge.dart';
 import '../../widgets/common/delete_account_helper.dart';
 import '../../widgets/common/profile_photo_picker.dart';
-import '../../widgets/loading_button.dart';
 import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
-/// Profile Screen - Redesigned with hero header, stats, and collapsed sections
+// =============================================================================
+// Tokens anti-slop (consistentes com o hub do Lutador / fighter_theme).
+// Bone + cards brancos + tinta ink + UM acento vermelho. A COR DA FAIXA
+// (AppTheme.getBeltColor) só representa faixa real — nunca cromática de UI.
+// =============================================================================
+class _T {
+  _T._();
+  static const bone = Color(0xFFF4F3EF);
+  static const card = Color(0xFFFFFFFF);
+  static const ink = Color(0xFF0A0A0A);
+  static const blood = Color(0xFFE0301E);
+  static const smoke = Color(0xFF6E6E68);
+  static const ash = Color(0xFF9A9A93);
+  static const hair = Color(0x14000000); // 8% ink hairline
+  static const List<FontFeature> tab = [FontFeature.tabularFigures()];
+}
+
+TextStyle _eyebrow(Color c, double s) => TextStyle(
+      color: c,
+      fontSize: s,
+      fontWeight: FontWeight.w800,
+      letterSpacing: 1.4,
+    );
+
+/// Profile Screen - Redesigned in the Fighter style (bone canvas, white cards,
+/// ink/red, tabular numerals). Keeps all existing functionality.
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
@@ -48,155 +72,152 @@ class ProfileScreen extends ConsumerWidget {
         final startDate = student.jiujitsuStartDate ?? student.startDate;
         final trainingTime = _formatTrainingTime(startDate);
 
-        return RefreshIndicator(
-          color: Theme.of(context).colorScheme.primary,
-          onRefresh: () async {
-            HapticFeedback.mediumImpact();
-            ref.invalidate(currentStudentProvider);
-          },
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // Hero Header
-                _HeroHeader(student: student).fadeInQuick(),
+        return Container(
+          color: _T.bone,
+          child: RefreshIndicator(
+            color: _T.blood,
+            backgroundColor: _T.card,
+            onRefresh: () async {
+              HapticFeedback.mediumImpact();
+              ref.invalidate(currentStudentProvider);
+            },
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 100),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Identity header — avatar (editable) + name + faixa + status
+                  _HeroHeader(student: student).fadeInQuick(),
 
-                const SizedBox(height: 20),
+                  const SizedBox(height: 14),
 
-                // Stats Row
-                Row(
-                  children: [
-                    _StatCard(
-                      icon: LucideIcons.clipboardCheck,
-                      value: '$totalTreinos',
-                      countValue: totalTreinos,
-                      label: 'presencas',
-                    ),
-                    const SizedBox(width: 12),
-                    _StatCard(
-                      icon: LucideIcons.calendar,
-                      value: trainingTime,
-                      label: 'de treino',
-                    ),
-                  ],
-                ),
+                  // Graduation showcase — animated belt(s) per sport
+                  _GraduationCard(student: student),
 
-                const SizedBox(height: 16),
+                  const SizedBox(height: 14),
 
-                // Quick Actions
-                _QuickActions(
-                  onTimeline: () => context.go('/portal/linha-do-tempo'),
-                  onEdit: () =>
-                      _showEditPersonalDataSheet(context, ref, student),
-                ),
+                  // Stats — presenças + tempo de treino
+                  _StatsRow(
+                    totalTreinos: totalTreinos,
+                    trainingTime: trainingTime,
+                  ),
 
-                const SizedBox(height: 24),
+                  const SizedBox(height: 14),
 
-                // Academy-managed section
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: _SectionHeader(title: 'GERENCIADO PELA ACADEMIA'),
-                ),
-                const SizedBox(height: 8),
-                _InfoCard(
-                  children: [
-                    _InfoRow(
-                      label: 'Inicio',
-                      value: DateFormat('dd/MM/yyyy').format(student.startDate),
-                    ),
-                    _InfoRow(
-                      label: 'Status',
-                      value: student.status.label,
-                      valueColor: AppTheme.getStatusColor(student.status.value),
-                    ),
-                    if ((plansAsync.valueOrNull ?? []).isNotEmpty)
+                  // Quick Actions
+                  _QuickActions(
+                    onTimeline: () => context.go('/portal/linha-do-tempo'),
+                    onEdit: () =>
+                        _showEditPersonalDataSheet(context, ref, student),
+                  ),
+
+                  const SizedBox(height: 26),
+
+                  // Academy-managed section
+                  _SectionHeader(title: 'GERENCIADO PELA ACADEMIA'),
+                  const SizedBox(height: 10),
+                  _InfoCard(
+                    children: [
                       _InfoRow(
-                        label:
-                            'Plano${(plansAsync.valueOrNull ?? []).length > 1 ? 's' : ''}',
-                        value: (plansAsync.valueOrNull ?? [])
-                            .map((p) => p.name)
-                            .join(', '),
+                        label: 'Inicio',
+                        value:
+                            DateFormat('dd/MM/yyyy').format(student.startDate),
                       ),
-                  ],
-                ),
-
-                const SizedBox(height: 24),
-
-                // My Data section
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: _SectionHeader(title: 'MEUS DADOS'),
-                ),
-                const SizedBox(height: 8),
-                _InfoCard(
-                  children: [
-                    _DataTile(
-                      icon: LucideIcons.user,
-                      title: 'Dados Pessoais',
-                      subtitle: _getPersonalDataSummary(student),
-                      isSubtitleEmpty: _isPersonalDataEmpty(student),
-                      onTap: () =>
-                          _showEditPersonalDataSheet(context, ref, student),
-                    ),
-                    _DataTile(
-                      icon: LucideIcons.mapPin,
-                      title: 'Endereco',
-                      subtitle: _getAddressSummary(student),
-                      isSubtitleEmpty:
-                          student.address == null ||
-                          !_hasAddress(student.address!),
-                      onTap: () => _showEditAddressSheet(context, ref, student),
-                    ),
-                    _DataTile(
-                      icon: LucideIcons.heartPulse,
-                      title: 'Saude e Emergencia',
-                      subtitle: _getHealthEmergencySummary(student),
-                      isSubtitleEmpty:
-                          _isHealthDataEmpty(student) &&
-                          student.emergencyContact == null,
-                      onTap: () => _showEditHealthAndEmergencySheet(
-                        context,
-                        ref,
-                        student,
+                      _InfoRow(
+                        label: 'Status',
+                        value: student.status.label,
+                        valueColor:
+                            AppTheme.getStatusColor(student.status.value),
                       ),
-                    ),
-                  ],
-                ),
+                      if ((plansAsync.valueOrNull ?? []).isNotEmpty)
+                        _InfoRow(
+                          label:
+                              'Plano${(plansAsync.valueOrNull ?? []).length > 1 ? 's' : ''}',
+                          value: (plansAsync.valueOrNull ?? [])
+                              .map((p) => p.name)
+                              .join(', '),
+                        ),
+                    ],
+                  ),
 
-                const SizedBox(height: 24),
+                  const SizedBox(height: 26),
 
-                // Preferences
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: _SectionHeader(title: 'PREFERENCIAS'),
-                ),
-                const SizedBox(height: 8),
-                _PrivacyToggle(
-                  value: student.isProfilePublic,
-                  onChanged: (value) =>
-                      _updatePrivacy(context, ref, student, value),
-                ),
+                  // My Data section
+                  _SectionHeader(title: 'MEUS DADOS'),
+                  const SizedBox(height: 10),
+                  _InfoCard(
+                    children: [
+                      _DataTile(
+                        icon: LucideIcons.dumbbell,
+                        title: 'Modalidades',
+                        subtitle: _getSportsSummary(student),
+                        isSubtitleEmpty: false,
+                        onTap: () =>
+                            context.go('/portal/minhas-modalidades'),
+                      ),
+                      _DataTile(
+                        icon: LucideIcons.user,
+                        title: 'Dados Pessoais',
+                        subtitle: _getPersonalDataSummary(student),
+                        isSubtitleEmpty: _isPersonalDataEmpty(student),
+                        onTap: () =>
+                            _showEditPersonalDataSheet(context, ref, student),
+                      ),
+                      _DataTile(
+                        icon: LucideIcons.mapPin,
+                        title: 'Endereco',
+                        subtitle: _getAddressSummary(student),
+                        isSubtitleEmpty: student.address == null ||
+                            !_hasAddress(student.address!),
+                        onTap: () =>
+                            _showEditAddressSheet(context, ref, student),
+                      ),
+                      _DataTile(
+                        icon: LucideIcons.heartPulse,
+                        title: 'Saude e Emergencia',
+                        subtitle: _getHealthEmergencySummary(student),
+                        isSubtitleEmpty: _isHealthDataEmpty(student) &&
+                            student.emergencyContact == null,
+                        onTap: () => _showEditHealthAndEmergencySheet(
+                          context,
+                          ref,
+                          student,
+                        ),
+                      ),
+                    ],
+                  ),
 
-                const SizedBox(height: 24),
+                  const SizedBox(height: 26),
 
-                // Academies
-                _AcademiesSection(),
+                  // Preferences
+                  _SectionHeader(title: 'PREFERENCIAS'),
+                  const SizedBox(height: 10),
+                  _PrivacyToggle(
+                    value: student.isProfilePublic,
+                    onChanged: (value) =>
+                        _updatePrivacy(context, ref, student, value),
+                  ),
 
-                const SizedBox(height: 24),
+                  const SizedBox(height: 26),
 
-                // Account
-                _AccountSection(),
+                  // Academies
+                  _AcademiesSection(),
 
-                const SizedBox(height: 80),
-              ],
+                  const SizedBox(height: 26),
+
+                  // Account
+                  _AccountSection(),
+
+                  const SizedBox(height: 40),
+                ],
+              ),
             ),
           ),
         );
       },
       loading: () => _buildLoadingState(),
-      error: (_, __) => _buildEmptyState(),
+      error: (_, _) => _buildEmptyState(),
     );
   }
 
@@ -224,14 +245,24 @@ class ProfileScreen extends ConsumerWidget {
     }
   }
 
+  String _getSportsSummary(Student student) {
+    final sports = student.getSports();
+    final names = sports.map((s) => getSport(s).labelShort).join(' · ');
+    final count = sports.length == 1 ? '1 modalidade' : '${sports.length} modalidades';
+    return '$count · $names';
+  }
+
   String _getPersonalDataSummary(Student student) {
     final parts = <String>[];
-    if (student.phone != null && student.phone!.isNotEmpty)
+    if (student.phone != null && student.phone!.isNotEmpty) {
       parts.add(formatPhone(student.phone));
-    if (student.email != null && student.email!.isNotEmpty)
+    }
+    if (student.email != null && student.email!.isNotEmpty) {
       parts.add(student.email!);
-    if (student.nickname != null && student.nickname!.isNotEmpty)
+    }
+    if (student.nickname != null && student.nickname!.isNotEmpty) {
       parts.add(student.nickname!);
+    }
     if (parts.isEmpty) return 'Nenhum dado';
     return parts.join(', ');
   }
@@ -379,54 +410,70 @@ class ProfileScreen extends ConsumerWidget {
   // ============================================
 
   Widget _buildLoadingState() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: const [
-          SizedBox(height: 16),
-          // Avatar shimmer
-          SkeletonAvatar(size: 88),
-          SizedBox(height: 20),
-          // Stats shimmer
-          SkeletonStats(count: 2, height: 80),
-          SizedBox(height: 24),
-          // Card shimmer
-          SkeletonCard(
-            height: 150,
-            showAvatar: false,
-            padding: EdgeInsets.all(16),
-          ),
-          SizedBox(height: 12),
-          SkeletonCard(height: 80, showAvatar: true),
-        ],
+    return Container(
+      color: _T.bone,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        child: Column(
+          children: const [
+            SizedBox(height: 8),
+            // Avatar shimmer
+            SkeletonAvatar(size: 72),
+            SizedBox(height: 20),
+            // Stats shimmer
+            SkeletonStats(count: 2, height: 80),
+            SizedBox(height: 24),
+            // Card shimmer
+            SkeletonCard(
+              height: 150,
+              showAvatar: false,
+              padding: EdgeInsets.all(16),
+            ),
+            SizedBox(height: 12),
+            SkeletonCard(height: 80, showAvatar: true),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildEmptyState() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const SizedBox(height: 80),
-          Icon(LucideIcons.userX, size: 48, color: AppTheme.textDisabled),
-          const SizedBox(height: 16),
-          Text(
-            'Perfil nao encontrado',
-            style: AppTheme.bodyLarge.copyWith(color: AppTheme.textSecondary),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Sua conta nao esta vinculada a um aluno',
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 40),
-          // Account section always visible for account deletion
-          _AccountSection(),
-          const SizedBox(height: 80),
-        ],
+    return Container(
+      color: _T.bone,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 60),
+            Center(
+              child: Column(
+                children: [
+                  Icon(LucideIcons.userX, size: 44, color: _T.ash),
+                  const SizedBox(height: 14),
+                  Text(
+                    'PERFIL NAO ENCONTRADO',
+                    style: _eyebrow(_T.ink, 14),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Sua conta nao esta vinculada a um aluno',
+                    style: const TextStyle(
+                      color: _T.smoke,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 40),
+            // Account section always visible for account deletion
+            _AccountSection(),
+          ],
+        ),
       ),
     );
   }
@@ -436,7 +483,8 @@ class ProfileScreen extends ConsumerWidget {
 // NEW WIDGETS
 // ============================================
 
-/// Hero Header — Centered avatar, name, belt, status
+/// Identity header — editable avatar + name (ALL-CAPS) + faixa + status pill.
+/// Left-aligned credential, consistent with the Lutador hub header.
 class _HeroHeader extends ConsumerWidget {
   final Student student;
 
@@ -447,13 +495,167 @@ class _HeroHeader extends ConsumerWidget {
     // Fall back to the authoritative academy context when the selected-academy
     // provider hasn't settled (null) — otherwise the upload path would be
     // academies//students/... and Storage denies it.
-    final academyId = ref.watch(selectedAcademyIdProvider) ?? FirebaseService.academyId;
+    final academyId =
+        ref.watch(selectedAcademyIdProvider) ?? FirebaseService.academyId;
 
-    // Resolve graduation per sport. The flat currentBelt/currentStripes fields
-    // are legacy BJJ-oriented and only correct for a BJJ-primary student;
-    // getGrade returns the per-sport grade. Multimodal students show one belt
-    // per graded sport; presence-only sports (GradeSystem.none — boxe/MMA/
-    // musculação) have no graduation and are shown as a plain chip instead.
+    final primarySport = student.getPrimarySport();
+    final grade = student.getGrade(primarySport);
+    final belt = grade?.currentGrade ?? student.currentBelt;
+    final stripes = grade?.currentStripes ?? student.currentStripes;
+    final beltColor = AppTheme.getBeltColor(belt);
+    final definition = getSport(primarySport);
+    final hasBelt = definition.gradeSystem != GradeSystem.none;
+
+    final name = (student.nickname != null && student.nickname!.isNotEmpty)
+        ? student.nickname!
+        : student.fullName;
+    final gradeLabel = getGradeLabel(primarySport, belt);
+    final stripeLabel = stripes > 0
+        ? ' · ${stripes == 1 ? '1º grau' : '$stripesº grau'}'
+        : '';
+
+    return _WhiteCard(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Editable avatar — keeps full upload/crop functionality.
+          ProfilePhotoPicker(
+            academyId: academyId,
+            studentId: student.id,
+            photoUrl: student.photoUrl,
+            fullName: student.fullName,
+            currentBelt: student.currentBelt,
+            editable: true,
+            size: 72.0,
+            onPhotoUpdated: () {
+              ref.invalidate(currentStudentProvider);
+            },
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name.toUpperCase(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _T.ink,
+                    fontSize: 21,
+                    height: 1.05,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  children: [
+                    if (hasBelt) ...[
+                      _MiniBelt(beltColor: beltColor, stripes: stripes),
+                      const SizedBox(width: 8),
+                    ],
+                    Flexible(
+                      child: Text(
+                        hasBelt ? '$gradeLabel$stripeLabel' : definition.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _T.smoke,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                // Status pill — uses the academy status color (semantic, not a
+                // belt color), kept compact and rectangular.
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.getStatusBackgroundColor(
+                      student.status.value,
+                    ),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    student.status.label.toUpperCase(),
+                    style: _eyebrow(
+                      AppTheme.getStatusColor(student.status.value),
+                      10,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Small belt swatch with a tip block + stripes — mirrors the Lutador hub.
+class _MiniBelt extends StatelessWidget {
+  const _MiniBelt({required this.beltColor, required this.stripes});
+  final Color beltColor;
+  final int stripes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 14,
+      decoration: BoxDecoration(
+        color: beltColor,
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: _T.hair),
+      ),
+      alignment: Alignment.centerRight,
+      child: Container(
+        width: 11,
+        height: 14,
+        decoration: const BoxDecoration(
+          color: _T.ink,
+          borderRadius: BorderRadius.only(
+            topRight: Radius.circular(3),
+            bottomRight: Radius.circular(3),
+          ),
+        ),
+        child: stripes > 0
+            ? Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  stripes.clamp(0, 4),
+                  (_) => Container(
+                    width: 1.4,
+                    height: 8,
+                    margin: const EdgeInsets.symmetric(horizontal: 0.6),
+                    color: Colors.white,
+                  ),
+                ),
+              )
+            : null,
+      ),
+    );
+  }
+}
+
+/// Graduation showcase — animated belt(s) per sport in a white card.
+class _GraduationCard extends ConsumerWidget {
+  final Student student;
+
+  const _GraduationCard({required this.student});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Resolve graduation per sport. getGrade returns the per-sport grade;
+    // multimodal students show one belt per graded sport. Presence-only sports
+    // (GradeSystem.none — boxe/MMA/musculação) have no graduation and render as
+    // a plain chip instead of a meaningless "Branca" belt.
     final primarySport = student.getPrimarySport();
     final muaythaiVariant =
         ref.watch(academySettingsProvider).valueOrNull?.muaythaiGradeSystem;
@@ -464,63 +666,29 @@ class _HeroHeader extends ConsumerWidget {
       ...student.getSports().where((s) => s != primarySport),
     ];
 
-    return Column(
-      children: [
-        // Avatar
-        ProfilePhotoPicker(
-          academyId: academyId,
-          studentId: student.id,
-          photoUrl: student.photoUrl,
-          fullName: student.fullName,
-          currentBelt: student.currentBelt,
-          editable: true,
-          size: 88.0,
-          onPhotoUpdated: () {
-            ref.invalidate(currentStudentProvider);
-          },
-        ),
-        const SizedBox(height: 12),
-        // Name
-        Text(
-          student.fullName,
-          style: AppTheme.headlineSmall.copyWith(fontWeight: FontWeight.w600),
-          textAlign: TextAlign.center,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 12),
-        // Belt hero — animated "evolution morph" (first grade 0° → current
-        // grade/graus) played once on entry, in evidence, in each sport's own
-        // color ladder + adornments (BJJ belts, Muay Thai prajied, etc.).
-        // For multimodal students we render the primary sport's belt large,
-        // then a compact belt per additional graded sport. Presence-only
-        // sports (GradeSystem.none) have no belt and are shown as a chip.
-        for (var i = 0; i < sportsList.length; i++) ...[
-          if (i > 0) const SizedBox(height: 12),
-          _SportGrade(
-            sport: sportsList[i],
-            grade: student.getGrade(sportsList[i]),
-            muaythaiVariant: muaythaiVariant,
-            isPrimary: i == 0,
+    return _WhiteCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Row(
+            children: [
+              Container(width: 14, height: 2, color: _T.blood),
+              const SizedBox(width: 8),
+              Text('GRADUACAO', style: _eyebrow(_T.ink, 12)),
+            ],
           ),
-        ],
-        const SizedBox(height: 8),
-        // Status Pill
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: AppTheme.getStatusBackgroundColor(student.status.value),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            student.status.label,
-            style: AppTheme.labelSmall.copyWith(
-              color: AppTheme.getStatusColor(student.status.value),
-              fontWeight: FontWeight.w600,
+          const SizedBox(height: 16),
+          for (var i = 0; i < sportsList.length; i++) ...[
+            if (i > 0) const SizedBox(height: 14),
+            _SportGrade(
+              sport: sportsList[i],
+              grade: student.getGrade(sportsList[i]),
+              muaythaiVariant: muaythaiVariant,
+              isPrimary: i == 0,
             ),
-          ),
-        ),
-      ],
+          ],
+        ],
+      ),
     );
   }
 }
@@ -551,22 +719,20 @@ class _SportGrade extends StatelessWidget {
     // Presence-only sports have no belt/grade ladder — render just the name.
     if (definition.gradeSystem == GradeSystem.none) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: AppTheme.surfaceVariant.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(20),
+          color: _T.bone,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: _T.hair),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(definition.icon, size: 16, color: AppTheme.textSecondary),
-            const SizedBox(width: 6),
+            Icon(definition.icon, size: 16, color: _T.smoke),
+            const SizedBox(width: 8),
             Text(
-              definition.label,
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.textSecondary,
-                fontWeight: FontWeight.w600,
-              ),
+              definition.label.toUpperCase(),
+              style: _eyebrow(_T.ink, 12),
             ),
           ],
         ),
@@ -589,15 +755,14 @@ class _SportGrade extends StatelessWidget {
         // Name the grade for every sport except primary BJJ, where the belt
         // color already reads as the grade.
         if (!(isPrimary && sport == SportId.bjj)) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text(
             isPrimary
-                ? getGradeLabel(sport, gradeId)
-                : '${definition.label}: ${getGradeLabel(sport, gradeId)}',
-            style: AppTheme.bodyMedium.copyWith(
-              color: AppTheme.textSecondary,
-              fontWeight: FontWeight.w600,
-            ),
+                ? getGradeLabel(sport, gradeId).toUpperCase()
+                : '${definition.label}: ${getGradeLabel(sport, gradeId)}'
+                    .toUpperCase(),
+            textAlign: TextAlign.center,
+            style: _eyebrow(_T.smoke, isPrimary ? 12 : 11),
           ),
         ],
       ],
@@ -605,60 +770,81 @@ class _SportGrade extends StatelessWidget {
   }
 }
 
-/// Stat Card — Shows a single statistic
-class _StatCard extends StatelessWidget {
-  final IconData icon;
-  final String value;
-  final String label;
+/// Stats row — presenças (count-up) + tempo de treino, fighter instrument
+/// style: big w900 tabular numerals + micro-caps labels.
+class _StatsRow extends StatelessWidget {
+  final int totalTreinos;
+  final String trainingTime;
 
-  /// When set, the [value] renders as an animated count-up instead of static
-  /// text (used for numeric stats like presencas).
-  final int? countValue;
-
-  const _StatCard({
-    required this.icon,
-    required this.value,
-    required this.label,
-    this.countValue,
-  });
+  const _StatsRow({required this.totalTreinos, required this.trainingTime});
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: AppTheme.surfaceVariant,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, size: 20, color: AppTheme.textSecondary),
-            const SizedBox(height: 8),
-            countValue != null
-                ? AnimatedCountUp(
-                    value: countValue!,
-                    style: AppTheme.headlineMedium.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  )
-                : Text(
-              value,
-              style: AppTheme.headlineMedium.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+    return _WhiteCard(
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              children: [
+                AnimatedCountUp(
+                  value: totalTreinos,
+                  style: const TextStyle(
+                    color: _T.ink,
+                    fontSize: 30,
+                    height: 1.0,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.5,
+                    fontFeatures: _T.tab,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text('PRESENCAS', style: _eyebrow(_T.smoke, 10)),
+              ],
             ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: AppTheme.labelSmall.copyWith(
-                color: AppTheme.textSecondary,
-              ),
+          ),
+          Container(width: 1, height: 40, color: _T.hair),
+          Expanded(
+            child: Column(
+              children: [
+                Text(
+                  trainingTime,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: _T.ink,
+                    fontSize: 30,
+                    height: 1.0,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.5,
+                    fontFeatures: _T.tab,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text('DE TREINO', style: _eyebrow(_T.smoke, 10)),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// White card base — fighter surface: white, radius 16, decided hairline.
+class _WhiteCard extends StatelessWidget {
+  const _WhiteCard({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _T.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _T.hair),
+      ),
+      child: child,
     );
   }
 }
@@ -677,16 +863,18 @@ class _QuickActions extends StatelessWidget {
         Expanded(
           child: _QuickActionChip(
             icon: LucideIcons.history,
-            label: 'Linha do tempo',
+            label: 'LINHA DO TEMPO',
             onTap: onTimeline,
+            filled: false,
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: _QuickActionChip(
             icon: LucideIcons.pencil,
-            label: 'Editar perfil',
+            label: 'EDITAR PERFIL',
             onTap: onEdit,
+            filled: true,
           ),
         ),
       ],
@@ -698,33 +886,40 @@ class _QuickActionChip extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final bool filled;
 
   const _QuickActionChip({
     required this.icon,
     required this.label,
     required this.onTap,
+    required this.filled,
   });
 
   @override
   Widget build(BuildContext context) {
+    final fg = filled ? Colors.white : _T.ink;
     return Pressable(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        height: 48,
         decoration: BoxDecoration(
-          color: AppTheme.surfaceVariant,
-          borderRadius: BorderRadius.circular(8),
+          color: filled ? _T.ink : _T.card,
+          borderRadius: BorderRadius.circular(12),
+          border: filled ? null : Border.all(color: _T.hair),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 16, color: AppTheme.textSecondary),
+            Icon(icon, size: 16, color: fg),
             const SizedBox(width: 8),
             Flexible(
               child: Text(
                 label,
-                style: AppTheme.labelMedium.copyWith(
-                  color: AppTheme.textSecondary,
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -762,13 +957,14 @@ class _DataTile extends StatelessWidget {
           children: [
             // Leading icon
             Container(
-              width: 36,
-              height: 36,
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(8),
+                color: _T.bone,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _T.hair),
               ),
-              child: Icon(icon, size: 18, color: AppTheme.textSecondary),
+              child: Icon(icon, size: 18, color: _T.ink),
             ),
             const SizedBox(width: 12),
             // Title + subtitle
@@ -778,17 +974,19 @@ class _DataTile extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: AppTheme.bodyMedium.copyWith(
-                      fontWeight: FontWeight.w500,
+                    style: const TextStyle(
+                      color: _T.ink,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 3),
                   Text(
                     subtitle,
-                    style: AppTheme.labelSmall.copyWith(
-                      color: isSubtitleEmpty
-                          ? AppTheme.textDisabled
-                          : AppTheme.textSecondary,
+                    style: TextStyle(
+                      color: isSubtitleEmpty ? _T.ash : _T.smoke,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -798,10 +996,10 @@ class _DataTile extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             // Trailing chevron
-            Icon(
+            const Icon(
               LucideIcons.chevronRight,
-              size: 16,
-              color: AppTheme.textSecondary,
+              size: 18,
+              color: _T.ash,
             ),
           ],
         ),
@@ -824,40 +1022,26 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          title,
-          style: AppTheme.labelSmall.copyWith(
-            color: AppTheme.textSecondary,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.5,
-          ),
-        ),
+        Container(width: 14, height: 2, color: _T.blood),
+        const SizedBox(width: 8),
+        Expanded(child: Text(title, style: _eyebrow(_T.ink, 13))),
         if (onEdit != null)
-          GestureDetector(
+          Pressable(
             onTap: onEdit,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(12),
+                color: _T.card,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: _T.hair),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    LucideIcons.pencil,
-                    size: 12,
-                    color: AppTheme.textSecondary,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Editar',
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
+                  const Icon(LucideIcons.pencil, size: 12, color: _T.ink),
+                  const SizedBox(width: 5),
+                  Text('EDITAR', style: _eyebrow(_T.ink, 10)),
                 ],
               ),
             ),
@@ -879,15 +1063,16 @@ class _InfoCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
+        color: _T.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _T.hair),
       ),
       child: Column(
         children: [
           for (int i = 0; i < filteredChildren.length; i++) ...[
             filteredChildren[i],
-            if (i < filteredChildren.length - 1) const Divider(height: 1),
+            if (i < filteredChildren.length - 1)
+              Divider(height: 1, thickness: 1, color: _T.hair),
           ],
         ],
       ),
@@ -911,19 +1096,20 @@ class _InfoRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 100,
+            width: 96,
             child: Text(
-              label,
-              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+              label.toUpperCase(),
+              style: _eyebrow(_T.smoke, 11),
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
               value,
-              style: AppTheme.bodyMedium.copyWith(
-                color: valueColor ?? AppTheme.textPrimary,
-                fontWeight: FontWeight.w500,
+              style: TextStyle(
+                color: valueColor ?? _T.ink,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
@@ -943,25 +1129,26 @@ class _PrivacyToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
+        color: _T.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _T.hair),
       ),
       child: Row(
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(8),
+              color: _T.bone,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _T.hair),
             ),
             child: Icon(
               value ? LucideIcons.eye : LucideIcons.eyeOff,
               size: 18,
-              color: AppTheme.textSecondary,
+              color: _T.ink,
             ),
           ),
           const SizedBox(width: 12),
@@ -969,16 +1156,21 @@ class _PrivacyToggle extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                const Text(
                   'Perfil publico',
-                  style: AppTheme.bodyMedium.copyWith(
-                    fontWeight: FontWeight.w500,
+                  style: TextStyle(
+                    color: _T.ink,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                Text(
+                const SizedBox(height: 2),
+                const Text(
                   'Outros alunos podem ver seu perfil',
-                  style: AppTheme.labelSmall.copyWith(
-                    color: AppTheme.textSecondary,
+                  style: TextStyle(
+                    color: _T.smoke,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
@@ -987,7 +1179,8 @@ class _PrivacyToggle extends StatelessWidget {
           Switch.adaptive(
             value: value,
             onChanged: onChanged,
-            activeColor: AppTheme.primary,
+            activeThumbColor: _T.blood,
+            activeTrackColor: _T.blood.withValues(alpha: 0.4),
           ),
         ],
       ),
@@ -1728,12 +1921,12 @@ class _AcademiesSection extends ConsumerWidget {
                   ? () => context.push('/portal/academias')
                   : null,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Container(
               decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.divider),
+                color: _T.card,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _T.hair),
               ),
               child: Column(
                 children: [
@@ -1748,23 +1941,25 @@ class _AcademiesSection extends ConsumerWidget {
                                 .selectAcademy(academies[i].id)
                           : null,
                     ),
-                    if (i < academies.length - 1) const Divider(height: 1),
+                    if (i < academies.length - 1)
+                      Divider(height: 1, thickness: 1, color: _T.hair),
                   ],
                 ],
               ),
             ),
             if (hasMultiple) ...[
               const SizedBox(height: 12),
-              GestureDetector(
+              Pressable(
                 onTap: () => context.push('/portal/academias'),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
-                    vertical: 8,
+                    vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(8),
+                    color: _T.card,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _T.hair),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1772,20 +1967,15 @@ class _AcademiesSection extends ConsumerWidget {
                       const Icon(
                         LucideIcons.settings,
                         size: 14,
-                        color: AppTheme.textSecondary,
+                        color: _T.ink,
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        'Gerenciar academias',
-                        style: AppTheme.labelMedium.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
+                      Text('GERENCIAR ACADEMIAS', style: _eyebrow(_T.ink, 11)),
                       const SizedBox(width: 4),
                       const Icon(
                         LucideIcons.chevronRight,
                         size: 14,
-                        color: AppTheme.textSecondary,
+                        color: _T.ash,
                       ),
                     ],
                   ),
@@ -1796,7 +1986,7 @@ class _AcademiesSection extends ConsumerWidget {
         );
       },
       loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+      error: (_, _) => const SizedBox.shrink(),
     );
   }
 }
@@ -1828,8 +2018,8 @@ class _AcademyTile extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: academy.logoUrl == null ? AppTheme.primary : null,
-                borderRadius: BorderRadius.circular(8),
+                color: academy.logoUrl == null ? _T.ink : null,
+                borderRadius: BorderRadius.circular(10),
               ),
               clipBehavior: Clip.antiAlias,
               child: academy.logoUrl != null
@@ -1853,10 +2043,11 @@ class _AcademyTile extends StatelessWidget {
                       Flexible(
                         child: Text(
                           academy.name,
-                          style: AppTheme.bodyMedium.copyWith(
-                            fontWeight: isSelected
-                                ? FontWeight.w600
-                                : FontWeight.w500,
+                          style: TextStyle(
+                            color: _T.ink,
+                            fontSize: 14.5,
+                            fontWeight:
+                                isSelected ? FontWeight.w800 : FontWeight.w700,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1869,14 +2060,15 @@ class _AcademyTile extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: AppTheme.primary,
+                            color: _T.ink,
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: const Text(
-                            'Principal',
+                            'PRINCIPAL',
                             style: TextStyle(
                               fontSize: 9,
-                              fontWeight: FontWeight.w600,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.6,
                               color: Colors.white,
                             ),
                           ),
@@ -1884,11 +2076,13 @@ class _AcademyTile extends StatelessWidget {
                       ],
                     ],
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 3),
                   Text(
                     academy.role.label,
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.textSecondary,
+                    style: const TextStyle(
+                      color: _T.smoke,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
@@ -1897,22 +2091,23 @@ class _AcademyTile extends StatelessWidget {
             // Selected indicator
             if (isSelected)
               Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: AppTheme.success.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
+                width: 22,
+                height: 22,
+                decoration: const BoxDecoration(
+                  color: _T.ink,
+                  shape: BoxShape.circle,
                 ),
                 child: const Icon(
                   LucideIcons.check,
-                  size: 14,
-                  color: AppTheme.success,
+                  size: 13,
+                  color: Colors.white,
                 ),
               )
             else if (onTap != null)
               const Icon(
                 LucideIcons.chevronRight,
-                size: 16,
-                color: AppTheme.textSecondary,
+                size: 18,
+                color: _T.ash,
               ),
           ],
         ),
@@ -1925,15 +2120,15 @@ class _AcademyTile extends StatelessWidget {
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: AppTheme.primary,
-        borderRadius: BorderRadius.circular(8),
+        color: _T.ink,
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Center(
         child: Text(
           academy.name.isNotEmpty ? academy.name[0].toUpperCase() : 'A',
           style: const TextStyle(
             fontSize: 18,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w900,
             color: Colors.white,
           ),
         ),
@@ -1949,20 +2144,13 @@ class _AccountSection extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'CONTA',
-          style: AppTheme.labelSmall.copyWith(
-            color: AppTheme.textSecondary,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.5,
-          ),
-        ),
-        const SizedBox(height: 8),
+        _SectionHeader(title: 'CONTA'),
+        const SizedBox(height: 10),
         Container(
           decoration: BoxDecoration(
-            color: AppTheme.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.divider),
+            color: _T.card,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _T.hair),
           ),
           child: Column(
             children: [
@@ -1972,7 +2160,7 @@ class _AccountSection extends ConsumerWidget {
                 title: 'Trocar senha',
                 onTap: () => _showChangePasswordDialog(context, ref),
               ),
-              const Divider(height: 1),
+              Divider(height: 1, thickness: 1, color: _T.hair),
               // Redeem instructor code (for users invited as instructor in
               // another academy — they enter the 8-char code here)
               _AccountTile(
@@ -1980,20 +2168,27 @@ class _AccountSection extends ConsumerWidget {
                 title: 'Resgatar código de equipe',
                 onTap: () => context.push('/codigo-equipe'),
               ),
-              const Divider(height: 1),
+              Divider(height: 1, thickness: 1, color: _T.hair),
               // Legal links
               _AccountTile(
                 icon: LucideIcons.fileText,
                 title: 'Termos de Uso',
                 onTap: () => _openUrl(AppConstants.termsOfServiceUrl),
               ),
-              const Divider(height: 1),
+              Divider(height: 1, thickness: 1, color: _T.hair),
               _AccountTile(
                 icon: LucideIcons.shield,
                 title: 'Politica de Privacidade',
                 onTap: () => _openUrl(AppConstants.privacyPolicyUrl),
               ),
-              const Divider(height: 1),
+              Divider(height: 1, thickness: 1, color: _T.hair),
+              // Logout — sair da conta (acima do excluir conta)
+              _AccountTile(
+                icon: LucideIcons.logOut,
+                title: 'Sair',
+                onTap: () => ref.read(authServiceProvider).signOut(),
+              ),
+              Divider(height: 1, thickness: 1, color: _T.hair),
               // Delete account
               _AccountTile(
                 icon: LucideIcons.trash2,
@@ -2247,29 +2442,33 @@ class _AccountTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isDestructive ? AppTheme.error : AppTheme.textPrimary;
+    final color = isDestructive ? _T.blood : _T.ink;
 
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: color),
+            Icon(icon, size: 19, color: color),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 title,
-                style: AppTheme.bodyMedium.copyWith(color: color),
+                style: TextStyle(
+                  color: color,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
             Icon(
               LucideIcons.chevronRight,
-              size: 16,
+              size: 18,
               color: isDestructive
-                  ? AppTheme.error.withValues(alpha: 0.5)
-                  : AppTheme.textSecondary,
+                  ? _T.blood.withValues(alpha: 0.5)
+                  : _T.ash,
             ),
           ],
         ),

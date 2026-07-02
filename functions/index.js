@@ -1820,3 +1820,19 @@ exports.trialExpiryReminder = onSchedule(
 // ./access_control/README.md para apontar cada catraca à URL da função.
 // ============================================================
 exports.ingestAccessEvent = require('./access_control/ingest').ingestAccessEvent;
+
+// ============================================================
+// F2c — TETO das auto-graduações (selfGraduations). Defesa em profundidade:
+// onWrite que replica a ordenação das escadas de graus (espelho de
+// lib/core/sports.dart) e DELETA qualquer auto-graduação acima do grau
+// VERIFICADO em students/{sid}.sportData. ADITIVO: não toca beltProgressions
+// nem nenhum fluxo existente. Ver ./self_graduation_guard.js.
+// ============================================================
+exports.enforceSelfGraduationCeiling =
+  require('./self_graduation_guard').enforceSelfGraduationCeiling;
+
+// ============================================================
+// Contador de likes do feed — denormaliza feedPosts.likeCount (O(0) no read,
+// sem .count() aggregation por post). Ver ./feed_like_counter.js.
+// ============================================================
+exports.onFeedLikeWrite = require('./feed_like_counter').onFeedLikeWrite;

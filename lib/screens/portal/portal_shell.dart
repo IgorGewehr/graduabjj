@@ -30,71 +30,53 @@ class _PortalShellState extends ConsumerState<PortalShell> {
   // Base bottom-nav items shared by every portal role. The 4th slot below
   // adapts (Chamada for monitors, Horários for students). The last slot is
   // the categorized "Menu" sheet.
-  static const _NavItem _homeNavItem = _NavItem(
-    label: 'Inicio',
-    icon: LucideIcons.layoutDashboard,
+  // B2C fighter-first: [ Lutador | Cena | Treinei | Academia | Perfil ].
+  // Lutador = identidade portátil (global); Cena = social/descoberta (global);
+  // Treinei = a ação central (Diário/check-in); Academia = o ÚNICO contexto de
+  // academia (switcher + telas contextuais); Perfil = conta.
+  static const _NavItem _lutadorNavItem = _NavItem(
+    label: 'Lutador',
+    icon: LucideIcons.shield,
     path: '/portal',
   );
-  static const _NavItem _scheduleNavItem = _NavItem(
-    label: 'Horarios',
-    icon: LucideIcons.calendar,
-    path: '/portal/horarios',
-  );
-  static const _NavItem _presencasNavItem = _NavItem(
-    label: 'Presencas',
-    icon: LucideIcons.clipboardCheck,
-    path: '/portal/presencas',
-  );
-  static const _NavItem _chamadaNavItem = _NavItem(
-    label: 'Chamada',
-    icon: LucideIcons.clipboardCheck,
-    path: '/portal/chamada',
-  );
-  static const _NavItem _alunosNavItem = _NavItem(
-    label: 'Alunos',
+  static const _NavItem _cenaNavItem = _NavItem(
+    label: 'Galera',
     icon: LucideIcons.users,
-    path: '/portal/alunos',
+    path: '/portal/cena',
+  );
+  static const _NavItem _treineiNavItem = _NavItem(
+    label: 'Treinei',
+    icon: LucideIcons.flame,
+    path: '/portal/diario',
+  );
+  static const _NavItem _academiaNavItem = _NavItem(
+    label: 'Academia',
+    icon: LucideIcons.building2,
+    path: '/portal/academia',
   );
   static const _NavItem _profileNavItem = _NavItem(
     label: 'Perfil',
     icon: LucideIcons.user,
     path: '/portal/perfil',
   );
-  static const _NavItem _menuNavItem = _NavItem(
-    label: 'Menu',
-    icon: LucideIcons.layoutGrid,
-    path: '', // Special case for bottom sheet
-  );
 
-  /// Builds the bottom nav for the current role. Monitors (or users with
-  /// attendance:take) get Chamada and Alunos as primary entries; students get
-  /// Horários in that slot.
+  /// Bottom nav fighter-first (igual para todo papel do portal). Monitores
+  /// acessam chamada/alunos pela aba Academia (cockpit) — follow-up.
   List<_NavItem> _bottomNavItemsFor({
     required bool isMonitor,
     required bool hasAttendancePerm,
   }) {
-    if (isMonitor || hasAttendancePerm) {
-      return const [
-        _homeNavItem,
-        _chamadaNavItem,
-        _alunosNavItem,
-        _profileNavItem,
-        _menuNavItem,
-      ];
-    }
     return const [
-      _homeNavItem,
-      _scheduleNavItem,
-      _presencasNavItem,
+      _lutadorNavItem,
+      _cenaNavItem,
+      _treineiNavItem,
+      _academiaNavItem,
       _profileNavItem,
-      _menuNavItem,
     ];
   }
 
   int _getSelectedIndex(String location, List<_NavItem> items) {
-    final menuIndex = items.length - 1;
-    // Check bottom nav items (except the Menu slot).
-    for (int i = 0; i < items.length - 1; i++) {
+    for (int i = 0; i < items.length; i++) {
       final path = items[i].path;
       if (path == '/portal') {
         if (location == path) return i;
@@ -102,28 +84,17 @@ class _PortalShellState extends ConsumerState<PortalShell> {
         return i;
       }
     }
-
-    // Any deeper portal route (declared in the catalog) → highlight Menu.
-    for (final entry in kPortalNavCatalog) {
-      if (location == entry.route || location.startsWith('${entry.route}/')) {
-        return menuIndex;
-      }
-    }
-
-    return 0;
+    return 0; // default: Lutador
   }
 
   void _onItemTapped(int index, List<_NavItem> items) {
-    if (index == items.length - 1) {
-      _showMoreMenu();
-    } else {
-      context.go(items[index].path);
-    }
+    context.go(items[index].path);
   }
 
   Widget _buildAppBarTitle(WidgetRef ref) {
-    // Use the AcademySwitcher widget which handles single and multi-academy display
-    return const AcademySwitcher();
+    // Fighter-first: o seletor de academia NÃO vive mais na AppBar global —
+    // ele é exclusivo da aba Academia. Cada tab tem seu próprio header.
+    return const SizedBox.shrink();
   }
 
   /// Entradas visíveis do portal (mesmos feature-flags + gates contextuais do
@@ -291,35 +262,27 @@ class _PortalShellState extends ConsumerState<PortalShell> {
       currentLocation: location,
       exitMessage: 'Pressione voltar novamente para sair',
       child: Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        backgroundColor: AppTheme.surface,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: _buildAppBarTitle(ref),
-        actions: [
-          _NotificationBell(),
-          const SizedBox(width: 8),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(
-            height: 1,
-            color: AppTheme.divider,
-          ),
-        ),
-      ),
+      // Fundo bone (igual ao fighter): a área da ilha mostra esse fundo.
+      backgroundColor: const Color(0xFFF4F3EF),
+      // Sem AppBar global (fighter-first): acabava o "header com espaço em
+      // branco". Mas um SafeArea no topo dá a folga da ilha/status bar a TODAS
+      // as telas (legadas e fighter) — sem isso os headers das telas da
+      // academia colidiam com a Dynamic Island.
         body: Row(
           children: [
             // Desktop (medium+): rail só-ícones à esquerda, do catálogo do portal.
             if (context.isDesktop)
               _PortalRail(entries: navEntries, currentPath: location),
             Expanded(
-              child: Column(
-                children: [
-                  const UpdateBanner(),
-                  Expanded(child: widget.child),
-                ],
+              child: SafeArea(
+                top: true,
+                bottom: false,
+                child: Column(
+                  children: [
+                    const UpdateBanner(),
+                    Expanded(child: widget.child),
+                  ],
+                ),
               ),
             ),
           ],

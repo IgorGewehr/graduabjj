@@ -212,6 +212,26 @@
         { "fieldPath": "sport", "order": "ASCENDING" },
         { "fieldPath": "order", "order": "ASCENDING" }
       ]
+    },
+    {
+      "//": "Social Feed (Fase 1): feed de PARCEIROS — whereIn(authorUid, chunk) + hiddenByAuthor==false orderBy occurredAt desc. Requerido por FeedPostsService.feedForAudience.",
+      "collectionGroup": "feedPosts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "authorUid", "order": "ASCENDING" },
+        { "fieldPath": "hiddenByAuthor", "order": "ASCENDING" },
+        { "fieldPath": "occurredAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Social Feed (Fase 1): feed de ACADEMIA — where(academyId) + hiddenByAuthor==false orderBy occurredAt desc. Requerido por FeedPostsService.feedForAcademy.",
+      "collectionGroup": "feedPosts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "academyId", "order": "ASCENDING" },
+        { "fieldPath": "hiddenByAuthor", "order": "ASCENDING" },
+        { "fieldPath": "occurredAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

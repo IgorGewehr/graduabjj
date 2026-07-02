@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../core/sports.dart';
 import '../models/student.dart';
 import 'firebase_service.dart';
+import 'sport_enrollment.dart';
 
 /// Converte "HH:MM" em minutos do dia. Retorna null em horário malformado
 /// (vazio, "19", "19:00:00" parcial, não-numérico) — um doc de schedule sujo
@@ -374,23 +375,25 @@ class ClassService {
   }
 
   // ============================================
-  // Add Student to Class (membership-only, no sport enrollment side-effects)
+  // Add Student to Class
+  //
+  // Unified with [addStudent]: besides adding the membership it always enrolls
+  // the student in the class's sport (so a sport-X class can't leave the student
+  // without X in `sports`). Returns void to keep the public contract.
   // ============================================
   Future<void> addStudentToClass(String classId, String studentId) async {
-    await _collections.classDoc(classId).update({
-      'studentIds': FieldValue.arrayUnion([studentId]),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await addStudent(classId, studentId);
   }
 
   // ============================================
-  // Remove Student from Class (membership-only)
+  // Remove Student from Class
+  //
+  // Unified with [removeStudent] (membership-only; the sport is never stripped
+  // from the student, mirroring [removeStudent]). Returns void to keep the
+  // public contract.
   // ============================================
   Future<void> removeStudentFromClass(String classId, String studentId) async {
-    await _collections.classDoc(classId).update({
-      'studentIds': FieldValue.arrayRemove([studentId]),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await removeStudent(classId, studentId);
   }
 
   // ============================================
@@ -427,50 +430,26 @@ class ClassService {
     if (!snap.exists) return;
 
     final data = snap.data() as Map<String, dynamic>;
-    final sportValue = sport.value;
 
-    final existingSports = (data['sports'] as List?)?.cast<String>() ?? const [];
+    // Muay Thai's starting grade depends on the academy's chosen ladder — fetch
+    // the academy settings only when they can actually affect the seed (Muay
+    // Thai and the sport not yet seeded), preserving the original read pattern.
     final existingSportData =
         (data['sportData'] as Map?)?.cast<String, dynamic>() ?? const {};
-    final existingPrimary = data['primarySport'] as String?;
-
-    final updates = <String, dynamic>{};
-
-    if (!existingSports.contains(sportValue)) {
-      updates['sports'] = FieldValue.arrayUnion([sportValue]);
+    Map<String, dynamic> academySettings = const {};
+    if (sport == SportId.muaythai &&
+        !existingSportData.containsKey(sport.value)) {
+      final academyDoc = await _collections.academy.get();
+      academySettings =
+          (academyDoc.data() as Map<String, dynamic>?) ?? const {};
     }
 
-    if (!existingSportData.containsKey(sportValue)) {
-      final category = classCategory?.value ??
-          (data['category'] as String?) ??
-          'adult';
-      // Muay Thai's starting grade depends on the academy's chosen ladder.
-      String? muaythaiVariant;
-      if (sport == SportId.muaythai) {
-        final academyDoc = await _collections.academy.get();
-        muaythaiVariant = (academyDoc.data()
-                as Map<String, dynamic>?)?['muaythaiGradeSystem'] as String?;
-      }
-      final grades = getGradesForSport(
-        sport,
-        category: category,
-        muaythaiVariant: muaythaiVariant,
-      );
-      final defaultGrade = grades.isNotEmpty ? grades.first.id : 'white';
-
-      // For BJJ the legacy `currentBelt`/`currentStripes` fields already hold
-      // the grade — preserve them so we don't downgrade existing students.
-      final isLegacyBjj = sport == SportId.bjj && data['currentBelt'] != null;
-      updates['sportData.$sportValue'] = {
-        'currentGrade': isLegacyBjj ? data['currentBelt'] : defaultGrade,
-        'currentStripes':
-            isLegacyBjj ? (data['currentStripes'] ?? 0) : 0,
-      };
-    }
-
-    if (existingPrimary == null || existingPrimary.isEmpty) {
-      updates['primarySport'] = sportValue;
-    }
+    final updates = SportEnrollment.seedSportData(
+      sport,
+      academySettings: academySettings,
+      studentData: data,
+      classCategory: classCategory,
+    );
 
     if (updates.isEmpty) return;
     updates['updatedAt'] = FieldValue.serverTimestamp();
