@@ -159,10 +159,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     const DashboardHojeCard().entrance(index: 1),
                     const SizedBox(height: 16),
                     // 2. RADAR: quem está esfriando + taxa de recuperação.
+                    // (ENGAJAMENTO saiu por decisão do dono: não é métrica
+                    // importante no dia a dia do professor.)
                     const DashboardRadarCard().entrance(index: 2),
-                    const SizedBox(height: 16),
-                    // 3. ENGAJAMENTO: streaks, feed e marcos p/ reconhecer.
-                    const DashboardEngajamentoCard().entrance(index: 3),
 
                     const SizedBox(height: 24),
 

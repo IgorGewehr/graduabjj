@@ -42,6 +42,39 @@ final retentionStudentsProvider = FutureProvider<List<Student>>((ref) async {
   return students;
 });
 
+/// REGRA DO RADAR (feedback do dono, jul/2026): a atenção do professor é para
+/// quem TAVA TREINANDO e está esfriando — NÃO para quem nunca engatou (nunca
+/// treinou, ou meia dúzia de aulas na vida). Nunca-engatou é problema de
+/// ATIVAÇÃO, não de churn — e poluía o radar inteiro (academia com alunos
+/// legados sem presença nascia "100% crítica").
+///
+/// Elegível ao radar de esfriamento:
+/// 1. Já treinou de verdade: presença conhecida E >=8 presenças na vida.
+/// 2. Tinha hábito recente (>=3 semanas treinadas nas últimas 8 OU >=4
+///    presenças nos últimos 30d) e está esfriando (4 semanas recentes < 4
+///    anteriores, OU >=7 dias parado); OU
+/// 3. É fiel de longa data (>=20 presenças) que parou de vez há 14–90 dias
+///    (>90 dias não é "esfriando", é ex-aluno — outro funil).
+bool isCoolingAthlete(Student s) {
+  final r = s.retention;
+  if (r == null) return false;
+  final days = s.daysSinceLastAttendance;
+  if (days == null) return false; // nunca treinou (in-app) → ativação
+  if (s.totalAttendanceCount < 8) return false; // nunca engatou
+
+  final weeks = s.last8WeeksBuckets(DateTime.now());
+  final trainedWeeks = weeks.where((w) => w > 0).length;
+  final hadRecentHabit = trainedWeeks >= 3 || r.attendanceLast30d >= 4;
+
+  if (hadRecentHabit) {
+    final older = weeks.sublist(0, 4).fold<int>(0, (a, b) => a + b);
+    final recent = weeks.sublist(4).fold<int>(0, (a, b) => a + b);
+    return recent < older || days >= 7;
+  }
+  // Sem hábito nas últimas 8 semanas: só o fiel que sumiu recentemente.
+  return s.totalAttendanceCount >= 20 && days >= 14 && days <= 90;
+}
+
 /// Métrica de recuperação do mês corrente para o header
 /// "De N contatados este mês, M voltaram".
 class RetentionMonthStats {

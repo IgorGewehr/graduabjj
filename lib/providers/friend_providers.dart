@@ -139,6 +139,11 @@ final myShowcaseProvider = FutureProvider<FighterProfile?>((ref) async {
     startDate: student.startDate,
     totalTrainings: student.totalAttendanceCount,
     useWeights: useWeights,
+    // Baseline sem-data do mestre: treinos anteriores ao app. Entra no
+    // cumulativo absoluto dos marcos (competições/self-grads) quando o marco
+    // é posterior ao histórico in-app; marcos retroativos ficam sem contagem.
+    initialCount: student.initialAttendanceCount ?? 0,
+    baselineSport: sport.value,
   );
 
   // Materializa (write condicional por hash) e propaga o photoUrl/código.
@@ -231,7 +236,7 @@ Future<void> _emitFeedPosts({
         belt: g.belt,
         stripes: g.stripes,
         isBeltChange: g.isBeltChange,
-        trainingsToReach: g.trainingsToReach,
+        trainingsToReach: g.trainingsToReach ?? 0,
         monthsToReach: g.monthsToReach,
       ),
       occurredAt: g.date,

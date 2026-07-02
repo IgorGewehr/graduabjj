@@ -81,6 +81,14 @@ class ShowcaseBuilder {
     List<SelfGraduation> selfGraduations = const [],
     List<SelfCompetition> selfCompetitions = const [],
     bool useWeights = false,
+    // Baseline SEM DATA informado pelo mestre (student.initialAttendanceCount):
+    // treinos anteriores ao app. Pertence ao esporte principal/legado
+    // [baselineSport]. Usado para o cumulativo ABSOLUTO de competições e
+    // graduações auto-declaradas — quando o marco é ANTERIOR ao histórico
+    // in-app, a contagem é INDETERMINÁVEL e fica null (a UI omite; regra do
+    // produto: nunca mostrar um número que pode estar errado).
+    int initialCount = 0,
+    String baselineSport = 'bjj',
   }) {
     // Dias de presença POR ESPORTE (legado sem sport = 'bjj'), asc, p/ countAt.
     // Base única para o cumulativo/esforço por-esporte de graduações e
@@ -111,6 +119,8 @@ class ShowcaseBuilder {
       attBySport: attBySport,
       startDate: startDate,
       useWeights: useWeights,
+      initialCount: initialCount,
+      baselineSport: baselineSport,
     );
     final comps = _buildCompetitions(
       competitions: competitions,
@@ -118,6 +128,8 @@ class ShowcaseBuilder {
       attBySport: attBySport,
       progressions: progressions,
       startDate: startDate,
+      initialCount: initialCount,
+      baselineSport: baselineSport,
     );
     final medals = _buildMedals(competitions);
 
@@ -145,6 +157,8 @@ class ShowcaseBuilder {
     required Map<String, List<DateTime>> attBySport,
     required DateTime startDate,
     required bool useWeights,
+    int initialCount = 0,
+    String baselineSport = 'bjj',
   }) {
     final out = <FighterGraduation>[];
 
@@ -191,11 +205,13 @@ class ShowcaseBuilder {
     }
     for (final entry in selfBySport.entries) {
       final attDays = attBySport[entry.key] ?? const <DateTime>[];
+      // Baseline do mestre só se aplica ao esporte principal/legado.
+      final effInitial = entry.key == baselineSport ? initialCount : 0;
       final asc = [...entry.value]..sort((a, b) => a.date.compareTo(b.date));
-      var prevCount = 0;
+      int? prevCount = 0; // no startDate o aluno tinha 0 treinos, por definição
       var prevDate = startDate;
       for (final g in asc) {
-        final cum = _upperBound(attDays, g.date);
+        final cum = _cumAt(attDays, g.date, effInitial);
         // Verified vence: se já existe o MESMO grau verificado, pula o auto
         // duplicado (mas mantém o encadeamento de esforço/datas intacto).
         if (!verifiedKeys.contains('${entry.key}|${g.grade}|${g.stripes}')) {
@@ -207,7 +223,10 @@ class ShowcaseBuilder {
             // nova (0 graus) como troca de faixa para destaque na timeline.
             isBeltChange: g.stripes == 0,
             date: g.date,
-            trainingsToReach: (cum - prevCount).clamp(0, 1 << 31).toInt(),
+            // null quando qualquer ponta do intervalo é indeterminável.
+            trainingsToReach: (cum != null && prevCount != null)
+                ? (cum - prevCount).clamp(0, 1 << 31).toInt()
+                : null,
             monthsToReach: monthsBetween(prevDate, g.date),
             cumulativeTrainings: cum,
             weighted: false,
@@ -235,6 +254,8 @@ class ShowcaseBuilder {
     required Map<String, List<DateTime>> attBySport,
     required List<BeltProgression> progressions,
     required DateTime startDate,
+    int initialCount = 0,
+    String baselineSport = 'bjj',
   }) {
     if (competitions.isEmpty && selfCompetitions.isEmpty) return const [];
 
@@ -275,12 +296,14 @@ class ShowcaseBuilder {
     final out = <FighterCompetitionMark>[];
     for (final entry in bySport.entries) {
       final attDays = attBySport[entry.key] ?? const <DateTime>[];
+      // Baseline do mestre só se aplica ao esporte principal/legado.
+      final effInitial = entry.key == baselineSport ? initialCount : 0;
       final compsAsc = [...entry.value]
         ..sort((a, b) => a.date.compareTo(b.date));
       var prevDate = startDate;
-      var prevCount = 0;
+      int? prevCount = 0; // no startDate o aluno tinha 0 treinos, por definição
       for (final c in compsAsc) {
-        final cum = _upperBound(attDays, c.date);
+        final cum = _cumAt(attDays, c.date, effInitial);
         final grades = progressions
             .where((p) =>
                 (p.sport ?? 'bjj') == entry.key &&
@@ -292,7 +315,12 @@ class ShowcaseBuilder {
           date: c.date,
           position: c.position,
           sport: c.sport,
-          trainingsSincePrev: (cum - prevCount).clamp(0, 1 << 31).toInt(),
+          // null quando qualquer ponta do intervalo é indeterminável — a UI
+          // omite a contagem em vez de subestimar (ex.: "15 treinos" num aluno
+          // com 100+ informados pelo mestre antes do app).
+          trainingsSincePrev: (cum != null && prevCount != null)
+              ? (cum - prevCount).clamp(0, 1 << 31).toInt()
+              : null,
           monthsSincePrev: monthsBetween(prevDate, c.date),
           gradesSincePrev: grades,
           cumulativeTrainings: cum,
@@ -305,6 +333,23 @@ class ShowcaseBuilder {
 
     out.sort((a, b) => b.date.compareTo(a.date)); // desc p/ exibição
     return out;
+  }
+
+  /// Treinos ABSOLUTOS até [date] no bucket do esporte, considerando o
+  /// baseline sem-data do mestre ([initialCount]).
+  ///
+  /// Regra da CERTEZA (pedido do produto): o baseline representa treinos
+  /// ANTERIORES a todo o histórico in-app, mas sem datas — então:
+  /// - sem baseline → contagem in-app é exata;
+  /// - com baseline E [date] >= 1ª presença in-app → baseline + in-app(<=date)
+  ///   (todo o baseline já tinha acontecido);
+  /// - com baseline E [date] ANTERIOR ao histórico in-app (marco retroativo)
+  ///   → IMPOSSÍVEL saber quantos treinos o aluno tinha → null (UI omite).
+  static int? _cumAt(List<DateTime> attDays, DateTime date, int initialCount) {
+    final inApp = _upperBound(attDays, date);
+    if (initialCount <= 0) return inApp;
+    if (attDays.isEmpty || date.isBefore(attDays.first)) return null;
+    return initialCount + inApp;
   }
 
   static MedalCount _buildMedals(List<Achievement> competitions) {

@@ -7,9 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/brand_tokens.dart';
 import '../../../core/theme.dart';
-import '../../../models/feed_post.dart';
 import '../../../models/student.dart';
-import '../../../providers/friend_providers.dart';
 import '../../../providers/portal_providers.dart';
 import '../../../providers/retention_providers.dart';
 import '../../../services/class_service.dart';
@@ -229,14 +227,10 @@ class DashboardRadarCard extends ConsumerWidget {
         loading: () => _emptyLine('Escaneando...'),
         error: (_, _) => _emptyLine('Radar indisponível.'),
         data: (students) {
-          // Esfriando = risco high/critical (job diário) OU, antes do score
-          // existir, fallback: ativo há 14+ dias sem treinar.
-          final risky = students.where((s) {
-            final level = s.retention?.riskLevel;
-            if (level == 'high' || level == 'critical') return true;
-            if (level == null) return (s.daysSinceLastAttendance ?? 0) >= 14;
-            return false;
-          }).toList();
+          // REGRA DO RADAR: só quem TAVA treinando e está esfriando —
+          // mesma régua da tela de Retenção (isCoolingAthlete). Nunca-treinou
+          // é problema de ativação e não entra aqui.
+          final risky = students.where(isCoolingAthlete).toList();
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -349,177 +343,6 @@ class _RiskRow extends StatelessWidget {
           ],
         ],
       ),
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// 3. ENGAJAMENTO — o termômetro B2C que não existia
-// ════════════════════════════════════════════════════════════════════════════
-
-class DashboardEngajamentoCard extends ConsumerWidget {
-  const DashboardEngajamentoCard({super.key});
-
-  /// Streak semanal a partir dos buckets persistidos: semanas consecutivas com
-  /// treino terminando na semana corrente (com grace: semana corrente vazia
-  /// não quebra — mesmo contrato do streak do aluno).
-  static int _streakFromBuckets(List<int> buckets) {
-    if (buckets.isEmpty) return 0;
-    var i = buckets.length - 1;
-    if (buckets[i] == 0) i--; // grace da semana corrente
-    var streak = 0;
-    while (i >= 0 && buckets[i] > 0) {
-      streak++;
-      i--;
-    }
-    return streak;
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final studentsAsync = ref.watch(retentionStudentsProvider);
-    final feedAsync = ref.watch(staffAcademyFeedProvider);
-
-    return _Section(
-      title: 'Engajamento',
-      icon: LucideIcons.flame,
-      onSeeAll: () => context.go('/admin/social'),
-      seeAllLabel: 'Social',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          studentsAsync.when(
-            loading: () => _emptyLine('...'),
-            error: (_, _) => const SizedBox.shrink(),
-            data: (students) {
-              final now = DateTime.now();
-              var onStreak = 0;
-              var trainedThisWeek = 0;
-              for (final s in students) {
-                final buckets = s.last8WeeksBuckets(now);
-                if (_streakFromBuckets(buckets) >= 4) onStreak++;
-                if (buckets.isNotEmpty && buckets.last > 0) trainedThisWeek++;
-              }
-              return Row(
-                children: [
-                  _Stat(value: '$onStreak', label: 'STREAKS 4+ SEM'),
-                  const SizedBox(width: 20),
-                  _Stat(value: '$trainedThisWeek', label: 'TREINARAM NA SEMANA'),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          feedAsync.when(
-            loading: () => const SizedBox.shrink(),
-            error: (_, _) => const SizedBox.shrink(),
-            data: (posts) {
-              final cutoff = DateTime.now().subtract(const Duration(days: 7));
-              final week = posts
-                  .where((p) =>
-                      !p.hiddenByStaff && p.occurredAt.isAfter(cutoff))
-                  .toList();
-              // Marcos que valem reconhecer NA AULA — ponte app → tatame
-              // (custo zero, muito BJJ): graduação, streak e marco de tatame.
-              final marcos = week
-                  .where((p) =>
-                      p.type == FeedPostType.graduacao ||
-                      p.type == FeedPostType.streakMilestone ||
-                      p.type == FeedPostType.matMilestone)
-                  .take(3)
-                  .toList();
-              final likes =
-                  week.fold<int>(0, (sum, p) => sum + p.likeCount);
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${week.length} marco${week.length == 1 ? '' : 's'} no feed '
-                    'essa semana · $likes salve${likes == 1 ? '' : 's'}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                  if (marcos.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    const Text(
-                      'PARA RECONHECER NA AULA',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.6,
-                        color: Brand.ash,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    for (final p in marcos)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Row(
-                          children: [
-                            const Icon(LucideIcons.award,
-                                size: 13, color: Brand.blood),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                '${p.authorName} — ${p.displayHeadline}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.textPrimary,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Stat extends StatelessWidget {
-  const _Stat({required this.value, required this.label});
-  final String value;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w900,
-            fontFeatures: Brand.tabular,
-            color: Brand.ink,
-            height: 1.0,
-          ),
-        ),
-        const SizedBox(height: 2),
-        const SizedBox(height: 0),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 9,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.5,
-            color: Brand.ash,
-          ),
-        ),
-      ],
     );
   }
 }

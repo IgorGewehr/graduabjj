@@ -13,6 +13,11 @@ DateTime? _parseDate(dynamic v) {
 
 int _asInt(dynamic v) => (v as num?)?.toInt() ?? 0;
 
+/// Nullable: campos de contagem de treino que podem ser INDETERMINÁVEIS
+/// (baseline sem-data informado pelo mestre cobre o período do marco) — null
+/// = "não sabemos com certeza", e a UI omite o número em vez de mentir.
+int? _asIntN(dynamic v) => (v as num?)?.toInt();
+
 /// Um marco de GRADUAÇÃO materializado (grau OU faixa). Carrega o ESFORÇO já
 /// computado (delta de presenças/meses até este marco) — o visitante lê isto
 /// pronto, sem tocar a attendance privada da academia do dono.
@@ -24,14 +29,16 @@ class FighterGraduation {
   final DateTime date;
 
   /// Presenças acumuladas NESTE BLOCO (delta de baselineCount p/ o marco
-  /// anterior). É "aulas até este grau/faixa".
-  final int trainingsToReach;
+  /// anterior). É "aulas até este grau/faixa". NULL = indeterminável (o
+  /// baseline sem-data do mestre cobre o período) — a UI omite a contagem.
+  final int? trainingsToReach;
 
   /// Meses inteiros entre o marco anterior (ou startDate) e este.
   final int monthsToReach;
 
   /// baselineCount neste ponto (cumulativo-vida) — para contexto/debug.
-  final int cumulativeTrainings;
+  /// NULL = indeterminável (ver [trainingsToReach]).
+  final int? cumulativeTrainings;
 
   /// true quando a unidade de [trainingsToReach] é "pontos" (academia com
   /// class weights), não "aulas".
@@ -74,9 +81,9 @@ class FighterGraduation {
         stripes: _asInt(d['stripes']),
         isBeltChange: d['isBeltChange'] == true,
         date: _parseDate(d['date']) ?? DateTime.now(),
-        trainingsToReach: _asInt(d['trainingsToReach']),
+        trainingsToReach: _asIntN(d['trainingsToReach']),
         monthsToReach: _asInt(d['monthsToReach']),
-        cumulativeTrainings: _asInt(d['cumulativeTrainings']),
+        cumulativeTrainings: _asIntN(d['cumulativeTrainings']),
         weighted: d['weighted'] == true,
         source: (d['source'] ?? 'verified').toString(),
       );
@@ -98,7 +105,8 @@ class FighterCompetitionMark {
   final String? modality;
 
   /// Presenças entre a competição anterior (ou startDate) e esta.
-  final int trainingsSincePrev;
+  /// NULL = indeterminável (baseline sem-data cobre o período) — UI omite.
+  final int? trainingsSincePrev;
 
   /// Meses inteiros desde a competição anterior (ou startDate).
   final int monthsSincePrev;
@@ -106,8 +114,10 @@ class FighterCompetitionMark {
   /// Nº de progressões (graus + faixas) registradas no intervalo.
   final int gradesSincePrev;
 
-  /// Presenças totais acumuladas até a data desta competição.
-  final int cumulativeTrainings;
+  /// Presenças totais acumuladas até a data desta competição (baseline do
+  /// mestre INCLUÍDO quando a competição é posterior ao histórico in-app).
+  /// NULL = indeterminável — UI omite.
+  final int? cumulativeTrainings;
 
   /// Origem do marco: `'verified'` (de `achievements`/competições da academia)
   /// ou `'auto'` (de `selfCompetitions`, externas/auto-declaradas). Default
@@ -154,10 +164,10 @@ class FighterCompetitionMark {
         beltCategory: d['beltCategory'] as String?,
         weightCategory: d['weightCategory'] as String?,
         modality: d['modality'] as String?,
-        trainingsSincePrev: _asInt(d['trainingsSincePrev']),
+        trainingsSincePrev: _asIntN(d['trainingsSincePrev']),
         monthsSincePrev: _asInt(d['monthsSincePrev']),
         gradesSincePrev: _asInt(d['gradesSincePrev']),
-        cumulativeTrainings: _asInt(d['cumulativeTrainings']),
+        cumulativeTrainings: _asIntN(d['cumulativeTrainings']),
         source: (d['source'] ?? 'verified').toString(),
       );
 }

@@ -864,45 +864,59 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
             border: Border.all(color: _hair),
           ),
           child: Row(
+            // start: o rótulo de AULAS VERIFICADAS pode quebrar em 2 linhas —
+            // com start os NÚMEROS ficam alinhados entre as 3 células.
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: _heroStat(p.currentStreak, 'SEMANAS', accent: true),
+                child: _heroStat(
+                  p.currentStreak,
+                  p.currentStreak == 1 ? 'SEMANA' : 'SEMANAS',
+                  accent: true,
+                ),
               ),
               _heroDivider(),
               Expanded(child: _heroStat(p.recordStreak, 'RECORDE')),
               _heroDivider(),
               Expanded(
-                child: _heroStatVerificado(p.totalTrainings, 'AULAS VERIFICADAS'),
+                child: _heroStatVerificado(p.totalTrainings),
               ),
             ],
           ),
         ),
         if (sessoesTatame > 0) ...[
           const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Text(
-                '$sessoesTatame SESSÕES DE TATAME',
-                style: const TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.8,
-                  fontFeatures: _tabular,
-                  color: _smoke,
-                ),
+          // Text.rich único com wrap: em telas estreitas quebra em 2 linhas
+          // alinhadas à direita em vez de estourar o Row.
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: '$sessoesTatame SESSÕES DE TATAME',
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                      fontFeatures: _tabular,
+                      color: _smoke,
+                    ),
+                  ),
+                  TextSpan(
+                    text: '  ·  inclui avulsos · não conta pra faixa',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
+                      color: _smoke.withValues(alpha: 0.65),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 6),
-              Text(
-                '· inclui avulsos · não conta pra faixa',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.2,
-                  color: _smoke.withValues(alpha: 0.65),
-                ),
-              ),
-            ],
+              textAlign: TextAlign.right,
+              maxLines: 2,
+            ),
           ),
         ],
       ],
@@ -934,7 +948,10 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
 
   /// Variante de _heroStat para "AULAS VERIFICADAS" — exibe um ícone de check
   /// discreto ao lado do rótulo para indicar que são presenças da academia.
-  Widget _heroStatVerificado(int value, String label) {
+  /// Text.rich (não Row): a célula é estreita e o rótulo é longo — com
+  /// WidgetSpan o ícone acompanha o texto e a linha quebra graciosa em telas
+  /// estreitas em vez de estourar (RenderFlex overflow de 30px no iPhone).
+  Widget _heroStatVerificado(int value) {
     return Column(
       children: [
         AnimatedCountUp(
@@ -949,18 +966,22 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
           ),
         ),
         const SizedBox(height: 6),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.verified_outlined, size: 10, color: _smoke),
-            const SizedBox(width: 3),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: _eyebrow(_smoke, 9.5),
-            ),
-          ],
+        Text.rich(
+          TextSpan(
+            children: [
+              const WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: Padding(
+                  padding: EdgeInsets.only(right: 3),
+                  child:
+                      Icon(Icons.verified_outlined, size: 10, color: _smoke),
+                ),
+              ),
+              TextSpan(text: 'AULAS VERIFICADAS'),
+            ],
+          ),
+          textAlign: TextAlign.center,
+          style: _eyebrow(_smoke, 9.5),
         ),
       ],
     );
@@ -1165,8 +1186,11 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
     final beltColor = _beltColor(sportId, g.belt);
     final unit = g.weighted ? 'PONTOS' : 'TREINOS';
     final isAuto = g.source == 'auto';
-    final effort = g.trainingsToReach > 0
-        ? '${g.trainingsToReach} $unit · ${_monthsLabel(g.monthsToReach)} ATÉ AQUI'
+    // Contagem null = indeterminável (baseline do mestre sem data) — omite o
+    // número em vez de mentir; mostra só o tempo.
+    final tReach = g.trainingsToReach;
+    final effort = (tReach != null && tReach > 0)
+        ? '$tReach $unit · ${_monthsLabel(g.monthsToReach)} ATÉ AQUI'
         : '${_monthsLabel(g.monthsToReach)} ATÉ AQUI';
     // Casa o marco AUTO ao doc cru (mesmo esporte/grau/grau-stripes/data) para
     // editar/excluir o registro certo. Verificado nunca tem ação.
@@ -1355,11 +1379,22 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
             .firstOrNull
         : null;
 
-    // A "estrada": o esforço entre a competição anterior e esta.
-    final road = isFirst
-        ? 'ESTREIA · ${c.cumulativeTrainings} TREINOS · ${_monthsLabel(c.monthsSincePrev)} DE CAMINHADA'
-        : 'DESDE A ÚLTIMA · ${c.trainingsSincePrev} TREINOS · ${_monthsLabel(c.monthsSincePrev)}'
-            '${c.gradesSincePrev > 0 ? ' · ${_gradesLabel(c.gradesSincePrev)}' : ''}';
+    // A "estrada": o esforço entre a competição anterior e esta. Contagem de
+    // treinos NULL = indeterminável (baseline do mestre sem data cobre o
+    // período) — o segmento de treinos é OMITIDO em vez de subestimar.
+    final String road;
+    if (isFirst) {
+      final cum = c.cumulativeTrainings;
+      road = cum != null
+          ? 'ESTREIA · $cum TREINOS · ${_monthsLabel(c.monthsSincePrev)} DE CAMINHADA'
+          : 'ESTREIA · ${_monthsLabel(c.monthsSincePrev)} DE CAMINHADA';
+    } else {
+      final since = c.trainingsSincePrev;
+      road = 'DESDE A ÚLTIMA · '
+          '${since != null ? '$since TREINOS · ' : ''}'
+          '${_monthsLabel(c.monthsSincePrev)}'
+          '${c.gradesSincePrev > 0 ? ' · ${_gradesLabel(c.gradesSincePrev)}' : ''}';
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),

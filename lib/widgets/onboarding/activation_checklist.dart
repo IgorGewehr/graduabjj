@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
@@ -30,8 +31,28 @@ class ActivationChecklist extends ConsumerStatefulWidget {
 }
 
 class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
-  // Expandir/retrair é estado LOCAL de UI (começa expandido).
+  // Expandir/retrair PERSISTE no device (SharedPreferences): quem retraiu o
+  // checklist uma vez não quer vê-lo aberto de novo a cada visita ao
+  // dashboard — ele só reabre se o professor tocar de novo.
+  static const _prefsKey = 'activation_checklist_expanded';
   bool _expanded = true;
+
+  @override
+  void initState() {
+    super.initState();
+    SharedPreferences.getInstance().then((prefs) {
+      final saved = prefs.getBool(_prefsKey);
+      if (saved != null && saved != _expanded && mounted) {
+        setState(() => _expanded = saved);
+      }
+    });
+  }
+
+  void _toggleExpanded() {
+    setState(() => _expanded = !_expanded);
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setBool(_prefsKey, _expanded));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -151,7 +172,7 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
         children: [
           // ── Cabeçalho (toca p/ expandir/retrair) ──────────────────────
           Pressable(
-            onTap: () => setState(() => _expanded = !_expanded),
+            onTap: _toggleExpanded,
             child: Row(
               children: [
                 Container(

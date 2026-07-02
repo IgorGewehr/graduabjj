@@ -1360,8 +1360,9 @@ class _GraduationMarkTile extends StatelessWidget {
   String get _effort {
     final unit = grad.weighted ? 'PONTOS' : 'TREINOS';
     final mLabel = grad.monthsToReach == 1 ? 'MES' : 'MESES';
-    if (grad.trainingsToReach > 0) {
-      return '${grad.trainingsToReach} $unit · ${grad.monthsToReach} $mLabel ATE AQUI';
+    final tReach = grad.trainingsToReach;
+    if (tReach != null && tReach > 0) {
+      return '$tReach $unit · ${grad.monthsToReach} $mLabel ATE AQUI';
     }
     return '${grad.monthsToReach} $mLabel ATE AQUI';
   }
@@ -1585,10 +1586,14 @@ class _CompetitionMarkTile extends StatelessWidget {
   String get _road {
     final mLabel = mark.monthsSincePrev == 1 ? 'MES' : 'MESES';
     if (isDebut) {
-      return 'ESTREIA: ${mark.cumulativeTrainings} TREINOS · ${mark.monthsSincePrev} $mLabel DE CAMINHADA';
+      final cum = mark.cumulativeTrainings;
+      return cum != null
+          ? 'ESTREIA: $cum TREINOS · ${mark.monthsSincePrev} $mLabel DE CAMINHADA'
+          : 'ESTREIA: ${mark.monthsSincePrev} $mLabel DE CAMINHADA';
     }
+    final since = mark.trainingsSincePrev;
     final parts = <String>[
-      '${mark.trainingsSincePrev} TREINOS',
+      if (since != null) '$since TREINOS',
       '${mark.monthsSincePrev} $mLabel',
     ];
     if (mark.gradesSincePrev > 0) {

@@ -86,15 +86,12 @@ class _Body extends ConsumerWidget {
   final List<Student> students;
 
   bool _isAtRisk(Student s) {
-    final lvl = s.retention?.riskLevel;
-    final days = s.daysSinceLastAttendance;
-    final riskyLevel = lvl == 'medium' || lvl == 'high' || lvl == 'critical';
-    // bluesRisk (§6.3) é um QUALIFICADOR do aluno na lista — nunca um grupo
-    // separado —, mas garante que o faixa-azul esfriando apareça no radar
-    // mesmo quando a banda de inatividade ainda não o pegou.
-    return riskyLevel ||
-        (days != null && days >= 7) ||
-        s.retention?.bluesRisk == true;
+    // REGRA DO RADAR: só quem TAVA treinando e está esfriando
+    // ([isCoolingAthlete]) — nunca-treinou/2-aulas-na-vida é problema de
+    // ATIVAÇÃO e fica fora (antes o score v1 marcava todos como crítico e o
+    // radar nascia poluído). bluesRisk (§6.3) segue como qualificador: o
+    // detector da CF já exige histórico real (promoção registrada p/ azul).
+    return isCoolingAthlete(s) || s.retention?.bluesRisk == true;
   }
 
   @override
@@ -109,10 +106,13 @@ class _Body extends ConsumerWidget {
     final int cHigh;
     final int cMedium;
     if (radarReady) {
+      // Contagens sobre o UNIVERSO DO RADAR (atRisk), não a academia inteira —
+      // senão alunos nunca-engataram (score alto por inatividade) inflavam o
+      // header com "N críticos" que não estão na lista.
       cCritical =
-          students.where((s) => s.retention?.riskLevel == 'critical').length;
-      cHigh = students.where((s) => s.retention?.riskLevel == 'high').length;
-      cMedium = students.where((s) => s.retention?.riskLevel == 'medium').length;
+          atRisk.where((s) => s.retention?.riskLevel == 'critical').length;
+      cHigh = atRisk.where((s) => s.retention?.riskLevel == 'high').length;
+      cMedium = atRisk.where((s) => s.retention?.riskLevel == 'medium').length;
     } else {
       int band(Student s, bool Function(int) test) {
         final d = s.daysSinceLastAttendance;
