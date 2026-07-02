@@ -63,6 +63,11 @@ class PushNotificationService {
 
   /// Fetch the device token and persist it under the signed-in user.
   Future<void> onUserLogin() async {
+    // GUARD (iOS 26): quando initialize() não rodou (main.dart pula o FCM no
+    // iOS porque o firebase_messaging crasha NATIVAMENTE — try/catch Dart não
+    // pega), NUNCA tocar o plugin: qualquer chamada nativa reativa o caminho
+    // crashante. Sem init não há token registrado, então não há o que fazer.
+    if (!_initialized) return;
     try {
       final token = await _messaging.getToken();
       if (token != null) {
@@ -76,9 +81,15 @@ class PushNotificationService {
 
   /// Remove this device's token so a logged-out device stops receiving push.
   Future<void> onUserLogout() async {
+    // GUARD (iOS 26): idem onUserLogin — sem initialize() não existe token
+    // salvo em users/{uid}/fcmTokens para limpar; o getToken() de fallback era
+    // justamente a 1ª chamada nativa da sessão e o risco de crash no logout.
+    if (!_initialized) return;
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      final token = _fcmToken ?? await _messaging.getToken();
+      // Só o cache — sem fallback getToken() no logout (chamada nativa extra
+      // desnecessária: se não temos token cacheado, nada foi salvo nesta run).
+      final token = _fcmToken;
       if (uid != null && token != null) {
         await FirebaseFirestore.instance
             .collection('users')
@@ -93,6 +104,7 @@ class PushNotificationService {
   }
 
   Future<void> subscribeToTopic(String topic) async {
+    if (!_initialized) return;
     try {
       await _messaging.subscribeToTopic(topic);
     } catch (e) {
@@ -101,6 +113,7 @@ class PushNotificationService {
   }
 
   Future<void> unsubscribeFromTopic(String topic) async {
+    if (!_initialized) return;
     try {
       await _messaging.unsubscribeFromTopic(topic);
     } catch (e) {

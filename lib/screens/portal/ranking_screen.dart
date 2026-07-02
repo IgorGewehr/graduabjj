@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/brand_tokens.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/ranking_entry.dart';
@@ -131,6 +132,18 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
           // Aluno: categoria travada na dele (sem seletor); só staff escolhe.
           showCategorySelector: widget.forStaff,
         ),
+        // Sub-meta do meio da tabela (§2.3 U-shape) — só na visão do ALUNO e
+        // só quando ele está no terço central do ranking. Renderiza
+        // SizedBox.shrink() fora dessas condições (invisível por padrão).
+        if (isStudentView && student != null)
+          _MyPositionCard(
+            myStudentId: student.id,
+            rankingKey: (
+              category: effectiveCategory,
+              period: _period,
+              sport: activeSport?.value,
+            ),
+          ),
         Expanded(child: _buildLeaderboard(activeSport, effectiveCategory)),
       ],
     );
@@ -411,6 +424,136 @@ class _RankingTile extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Card "VOCÊ" — sub-meta para o MEIO da tabela (visão do aluno).
+///
+/// Base científica (docs/b2c/PESQUISA_PSICOLOGIA_RETENCAO_RIVAIS_2026-07.md
+/// §2.3, efeito curvilíneo/U-shape): motivação é maior no TOPO e no FUNDO do
+/// ranking — a desmotivação mora no meio. A correção de design (P6) é dar a
+/// quem está no meio UMA sub-meta mais próxima que a posição global.
+///
+/// Regras de exibição (fora delas o widget é invisível — SizedBox.shrink):
+/// - tabela com >= 8 entries (ranking pequeno não tem "meio");
+/// - posição > 3 (topo NUNCA vê — seria redundante);
+/// - posição entre 25% e 75% da tabela (o terço central da curva U).
+///
+/// A sub-meta é a distância pro próximo colocado: como o desempate do
+/// [RankingService] é presença-mais-recente DESC, EMPATAR em treinos já sobe —
+/// então o alvo é `max(1, diff)` presenças. Nunca vira push (§2.3: "nunca push
+/// de posição"); é só um lembrete silencioso de que a próxima posição está a
+/// poucos treinos.
+class _MyPositionCard extends ConsumerWidget {
+  final String myStudentId;
+  final ({RankingCategory category, RankingPeriod period, String? sport})
+      rankingKey;
+
+  const _MyPositionCard({
+    required this.myStudentId,
+    required this.rankingKey,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Mesma family key da lista — zero fetch extra, e o pull-to-refresh da
+    // lista invalida este card junto.
+    final entries = ref.watch(classRankingProvider(rankingKey)).valueOrNull;
+    if (entries == null || entries.length < 8) return const SizedBox.shrink();
+
+    final idx = entries.indexWhere((e) => e.studentId == myStudentId);
+    if (idx <= 0) return const SizedBox.shrink(); // fora do ranking ou líder
+    final me = entries[idx];
+    final fraction = me.rank / entries.length;
+    if (me.rank <= 3 || fraction < 0.25 || fraction > 0.75) {
+      return const SizedBox.shrink();
+    }
+
+    // Distância pro próximo: empate + presença mais recente já desempata a
+    // favor de quem acabou de treinar, então o alvo mínimo é 1 presença.
+    final above = entries[idx - 1];
+    final needed = (above.attendanceCount - me.attendanceCount).clamp(1, 9999);
+    final subGoal = needed == 1
+        ? 'A 1 presença de subir uma posição'
+        : 'A $needed presenças de subir uma posição';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Brand.ink.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        children: [
+          // Posição atual — numeral tabular no padrão das linhas da tabela.
+          Text(
+            '${me.rank}º',
+            style: const TextStyle(
+              fontSize: 23,
+              height: 1.0,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+              fontFeatures: Brand.tabular,
+              color: Brand.ink,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'VOCÊ',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.4,
+                    color: Brand.blood,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subGoal,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    fontFeatures: Brand.tabular,
+                    color: Brand.ink,
+                    height: 1.15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${me.attendanceCount}',
+            style: const TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w900,
+              fontFeatures: Brand.tabular,
+              color: Brand.ink,
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text(
+              'treinos',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: Brand.ash,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ).entrance();
   }
 }
 

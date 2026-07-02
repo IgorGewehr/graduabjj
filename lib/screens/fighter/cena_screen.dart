@@ -13,6 +13,7 @@ import '../../models/ranking_entry.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/friend_providers.dart';
+import '../../providers/oss_providers.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/ranking_providers.dart';
 import '../../providers/student_provider.dart';
@@ -1213,6 +1214,12 @@ class _PostCardState extends ConsumerState<_PostCard> {
   @override
   Widget build(BuildContext context) {
     final p = widget.post;
+    // Reciprocidade (§2.1/P2): o autor deste post me deu oss nos últimos 14
+    // dias? Falha do provider degrada p/ set vazio — o nudge só some.
+    final recentLikers =
+        ref.watch(myRecentLikersProvider).valueOrNull ?? const <String>{};
+    final gaveMeOss =
+        !widget.isMyPost && !_liked && recentLikers.contains(p.authorUid);
     final beltColor = AppTheme.getBeltColor(p.authorBelt);
     final onBelt = beltColor.computeLuminance() > 0.6 ? _C.ink : Colors.white;
     final initials = () {
@@ -1298,7 +1305,11 @@ class _PostCardState extends ConsumerState<_PostCard> {
             ),
           ],
           const SizedBox(height: 12),
-          // Footer: like pill.
+          // Footer: like pill. Quando o AUTOR deste post me deu oss há pouco
+          // (myRecentLikersProvider) e eu ainda não retribuí, um microtexto
+          // discreto convida à retribuição — kudos recíproco é o loop com a
+          // evidência causal mais forte da pesquisa (§2.1/P2). O nudge some ao
+          // curtir (otimista) e nunca aparece em post meu.
           Pressable(
             onTap: widget.isMyPost ? null : _toggleLike,
             child: Row(
@@ -1318,6 +1329,17 @@ class _PostCardState extends ConsumerState<_PostCard> {
                       fontFeatures: _C.tab,
                       color: _liked ? _C.blood : _C.ash),
                 ),
+                if (gaveMeOss) ...[
+                  const SizedBox(width: 8),
+                  const Text(
+                    'te deu oss',
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                        color: _C.ash),
+                  ),
+                ],
               ],
             ),
           ),

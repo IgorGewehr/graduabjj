@@ -83,6 +83,59 @@ class SelfGraduation {
       );
 }
 
+/// Confronto individual dentro de uma [SelfCompetition] — RIVAIS R0
+/// ("adversário de chave", §6.1 da pesquisa de retenção).
+///
+/// É o diário de lutas do PRÓPRIO aluno: o adversário NÃO precisa estar no
+/// app e nada dele é exposto — o dado vive dentro do doc da competição
+/// auto-declarada (owner-writable) e só a Jornada do próprio aluno lê.
+/// `result` é sempre `'win' | 'loss' | 'draw'` (perspectiva do aluno).
+class SelfMatch {
+  final String opponentName;
+
+  /// Equipe do adversário (opcional) — exibida com respeito (§3.4: a
+  /// identidade de equipe é sagrada; rival é adversário de chave, não colega).
+  final String? opponentTeam;
+
+  /// `'win' | 'loss' | 'draw'` — do ponto de vista do aluno.
+  final String result;
+
+  const SelfMatch({
+    required this.opponentName,
+    this.opponentTeam,
+    required this.result,
+  });
+
+  Map<String, dynamic> toMap() => {
+        'opponentName': opponentName,
+        if (opponentTeam != null) 'opponentTeam': opponentTeam,
+        'result': result,
+      };
+
+  /// Retrocompatível: defaults seguros para mapas legados/parciais.
+  factory SelfMatch.fromMap(Map<String, dynamic> d) {
+    final team = d['opponentTeam'];
+    final result = (d['result'] ?? '').toString();
+    return SelfMatch(
+      opponentName: (d['opponentName'] ?? '').toString(),
+      opponentTeam:
+          (team is String && team.trim().isNotEmpty) ? team : null,
+      result: const {'win', 'loss', 'draw'}.contains(result) ? result : 'draw',
+    );
+  }
+
+  /// Parse tolerante de uma lista vinda do Firestore: ignora entradas que não
+  /// sejam mapas ou que não tenham nome de adversário.
+  static List<SelfMatch> listFrom(dynamic v) {
+    if (v is! List) return const [];
+    return v
+        .whereType<Map>()
+        .map((m) => SelfMatch.fromMap(Map<String, dynamic>.from(m)))
+        .where((m) => m.opponentName.trim().isNotEmpty)
+        .toList();
+  }
+}
+
 /// Competição AUTO-DECLARADA pelo próprio lutador (§1.3/§1.4/§4.2 do plano).
 ///
 /// Vive em `academies/{aid}/students/{sid}/selfCompetitions/{id}`. Cobre
@@ -107,6 +160,11 @@ class SelfCompetition {
   /// Nome da academia externa (quando `external`).
   final String? externalAcademy;
 
+  /// Confrontos da chave registrados pelo aluno (RIVAIS R0, §6.1). Opcional —
+  /// lista vazia quando o aluno não registrou lutas individuais. Máximo de 8
+  /// por competição (enforced na UI de captura).
+  final List<SelfMatch> matches;
+
   /// Sempre `'self'`.
   final String source;
 
@@ -125,6 +183,7 @@ class SelfCompetition {
     this.result,
     this.external = false,
     this.externalAcademy,
+    this.matches = const [],
     this.source = 'self',
     required this.createdBy,
     this.createdAt,
@@ -138,6 +197,8 @@ class SelfCompetition {
         if (result != null) 'result': result,
         'external': external,
         if (externalAcademy != null) 'externalAcademy': externalAcademy,
+        if (matches.isNotEmpty)
+          'matches': matches.map((m) => m.toMap()).toList(),
         'source': source,
         'createdBy': createdBy,
         if (createdAt != null) 'createdAt': Timestamp.fromDate(createdAt!),
@@ -154,6 +215,7 @@ class SelfCompetition {
         result: d['result'] as String?,
         external: d['external'] == true,
         externalAcademy: d['externalAcademy'] as String?,
+        matches: SelfMatch.listFrom(d['matches']),
         source: (d['source'] ?? 'self').toString(),
         createdBy: (d['createdBy'] ?? '').toString(),
         createdAt: _parseDate(d['createdAt']),

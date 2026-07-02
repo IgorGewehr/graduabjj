@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -11,12 +12,14 @@ import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/retention_providers.dart';
 import '../../services/firebase_service.dart';
 import '../../services/retention_contact_service.dart';
 import '../../services/student_service.dart';
 import '../../widgets/polish/polish.dart';
+import 'widgets/technical_goal_dialog.dart';
 
 /// Retenção 2.0 — RADAR ACIONÁVEL (§3.1/§3.2 do plano Repaginada).
 ///
@@ -86,7 +89,12 @@ class _Body extends ConsumerWidget {
     final lvl = s.retention?.riskLevel;
     final days = s.daysSinceLastAttendance;
     final riskyLevel = lvl == 'medium' || lvl == 'high' || lvl == 'critical';
-    return riskyLevel || (days != null && days >= 7);
+    // bluesRisk (§6.3) é um QUALIFICADOR do aluno na lista — nunca um grupo
+    // separado —, mas garante que o faixa-azul esfriando apareça no radar
+    // mesmo quando a banda de inatividade ainda não o pegou.
+    return riskyLevel ||
+        (days != null && days >= 7) ||
+        s.retention?.bluesRisk == true;
   }
 
   @override
@@ -450,6 +458,12 @@ class _RetentionCardState extends ConsumerState<_RetentionCard> {
     return null;
   }
 
+  /// Flag anti-"blue belt blues" (§6.3) computada pela CF diária: faixa-azul
+  /// esfriando. Qualifica o aluno na lista (chip + playbook próprio) — o tom
+  /// do reengajamento muda de "sentimos sua falta" para reconhecimento +
+  /// desafio técnico.
+  bool get _isBlues => student.retention?.bluesRisk == true;
+
   String? get _waPhone {
     final raw = student.phone;
     if (raw == null) return null;
@@ -500,6 +514,18 @@ class _RetentionCardState extends ConsumerState<_RetentionCard> {
   // ──────────────────────────────────────────────────────────────────────────
 
   _WaTemplate get _waTemplate {
+    // Blues (§6.3 arma 1): reconhecimento + desafio técnico. NUNCA mencionar
+    // que o aluno sumiu — cobrança de presença é exatamente o que afunda um
+    // faixa-azul em estagnação.
+    if (_isBlues) {
+      return _WaTemplate(
+        'retention_blues_challenge',
+        (name, academy) =>
+            'Fala $name! Teu jogo tá evoluindo demais — dá pra ver no tatame. '
+            'Semana que vem quero te passar uma meta técnica nova, tem uma '
+            'chave que é a tua cara. Bora? 👊',
+      );
+    }
     final d = student.daysSinceLastAttendance ?? 999;
     if (d > 30) {
       return _WaTemplate(
@@ -929,6 +955,24 @@ class _RetentionCardState extends ConsumerState<_RetentionCard> {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
+  // Playbook blues (§6.3 arma 1): meta técnica — MESMO dialog da ficha
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Future<void> _onDefineGoal() async {
+    if (_busy) return;
+    final staff = ref.read(currentUserProvider).valueOrNull;
+    final result = await showTechnicalGoalDialog(
+      context,
+      studentId: student.id,
+      studentName: student.fullName,
+      current: student.activeGoal,
+      staffName: staff?.displayName ?? 'Professor',
+    );
+    // Recarrega a lista para o playbook refletir a meta recém-salva/concluída.
+    if (result != null) ref.invalidate(retentionStudentsProvider);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
   // Sugerir inativar (§2.3) — SEMPRE decisão humana com confirmação
   // ──────────────────────────────────────────────────────────────────────────
 
@@ -984,6 +1028,132 @@ class _RetentionCardState extends ConsumerState<_RetentionCard> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Playbook blues (expandido) — DIFERENTE do inadimplente/sumido (§6.3):
+  // reconhecimento + desafio técnico, nunca cobrança de presença.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Widget _buildBluesPlaybook() {
+    final goal = student.activeGoal;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 12, 14, 2),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.beltBlue.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.beltBlue.withValues(alpha: 0.20)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(LucideIcons.compass, size: 13, color: AppTheme.beltBlue),
+              SizedBox(width: 6),
+              Text(
+                'PLAYBOOK FAIXA-AZUL',
+                style: TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.0,
+                  color: AppTheme.beltBlue,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Fase clássica de estagnação pós-promoção. O jogo aqui é '
+            'reconhecimento + desafio técnico — o WhatsApp deste card já vai '
+            'no tom certo, sem cobrar presença.',
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.35,
+              fontWeight: FontWeight.w500,
+              color: Brand.ink,
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (goal == null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ActionChip(
+                avatar: const Icon(LucideIcons.target,
+                    size: 14, color: AppTheme.beltBlue),
+                label: const Text('DEFINIR META TÉCNICA'),
+                labelStyle: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.6,
+                  color: AppTheme.beltBlue,
+                ),
+                backgroundColor: Colors.white,
+                side: BorderSide(
+                  color: AppTheme.beltBlue.withValues(alpha: 0.45),
+                ),
+                visualDensity: VisualDensity.compact,
+                onPressed: _onDefineGoal,
+              ),
+            )
+          else
+            // Meta já ativa: mostra e deixa editar/concluir no mesmo dialog.
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: _onDefineGoal,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(LucideIcons.target,
+                        size: 14, color: AppTheme.beltBlue),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            goal.text,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: Brand.ink,
+                            ),
+                          ),
+                          if (goal.until != null)
+                            Text(
+                              'até ${DateFormat('dd/MM/yy').format(goal.until!)}',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                color: Brand.ash.withValues(alpha: 0.9),
+                                fontFeatures: Brand.tabular,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'EDITAR',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.6,
+                        color: AppTheme.beltBlue,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -1113,6 +1283,11 @@ class _RetentionCardState extends ConsumerState<_RetentionCard> {
                     ),
                   ),
                   if (level != null) _LevelBadge(level: level),
+                  if (_isBlues)
+                    const Padding(
+                      padding: EdgeInsets.only(left: 4),
+                      child: _BluesChip(),
+                    ),
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     icon: Icon(
@@ -1123,8 +1298,10 @@ class _RetentionCardState extends ConsumerState<_RetentionCard> {
                       color: Brand.ash,
                     ),
                     tooltip: _expanded
-                        ? 'Fechar histórico'
-                        : 'Histórico de contatos',
+                        ? 'Fechar'
+                        : _isBlues
+                            ? 'Playbook + histórico de contatos'
+                            : 'Histórico de contatos',
                     onPressed: () => setState(() => _expanded = !_expanded),
                   ),
                 ],
@@ -1195,9 +1372,10 @@ class _RetentionCardState extends ConsumerState<_RetentionCard> {
             ],
           ),
 
-          // Histórico de contatos (expandível).
+          // Expandir: playbook blues (quando aplicável) + histórico de contatos.
           if (_expanded) ...[
             Divider(height: 1, color: Brand.ash.withValues(alpha: 0.12)),
+            if (_isBlues) _buildBluesPlaybook(),
             _ContactHistory(studentId: student.id),
           ],
         ],
@@ -1268,6 +1446,36 @@ class _CardAction extends StatelessWidget {
       );
     }
     return Expanded(child: child);
+  }
+}
+
+/// Chip discreto "BLUES" (azul-faixa) — qualificador anti-"blue belt blues"
+/// (§6.3) ao lado do badge de risco. Mesmo molde visual do [_LevelBadge].
+class _BluesChip extends StatelessWidget {
+  const _BluesChip();
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Faixa-azul esfriando — expanda o card pro playbook próprio',
+      triggerMode: TooltipTriggerMode.tap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppTheme.beltBlue.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Text(
+          'BLUES',
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.8,
+            color: AppTheme.beltBlue,
+          ),
+        ),
+      ),
+    );
   }
 }
 

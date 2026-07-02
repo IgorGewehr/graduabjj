@@ -117,7 +117,17 @@ final myShowcaseProvider = FutureProvider<FighterProfile?>((ref) async {
     if (l.effectiveSport != sport.value) continue;
     trainedDays.add(DateTime(l.date.year, l.date.month, l.date.day));
   }
-  final streak = computeWeeklyStreak(trainedDays: trainedDays, now: DateTime.now());
+  // Semanas congeladas (modo lesão/descanso) viram PONTE do streak — provider
+  // cacheado (1 listener em users/{uid}), zero reads extras aqui. Mantém o
+  // espelho fighterProfiles consistente com o streak que o dono vê no hub e
+  // com o cálculo server-side do feed_materializer.
+  final frozenWeeks =
+      (await ref.watch(frozenWeeksProvider.future)).keys.toSet();
+  final streak = computeWeeklyStreak(
+    trainedDays: trainedDays,
+    now: DateTime.now(),
+    frozenWeeks: frozenWeeks,
+  );
 
   final showcase = ShowcaseBuilder.build(
     progressions: progs,

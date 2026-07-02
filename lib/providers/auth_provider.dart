@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -261,8 +262,13 @@ class AuthService {
 
   /// Sign out
   Future<void> signOut() async {
-    // Remove FCM token before signing out
-    await pushNotificationService.onUserLogout();
+    // Remove FCM token before signing out. Best-effort: NENHUMA falha de
+    // limpeza de push pode impedir/atrasar o logout do usuário.
+    try {
+      await pushNotificationService.onUserLogout();
+    } catch (e) {
+      debugPrint('[auth] push cleanup on signOut failed: $e');
+    }
     await _auth.signOut();
   }
 

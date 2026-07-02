@@ -462,10 +462,31 @@ final routerProvider = Provider<GoRouter>((ref) {
   // clique. Agora o router é criado UMA vez e um refreshListenable re-roda só o
   // redirect quando bootstrap/user/criação mudam (sem recriar/resetar).
   final refresh = ValueNotifier<int>(0);
-  ref.listen(appBootstrapProvider, (_, _) => refresh.value++);
-  ref.listen(currentUserProvider, (_, _) => refresh.value++);
-  ref.listen(isCreatingAccountProvider, (_, _) => refresh.value++);
-  ref.onDispose(refresh.dispose);
+  // BUG CRÍTICO #2 (crash no LOGOUT, corrigido): bumpar o notifier SINCRONAMENTE
+  // dentro do callback de ref.listen roda o redirect do GoRouter re-entrante,
+  // no MEIO do flush do ProviderScheduler — o redirect faz ref.read de providers
+  // dirty e muta o _HashMap interno de dependências enquanto o Riverpod o itera
+  // → ConcurrentModificationError na RAIZ da árvore (UncontrolledProviderScope)
+  // → app irrecuperável. Fix: coalescer os 3 listeners num único bump ADIADO
+  // para o event-loop (Future(), não microtask), depois do flush terminar.
+  var refreshScheduled = false;
+  var disposed = false;
+  void scheduleRefresh() {
+    if (refreshScheduled || disposed) return;
+    refreshScheduled = true;
+    Future(() {
+      refreshScheduled = false;
+      if (!disposed) refresh.value++;
+    });
+  }
+
+  ref.listen(appBootstrapProvider, (_, _) => scheduleRefresh());
+  ref.listen(currentUserProvider, (_, _) => scheduleRefresh());
+  ref.listen(isCreatingAccountProvider, (_, _) => scheduleRefresh());
+  ref.onDispose(() {
+    disposed = true;
+    refresh.dispose();
+  });
 
   return GoRouter(
     navigatorKey: navigatorKey,

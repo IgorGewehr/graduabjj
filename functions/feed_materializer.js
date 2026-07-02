@@ -8,7 +8,9 @@
  * _emitFeedPosts`) para os 3 marcos deriváveis de PRESENÇA:
  *   - streak_milestone  → streak semanal (semanas ISO consecutivas, fusão
  *                         attendance ∪ training_logs do esporte PRINCIPAL,
- *                         grace da semana corrente — lib/services/weekly_streak.dart)
+ *                         grace da semana corrente + PONTE de semanas
+ *                         congeladas em users/{uid}.streakFreezes —
+ *                         lib/services/weekly_streak.dart)
  *                         quando cruza EXATAMENTE 4/8/12/26/52 semanas;
  *   - mat_milestone     → total de aulas cruzou 100/250/500/1000, e aniversários
  *                         de tatame 1/2/3/5 anos desde a primeira presença;
@@ -96,6 +98,22 @@ function mondayUtcOf(dayUtc) {
   return new Date(dayUtc.getTime() - (isoDow - 1) * DAY_MS);
 }
 
+/**
+ * Millis (UTC) da SEGUNDA da semana ISO 'YYYY-Www' — porta fiel de
+ * `weekly_streak.dart:mondayUtcOfIsoWeekKey` (ISO 8601: 4 de janeiro está
+ * SEMPRE na semana 1 do seu ano ISO). null p/ chave malformada — dado sujo em
+ * users/{uid}.streakFreezes não derruba a materialização.
+ */
+function mondayUtcMsOfIsoKey(key) {
+  const m = /^(\d{4})-W(\d{2})$/.exec(String(key || ''));
+  if (!m) return null;
+  const week = Number(m[2]);
+  if (week < 1 || week > 53) return null;
+  const jan4 = new Date(Date.UTC(Number(m[1]), 0, 4));
+  const dow = jan4.getUTCDay() === 0 ? 7 : jan4.getUTCDay();
+  return jan4.getTime() - (dow - 1) * DAY_MS + (week - 1) * 7 * DAY_MS;
+}
+
 // ============================================================
 // Doc-ids determinísticos — BYTE-IGUAIS aos de lib/models/feed_post.dart.
 // ============================================================
@@ -173,28 +191,44 @@ function authorIdentityOf(student, sport) {
 // ============================================================
 // Streak semanal — porta da parte "streak atual" de
 // lib/services/weekly_streak.dart:computeWeeklyStreak (com GRACE da semana
-// corrente: semana atual sem treino ainda NÃO quebra o run).
+// corrente: semana atual sem treino ainda NÃO quebra o run; e com PONTE de
+// semanas congeladas: users/{uid}.streakFreezes — modo lesão/descanso —
+// não conta como treinada, não quebra o run; treino vence o freeze).
+// A semântica TEM que ser a mesma do app, senão o post de marco diverge do
+// streak que o aluno vê.
 // ============================================================
 
 /**
  * @param {Set<number>} trainedDayKeys millis UTC-midnight dos dias treinados
  * @param {Date} todayUtc dia calendário atual (UTC-midnight, já em SP)
- * @returns {number} semanas ISO consecutivas terminando na semana atual
+ * @param {Set<number>} [frozenWeekMs] millis UTC-midnight das SEGUNDAS das
+ *   semanas congeladas (via mondayUtcMsOfIsoKey sobre streakFreezes)
+ * @returns {number} semanas ISO TREINADAS no run que termina na semana atual
+ *   (pontes congeladas não somam nem quebram)
  */
-function computeCurrentStreakWeeks(trainedDayKeys, todayUtc) {
+function computeCurrentStreakWeeks(trainedDayKeys, todayUtc, frozenWeekMs = new Set()) {
   const trainedWeeks = new Set();
   for (const key of trainedDayKeys) {
     trainedWeeks.add(mondayUtcOf(new Date(key)).getTime());
   }
   const currentWeek = mondayUtcOf(todayUtc).getTime();
+  const maxUseful = STREAK_MILESTONES[STREAK_MILESTONES.length - 1] + 2;
   let weeks = 0;
-  let cursor = trainedWeeks.has(currentWeek)
-    ? currentWeek
-    : currentWeek - 7 * DAY_MS;
-  // Bound defensivo: > maior milestone + 2 já não cruza marco nenhum (e a
-  // janela de dados é ~53 semanas de qualquer forma).
-  while (trainedWeeks.has(cursor) && weeks <= STREAK_MILESTONES[STREAK_MILESTONES.length - 1] + 2) {
-    weeks++;
+  let cursor = currentWeek;
+  let isCurrent = true;
+  // Bound defensivo de iterações: 53 semanas de janela de dados + ~60 freezes
+  // podados; > maxUseful semanas treinadas já não cruza marco nenhum.
+  for (let i = 0; i < 130 && weeks <= maxUseful; i++) {
+    if (trainedWeeks.has(cursor)) {
+      weeks++;
+    } else if (frozenWeekMs.has(cursor)) {
+      // PONTE — modo lesão/descanso: não soma, não quebra.
+    } else if (isCurrent) {
+      // GRACE — semana corrente sem treino é só pendente.
+    } else {
+      break;
+    }
+    isCurrent = false;
     cursor -= 7 * DAY_MS;
   }
   return weeks;
@@ -431,7 +465,28 @@ async function materializeAttendanceMarcos({ db, academyId, studentId }) {
         if (!latestStreakDay || l.day > latestStreakDay) latestStreakDay = l.day;
       }
 
-      const currentWeeks = computeCurrentStreakWeeks(streakDayKeys, todayUtc);
+      // MODO LESÃO/DESCANSO — users/{uid}.streakFreezes ('YYYY-Www' → motivo,
+      // escrito pelo próprio aluno via StreakFreezeService): semana congelada
+      // vira PONTE, a MESMA semântica de weekly_streak.dart(frozenWeeks:).
+      // 1 read enxuto (fieldMask), só quando algum marco de streak falta.
+      // Fail-open (set vazio): erro transitório degrada p/ semântica antiga.
+      const frozenWeekMs = new Set();
+      try {
+        const [freezeSnap] = await db.getAll(
+          db.collection('users').doc(uid), { fieldMask: ['streakFreezes'] });
+        const raw = freezeSnap.exists ? (freezeSnap.data() || {}).streakFreezes : null;
+        if (raw && typeof raw === 'object') {
+          for (const k of Object.keys(raw)) {
+            const ms = mondayUtcMsOfIsoKey(k);
+            if (ms !== null) frozenWeekMs.add(ms);
+          }
+        }
+      } catch (e) {
+        console.warn(`[feed] leitura de streakFreezes falhou uid=${uid}:`, e.message);
+      }
+
+      const currentWeeks =
+        computeCurrentStreakWeeks(streakDayKeys, todayUtc, frozenWeekMs);
       if (missingStreak.includes(currentWeeks)) {
         const postId = streakId(uid, currentWeeks);
         // occurredAt = a presença/treino mais recente do run (o dia que cruzou).

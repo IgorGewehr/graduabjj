@@ -282,6 +282,13 @@ class StudentRetention {
   final String? riskLevel;
   final DateTime? riskComputedAt;
 
+  /// Flag anti-"blue belt blues" (§3.3/§6.3 da pesquisa de retenção), gravada
+  /// pela CF diária: faixa-azul de BJJ como esporte principal, 6–30 meses na
+  /// faixa (medido pela promoção registrada em beltProgressions) e tendência
+  /// de frequência caindo. A CF grava SEMPRE true/false explícito — aqui o
+  /// default false só cobre docs ainda não recomputados (backfill pendente).
+  final bool bluesRisk;
+
   const StudentRetention({
     this.lastAttendanceDate,
     this.attendanceLast7d = 0,
@@ -290,6 +297,7 @@ class StudentRetention {
     this.riskScore,
     this.riskLevel,
     this.riskComputedAt,
+    this.bluesRisk = false,
   });
 
   factory StudentRetention.fromMap(Map<String, dynamic> map) {
@@ -310,6 +318,52 @@ class StudentRetention {
       riskScore: (map['riskScore'] as num?)?.toInt(),
       riskLevel: map['riskLevel'] as String?,
       riskComputedAt: (map['riskComputedAt'] as Timestamp?)?.toDate(),
+      bluesRisk: map['bluesRisk'] == true,
+    );
+  }
+}
+
+/// Meta técnica de curto prazo do aluno — definida pelo PROFESSOR (protocolo
+/// anti-"blue belt blues", §6.3 da pesquisa: metas de habilidade de 4-6
+/// semanas são a arma nº 1 contra a estagnação da faixa-azul).
+///
+/// Escrita staff-only: a UI de staff grava o campo `activeGoal` direto via
+/// update() no doc do aluno; o cliente-aluno apenas lê. Por isso o campo
+/// NUNCA entra em [Student.toFirestore].
+class StudentGoal {
+  /// Texto da meta (ex.: "Finalizar 3x da guarda fechada até o camp").
+  final String text;
+
+  /// Prazo opcional da meta.
+  final DateTime? until;
+
+  /// Nome de quem definiu (denormalizado para exibição no app do aluno).
+  final String? setByName;
+
+  /// Quando a meta foi definida.
+  final DateTime? setAt;
+
+  const StudentGoal({
+    required this.text,
+    this.until,
+    this.setByName,
+    this.setAt,
+  });
+
+  /// Parse tolerante: null para mapa ausente/malformado ou meta sem texto —
+  /// meta vazia é o mesmo que meta nenhuma (empty-state invisível).
+  static StudentGoal? fromMap(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    final rawText = map['text'];
+    final text = rawText is String ? rawText.trim() : '';
+    if (text.isEmpty) return null;
+    final rawUntil = map['until'];
+    final rawSetAt = map['setAt'];
+    return StudentGoal(
+      text: text,
+      until: rawUntil is Timestamp ? rawUntil.toDate() : null,
+      setByName: map['setByName'] is String ? map['setByName'] as String : null,
+      setAt: rawSetAt is Timestamp ? rawSetAt.toDate() : null,
     );
   }
 }
@@ -408,6 +462,10 @@ class Student {
   // Retenção (leitura — gravado exclusivamente pelas Cloud Functions)
   final StudentRetention? retention;
 
+  // Meta técnica ativa (leitura no app do aluno — só o staff escreve; ver
+  // StudentGoal). Fica FORA do toFirestore pelo mesmo motivo do retention.
+  final StudentGoal? activeGoal;
+
   // Histórico de mudança de status (gravado pelo cliente a cada transição real)
   final DateTime? statusChangedAt;
   final String? statusChangeReason;
@@ -464,6 +522,7 @@ class Student {
     required this.updatedAt,
     this.createdBy,
     this.retention,
+    this.activeGoal,
     this.statusChangedAt,
     this.statusChangeReason,
   });
@@ -544,6 +603,12 @@ class Student {
               Map<String, dynamic>.from(data['retention'] as Map),
             )
           : null,
+      // Meta técnica anti-blues (staff-only write; parse tolerante → null)
+      activeGoal: data['activeGoal'] is Map
+          ? StudentGoal.fromMap(
+              Map<String, dynamic>.from(data['activeGoal'] as Map),
+            )
+          : null,
       statusChangedAt: (data['statusChangedAt'] as Timestamp?)?.toDate(),
       statusChangeReason: data['statusChangeReason'] as String?,
     );
@@ -601,6 +666,10 @@ class Student {
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(DateTime.now()),
       'createdBy': createdBy,
+      // NUNCA escritos por aqui (escrita fora do cliente-aluno):
+      // `retention` é exclusivo das Cloud Functions e `activeGoal` é gravado
+      // pela UI de staff direto via update() — incluí-los sobrescreveria os
+      // dados do servidor em qualquer save comum da ficha.
     };
   }
 
@@ -776,6 +845,7 @@ class Student {
     DateTime? updatedAt,
     String? createdBy,
     StudentRetention? retention,
+    StudentGoal? activeGoal,
     DateTime? statusChangedAt,
     String? statusChangeReason,
   }) {
@@ -831,6 +901,7 @@ class Student {
       updatedAt: updatedAt ?? this.updatedAt,
       createdBy: createdBy ?? this.createdBy,
       retention: retention ?? this.retention,
+      activeGoal: activeGoal ?? this.activeGoal,
       statusChangedAt: statusChangedAt ?? this.statusChangedAt,
       statusChangeReason: statusChangeReason ?? this.statusChangeReason,
     );

@@ -235,6 +235,15 @@
       ]
     },
     {
+      "//": "Oss recíproco (PESQUISA §2.1/P2): myRecentLikersProvider (oss_providers.dart) lê quem me deu oss — where(authorUid==uid) + orderBy(createdAt desc) na coleção top-level likes; igualdade + orderBy em campo distinto exige composto.",
+      "collectionGroup": "likes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "authorUid", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "//": "Retenção (§2.3): churn consumado do mês — computeRetentionDaily conta transições por (status in [inactive,transferred]) + range em statusChangedAt.",
       "collectionGroup": "students",
       "queryScope": "COLLECTION",

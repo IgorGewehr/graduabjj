@@ -27,15 +27,23 @@
  *  - Self-log (users/{uid}/training_logs) aqui é usado SÓ para evitar falso
  *    positivo/contar rolas em push — NUNCA alimenta ranking/graduação.
  *  - riskScore/contactLog nunca aparecem em push nem em payload.
+ *  - MODO LESÃO/DESCANSO (§4.3 da pesquisa de retenção): users/{uid}
+ *    .streakFreezes = { 'YYYY-Www': 'lesao'|'descanso' }, escrito pelo
+ *    PRÓPRIO aluno (lib/services/streak_freeze_service.dart). Semana corrente
+ *    congelada = o aluno avisou que está parado → streakRiskCheck NUNCA
+ *    cutuca. Semana congelada no meio de um run = PONTE (não conta como
+ *    treinada, não quebra) — mesma semântica de lib/services/weekly_streak.dart,
+ *    para o número do push jamais divergir do streak que o aluno vê no app.
  *
  * CUSTO (documentado por exigência do plano): streakRiskCheck e
  * weeklyRecapSunday NÃO varrem users/ — iteram academies/{aid}/students com
  * projeção select(linkedUserId, status, retention). Custo por run:
  * O(nº de alunos da plataforma) leituras de doc (projeção reduz bandwidth,
- * não billing) + 1 leitura de users/{uid} por CANDIDATO que passa nos filtros
- * (subconjunto pequeno) + 1 query em training_logs por candidato. Com ~10³–10⁴
- * alunos e 3 runs/semana, isso fica na casa de dezenas de milhares de reads
- * semanais — ordens de magnitude abaixo de varrer users/ inteiro por dia.
+ * não billing) + ~2 leituras de users/{uid} por CANDIDATO que passa nos
+ * filtros (subconjunto pequeno; a 2ª é o fieldMask de streakFreezes) + 1
+ * query em training_logs por candidato. Com ~10³–10⁴ alunos e 3 runs/semana,
+ * isso fica na casa de dezenas de milhares de reads semanais — ordens de
+ * magnitude abaixo de varrer users/ inteiro por dia.
  */
 
 const { onSchedule } = require('firebase-functions/v2/scheduler');
@@ -135,18 +143,25 @@ function spTodayKey(spParts) {
 }
 
 /**
- * Streak em SEMANAS consecutivas com bucket > 0 em retention.weeklyBuckets,
- * andando para trás a partir da semana corrente (includeCurrent=true) ou da
- * anterior (includeCurrent=false). Como weeklyBuckets guarda ~9 semanas
- * (poda automática — ver contrato de retention), o streak reportado satura
- * nesse horizonte; a mensagem continua verdadeira ("pelo menos N").
+ * Streak em SEMANAS com bucket > 0 em retention.weeklyBuckets, andando para
+ * trás a partir da semana corrente (includeCurrent=true) ou da anterior
+ * (includeCurrent=false). Como weeklyBuckets guarda ~9 semanas (poda
+ * automática — ver contrato de retention), o streak reportado satura nesse
+ * horizonte; a mensagem continua verdadeira ("pelo menos N").
+ *
+ * [streakFreezes] = users/{uid}.streakFreezes ({ 'YYYY-Www': motivo }):
+ * semana congelada SEM treino é PONTE — não soma no streak, não quebra o run
+ * (mesma semântica de lib/services/weekly_streak.dart). Semana congelada COM
+ * treino conta normalmente (treino vence).
  */
-function computeStreakWeeks(weeklyBuckets, spParts, includeCurrent) {
+function computeStreakWeeks(weeklyBuckets, spParts, includeCurrent, streakFreezes) {
   const buckets = weeklyBuckets || {};
+  const freezes = streakFreezes || {};
   let streak = 0;
   for (let k = includeCurrent ? 0 : 1; k < 60; k++) {
     const key = isoWeekKey(spParts.year, spParts.month, spParts.day, -7 * k);
     if ((Number(buckets[key]) || 0) > 0) streak++;
+    else if (freezes[key]) { /* PONTE — modo lesão/descanso */ }
     else break;
   }
   return streak;
@@ -330,6 +345,24 @@ async function forEachLinkedActiveStudent(cb) {
   }
 }
 
+/**
+ * Lê users/{uid}.streakFreezes ({ 'YYYY-Www': 'lesao'|'descanso' }) com
+ * fieldMask — 1 read enxuto por CANDIDATO, mesmo perfil de custo do header.
+ * Fail-open ({}): erro transitório degrada para o comportamento pré-freeze
+ * (melhor 1 push a mais que run quebrada), com log.
+ */
+async function getStreakFreezes(uid) {
+  try {
+    const [snap] = await db.getAll(
+      db.collection('users').doc(uid), { fieldMask: ['streakFreezes'] });
+    const raw = snap.exists ? (snap.data() || {}).streakFreezes : null;
+    return (raw && typeof raw === 'object') ? raw : {};
+  } catch (e) {
+    console.warn(`[push] leitura de streakFreezes falhou uid=${uid}:`, e.message);
+    return {};
+  }
+}
+
 /** true se o aluno tem QUALQUER training_log (self-log) na semana ISO corrente. */
 async function hasSelfLogThisWeek(uid, mondayUtc) {
   try {
@@ -394,20 +427,33 @@ exports.streakRiskCheck = onSchedule(
       // Semana corrente COM treino verificado → streak não está em risco.
       if ((Number(buckets[currentKey]) || 0) > 0) return;
 
-      // Streak das semanas anteriores (a corrente, zerada, fica de fora).
+      // Gate de candidatura SEM freezes (barato, zero reads extras): streak
+      // cru das semanas anteriores. Conservador de propósito — quem teve a
+      // semana passada congelada sem treino (lesionado recente) fica de fora
+      // do nudge, exatamente o que §4.3 pede.
       const streak = computeStreakWeeks(buckets, sp, false);
       if (streak < 2) return;
 
       seen.add(uid);
 
+      // MODO LESÃO/DESCANSO (§4.3): semana corrente congelada = o aluno JÁ
+      // AVISOU que está parado. Cutucar aqui seria o anti-padrão exato da
+      // pesquisa ("deletei o Strava... não suportava ver os outros treinando").
+      const freezes = await getStreakFreezes(uid);
+      if (freezes[currentKey]) return;
+
       // Guard de falso positivo: self-log na semana = pessoa treinou.
       if (await hasSelfLogThisWeek(uid, mondayUtc)) return;
+
+      // Nº do push com semântica de PONTE (freezes no meio do run não
+      // quebram) — bate com o streak que o aluno vê no app.
+      const bridgedStreak = computeStreakWeeks(buckets, sp, false, freezes);
 
       const res = await sendPushIfAllowed({
         db, uid,
         category: 'training',
         title: 'A semana ainda tá aberta 🔥',
-        body: `Seu streak de ${streak} semanas segue vivo — um treino essa semana mantém a chama.`,
+        body: `Seu streak de ${bridgedStreak} semanas segue vivo — um treino essa semana mantém a chama.`,
         data: { type: 'streak_risk', academyId, weekKey: currentKey },
       });
       if (res.sent) sentCount++;
@@ -447,11 +493,17 @@ exports.weeklyRecapSunday = onSchedule(
       if (!buckets) return;
 
       const trainings = Number(buckets[currentKey]) || 0;
-      if (trainings < 1) return; // nunca "sua semana: 0"
+      // Nunca "sua semana: 0" — cobre TAMBÉM a semana congelada sem treino
+      // (modo lesão/descanso): lesionado que não treinou não recebe recap.
+      if (trainings < 1) return;
 
       seen.add(uid);
 
-      const streak = computeStreakWeeks(buckets, sp, true); // inclui a corrente
+      // Freezes p/ o nº do streak com semântica de PONTE — semana congelada
+      // no meio do run não quebra; o push não pode divergir do que o aluno vê
+      // no hub. 1 read (fieldMask) por destinatário do recap.
+      const freezes = await getStreakFreezes(uid);
+      const streak = computeStreakWeeks(buckets, sp, true, freezes); // inclui a corrente
       const rolas = await sumRolasThisWeek(uid, mondayUtc);
 
       const treinoTxt = `${trainings} treino${trainings === 1 ? '' : 's'}`;

@@ -4,6 +4,7 @@ import '../models/ranking_entry.dart';
 import '../models/student.dart';
 import '../services/services.dart';
 import '../services/ranking_service.dart';
+import '../services/streak_freeze_service.dart';
 import '../services/training_log_service.dart';
 import '../services/weekly_streak.dart';
 import 'auth_provider.dart';
@@ -312,9 +313,26 @@ Future<Set<DateTime>> _fusedTrainedDays({
   return days;
 }
 
+/// FREEZES do streak (modo lesão/descanso) do PRÓPRIO usuário — espelho ao
+/// vivo de `users/{uid}.streakFreezes`, mapa `'YYYY-Www' → 'lesao'|'descanso'`.
+/// `.keys.toSet()` alimenta `computeWeeklyStreak(frozenWeeks:)`; o VALOR da
+/// semana corrente diz à UI qual modo está ativo. Cacheado AQUI (1 listener)
+/// para que todos os callers de streak compartilhem a mesma leitura em vez de
+/// cada um reler `users/{uid}`. Deslogado = mapa vazio.
+final frozenWeeksProvider = StreamProvider<Map<String, String>>((ref) async* {
+  final user = await ref.watch(currentUserProvider.future);
+  if (user == null) {
+    yield const <String, String>{};
+    return;
+  }
+  yield* StreakFreezeService(user.id).watch();
+});
+
 /// Streak SEMANAL rico pro dashboard do lutador: semanas atuais (com GRACE da
 /// semana em curso) + recorde + strip das últimas ~8 semanas. FUNDE presença
 /// verificada + self-logs (dedup por dia) e computa via [computeWeeklyStreak].
+/// Semanas congeladas (modo lesão/descanso, [frozenWeeksProvider]) viram PONTE
+/// — só quando o streak computado é o do PRÓPRIO usuário (freeze é owner-scoped).
 ///
 /// Global (todos os esportes) — casa com o comportamento anterior deste
 /// provider. A variante POR ESPORTE é computada no `myShowcaseProvider`
@@ -338,7 +356,19 @@ final studentStreakInfoProvider = FutureProvider.family<WeeklyStreakResult,
     studentId: studentId,
     uid: uid,
   );
-  return computeWeeklyStreak(trainedDays: days, now: DateTime.now());
+
+  // Freezes são do PRÓPRIO doc users/{uid} — só se aplicam ao próprio streak
+  // (de terceiros nem daria pra ler; uid == null nesse caso, mesmo critério
+  // da fusão de self-logs acima).
+  final frozenWeeks = uid != null
+      ? (await ref.watch(frozenWeeksProvider.future)).keys.toSet()
+      : const <String>{};
+
+  return computeWeeklyStreak(
+    trainedDays: days,
+    now: DateTime.now(),
+    frozenWeeks: frozenWeeks,
+  );
 });
 
 /// Student monthly attendance count provider

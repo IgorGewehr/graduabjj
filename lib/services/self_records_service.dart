@@ -84,6 +84,20 @@ class SelfRecordsService {
   ) =>
       _competitions(studentId).doc(id).update(data);
 
+  /// Substitui os confrontos de chave (`matches`, RIVAIS R0) de uma
+  /// competição auto-declarada. Lista vazia REMOVE o campo do doc (mantém o
+  /// documento limpo para quem nunca registrou confrontos).
+  Future<void> setCompetitionMatches(
+    String studentId,
+    String id,
+    List<SelfMatch> matches,
+  ) =>
+      _competitions(studentId).doc(id).update({
+        'matches': matches.isEmpty
+            ? FieldValue.delete()
+            : matches.map((m) => m.toMap()).toList(),
+      });
+
   Future<void> deleteCompetition(String studentId, String id) =>
       _competitions(studentId).doc(id).delete();
 

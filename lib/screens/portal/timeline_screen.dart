@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/brand_tokens.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -67,7 +68,7 @@ final _selfTimelineRecordsProvider =
 });
 
 /// Actions available on a self-declared timeline event.
-enum _SelfTimelineAction { editDate, delete }
+enum _SelfTimelineAction { editDate, matches, delete }
 
 /// Shows the options bottom sheet for a self-declared timeline event and
 /// executes the chosen action (edit date or delete) via [SelfRecordsService].
@@ -83,6 +84,20 @@ Future<void> _showSelfTimelineOptions(
       event.type == TimelineEventType.stripe;
   final docId = event.selfDocId;
   if (docId == null) return;
+
+  // Competition self events can also carry the aluno's key matches (RIVAIS
+  // R0 — "confrontos da chave"). Resolve the backing doc up-front so the
+  // options sheet can offer the editor with the current match count.
+  SelfCompetition? found;
+  if (!isGrad) {
+    for (final c in self.comps) {
+      if (c.id == docId) {
+        found = c;
+        break;
+      }
+    }
+  }
+  final comp = found;
 
   // Show options sheet.
   final action = await showModalBottomSheet<_SelfTimelineAction>(
@@ -117,6 +132,35 @@ Future<void> _showSelfTimelineOptions(
             ),
             onTap: () => Navigator.pop(c, _SelfTimelineAction.editDate),
           ),
+          if (comp != null)
+            ListTile(
+              leading: Icon(LucideIcons.swords,
+                  size: 20, color: AppTheme.textPrimary),
+              title: Text(
+                'Confrontos da chave',
+                style: AppTheme.bodyMedium
+                    .copyWith(fontWeight: FontWeight.w600),
+              ),
+              trailing: comp.matches.isEmpty
+                  ? null
+                  : Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Brand.ink.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '${comp.matches.length}',
+                        style: AppTheme.labelSmall.copyWith(
+                          fontWeight: FontWeight.w800,
+                          fontFeatures: Brand.tabular,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+              onTap: () => Navigator.pop(c, _SelfTimelineAction.matches),
+            ),
           ListTile(
             leading: Icon(LucideIcons.trash2, size: 20, color: Colors.red),
             title: Text(
@@ -161,6 +205,35 @@ Future<void> _showSelfTimelineOptions(
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
               content: Text('Nao foi possivel atualizar a data.')),
+        );
+      }
+    }
+  } else if (action == _SelfTimelineAction.matches) {
+    if (comp == null) return;
+    final edited = await showModalBottomSheet<List<SelfMatch>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (_) => _SelfMatchesSheet(comp: comp),
+    );
+    if (edited == null) return;
+    try {
+      await SelfRecordsService(self.academyId)
+          .setCompetitionMatches(self.studentId, docId, edited);
+      ref.invalidate(_selfTimelineRecordsProvider(self.studentId));
+      if (context.mounted && edited.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Confrontos salvos no teu cartel.')),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Não foi possível salvar os confrontos.')),
         );
       }
     }
@@ -292,6 +365,17 @@ class TimelineScreen extends ConsumerWidget {
                 ),
               ),
 
+              // RIVAIS R0 — "Adversários de chave" (§6.1): head-to-head
+              // PRIVADO agregado dos confrontos que o aluno registrou nas
+              // próprias competições. Invisível sem >=1 confronto (regra
+              // anti-poluição) — o widget colapsa para zero altura.
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _RivalsCard(comps: selfRecords?.comps ?? const []),
+                ),
+              ),
+
               const SliverToBoxAdapter(child: SizedBox(height: 24)),
 
               // Per-sport filter (multi-sport students only). SportTabBar
@@ -380,6 +464,13 @@ class TimelineScreen extends ConsumerWidget {
     // Reverse for display (newest at top, oldest at bottom)
     final reversedEvents = filteredEvents.reversed.toList();
 
+    // Nº de confrontos de chave por competição self (RIVAIS R0) — alimenta a
+    // linha discreta "N confrontos na chave" do card. Ausência = zero UI.
+    final matchCounts = <String, int>{
+      for (final c in selfRecords?.comps ?? const <SelfCompetition>[])
+        if (c.matches.isNotEmpty) c.id: c.matches.length,
+    };
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -395,6 +486,9 @@ class TimelineScreen extends ConsumerWidget {
           return _TimelineItem(
             event: event,
             isLast: isLast,
+            matchCount: event.selfDocId == null
+                ? 0
+                : (matchCounts[event.selfDocId] ?? 0),
             onOptions: (event.isSelf && onSelfOptions != null)
                 ? () => onSelfOptions(event)
                 : null,
@@ -900,10 +994,15 @@ class _TimelineItem extends StatelessWidget {
   /// Only set for self-declared (auto) events that the student can edit/delete.
   final VoidCallback? onOptions;
 
+  /// Nº de confrontos de chave registrados nesta competição self (RIVAIS R0).
+  /// Zero (o caso de quem não registra) não renderiza NADA.
+  final int matchCount;
+
   const _TimelineItem({
     required this.event,
     required this.isLast,
     this.onOptions,
+    this.matchCount = 0,
   });
 
   Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) {
@@ -1098,6 +1197,32 @@ class _TimelineItem extends StatelessWidget {
                       event.position != null) ...[
                     const SizedBox(height: 12),
                     _PositionBadge(position: event.position!),
+                  ],
+
+                  // Confrontos da chave (RIVAIS R0) — linha discreta, só
+                  // quando o aluno registrou lutas nesta competição.
+                  if (event.type == TimelineEventType.competition &&
+                      matchCount > 0) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(
+                          LucideIcons.swords,
+                          size: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          matchCount == 1
+                              ? '1 confronto na chave'
+                              : '$matchCount confrontos na chave',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                            fontFeatures: Brand.tabular,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
 
                   // Academy badge for competitions (shows which academy they represented)
@@ -1372,6 +1497,875 @@ class _EventConfig {
     required this.color,
     required this.bgColor,
   });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RIVAIS R0 — "Adversários de chave" (§6.1 da pesquisa de retenção)
+//
+// O rival NÃO precisa estar no app: o aluno registra os confrontos dos SEUS
+// campeonatos (selfCompetitions.matches) e o app agrega um head-to-head
+// PRIVADO. Nada do adversário é exposto — é o diário de lutas do próprio
+// aluno (esta tela sempre renderiza currentStudentProvider, e todos os
+// widgets abaixo são privados do arquivo; a Jornada de visitante em
+// public_profile_screen não passa por aqui). Zero backend novo.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Remove acentos comuns de pt-BR — "João" e "Joao" viram o mesmo adversário
+/// na chave de agrupamento do head-to-head.
+String _foldDiacritics(String input) {
+  const map = <String, String>{
+    'á': 'a', 'à': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a',
+    'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+    'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
+    'ó': 'o', 'ò': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
+    'ú': 'u', 'ù': 'u', 'û': 'u', 'ü': 'u',
+    'ç': 'c', 'ñ': 'n',
+  };
+  final sb = StringBuffer();
+  for (final ch in input.split('')) {
+    sb.write(map[ch] ?? ch);
+  }
+  return sb.toString();
+}
+
+/// Normalização de nome/equipe para agrupamento: trim, lowercase, espaços
+/// colapsados e acentos removidos.
+String _normalizeH2H(String s) =>
+    _foldDiacritics(s.trim().toLowerCase()).replaceAll(RegExp(r'\s+'), ' ');
+
+/// Um confronto individual + a competição em que aconteceu.
+class _H2HBout {
+  final SelfCompetition comp;
+  final SelfMatch match;
+  const _H2HBout(this.comp, this.match);
+}
+
+/// Cartel agregado contra um adversário (nome + equipe normalizados).
+class _H2HEntry {
+  /// Grafia mais recente do nome/equipe (a que o aluno digitou por último).
+  final String name;
+  final String? team;
+
+  /// Confrontos, mais recente primeiro.
+  final List<_H2HBout> bouts;
+
+  const _H2HEntry({required this.name, this.team, required this.bouts});
+
+  int get wins => bouts.where((b) => b.match.result == 'win').length;
+  int get losses => bouts.where((b) => b.match.result == 'loss').length;
+  int get draws => bouts.where((b) => b.match.result == 'draw').length;
+  _H2HBout get last => bouts.first;
+
+  /// Verde à frente, blood atrás, ash empatado — a cor do placar.
+  Color get scoreColor => wins > losses
+      ? AppTheme.success
+      : losses > wins
+          ? Brand.blood
+          : Brand.ash;
+}
+
+/// Agrega os confrontos de todas as competições self num cartel por
+/// adversário, ordenado por nº de confrontos (rivalidade nasce de confronto
+/// REPETIDO — Kilduff, §4.2) e, no empate, pelo reencontro mais recente.
+List<_H2HEntry> _aggregateH2H(List<SelfCompetition> comps) {
+  final byKey = <String, List<_H2HBout>>{};
+  for (final c in comps) {
+    for (final m in c.matches) {
+      if (m.opponentName.trim().isEmpty) continue;
+      final key =
+          '${_normalizeH2H(m.opponentName)}|${_normalizeH2H(m.opponentTeam ?? '')}';
+      byKey.putIfAbsent(key, () => []).add(_H2HBout(c, m));
+    }
+  }
+  if (byKey.isEmpty) return const [];
+
+  final entries = <_H2HEntry>[];
+  for (final bouts in byKey.values) {
+    bouts.sort((a, b) => b.comp.date.compareTo(a.comp.date));
+    final latest = bouts.first.match;
+    entries.add(_H2HEntry(
+      name: latest.opponentName.trim(),
+      team: (latest.opponentTeam?.trim().isNotEmpty ?? false)
+          ? latest.opponentTeam!.trim()
+          : null,
+      bouts: bouts,
+    ));
+  }
+  entries.sort((a, b) {
+    final byTotal = b.bouts.length.compareTo(a.bouts.length);
+    if (byTotal != 0) return byTotal;
+    return b.last.comp.date.compareTo(a.last.comp.date);
+  });
+  return entries;
+}
+
+String _resultLabel(String r) =>
+    r == 'win' ? 'Vitória' : (r == 'loss' ? 'Derrota' : 'Empate');
+
+Color _resultColor(String r) => r == 'win'
+    ? AppTheme.success
+    : (r == 'loss' ? Brand.blood : Brand.ash);
+
+/// Card "ADVERSÁRIOS DE CHAVE" da Jornada.
+///
+/// Regra anti-poluição: sem nenhum confronto registrado o widget colapsa para
+/// zero altura — quem não compete nunca vê esta seção. Mostra até 5
+/// adversários; tap numa linha abre o histórico de confrontos.
+class _RivalsCard extends StatelessWidget {
+  final List<SelfCompetition> comps;
+
+  const _RivalsCard({required this.comps});
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = _aggregateH2H(comps);
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    final totalBouts = entries.fold<int>(0, (s, e) => s + e.bouts.length);
+    final visible = entries.take(5).toList();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 20),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.divider),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+              child: Row(
+                children: [
+                  Icon(LucideIcons.swords, size: 14, color: Brand.ink),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'ADVERSÁRIOS DE CHAVE',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.textPrimary,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.1,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    totalBouts == 1 ? '1 CONFRONTO' : '$totalBouts CONFRONTOS',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: Brand.ash,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                      fontFeatures: Brand.tabular,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ...visible.map((e) => _RivalRow(entry: e)),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha de um adversário no card: nome · equipe + placar "VOCÊ W × L" +
+/// microtexto do último confronto. Tap → histórico completo.
+class _RivalRow extends StatelessWidget {
+  final _H2HEntry entry;
+
+  const _RivalRow({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final last = entry.last;
+    final subtitle =
+        'Último: ${last.comp.name} · ${last.comp.date.year} · '
+        '${_resultLabel(last.match.result)}';
+
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        _showRivalBoutsSheet(context, entry);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.team == null
+                        ? entry.name
+                        : '${entry.name} · ${entry.team}',
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            _H2HScoreline(entry: entry),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Placar "VOCÊ 2 × 1" — números w900 tabulares na cor do estado (verde à
+/// frente, blood atrás, ash empate). Empates aparecem como sufixo discreto.
+class _H2HScoreline extends StatelessWidget {
+  final _H2HEntry entry;
+
+  /// Tamanho dos números (permite reuso no sheet de histórico em escala maior).
+  final double scale;
+
+  const _H2HScoreline({required this.entry, this.scale = 1});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = entry.scoreColor;
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: 'VOCÊ ',
+            style: AppTheme.labelSmall.copyWith(
+              color: Brand.ash,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+              fontSize: (AppTheme.labelSmall.fontSize ?? 11) * scale,
+            ),
+          ),
+          TextSpan(
+            text: '${entry.wins}',
+            style: AppTheme.titleMedium.copyWith(
+              color: color,
+              fontWeight: FontWeight.w900,
+              fontFeatures: Brand.tabular,
+              fontSize: (AppTheme.titleMedium.fontSize ?? 16) * scale,
+            ),
+          ),
+          TextSpan(
+            text: ' × ',
+            style: AppTheme.bodySmall.copyWith(
+              color: Brand.ash,
+              fontWeight: FontWeight.w700,
+              fontSize: (AppTheme.bodySmall.fontSize ?? 12) * scale,
+            ),
+          ),
+          TextSpan(
+            text: '${entry.losses}',
+            style: AppTheme.titleMedium.copyWith(
+              color: color,
+              fontWeight: FontWeight.w900,
+              fontFeatures: Brand.tabular,
+              fontSize: (AppTheme.titleMedium.fontSize ?? 16) * scale,
+            ),
+          ),
+          if (entry.draws > 0)
+            TextSpan(
+              text: ' · ${entry.draws}E',
+              style: AppTheme.labelSmall.copyWith(
+                color: Brand.ash,
+                fontWeight: FontWeight.w700,
+                fontFeatures: Brand.tabular,
+                fontSize: (AppTheme.labelSmall.fontSize ?? 11) * scale,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Histórico de confrontos contra UM adversário: evento, ano e resultado de
+/// cada luta (leitura pura — a edição vive no sheet da própria competição).
+void _showRivalBoutsSheet(BuildContext context, _H2HEntry entry) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppTheme.surface,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+    ),
+    builder: (c) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(c).size.height * 0.75,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 12),
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.divider,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.name.toUpperCase(),
+                    style: AppTheme.titleMedium.copyWith(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.8,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (entry.team != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      entry.team!,
+                      style: AppTheme.labelSmall.copyWith(
+                        color: Brand.ash,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.4,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  _H2HScoreline(entry: entry, scale: 1.4),
+                  const SizedBox(height: 6),
+                ],
+              ),
+            ),
+            const Divider(height: 17, thickness: 1),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.only(bottom: 12),
+                itemCount: entry.bouts.length,
+                separatorBuilder: (_, _) => Divider(
+                  height: 1,
+                  thickness: 1,
+                  indent: 20,
+                  endIndent: 20,
+                  color: AppTheme.divider,
+                ),
+                itemBuilder: (_, i) {
+                  final bout = entry.bouts[i];
+                  final color = _resultColor(bout.match.result);
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 12),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Center(
+                            child: Text(
+                              _resultLabel(bout.match.result)[0],
+                              style: AppTheme.labelSmall.copyWith(
+                                color: color,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                bout.comp.name.isNotEmpty
+                                    ? bout.comp.name
+                                    : 'Competição',
+                                style: AppTheme.bodyMedium.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${bout.comp.date.year}',
+                                style: AppTheme.labelSmall.copyWith(
+                                  color: AppTheme.textSecondary,
+                                  fontFeatures: Brand.tabular,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          _resultLabel(bout.match.result),
+                          style: AppTheme.labelSmall.copyWith(
+                            color: color,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// Rascunho editável de um confronto no sheet de captura.
+class _MatchDraft {
+  final TextEditingController name;
+  final TextEditingController team;
+
+  /// `'win' | 'loss' | 'draw'` — null enquanto o aluno não escolher.
+  String? result;
+
+  _MatchDraft({String name = '', String team = '', this.result})
+      : name = TextEditingController(text: name),
+        team = TextEditingController(text: team);
+
+  void dispose() {
+    name.dispose();
+    team.dispose();
+  }
+}
+
+/// Sheet de captura "CONFRONTOS DA CHAVE" de uma competição self-declarada.
+///
+/// Aberto pelas opções (…) do evento na Jornada. Devolve a lista editada via
+/// `Navigator.pop` (null = cancelou); o caller persiste. Máximo de 8
+/// confrontos por competição. Linhas totalmente em branco são ignoradas.
+class _SelfMatchesSheet extends StatefulWidget {
+  final SelfCompetition comp;
+
+  const _SelfMatchesSheet({required this.comp});
+
+  @override
+  State<_SelfMatchesSheet> createState() => _SelfMatchesSheetState();
+}
+
+class _SelfMatchesSheetState extends State<_SelfMatchesSheet> {
+  static const int _maxMatches = 8;
+
+  late final List<_MatchDraft> _drafts = widget.comp.matches
+      .map((m) => _MatchDraft(
+            name: m.opponentName,
+            team: m.opponentTeam ?? '',
+            result: m.result,
+          ))
+      .toList();
+
+  @override
+  void dispose() {
+    for (final d in _drafts) {
+      d.dispose();
+    }
+    super.dispose();
+  }
+
+  /// Mensagem de validação exibida INLINE (um sheet modal cobre o SnackBar
+  /// do Scaffold raiz). Limpa em qualquer interação.
+  String? _error;
+
+  void _addDraft() {
+    if (_drafts.length >= _maxMatches) return;
+    HapticFeedback.lightImpact();
+    setState(() {
+      _error = null;
+      _drafts.add(_MatchDraft());
+    });
+  }
+
+  void _removeDraft(int index) {
+    final removed = _drafts[index];
+    setState(() {
+      _error = null;
+      _drafts.removeAt(index);
+    });
+    // Dispose after the frame so the fields aren't torn down mid-build.
+    WidgetsBinding.instance.addPostFrameCallback((_) => removed.dispose());
+  }
+
+  void _save() {
+    final matches = <SelfMatch>[];
+    for (final d in _drafts) {
+      final name = d.name.text.trim();
+      final team = d.team.text.trim();
+      if (name.isEmpty && team.isEmpty) continue; // linha em branco: ignora
+      if (name.isEmpty) {
+        setState(
+            () => _error = 'Cada confronto precisa do nome do adversário.');
+        return;
+      }
+      if (d.result == null) {
+        setState(() =>
+            _error = 'Marca o resultado (V, E ou D) de cada confronto.');
+        return;
+      }
+      matches.add(SelfMatch(
+        opponentName: name,
+        opponentTeam: team.isEmpty ? null : team,
+        result: d.result!,
+      ));
+    }
+    Navigator.pop(context, matches);
+  }
+
+  InputDecoration _fieldDecoration(String hint) => InputDecoration(
+        hintText: hint,
+        hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.textDisabled),
+        counterText: '',
+        isDense: true,
+        filled: true,
+        fillColor: AppTheme.surface,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: AppTheme.divider),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Brand.ink, width: 1.4),
+        ),
+      );
+
+  Widget _draftCard(int index) {
+    final draft = _drafts[index];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Brand.bone,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'CONFRONTO ${index + 1}',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: Brand.ash,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1,
+                    fontFeatures: Brand.tabular,
+                  ),
+                ),
+              ),
+              GestureDetector(
+                onTap: () => _removeDraft(index),
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: Icon(LucideIcons.x, size: 16, color: Brand.ash),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: draft.name,
+            textCapitalization: TextCapitalization.words,
+            maxLength: 40,
+            style: AppTheme.bodyMedium,
+            decoration: _fieldDecoration('Nome do adversário'),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: draft.team,
+            textCapitalization: TextCapitalization.words,
+            maxLength: 40,
+            style: AppTheme.bodyMedium,
+            decoration: _fieldDecoration('Equipe (opcional)'),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _ResultChoiceChip(
+                  label: 'VITÓRIA',
+                  color: AppTheme.success,
+                  selected: draft.result == 'win',
+                  onTap: () => setState(() {
+                    _error = null;
+                    draft.result = 'win';
+                  }),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ResultChoiceChip(
+                  label: 'EMPATE',
+                  color: Brand.ash,
+                  selected: draft.result == 'draw',
+                  onTap: () => setState(() {
+                    _error = null;
+                    draft.result = 'draw';
+                  }),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ResultChoiceChip(
+                  label: 'DERROTA',
+                  color: Brand.blood,
+                  selected: draft.result == 'loss',
+                  onTap: () => setState(() {
+                    _error = null;
+                    draft.result = 'loss';
+                  }),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    return Padding(
+      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: media.size.height * 0.85),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(LucideIcons.swords, size: 16, color: Brand.ink),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'CONFRONTOS DA CHAVE',
+                            style: AppTheme.titleMedium.copyWith(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.1,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${widget.comp.name} · ${widget.comp.date.year}',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: Brand.ash,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.4,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_drafts.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Text(
+                            'Registra teus confrontos e monta teu cartel '
+                            'de chave.',
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ...List.generate(_drafts.length, _draftCard),
+                      if (_drafts.length < _maxMatches)
+                        OutlinedButton.icon(
+                          onPressed: _addDraft,
+                          icon: const Icon(LucideIcons.plus, size: 16),
+                          label: Text(
+                            'ADICIONAR CONFRONTO',
+                            style: AppTheme.labelSmall.copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Brand.ink,
+                            side: BorderSide(color: AppTheme.divider),
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        )
+                      else
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            'Máximo de 8 confrontos por competição.',
+                            style: AppTheme.labelSmall.copyWith(
+                              color: Brand.ash,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                  child: Text(
+                    _error!,
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.error,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: FilledButton(
+                    onPressed: _save,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Brand.ink,
+                      foregroundColor: Brand.bone,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'SALVAR CONFRONTOS',
+                      style: AppTheme.labelMedium.copyWith(
+                        color: Brand.bone,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Chip de resultado V/E/D do sheet de captura.
+class _ResultChoiceChip extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ResultChoiceChip({
+    required this.label,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        height: 38,
+        decoration: BoxDecoration(
+          color: selected
+              ? color.withValues(alpha: 0.12)
+              : AppTheme.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? color : AppTheme.divider,
+            width: selected ? 1.4 : 1,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: AppTheme.labelSmall.copyWith(
+              color: selected ? color : Brand.ash,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Academy indicator for multi-academy users

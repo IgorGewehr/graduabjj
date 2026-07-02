@@ -20,8 +20,10 @@
  *    academia, recomputa as janelas rolantes de TODOS os alunos ativos a
  *    partir de 1 query range de attendance (últimos 30d) — corrige drift do
  *    incremental —, calcula o score de risco v1 (PORT fiel da fórmula
- *    40/30/20/10 de lib/services/retention_service.dart:188-396), fecha os
- *    outcomes de retentionContacts pendentes e grava o snapshot diário em
+ *    40/30/20/10 de lib/services/retention_service.dart:188-396), calcula a
+ *    flag anti-"blue belt blues" (§3.3/§6.3 da pesquisa de retenção — custo:
+ *    +1 query por academia em beltProgressions), fecha os outcomes de
+ *    retentionContacts pendentes e grava o snapshot diário em
  *    academies/{aid}/retentionSnapshots/{YYYY-MM-DD} (doc-id determinístico —
  *    re-rodar no mesmo dia sobrescreve, idempotente).
  *
@@ -35,6 +37,7 @@
  *     riskLevel: 'low'|'medium'|'high'|'critical',
  *     riskComputedAt: Timestamp,
  *     riskFormulaVersion: 1,
+ *     bluesRisk: bool,   // anti-"blue belt blues" — SEMPRE explícito
  *   }
  *
  * INVARIANTES (§10 do plano — não-negociáveis):
@@ -376,6 +379,67 @@ function differenceInMonths(a, b) {
 }
 
 // ============================================================
+// Anti-"blue belt blues" (§3.3/§6.3 da pesquisa de retenção)
+// ============================================================
+
+/** Janela de tempo-na-faixa-azul (meses) em que o risco de blues se aplica. */
+const BLUES_MIN_MONTHS = 6;
+const BLUES_MAX_MONTHS = 30;
+/** Inatividade (dias desde a última presença) que sozinha indica blues. */
+const BLUES_INACTIVITY_DAYS = 10;
+/** Tamanho de cada janela da comparação de tendência (semanas ISO completas). */
+const BLUES_TREND_WEEKS = 4;
+
+/**
+ * Modalidade primária do doc cru do aluno — espelha Student.getPrimarySport():
+ * `primarySport`, senão o primeiro de `sports`, senão 'bjj' (back-compat).
+ */
+function primarySportOf(s) {
+  if (typeof s.primarySport === 'string' && s.primarySport) return s.primarySport;
+  if (Array.isArray(s.sports) && s.sports.length > 0 && s.sports[0]) {
+    return String(s.sports[0]);
+  }
+  return 'bjj';
+}
+
+/**
+ * Faixa de BJJ do doc cru do aluno — espelha Student.getGrade(SportId.bjj):
+ * sportData.bjj.currentGrade quando existe, senão o legado currentBelt.
+ */
+function bjjBeltOf(s) {
+  const sd = s.sportData && typeof s.sportData === 'object' ? s.sportData.bjj : null;
+  if (sd && typeof sd === 'object') return String(sd.currentGrade || 'white');
+  return String(s.currentBelt || 'white');
+}
+
+/**
+ * Flag anti-"blue belt blues" — o maior vazamento documentado do funil
+ * (~50% desistem na faixa-azul; §3.3). Função PURA (exportada p/ teste):
+ *
+ *   faixa AZUL de BJJ como esporte principal (blues é conceito de BJJ —
+ *   academias multi-esporte só flagam quando o primário é bjj)
+ *   E tempo na faixa entre 6 e 30 meses (medido pela promoção mais recente
+ *   PARA azul em beltProgressions; `monthsInBelt` null = sem registro de
+ *   promoção → NUNCA flaga: sem dado, sem alarme falso)
+ *   E tendência de frequência caindo: soma das 4 semanas ISO COMPLETAS mais
+ *   recentes < soma das 4 anteriores, OU >= 10 dias sem treinar.
+ *
+ * A semana ISO corrente fica FORA da comparação de tendência: o job roda
+ * diariamente e a semana parcial compararia 3½ semanas contra 4 — a flag
+ * oscilaria conforme o dia da semana. Com 8 semanas completas ela só muda
+ * na virada de semana (ou via o gatilho de inatividade, que é diário).
+ */
+function computeBluesRisk({
+  primarySport, belt, monthsInBelt, recentWeeksSum, priorWeeksSum, daysSinceLastAttendance,
+}) {
+  if (primarySport !== 'bjj' || belt !== 'blue') return false;
+  if (monthsInBelt == null) return false; // sem promoção registrada — sem alarme falso
+  if (monthsInBelt < BLUES_MIN_MONTHS || monthsInBelt > BLUES_MAX_MONTHS) return false;
+  return recentWeeksSum < priorWeeksSum ||
+    daysSinceLastAttendance >= BLUES_INACTIVITY_DAYS;
+}
+
+// ============================================================
 // Job diário: computeRetentionDaily
 // ============================================================
 
@@ -452,6 +516,26 @@ async function computeAcademyRetention(academyId, now = new Date()) {
     overdueByStudent.set(f.studentId, (overdueByStudent.get(f.studentId) || 0) + 1);
   }
 
+  // ── Anti-blues: promoção mais recente PARA azul, por aluno ────────────────
+  // CUSTO: +1 query por academia (beltProgressions where newBelt == 'blue' —
+  // igualdade em campo único, índice automático). Traz também os graus DENTRO
+  // da azul (previousBelt == 'blue'); esses são descartados em memória porque
+  // um grau não reinicia o relógio de tempo-na-faixa. Progressões legadas sem
+  // `sport` são BJJ (mesma regra de BeltProgression.getSport).
+  const blueSinceByStudent = new Map(); // studentId → Date da chegada à azul
+  const promoSnap = await acadRef.collection('beltProgressions')
+    .where('newBelt', '==', 'blue')
+    .get();
+  for (const doc of promoSnap.docs) {
+    const p = doc.data() || {};
+    if ((p.sport || 'bjj') !== 'bjj') continue; // azul de outra modalidade não é blues
+    if (String(p.previousBelt || '') === 'blue') continue; // grau na azul, não promoção
+    const when = readDate(p.promotionDate);
+    if (!p.studentId || !when) continue;
+    const cur = blueSinceByStudent.get(p.studentId);
+    if (!cur || when.getTime() > cur.getTime()) blueSinceByStudent.set(p.studentId, when);
+  }
+
   // ── Alunos (uma leitura: ativos p/ recompute, ex-alunos p/ churn) ──────────
   const studentsSnap = await acadRef.collection('students').get();
 
@@ -469,10 +553,25 @@ async function computeAcademyRetention(academyId, now = new Date()) {
     }
   }
 
+  // Janelas da tendência do blues: as 4 semanas ISO COMPLETAS mais recentes
+  // vs as 4 anteriores (i = 1..8 semanas atrás — cabem exatas na janela de
+  // ~9 semanas dos weeklyBuckets; a corrente é parcial e fica de fora, ver
+  // computeBluesRisk).
+  const bluesRecentKeys = [];
+  const bluesPriorKeys = [];
+  {
+    const currentMonday = mondayOf(spCivilDate(now));
+    for (let i = 1; i <= 2 * BLUES_TREND_WEEKS; i++) {
+      const key = isoWeekKeyFromCivil(new Date(currentMonday.getTime() - i * MS_WEEK));
+      (i <= BLUES_TREND_WEEKS ? bluesRecentKeys : bluesPriorKeys).push(key);
+    }
+  }
+
   const batcher = makeBatcher();
   const monthKey = spMonthKey(now);
 
   const atRisk = { critical: 0, high: 0, medium: 0 };
+  let bluesFlagged = 0;
   let activeStudents = 0;
   let churnedThisMonth = 0;
   let totalAttendance30d = 0;
@@ -566,6 +665,24 @@ async function computeAcademyRetention(academyId, now = new Date()) {
       if (!allowed.has(key)) updates[`retention.weeklyBuckets.${key}`] = FieldValue.delete();
     }
 
+    // ── Anti-blues (§6.3): flag SEMPRE explícita (true/false) p/ o radar ────
+    // filtrar com confiança. Buckets lidos no estado PÓS-run: semanas dentro
+    // da janela de 30d saem do recompute; mais antigas, do persistido.
+    const bucketAfterRun = (key) => (recomputableKeys.has(key)
+      ? (freshBuckets[key] || 0)
+      : (Number(existingBuckets[key]) || 0));
+    const blueSince = blueSinceByStudent.get(sDoc.id) || null;
+    const bluesRisk = computeBluesRisk({
+      primarySport: primarySportOf(s),
+      belt: bjjBeltOf(s),
+      monthsInBelt: blueSince ? differenceInMonths(now, blueSince) : null,
+      recentWeeksSum: bluesRecentKeys.reduce((sum, k) => sum + bucketAfterRun(k), 0),
+      priorWeeksSum: bluesPriorKeys.reduce((sum, k) => sum + bucketAfterRun(k), 0),
+      daysSinceLastAttendance,
+    });
+    if (bluesRisk) bluesFlagged++;
+    updates['retention.bluesRisk'] = bluesRisk;
+
     batcher.update(sDoc.ref, updates);
     await batcher.maybeFlush();
   }
@@ -635,7 +752,8 @@ async function computeAcademyRetention(academyId, now = new Date()) {
   console.log(
     `[retentionDaily] academy ${academyId}: ${activeStudents} ativos, ` +
     `${attSnap.size} presenças/30d, atRisk c=${atRisk.critical}/h=${atRisk.high}/m=${atRisk.medium}, ` +
-    `churnMês=${churnedThisMonth}, contatos fechados=${flippedById.size}, writes=${written}`
+    `blues=${bluesFlagged}, churnMês=${churnedThisMonth}, ` +
+    `contatos fechados=${flippedById.size}, writes=${written}`
   );
 }
 
@@ -665,4 +783,5 @@ exports.computeRetentionDaily = onSchedule(
 // Reuso/teste (mesmo padrão de processAcademyGamification).
 exports.computeAcademyRetention = computeAcademyRetention;
 exports.computeRiskScoreV1 = computeRiskScoreV1;
+exports.computeBluesRisk = computeBluesRisk;
 exports.isoWeekKey = isoWeekKey;

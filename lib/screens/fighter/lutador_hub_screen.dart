@@ -13,6 +13,7 @@ import '../../providers/portal_providers.dart';
 import '../../providers/student_provider.dart';
 import '../../services/feed_posts_service.dart';
 import '../../services/settings_service.dart';
+import '../../services/streak_freeze_service.dart';
 import '../../services/weekly_streak.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/polish/polish.dart';
@@ -37,6 +38,16 @@ TextStyle _eyebrow(Color c, double s) => TextStyle(
 
 Color _onBelt(Color belt) =>
     belt.computeLuminance() > 0.6 ? _T.ink : Colors.white;
+
+/// Data curta pt-BR ('15 AGO'; ganha o ano quando não é o corrente).
+String _shortDatePt(DateTime d) {
+  const m = [
+    'JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', //
+    'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ',
+  ];
+  final s = '${d.day} ${m[d.month - 1]}';
+  return d.year == DateTime.now().year ? s : '$s ${d.year}';
+}
 
 String _nameInitials(String name) {
   final parts = name.trim().split(RegExp(r'\s+'));
@@ -84,6 +95,18 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
         ? student.nickname!
         : (student?.fullName ?? user?.displayName ?? 'Lutador');
 
+    // ATIVAÇÃO 1ª SESSÃO (§2.1): zero treinos verificados E zero histórico de
+    // streak (presença ∪ self-log) → o espaço streak/stats vira UM convite ao
+    // 1º registro. É um ESTADO: some para sempre depois do 1º treino.
+    final streakInfo = student == null
+        ? null
+        : ref.watch(studentStreakInfoProvider(student.id)).valueOrNull;
+    final isFirstStep = student != null &&
+        streakInfo != null &&
+        student.totalAttendanceCount == 0 &&
+        streakInfo.currentWeeks == 0 &&
+        streakInfo.recordWeeks == 0;
+
     return Scaffold(
       backgroundColor: _T.bone,
       body: SafeArea(
@@ -109,12 +132,18 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
                   : null,
             ),
             const SizedBox(height: 18),
-            if (student != null)
-              _StreakCard(studentId: student.id)
-            else
+            if (student == null) ...[
               _emptyStreak(),
-            const SizedBox(height: 14),
-            if (student != null) ...[
+              const SizedBox(height: 14),
+              _unlinked(),
+            ] else if (isFirstStep) ...[
+              const _FirstStepCard(),
+              const SizedBox(height: 22),
+              _FriendsSection(),
+            ] else ...[
+              _StreakCard(studentId: student.id),
+              const SizedBox(height: 14),
+              _MissionCard(goal: student.activeGoal),
               _GraduationCard(
                 studentId: student.id,
                 sport: sport,
@@ -125,8 +154,7 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
               _StatsCard(student: student, beltColor: beltColor),
               const SizedBox(height: 22),
               _FriendsSection(),
-            ] else
-              _unlinked(),
+            ],
           ],
         ),
       ),
@@ -362,19 +390,32 @@ class _MiniBelt extends StatelessWidget {
 }
 
 // =============================================================================
-// STREAK CARD (dark) — sequência + recorde + a semana.
+// STREAK CARD (dark) — sequência + recorde + a semana. FREEZE (§6.4): a semana
+// corrente pode ser PROTEGIDA (lesão/descanso) — não conta como treinada, mas
+// não quebra a corrente. Nunca quebra silenciosa; nunca cobrança. A ação é
+// discreta: snowflake no canto ou long-press no card.
 // =============================================================================
-class _StreakCard extends ConsumerWidget {
+class _StreakCard extends ConsumerStatefulWidget {
   const _StreakCard({required this.studentId});
   final String studentId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_StreakCard> createState() => _StreakCardState();
+}
+
+class _StreakCardState extends ConsumerState<_StreakCard> {
+  /// Override OTIMISTA do congelamento da semana corrente (rollback no erro).
+  bool? _frozenOverride;
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
     // Streak SEMANAL: uma SEMANA (seg→dom) conta se teve >=1 treino (presença
     // ou self-log). `currentWeeks` = semanas consecutivas até a atual (com
     // GRACE: a atual sem treino fica pendente, não quebra). `weeks` = strip das
     // últimas ~8 semanas (antiga → atual).
-    final info = ref.watch(studentStreakInfoProvider(studentId)).valueOrNull;
+    final info =
+        ref.watch(studentStreakInfoProvider(widget.studentId)).valueOrNull;
     final current = info?.currentWeeks ?? 0;
     final record = info?.recordWeeks ?? 0;
     final weeks = info?.weeks ?? const <WeekCell>[];
@@ -382,57 +423,283 @@ class _StreakCard extends ConsumerWidget {
     // Nenhum treino em todo o histórico (record acumula tudo) → estado zero.
     if (record == 0 && current == 0) return _zeroState();
 
-    return _DarkCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(current > 0 ? 'SEQUÊNCIA ATIVA' : 'SEQUÊNCIA',
-                  style: _eyebrow(_T.ash, 12)),
-              if (record > 0) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: _T.blood.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text('RECORDE $record', style: _eyebrow(_T.blood, 10)),
+    // `frozenWeeksProvider` = espelho ao vivo de `users/{uid}.streakFreezes`
+    // ('YYYY-Www' → 'lesao'|'descanso'). Só a chave da semana CORRENTE importa
+    // aqui — o cálculo de ponte acontece no provider do streak.
+    final frozenWeeks = ref.watch(frozenWeeksProvider).valueOrNull ??
+        const <String, String>{};
+    final frozen = _frozenOverride ??
+        frozenWeeks.containsKey(isoWeekKeyOf(DateTime.now()));
+
+    return GestureDetector(
+      onLongPress: () => _openFreezeSheet(frozen),
+      child: _DarkCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                      frozen
+                          ? 'SEQUÊNCIA'
+                          : (current > 0 ? 'SEQUÊNCIA ATIVA' : 'SEQUÊNCIA'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _eyebrow(_T.ash, 12)),
                 ),
+                if (frozen) ...[
+                  // Chip discreto de semana protegida — toca pra reativar.
+                  const SizedBox(width: 8),
+                  Pressable(
+                    onTap: () => _openFreezeSheet(true),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(LucideIcons.snowflake,
+                              size: 10, color: _T.bone),
+                          const SizedBox(width: 4),
+                          Text('SEMANA PROTEGIDA',
+                              style: _eyebrow(_T.bone, 10)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ] else if (record > 0) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _T.blood.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child:
+                        Text('RECORDE $record', style: _eyebrow(_T.blood, 10)),
+                  ),
+                ],
+                const Spacer(),
+                // Ação discreta de freeze — presença mínima, mas descobrível
+                // (long-press no card leva ao mesmo lugar).
+                Pressable(
+                  onTap: () => _openFreezeSheet(frozen),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(LucideIcons.snowflake,
+                        size: 15,
+                        color: frozen
+                            ? _T.bone
+                            : Colors.white.withValues(alpha: 0.35)),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Icon(LucideIcons.flame, color: _T.blood, size: 26),
               ],
-              const Spacer(),
-              const Icon(LucideIcons.flame, color: _T.blood, size: 26),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Text('$current',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 52,
-                      height: 1.0,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -2,
-                      fontFeatures: _T.tab)),
-              const SizedBox(width: 12),
-              Text(current == 1 ? 'SEMANA\nSEGUIDA' : 'SEMANAS\nSEGUIDAS',
-                  style: const TextStyle(
-                      color: _T.blood,
-                      fontSize: 15,
-                      height: 1.1,
-                      letterSpacing: 0.8,
-                      fontWeight: FontWeight.w900)),
-            ],
-          ),
-          const SizedBox(height: 18),
-          if (weeks.isNotEmpty) _WeekStrip(weeks: weeks),
-        ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text('$current',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 52,
+                        height: 1.0,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -2,
+                        fontFeatures: _T.tab)),
+                const SizedBox(width: 12),
+                Text(current == 1 ? 'SEMANA\nSEGUIDA' : 'SEMANAS\nSEGUIDAS',
+                    style: const TextStyle(
+                        color: _T.blood,
+                        fontSize: 15,
+                        height: 1.1,
+                        letterSpacing: 0.8,
+                        fontWeight: FontWeight.w900)),
+              ],
+            ),
+            const SizedBox(height: 18),
+            if (weeks.isNotEmpty) _WeekStrip(weeks: weeks),
+          ],
+        ),
       ),
     );
+  }
+
+  /// Sheet fighter-style de PROTEÇÃO DA SEMANA (§6.4 — freeze explícito de
+  /// lesão/descanso). Copy acolhedora: proteger nunca soa como falha.
+  Future<void> _openFreezeSheet(bool frozen) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _T.ink,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (c) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 10),
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 18, 24, 6),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.snowflake, size: 18, color: _T.blood),
+                  const SizedBox(width: 10),
+                  Text(frozen ? 'SEMANA PROTEGIDA' : 'PROTEGER A SEMANA',
+                      style: const TextStyle(
+                          color: _T.bone,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.0)),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
+              child: Text(
+                frozen
+                    ? 'Essa semana não quebra tua corrente. Reativa quando '
+                        'voltar ao tatame.'
+                    : 'Seu streak fica protegido. Volta quando der.',
+                style: TextStyle(
+                    color: _T.ash,
+                    fontSize: 13.5,
+                    height: 1.4,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (frozen)
+              _freezeOption(c,
+                  icon: LucideIcons.flame,
+                  label: 'REATIVAR A SEMANA',
+                  sub: 'voltar a contar a partir de agora',
+                  value: 'unfreeze')
+            else ...[
+              _freezeOption(c,
+                  icon: LucideIcons.moon,
+                  label: 'SEMANA DE DESCANSO',
+                  sub: 'recuperar também faz parte do jogo',
+                  value: StreakFreezeService.reasonDescanso),
+              _freezeOption(c,
+                  icon: LucideIcons.heartPulse,
+                  label: 'LESIONADO',
+                  sub: 'cuida de ti primeiro — sem pressa',
+                  value: StreakFreezeService.reasonLesao),
+            ],
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'unfreeze') {
+      await _setFrozen(frozen: false);
+    } else {
+      await _setFrozen(frozen: true, reason: choice);
+    }
+  }
+
+  Widget _freezeOption(
+    BuildContext sheetContext, {
+    required IconData icon,
+    required String label,
+    required String sub,
+    required String value,
+  }) {
+    return Pressable(
+      onTap: () => Navigator.pop(sheetContext, value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              alignment: Alignment.center,
+              child: Icon(icon, size: 19, color: _T.bone),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: const TextStyle(
+                          color: _T.bone,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.8)),
+                  const SizedBox(height: 2),
+                  Text(sub,
+                      style: TextStyle(
+                          color: _T.ash,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Congela/descongela a semana ISO corrente — OTIMISTA com rollback no erro.
+  /// Invalida o streak: semana protegida não conta como treinada, mas vira
+  /// PONTE (não quebra a continuidade).
+  Future<void> _setFrozen({required bool frozen, String? reason}) async {
+    if (_busy) return;
+    final uid = ref.read(currentUserProvider).valueOrNull?.id;
+    if (uid == null || uid.isEmpty) return;
+    final prev = _frozenOverride;
+    setState(() {
+      _busy = true;
+      _frozenOverride = frozen;
+    });
+    try {
+      final service = StreakFreezeService(uid);
+      if (frozen) {
+        await service
+            .freezeCurrentWeek(reason ?? StreakFreezeService.reasonDescanso);
+      } else {
+        await service.unfreezeCurrentWeek();
+      }
+      ref.invalidate(frozenWeeksProvider);
+      ref.invalidate(studentStreakInfoProvider(widget.studentId));
+    } catch (_) {
+      if (mounted) {
+        setState(() => _frozenOverride = prev);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content:
+              Text('Não deu pra atualizar a proteção agora. Tenta de novo.'),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Widget _zeroState() => _DarkCard(
@@ -523,6 +790,153 @@ class _WeekStrip extends StatelessWidget {
                 ),
               )
             : null,
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// ATIVAÇÃO 1ª SESSÃO (§2.1) — zero treinos: o espaço do streak/stats vira UM
+// convite ao 1º registro (1 ação significativa na 1ª sessão ≈ 2-3x retenção).
+// É um convite, não um tutorial — e some para sempre depois do 1º treino.
+// =============================================================================
+class _FirstStepCard extends StatelessWidget {
+  const _FirstStepCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return _DarkCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('PRIMEIRO PASSO', style: _eyebrow(_T.ash, 12)),
+              const Spacer(),
+              const Icon(LucideIcons.flame, color: _T.blood, size: 26),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Text('REGISTRA TEU\nPRIMEIRO TREINO.',
+              style: TextStyle(
+                  color: _T.bone,
+                  height: 1.1,
+                  fontSize: 22,
+                  letterSpacing: 0.2,
+                  fontWeight: FontWeight.w900)),
+          const SizedBox(height: 8),
+          Text(
+            'Leva 5 segundos — e é aqui que a tua corrente acende.',
+            style: TextStyle(
+                color: _T.ash,
+                fontSize: 13.5,
+                height: 1.4,
+                fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 16),
+          Pressable(
+            onTap: () => context.go('/portal/diario'),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                  color: _T.blood, borderRadius: BorderRadius.circular(8)),
+              alignment: Alignment.center,
+              child: const Text('REGISTRAR TREINO',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.0)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// MISSÃO ATIVA (anti-blues §6.3, arma 1) — meta técnica de curto prazo que o
+// PROFESSOR definiu. É um ESTADO, não uma seção: invisível sem meta (ou com
+// meta vencida — missão velha nunca vira cobrança).
+// =============================================================================
+class _MissionCard extends StatelessWidget {
+  const _MissionCard({required this.goal});
+  final StudentGoal? goal;
+
+  @override
+  Widget build(BuildContext context) {
+    final g = goal;
+    if (g == null || g.text.trim().isEmpty) return const SizedBox.shrink();
+    final until = g.until;
+    if (until != null) {
+      final endOfDay = DateTime(until.year, until.month, until.day, 23, 59, 59);
+      if (DateTime.now().isAfter(endOfDay)) return const SizedBox.shrink();
+    }
+    final signedBy = g.setByName?.trim();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: _T.card,
+          borderRadius: BorderRadius.circular(16),
+          border:
+              Border.all(color: _T.blood.withValues(alpha: 0.22), width: 1.2),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: _T.blood.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              alignment: Alignment.center,
+              child: const Icon(LucideIcons.target, size: 20, color: _T.blood),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text('MISSÃO DO PROFESSOR',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _eyebrow(_T.blood, 10.5)),
+                      ),
+                      if (until != null)
+                        Text('ATÉ ${_shortDatePt(until)}',
+                            style: _eyebrow(_T.ash, 10)),
+                    ],
+                  ),
+                  const SizedBox(height: 7),
+                  Text(g.text.trim(),
+                      style: const TextStyle(
+                          color: _T.ink,
+                          fontSize: 15,
+                          height: 1.35,
+                          fontWeight: FontWeight.w800)),
+                  if (signedBy != null && signedBy.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text('— $signedBy',
+                        style: const TextStyle(
+                            color: _T.smoke,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700)),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -670,16 +1084,23 @@ class _StatsCard extends ConsumerWidget {
                   letterSpacing: -0.5,
                   fontFeatures: _T.tab)),
           const SizedBox(height: 5),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.verified_outlined, size: 10, color: _T.smoke),
-              const SizedBox(width: 3),
-              Text('AULAS VERIFICADAS',
-                  textAlign: TextAlign.center,
-                  style: _eyebrow(_T.smoke, 9)),
-            ],
+          // Text.rich (não Row): o rótulo é longo e a célula do stat é estreita —
+          // com WidgetSpan o ícone acompanha o texto e a linha QUEBRA graciosa
+          // em telas estreitas em vez de estourar (RenderFlex overflow).
+          Text.rich(
+            TextSpan(children: [
+              const WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: Padding(
+                  padding: EdgeInsets.only(right: 3),
+                  child:
+                      Icon(Icons.verified_outlined, size: 10, color: _T.smoke),
+                ),
+              ),
+              TextSpan(text: 'AULAS VERIFICADAS'),
+            ]),
+            textAlign: TextAlign.center,
+            style: _eyebrow(_T.smoke, 9),
           ),
         ],
       );

@@ -29,6 +29,7 @@ import '../../widgets/shared/week_strip.dart';
 import 'physical_assessment_form_screen.dart';
 import 'student_syllabus_tab.dart';
 import 'student_cartel_tab.dart';
+import 'widgets/technical_goal_dialog.dart';
 
 /// Admin Student Detail Screen - View and manage student
 class AdminStudentDetailScreen extends ConsumerStatefulWidget {
@@ -391,6 +392,14 @@ class _AdminStudentDetailScreenState
       expandedHeight: 200,
       pinned: true,
       actions: [
+        // Meta técnica de curto prazo (anti-"blue belt blues", §6.3 arma 1):
+        // o professor define, o aluno vê como missão ativa no hub dele.
+        if (canEdit)
+          IconButton(
+            icon: const Icon(LucideIcons.target),
+            tooltip: 'Meta técnica',
+            onPressed: _showGoalDialog,
+          ),
         if (canEdit)
           IconButton(
             icon: const Icon(Icons.edit),
@@ -580,6 +589,127 @@ class _AdminStudentDetailScreenState
           barWidth: 5,
         )),
       ],
+    );
+  }
+
+  // ============================================
+  // Meta técnica (anti-"blue belt blues", §6.3 arma 1)
+  // ============================================
+
+  /// Abre o dialog de meta técnica — o MESMO usado pelo playbook blues do
+  /// radar de retenção. Staff-only (o botão já é gateado por permissão).
+  Future<void> _showGoalDialog() async {
+    final staff = ref.read(currentUserProvider).valueOrNull;
+    final result = await showTechnicalGoalDialog(
+      context,
+      studentId: _student!.id,
+      studentName: _student!.fullName,
+      current: _student!.activeGoal,
+      staffName: staff?.displayName ?? 'Professor',
+    );
+    if (result != null && mounted) _loadData();
+  }
+
+  /// Concluir = remover o campo (meta cumprida sai da ficha e do hub do aluno).
+  Future<void> _completeGoal() async {
+    try {
+      await StudentService(FirebaseService.academyId)
+          .update(_student!.id, {'activeGoal': FieldValue.delete()});
+      if (!mounted) return;
+      context.showSuccess('Meta concluída 👊');
+      _loadData();
+    } catch (_) {
+      if (mounted) context.showError('Não deu pra concluir a meta');
+    }
+  }
+
+  /// Card da meta técnica ativa na aba Info — só existe quando há meta
+  /// (empty-state invisível; definição pelo ícone de alvo no AppBar).
+  Widget _buildActiveGoalCard(StudentGoal goal) {
+    final metaParts = <String>[
+      if (goal.setByName != null && goal.setByName!.isNotEmpty)
+        'por ${goal.setByName}',
+      if (goal.until != null)
+        'até ${DateFormat('dd/MM/yyyy').format(goal.until!)}',
+    ];
+    return Card(
+      elevation: 1,
+      shadowColor: Colors.black.withValues(alpha: 0.05),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: AppTheme.beltBlue,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Meta técnica ativa',
+                    style: AppTheme.titleMedium.copyWith(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                const Icon(
+                  LucideIcons.target,
+                  size: 18,
+                  color: AppTheme.beltBlue,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              goal.text,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                height: 1.3,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              [...metaParts, 'o aluno vê como missão no app'].join(' · '),
+              style: AppTheme.bodySmall.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _showGoalDialog,
+                    icon: const Icon(LucideIcons.pencil, size: 15),
+                    label: const Text('Editar'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.success,
+                    ),
+                    onPressed: _completeGoal,
+                    icon: const Icon(LucideIcons.check, size: 15),
+                    label: const Text('Concluir'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1085,6 +1215,12 @@ class _AdminStudentDetailScreenState
               ),
             ),
             const SizedBox(height: 4),
+          ],
+
+          // Meta técnica ativa (§6.3 arma 1) — invisível sem meta definida.
+          if (_student!.activeGoal != null) ...[
+            _buildActiveGoalCard(_student!.activeGoal!).entrance(),
+            const SizedBox(height: 16),
           ],
 
           // Quick stats
