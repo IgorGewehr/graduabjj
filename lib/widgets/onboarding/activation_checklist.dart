@@ -35,17 +35,30 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
   // checklist uma vez não quer vê-lo aberto de novo a cada visita ao
   // dashboard — ele só reabre se o professor tocar de novo.
   static const _prefsKey = 'activation_checklist_expanded';
+  static const _hiddenKey = 'activation_checklist_hidden';
   bool _expanded = true;
+  bool _hidden = false;
 
   @override
   void initState() {
     super.initState();
     SharedPreferences.getInstance().then((prefs) {
       final saved = prefs.getBool(_prefsKey);
-      if (saved != null && saved != _expanded && mounted) {
-        setState(() => _expanded = saved);
-      }
+      final hidden = prefs.getBool(_hiddenKey) ?? false;
+      if (!mounted) return;
+      setState(() {
+        if (saved != null) _expanded = saved;
+        _hidden = hidden;
+      });
     });
+  }
+
+  /// "Não mostrar mais": academia madura não precisa do guia — some de vez
+  /// (persistido no device; os passos continuam acessíveis via Configurações).
+  void _hideForever() {
+    setState(() => _hidden = true);
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setBool(_hiddenKey, true));
   }
 
   void _toggleExpanded() {
@@ -56,6 +69,7 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
 
   @override
   Widget build(BuildContext context) {
+    if (_hidden) return const SizedBox.shrink();
     final settingsAsync = ref.watch(academySettingsProvider);
     final classesAsync = ref.watch(classesProvider);
     final plansAsync = ref.watch(activePlansProvider);
@@ -249,6 +263,24 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
                               ? () => dismissStep(step.id)
                               : null,
                         ),
+                      const SizedBox(height: 4),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Pressable(
+                          onTap: _hideForever,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 4),
+                            child: Text(
+                              'Não mostrar mais',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.textSecondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
           ),

@@ -116,8 +116,6 @@ class DashboardHojeCard extends ConsumerWidget {
     return _Section(
       title: 'Hoje',
       icon: LucideIcons.calendarClock,
-      onSeeAll: () => context.go('/admin/chamada'),
-      seeAllLabel: 'Chamada',
       child: classesAsync.when(
         loading: () => _emptyLine('Carregando grade...'),
         error: (_, _) => _emptyLine('Grade indisponível.'),
@@ -125,6 +123,7 @@ class DashboardHojeCard extends ConsumerWidget {
           // (turma, horário de hoje) ordenado por horário.
           final today = <(BJJClass, String)>[];
           for (final c in classes) {
+            if (!c.isActive) continue;
             for (final s in c.schedule) {
               if (s.dayOfWeek == todayDow) today.add((c, s.startTime));
             }
@@ -154,53 +153,44 @@ class _ClassRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Text(
-            time,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-              fontFeatures: Brand.tabular,
-              color: Brand.ink,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              bjjClass.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.textPrimary,
-              ),
-            ),
-          ),
-          // Chamada 1-tap — a ação nº 1 do professor a 1 toque do login.
-          GestureDetector(
-            onTap: () => context.go('/admin/chamada'),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: Brand.ink,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                'CHAMADA',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.5,
-                  color: Colors.white,
+    // Linha inteira tocável → Chamada. Sem botão por linha: o quick action
+    // "Chamada" logo acima já é O CTA — repetir o rótulo 5x na mesma dobra
+    // era ruído (feedback do dono).
+    return InkWell(
+      onTap: () => context.go('/admin/chamada'),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 46,
+              child: Text(
+                time,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  fontFeatures: Brand.tabular,
+                  color: Brand.blood,
                 ),
               ),
             ),
-          ),
-        ],
+            Expanded(
+              child: Text(
+                bjjClass.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ),
+            Icon(LucideIcons.chevronRight,
+                size: 15, color: AppTheme.textDisabled),
+          ],
+        ),
       ),
     );
   }
@@ -232,19 +222,38 @@ class DashboardRadarCard extends ConsumerWidget {
           // é problema de ativação e não entra aqui.
           final risky = students.where(isCoolingAthlete).toList();
 
+          // Esfriou HÁ MENOS TEMPO primeiro: pegar o aluno com 7 dias de
+          // sumiço é muito mais recuperável do que o de 37 — o dashboard
+          // mostra os mais frescos; a lista completa fica na Retenção.
+          risky.sort((a, b) => (a.daysSinceLastAttendance ?? 999)
+              .compareTo(b.daysSinceLastAttendance ?? 999));
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (risky.isEmpty)
                 _emptyLine('Ninguém esfriando — tatame saudável. 👊')
               else ...[
-                Text(
-                  '${risky.length} aluno${risky.length == 1 ? '' : 's'} esfriando',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                    color: Brand.blood,
-                  ),
+                Text.rich(
+                  TextSpan(children: [
+                    TextSpan(
+                      text: '${risky.length} ',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        fontFeatures: Brand.tabular,
+                        color: Brand.blood,
+                      ),
+                    ),
+                    TextSpan(
+                      text:
+                          'esfriando · os mais recentes primeiro',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ]),
                 ),
                 const SizedBox(height: 8),
                 for (final s in risky.take(4)) _RiskRow(student: s),

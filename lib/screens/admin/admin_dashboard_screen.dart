@@ -27,20 +27,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   bool _isLoading = true;
   bool _loadError = false;
 
-  // Stats carousel
-  final PageController _statsPageController = PageController(viewportFraction: 0.85);
-  int _currentStatsPage = 0;
-
   @override
   void initState() {
     super.initState();
     _loadDashboardData();
-  }
-
-  @override
-  void dispose() {
-    _statsPageController.dispose();
-    super.dispose();
   }
 
   Future<void> _loadDashboardData() async {
@@ -361,6 +351,8 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     );
   }
 
+  /// Grid FIXO 2-up (era um PageView com dots para... 2 cards — carrossel
+  /// para meia dúzia de dado é cerimônia; feedback do dono: dashboard estranho).
   Widget _buildStatsCarousel() {
     final stats = _studentStats ?? {};
     final byStatus = stats['byStatus'] as Map<String, dynamic>? ?? {};
@@ -371,71 +363,38 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     final monthlyRevenue = (summary['paid']?['value'] ?? 0).toDouble();
     final paidCount = summary['paid']?['count'] ?? 0;
 
-    return Column(
-      children: [
-        SizedBox(
-          height: 100,
-          child: PageView.builder(
-            controller: _statsPageController,
-            onPageChanged: (page) {
-              setState(() => _currentStatsPage = page);
-            },
-            itemCount: _canSeeFinancial ? 2 : 1,
-            itemBuilder: (context, index) {
-              final cards = [
-                // Alunos Ativos
-                _StatsCarouselCard(
-                  icon: LucideIcons.users,
-                  label: 'Alunos Ativos',
-                  value: totalActive.toString(),
-                  countUpValue: totalActive is num
-                      ? totalActive.toInt()
-                      : int.tryParse('$totalActive') ?? 0,
-                  subtitle: 'de $totalStudents total',
-                  onTap: () => context.go('/admin/alunos'),
-                ),
-                // Receita do Mes — só com financial:view
-                if (_canSeeFinancial)
-                  _StatsCarouselCard(
-                    icon: LucideIcons.dollarSign,
-                    iconBgColor: AppTheme.successLight,
-                    iconColor: AppTheme.success,
-                    label: 'Receita do Mes',
-                    value: _formatCurrency(monthlyRevenue),
-                    subtitle: '$paidCount pagamentos',
-                    onTap: () => context.go('/admin/financeiro'),
-                  ),
-              ];
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: cards[index],
-              );
-            },
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+          Expanded(
+            child: _StatsCarouselCard(
+              icon: LucideIcons.users,
+              label: 'Alunos Ativos',
+              value: totalActive.toString(),
+              countUpValue: totalActive is num
+                  ? totalActive.toInt()
+                  : int.tryParse('$totalActive') ?? 0,
+              subtitle: 'de $totalStudents total',
+              onTap: () => context.go('/admin/alunos'),
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        // Dot indicators
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(
-            2,
-            (index) {
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                width: _currentStatsPage == index ? 20 : 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _currentStatsPage == index
-                      ? AppTheme.textPrimary
-                      : AppTheme.divider,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
+          if (_canSeeFinancial) ...[
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatsCarouselCard(
+                icon: LucideIcons.dollarSign,
+                iconBgColor: AppTheme.successLight,
+                iconColor: AppTheme.success,
+                label: 'Receita do Mes',
+                value: _formatCurrency(monthlyRevenue),
+                subtitle: '$paidCount pagamentos',
+                onTap: () => context.go('/admin/financeiro'),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -451,6 +410,63 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
     final percentPaid =
         totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0.0;
+
+    // Mês sem NENHUMA cobrança gerada: o card preto "R$ 0,00 · 0%" parecia o
+    // app quebrado (feedback do dono). Empty-state honesto + atalho.
+    final nothingThisMonth = totalExpected <= 0 &&
+        (paidCount as int) == 0 &&
+        (pendingCount as int) == 0 &&
+        (overdueCount as int) == 0;
+    if (nothingThisMonth) {
+      const months = [
+        'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+        'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'
+      ];
+      final month = months[DateTime.now().month - 1];
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.divider),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Mensalidades',
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Nenhuma cobrança gerada em $month ainda.',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () => context.go('/admin/financeiro'),
+                child: Text(
+                  'Ir ao Financeiro →',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),

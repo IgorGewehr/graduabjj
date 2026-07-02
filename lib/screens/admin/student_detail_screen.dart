@@ -320,6 +320,19 @@ class _AdminStudentDetailScreenState
         (currentUser.isAdmin || currentUser.hasPermission('students:delete'));
 
     final menuItems = <PopupMenuEntry<String>>[
+      // Meta técnica (anti-blues §6.3): morava como 3º ícone no AppBar e
+      // brigava com o nome centralizado — vive melhor no menu.
+      if (canEdit)
+        const PopupMenuItem(
+          value: 'goal',
+          child: Row(
+            children: [
+              Icon(LucideIcons.target),
+              SizedBox(width: 8),
+              Text('Meta técnica'),
+            ],
+          ),
+        ),
       if (canPromote)
         const PopupMenuItem(
           value: 'promote',
@@ -392,14 +405,6 @@ class _AdminStudentDetailScreenState
       expandedHeight: 200,
       pinned: true,
       actions: [
-        // Meta técnica de curto prazo (anti-"blue belt blues", §6.3 arma 1):
-        // o professor define, o aluno vê como missão ativa no hub dele.
-        if (canEdit)
-          IconButton(
-            icon: const Icon(LucideIcons.target),
-            tooltip: 'Meta técnica',
-            onPressed: _showGoalDialog,
-          ),
         if (canEdit)
           IconButton(
             icon: const Icon(Icons.edit),
@@ -415,6 +420,7 @@ class _AdminStudentDetailScreenState
         if (menuItems.isNotEmpty)
           PopupMenuButton<String>(
             onSelected: (value) {
+              if (value == 'goal') _showGoalDialog();
               if (value == 'promote') _showPromoteDialog();
               if (value == 'toggle_status') _toggleStatus();
               if (value == 'generate_code') _generateLinkCode();
@@ -486,22 +492,21 @@ class _AdminStudentDetailScreenState
                             // opens. Uses the student's primary-sport grade.
                             _buildAnimatedBeltHero(),
                             const SizedBox(height: 8),
-                            Row(
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
                                 _buildBeltBadge(),
-                                const SizedBox(width: 8),
                                 _buildStatusBadge(),
+                                // Última presença: UM chip compacto — o
+                                // detalhe (strip 8 semanas + risco) vive na
+                                // aba Info, onde tem espaço de sobra.
+                                if (_student!.status == StudentStatus.active &&
+                                    _student!.retention != null)
+                                  _buildPresencePill(),
                               ],
                             ),
-                            // Retenção (§3.3): última presença + risco + strip
-                            // de 8 semanas — o professor vê o hábito do aluno
-                            // sem sair da ficha. Omitido se o backfill ainda
-                            // não populou retention.*.
-                            if (_student!.status == StudentStatus.active &&
-                                _student!.retention != null) ...[
-                              const SizedBox(height: 10),
-                              _buildRetentionRow(),
-                            ],
                           ],
                         ),
                       ),
@@ -516,85 +521,152 @@ class _AdminStudentDetailScreenState
     );
   }
 
-  /// Chip "última presença" (verde ≤7d, âmbar ≤14d, blood >14d) + badge de
-  /// risco (high/critical) + WeekStrip das 8 semanas — sobre o header colorido,
-  /// então tudo em pill branca translúcida (mesmo molde do _buildBeltBadge).
-  Widget _buildRetentionRow() {
+  /// Chip compacto de última presença sobre o header colorido (pill branca
+  /// translúcida, mesmo molde do _buildBeltBadge). Verde ≤7d, âmbar ≤14d,
+  /// blood >14d.
+  Widget _buildPresencePill() {
     final days = _student!.daysSinceLastAttendance;
-    final riskLevel = _student!.retention?.riskLevel;
-
-    final Color chipColor;
-    final String chipLabel;
+    final Color color;
+    final String label;
     if (days == null) {
-      chipColor = AppTheme.textSecondary;
-      chipLabel = 'Nunca treinou';
+      color = AppTheme.textSecondary;
+      label = 'Sem presenças';
     } else if (days <= 7) {
-      chipColor = AppTheme.success;
-      chipLabel = days == 0 ? 'Treinou hoje' : 'Última presença há ${days}d';
+      color = AppTheme.success;
+      label = days == 0 ? 'Treinou hoje' : 'Última presença há ${days}d';
     } else if (days <= 14) {
-      chipColor = AppTheme.warning;
-      chipLabel = 'Última presença há ${days}d';
+      color = AppTheme.warning;
+      label = 'Última presença há ${days}d';
     } else {
-      chipColor = Brand.blood;
-      chipLabel = 'Última presença há ${days}d';
+      color = Brand.blood;
+      label = 'Última presença há ${days}d';
     }
-
-    Widget pill(Widget child) => Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.9),
-            borderRadius: BorderRadius.circular(16),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
-          child: child,
-        );
-
-    return Wrap(
-      spacing: 8,
-      runSpacing: 6,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        pill(Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 7,
-              height: 7,
-              decoration:
-                  BoxDecoration(color: chipColor, shape: BoxShape.circle),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: color,
             ),
-            const SizedBox(width: 6),
-            Text(
-              chipLabel,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: chipColor,
-              ),
-            ),
-          ],
-        )),
-        if (riskLevel == 'high' || riskLevel == 'critical')
-          pill(Text(
-            riskLevel == 'critical' ? 'RISCO CRÍTICO' : 'RISCO ALTO',
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 0.5,
-              color: Brand.blood,
-            ),
-          )),
-        pill(WeekStrip(
-          buckets: _student!.last8WeeksBuckets(DateTime.now()),
-          height: 16,
-          barWidth: 5,
-        )),
-      ],
+          ),
+        ],
+      ),
     );
   }
 
-  // ============================================
-  // Meta técnica (anti-"blue belt blues", §6.3 arma 1)
-  // ============================================
+  /// Card "Frequência" da aba Info: strip das 8 semanas + risco/blues quando
+  /// houver — o detalhe de retenção que NÃO cabia no header (overflow).
+  Widget _buildFrequencyCard() {
+    final r = _student!.retention;
+    if (r == null || _student!.status != StudentStatus.active) {
+      return const SizedBox.shrink();
+    }
+    final riskLevel = r.riskLevel;
+    final showRisk = riskLevel == 'high' || riskLevel == 'critical';
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Frequência · 8 semanas',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${r.attendanceLast30d} presenças nos últimos 30 dias',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (showRisk || r.bluesRisk) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showRisk)
+                        Container(
+                          margin: const EdgeInsets.only(right: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Brand.blood.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            riskLevel == 'critical'
+                                ? 'RISCO CRÍTICO'
+                                : 'RISCO ALTO',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.4,
+                              color: Brand.blood,
+                            ),
+                          ),
+                        ),
+                      if (r.bluesRisk)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.info.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'BLUES',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.4,
+                              color: AppTheme.info,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          WeekStrip(
+            buckets: _student!.last8WeeksBuckets(DateTime.now()),
+            height: 26,
+            barWidth: 7,
+          ),
+        ],
+      ),
+    );
+  }
 
   /// Abre o dialog de meta técnica — o MESMO usado pelo playbook blues do
   /// radar de retenção. Staff-only (o botão já é gateado por permissão).
@@ -1258,6 +1330,10 @@ class _AdminStudentDetailScreenState
               ),
             ],
           ).entrance(),
+
+          // Frequência (retenção): strip de 8 semanas + risco/blues — o
+          // detalhe que saiu do header (não cabia) e vive melhor aqui.
+          _buildFrequencyCard().entrance(index: 1),
           const SizedBox(height: 24),
 
           // Personal info
