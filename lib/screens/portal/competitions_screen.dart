@@ -82,10 +82,21 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
             );
             final enrollments = enrollmentsAsync.valueOrNull ?? [];
 
-            // Filter for enrolled upcoming competitions
-            final enrolledUpcoming = upcomingCompetitions.where((c) {
+            // INSCRITAS = TODAS as competições em que o aluno se inscreveu
+            // (próximas E passadas) — é o registro da participação dele, não
+            // só o que vem a seguir. Ordena: próximas primeiro (data asc),
+            // depois as passadas (mais recente primeiro).
+            final enrolledAll = competitions.where((c) {
               return enrollments.any((e) => e.competitionId == c.id);
-            }).toList();
+            }).toList()
+              ..sort((a, b) {
+                final aUp = a.status == CompetitionStatus.upcoming;
+                final bUp = b.status == CompetitionStatus.upcoming;
+                if (aUp != bUp) return aUp ? -1 : 1;
+                return aUp
+                    ? a.date.compareTo(b.date)
+                    : b.date.compareTo(a.date);
+              });
 
             return RefreshIndicator(
               color: _kAccent,
@@ -145,7 +156,7 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
                         dividerColor: Colors.transparent,
                         tabs: [
                           Tab(text: 'PRÓXIMAS ${upcomingCompetitions.length}'),
-                          Tab(text: 'INSCRITAS ${enrolledUpcoming.length}'),
+                          Tab(text: 'INSCRITAS ${enrolledAll.length}'),
                           Tab(text: 'HISTÓRICO ${pastCompetitions.length}'),
                         ],
                       ),
@@ -164,14 +175,15 @@ class _CompetitionsScreenState extends ConsumerState<CompetitionsScreen>
                             emptyMessage: 'Nenhuma competicao programada',
                           ),
 
-                          // Inscricoes Tab
+                          // Inscricoes Tab — todas em que o aluno se
+                          // inscreveu, incluindo as já realizadas.
                           _CompetitionsList(
-                            competitions: enrolledUpcoming,
+                            competitions: enrolledAll,
                             student: student,
-                            isUpcoming: true,
+                            isUpcoming: false,
                             showEnrolledBadge: true,
                             emptyMessage:
-                                'Voce nao esta inscrito em nenhuma competicao',
+                                'Voce ainda nao se inscreveu em nenhuma competicao',
                           ),
 
                           // Historico Tab
@@ -463,7 +475,10 @@ class _CompetitionsList extends ConsumerWidget {
             child: _CompetitionCard(
               competition: competition,
               isEnrolled: isEnrolled,
-              isUpcoming: isUpcoming,
+              // Por competição (não pelo flag da lista): a aba INSCRITAS é
+              // MISTA (próximas + já realizadas) — cada card mostra o estado
+              // certo (destaque de "em breve" vs resultado do histórico).
+              isUpcoming: competition.status == CompetitionStatus.upcoming,
               studentId: student.id,
             ),
           ).entrance(index: index),
