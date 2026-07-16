@@ -1,10 +1,15 @@
 /// Period over which a class attendance ranking is computed.
 enum RankingPeriod {
-  /// Current week, Monday 00:00 (local) through "now".
+  /// Últimos 7 dias (rolling) até agora.
   week,
 
-  /// Current month, day 1 00:00 (local) through "now".
+  /// Últimos 30 dias (rolling) até agora.
   month,
+
+  /// Intervalo escolhido pelo usuário (dia X → dia Y). A janela concreta vem
+  /// de fora (start/end explícitos); [RankingService.periodRange] só tem um
+  /// fallback defensivo para este caso.
+  custom,
 }
 
 /// Audience filter for the attendance ranking.

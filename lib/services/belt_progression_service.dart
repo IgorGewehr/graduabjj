@@ -835,6 +835,59 @@ class BeltProgressionService {
     await _collections.beltProgressions.doc(progressionId).delete();
   }
 
+  /// DESFAZ uma graduação errada: remove o registro E, quando esta progressão
+  /// ainda REFLETE a faixa/grau atual do aluno, reverte a faixa/grau para o
+  /// estado anterior gravado na própria progressão (previousBelt/previousStripes).
+  ///
+  /// Diferente de [deleteProgression] (que só limpa o histórico), este é o
+  /// "desfazer" real — o professor graduou sem querer e quer o aluno de volta
+  /// à faixa anterior. Se o aluno já foi movido depois desta progressão (o
+  /// estado atual não bate com newBelt/newStripes), NÃO mexe na faixa atual
+  /// para não sobrescrever uma correção posterior — apenas remove o registro.
+  ///
+  /// Retorna `true` se a faixa/grau atual foi revertida; `false` se só o
+  /// histórico foi limpo. Rules: admin ou instrutor com graduation:manage.
+  Future<bool> undoProgression(BeltProgression p) async {
+    final sportId = p.getSport();
+    bool reverted = false;
+
+    final studentDoc = await _collections.student(p.studentId).get();
+    if (studentDoc.exists) {
+      final data = studentDoc.data() as Map<String, dynamic>;
+
+      // Faixa/grau atual neste esporte — mesma resolução de Student.getGrade
+      // (BJJ sem sportData cai nos campos legados).
+      String currentBelt;
+      int currentStripes;
+      final sd = (data['sportData'] as Map?)?[sportId.value];
+      if (sportId == SportId.bjj && sd == null) {
+        currentBelt = data['currentBelt'] ?? 'white';
+        currentStripes = (data['currentStripes'] as num?)?.toInt() ?? 0;
+      } else {
+        currentBelt = sd?['currentGrade'] ?? 'white';
+        currentStripes = (sd?['currentStripes'] as num?)?.toInt() ?? 0;
+      }
+
+      // Só reverte se o estado atual É exatamente o que esta progressão aplicou.
+      if (currentBelt == p.newBelt && currentStripes == p.newStripes) {
+        final update = <String, dynamic>{
+          'updatedAt': FieldValue.serverTimestamp(),
+          'sportData.${sportId.value}.currentGrade': p.previousBelt,
+          'sportData.${sportId.value}.currentStripes': p.previousStripes,
+        };
+        if (sportId == SportId.bjj) {
+          update['currentBelt'] = p.previousBelt;
+          update['currentStripes'] = p.previousStripes;
+        }
+        await _collections.student(p.studentId).update(update);
+        reverted = true;
+      }
+    }
+
+    await _collections.beltProgressions.doc(p.id).delete();
+    return reverted;
+  }
+
   Future<BeltProgression> promote({
     required String studentId,
     required String studentName,
@@ -1116,6 +1169,10 @@ class BeltProgressionService {
           'totalClasses': totalClasses,
           'eligibility': eligibility,
           'sportId': sportVal,
+          // Categoria (kids/adult) precisa viajar junto: sem ela a sheet de
+          // promoção caía em 'adult' e a troca de faixa usava a escada adulta
+          // (infantil branca → azul, em vez de → cinza).
+          'category': category,
           // Para notificar o aluno ("apto a graduar"); null se sem conta vinculada.
           'linkedUserId': data['linkedUserId'],
         });

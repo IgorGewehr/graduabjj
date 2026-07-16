@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'fns.dart';
 
 import 'firebase_service.dart';
 import 'mp_card_tokenizer.dart';
@@ -127,7 +127,7 @@ class Subscription {
 class SubscriptionService {
   final String academyId;
   final FirebaseFirestore _db = FirebaseService.firestore;
-  final FirebaseFunctions _functions = FirebaseFunctions.instance;
+  final CallableClient _functions = Fns.functions;
 
   SubscriptionService(this.academyId);
 

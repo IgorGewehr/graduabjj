@@ -4,6 +4,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import '../core/constants.dart';
+import 'fns.dart';
 
 /// Payment Link Response
 class PaymentLink {
@@ -139,7 +140,7 @@ class WithdrawalResult {
 /// Handles payment operations via Firebase Cloud Functions
 class AbacatePayService {
   final String academyId;
-  final FirebaseFunctions _functions = FirebaseFunctions.instance;
+  final CallableClient _functions = Fns.functions;
 
   AbacatePayService(this.academyId);
 

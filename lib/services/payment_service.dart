@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'fns.dart';
 
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
@@ -607,7 +607,7 @@ class PaymentService {
     bool markPaidCash = false,
     String? staffName,
   }) async {
-    await FirebaseFunctions.instance
+    await Fns.functions
         .httpsCallable('markPrivateLessonGiven')
         .call({
       'academyId': academyId,
@@ -680,7 +680,7 @@ class PaymentService {
         gatewayPaymentId.isNotEmpty &&
         paymentGateway == 'mercadopago') {
       try {
-        await FirebaseFunctions.instance.httpsCallable('cancelMpPix').call({
+        await Fns.functions.httpsCallable('cancelMpPix').call({
           'academyId': academyId,
           'paymentId': gatewayPaymentId,
         });
@@ -726,7 +726,7 @@ class PaymentService {
         gatewayPaymentId.isNotEmpty &&
         paymentGateway == 'mercadopago') {
       try {
-        await FirebaseFunctions.instance.httpsCallable('cancelMpPix').call({
+        await Fns.functions.httpsCallable('cancelMpPix').call({
           'academyId': academyId,
           'paymentId': gatewayPaymentId,
         });

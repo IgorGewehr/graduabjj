@@ -1,4 +1,4 @@
-import 'package:cloud_functions/cloud_functions.dart';
+import 'fns.dart';
 
 import '../models/ranking_entry.dart';
 import '../models/student.dart';
@@ -14,10 +14,10 @@ import 'student_service.dart';
 /// trip whether the caller wants one category or everything.
 class RankingService {
   final String academyId;
-  final FirebaseFunctions _functions;
+  final CallableClient _functions;
 
-  RankingService(this.academyId, {FirebaseFunctions? functions})
-      : _functions = functions ?? FirebaseFunctions.instance;
+  RankingService(this.academyId, {CallableClient? functions})
+      : _functions = functions ?? Fns.functions;
 
   /// Returns the ranking over [period], highest attendance first.
   ///
@@ -37,11 +37,19 @@ class RankingService {
     Set<String>? classIds,
     String? sport,
     int limit = 100,
+    // Janela explícita para [RankingPeriod.custom] (dia X → dia Y). O fim já
+    // deve vir EXCLUSIVO (início do dia seguinte), porque a CF filtra
+    // `date < end`.
+    DateTime? customStart,
+    DateTime? customEnd,
   }) async {
     if (classIds != null && classIds.isEmpty) return const [];
 
     final now = DateTime.now();
-    final (start, end) = periodRange(period, now);
+    final (start, end) =
+        period == RankingPeriod.custom && customStart != null && customEnd != null
+            ? (customStart, customEnd)
+            : periodRange(period, now);
 
     // Ranking is computed SERVER-SIDE (getAttendanceRanking CF): a plain student
     // cannot read peers' raw attendance (staff/monitor-only by the Firestore
@@ -102,6 +110,8 @@ class RankingService {
     required RankingPeriod period,
     Set<String>? classIds,
     String? sport,
+    DateTime? customStart,
+    DateTime? customEnd,
   }) async {
     // Use a large limit so the target student is never truncated out.
     final ranking = await getRanking(
@@ -109,6 +119,8 @@ class RankingService {
       period: period,
       sport: sport,
       limit: 100000,
+      customStart: customStart,
+      customEnd: customEnd,
     );
     for (final entry in ranking) {
       if (entry.studentId == studentId) return entry.rank;
@@ -127,6 +139,10 @@ class RankingService {
         return (today.subtract(const Duration(days: 6)), now);
       case RankingPeriod.month:
         // ÚLTIMOS 30 DIAS (rolling: hoje + 29 anteriores).
+        return (today.subtract(const Duration(days: 29)), now);
+      case RankingPeriod.custom:
+        // Fallback defensivo: 'custom' sempre recebe janela explícita em
+        // getRanking; se chegar aqui sem datas, usa os últimos 30 dias.
         return (today.subtract(const Duration(days: 29)), now);
     }
   }

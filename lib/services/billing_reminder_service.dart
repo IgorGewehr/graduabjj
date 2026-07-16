@@ -564,8 +564,16 @@ class StudentContact {
   String? get effectiveEmail =>
       category == 'kids' ? guardianEmail : email;
 
-  String? get effectiveCpf =>
-      category == 'kids' ? guardianCpf : cpf;
+  /// CPF do PAGADOR pro PIX do Mercado Pago (que exige um CPF válido).
+  /// Kids: prefere o CPF do RESPONSÁVEL (pagador correto de um menor); se o
+  /// responsável não tiver CPF cadastrado, cai no CPF PRÓPRIO do aluno — o MP
+  /// só precisa de um CPF válido pra identificar o pagador. Sem NENHUM CPF, o
+  /// PIX não é gerado e a cobrança sai sem o link.
+  String? get effectiveCpf {
+    String? nz(String? s) => (s != null && s.trim().isNotEmpty) ? s : null;
+    if (category == 'kids') return nz(guardianCpf) ?? nz(cpf);
+    return nz(cpf);
+  }
 }
 
 // ============================================

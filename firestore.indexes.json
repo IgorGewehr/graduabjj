@@ -3,6 +3,15 @@
   "//retencao-doc": "Fundação de retenção (REPAGINADA §2/§10): o range por `date` em academies/{aid}/attendance do job diário computeRetentionDaily usa o índice single-field AUTOMÁTICO de `date` — attendance NÃO tem fieldOverride/exemption neste arquivo (verificado 2026-07), então nada a declarar; não criar exemption em attendance sem repor o índice de `date`. Compostos novos: students (status, statusChangedAt) p/ churn consumado do mês; retentionContacts (outcome, at) p/ o job fechar outcomes pending; fieldOverride students.linkedUserId p/ streakRiskCheck via collectionGroup.",
   "indexes": [
     {
+      "//": "Self-onboarding: admin lista solicitações PENDENTES mais recentes primeiro (academies/{id}/joinRequests where status=='pending' orderBy createdAt desc).",
+      "collectionGroup": "joinRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "physicalAssessments",
       "queryScope": "COLLECTION",
       "fields": [

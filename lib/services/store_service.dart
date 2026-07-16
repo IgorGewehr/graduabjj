@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'fns.dart';
 
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
@@ -804,7 +804,7 @@ class StoreService {
     // Best-effort: cancela o PIX aberto no MP (callable cancelMpPix, admin-gated).
     // Nunca bloqueia o mark-paid se o cancelamento falhar.
     try {
-      await FirebaseFunctions.instance.httpsCallable('cancelMpPix').call({
+      await Fns.functions.httpsCallable('cancelMpPix').call({
         'academyId': academyId,
         'paymentId': gatewayPaymentId,
       });

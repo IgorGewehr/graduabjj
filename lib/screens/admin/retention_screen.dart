@@ -1,4 +1,6 @@
 import 'package:cloud_functions/cloud_functions.dart';
+
+import '../../services/fns.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -817,7 +819,7 @@ class _RetentionCardState extends ConsumerState<_RetentionCard> {
     try {
       // Assinatura real da callable (server_functions.js):
       // { targetUserId, title, body, academyId, notificationData? }.
-      await FirebaseFunctions.instance
+      await Fns.functions
           .httpsCallable('sendUserNotification')
           .call<dynamic>({
         'targetUserId': targetUid,

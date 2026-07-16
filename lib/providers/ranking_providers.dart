@@ -48,9 +48,17 @@ final rankingServiceProvider = Provider<RankingService?>((ref) {
 
 /// Attendance ranking for a category (Geral / Adulto / Kids) over a period,
 /// optionally scoped to a single modality ([sport] = SportId.value; null = all).
-final classRankingProvider = FutureProvider.family<List<RankingEntry>,
-    ({RankingCategory category, RankingPeriod period, String? sport})>(
-        (ref, args) async {
+final classRankingProvider = FutureProvider.family<
+    List<RankingEntry>,
+    ({
+      RankingCategory category,
+      RankingPeriod period,
+      String? sport,
+      // Janela do período CUSTOM (epoch millis). Ambos null nos presets. Entram
+      // na chave da family para o ranking ser cacheado por intervalo.
+      int? startMillis,
+      int? endMillis,
+    })>((ref, args) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return const [];
   final classes = await ref.watch(classesProvider.future);
@@ -59,6 +67,12 @@ final classRankingProvider = FutureProvider.family<List<RankingEntry>,
     classIds: classIds,
     period: args.period,
     sport: args.sport,
+    customStart: args.startMillis != null
+        ? DateTime.fromMillisecondsSinceEpoch(args.startMillis!)
+        : null,
+    customEnd: args.endMillis != null
+        ? DateTime.fromMillisecondsSinceEpoch(args.endMillis!)
+        : null,
   );
 });
 

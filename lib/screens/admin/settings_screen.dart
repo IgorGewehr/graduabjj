@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
+
+import '../../core/platform_support.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -667,8 +669,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
       if (pickedFile == null) return;
 
-      // Crop to 1:1 aspect ratio
-      final croppedFile = await ImageCropper().cropImage(
+      // Crop to 1:1 aspect ratio. No desktop (sem image_cropper) usa a imagem
+      // original sem recortar.
+      final croppedFile = !PlatformSupport.canCropImage
+          ? CroppedFile(pickedFile.path)
+          : await ImageCropper().cropImage(
         sourcePath: pickedFile.path,
         aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
         compressQuality: 85,

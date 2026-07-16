@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import '../services/fns.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -101,7 +101,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     }
     setState(() => _launching = true);
     try {
-      final result = await FirebaseFunctions.instance
+      final result = await Fns.functions
           .httpsCallable('createMercadoPagoCheckout')
           .call(<String, dynamic>{
         'academyId': academyId,

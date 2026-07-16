@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/brand_tokens.dart';
@@ -44,9 +45,49 @@ class RankingScreen extends ConsumerStatefulWidget {
 class _RankingScreenState extends ConsumerState<RankingScreen> {
   RankingCategory _category = RankingCategory.general;
   RankingPeriod _period = RankingPeriod.week;
+  // Intervalo escolhido quando _period == custom (dia X → dia Y).
+  DateTimeRange? _customRange;
   // Selected modality (null until the user picks). Only relevant for academies
   // that train more than one sport — keeps each modality's ranking separate.
   SportId? _selectedSport;
+
+  /// Janela (epoch millis) do período CUSTOM para a chave do provider. Presets
+  /// → (null, null). O fim é EXCLUSIVO (início do dia seguinte ao dia final),
+  /// pois a CF filtra `date < end`, incluindo assim o dia final inteiro.
+  ({int? startMillis, int? endMillis}) get _customMillis {
+    if (_period != RankingPeriod.custom || _customRange == null) {
+      return (startMillis: null, endMillis: null);
+    }
+    final r = _customRange!;
+    final start = DateTime(r.start.year, r.start.month, r.start.day);
+    final end = DateTime(r.end.year, r.end.month, r.end.day)
+        .add(const Duration(days: 1));
+    return (
+      startMillis: start.millisecondsSinceEpoch,
+      endMillis: end.millisecondsSinceEpoch,
+    );
+  }
+
+  Future<void> _pickCustomRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 3),
+      lastDate: now,
+      initialDateRange: _customRange ??
+          DateTimeRange(
+            start: now.subtract(const Duration(days: 29)),
+            end: now,
+          ),
+      helpText: 'Escolha o período',
+      saveText: 'Aplicar',
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _customRange = picked;
+      _period = RankingPeriod.custom;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -127,8 +168,10 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
         _RankingHeader(
           category: effectiveCategory,
           period: _period,
+          customRange: _customRange,
           onCategoryChanged: (c) => setState(() => _category = c),
           onPeriodChanged: (p) => setState(() => _period = p),
+          onPickCustom: _pickCustomRange,
           // Aluno: categoria travada na dele (sem seletor); só staff escolhe.
           showCategorySelector: widget.forStaff,
         ),
@@ -142,6 +185,8 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
               category: effectiveCategory,
               period: _period,
               sport: activeSport?.value,
+              startMillis: _customMillis.startMillis,
+              endMillis: _customMillis.endMillis,
             ),
           ),
         Expanded(child: _buildLeaderboard(activeSport, effectiveCategory)),
@@ -150,7 +195,14 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
   }
 
   Widget _buildLeaderboard(SportId? sport, RankingCategory category) {
-    final key = (category: category, period: _period, sport: sport?.value);
+    final m = _customMillis;
+    final key = (
+      category: category,
+      period: _period,
+      sport: sport?.value,
+      startMillis: m.startMillis,
+      endMillis: m.endMillis,
+    );
     final rankingAsync = ref.watch(classRankingProvider(key));
 
     return RefreshIndicator(
@@ -256,17 +308,29 @@ class _SportSelector extends StatelessWidget {
 class _RankingHeader extends StatelessWidget {
   final RankingCategory category;
   final RankingPeriod period;
+  final DateTimeRange? customRange;
   final ValueChanged<RankingCategory> onCategoryChanged;
   final ValueChanged<RankingPeriod> onPeriodChanged;
+  final VoidCallback onPickCustom;
   final bool showCategorySelector;
 
   const _RankingHeader({
     required this.category,
     required this.period,
+    required this.customRange,
     required this.onCategoryChanged,
     required this.onPeriodChanged,
+    required this.onPickCustom,
     this.showCategorySelector = true,
   });
+
+  String _customLabel() {
+    if (period == RankingPeriod.custom && customRange != null) {
+      final f = DateFormat('dd/MM');
+      return '${f.format(customRange!.start)} – ${f.format(customRange!.end)}';
+    }
+    return 'Período';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -306,26 +370,107 @@ class _RankingHeader extends StatelessWidget {
             ),
             const SizedBox(height: 12),
           ],
-          // Period segmented control
-          SegmentedButton<RankingPeriod>(
-            segments: const [
-              ButtonSegment(
-                value: RankingPeriod.week,
-                label: Text('7 Dias'),
+          // Seletor de período: presets (7/30 dias) + PERSONALIZADO (dia X →
+          // dia Y). Três estados, então um Row de pílulas em vez de
+          // SegmentedButton (que exige exatamente 1 selecionado entre 2).
+          Row(
+            children: [
+              Expanded(
+                child: _PeriodPill(
+                  label: '7 dias',
+                  selected: period == RankingPeriod.week,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onPeriodChanged(RankingPeriod.week);
+                  },
+                ),
               ),
-              ButtonSegment(
-                value: RankingPeriod.month,
-                label: Text('30 Dias'),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _PeriodPill(
+                  label: '30 dias',
+                  selected: period == RankingPeriod.month,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onPeriodChanged(RankingPeriod.month);
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: _PeriodPill(
+                  label: _customLabel(),
+                  icon: LucideIcons.calendar,
+                  selected: period == RankingPeriod.custom,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onPickCustom();
+                  },
+                ),
               ),
             ],
-            selected: {period},
-            showSelectedIcon: false,
-            onSelectionChanged: (set) {
-              HapticFeedback.selectionClick();
-              onPeriodChanged(set.first);
-            },
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Pílula de período (preset ou personalizado). Selecionada = tinta cheia.
+class _PeriodPill extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PeriodPill({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? AppTheme.primary : AppTheme.surface,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? AppTheme.primary : AppTheme.divider,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (icon != null) ...[
+                Icon(icon,
+                    size: 15,
+                    color: selected ? Colors.white : AppTheme.textSecondary),
+                const SizedBox(width: 6),
+              ],
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTheme.labelMedium.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: selected ? Colors.white : AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -446,8 +591,13 @@ class _RankingTile extends StatelessWidget {
 /// poucos treinos.
 class _MyPositionCard extends ConsumerWidget {
   final String myStudentId;
-  final ({RankingCategory category, RankingPeriod period, String? sport})
-      rankingKey;
+  final ({
+    RankingCategory category,
+    RankingPeriod period,
+    String? sport,
+    int? startMillis,
+    int? endMillis,
+  }) rankingKey;
 
   const _MyPositionCard({
     required this.myStudentId,

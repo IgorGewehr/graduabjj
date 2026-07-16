@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import '../core/constants.dart';
 import '../models/user.dart';
@@ -303,59 +304,34 @@ class AuthService {
 
   /// Delete user account and all associated data
   /// This is required by Google Play Store policy
+  /// Exclusão de conta (App Store / Play Store). Faz a limpeza + a exclusão da
+  /// conta do Firebase Auth NO SERVIDOR (Cloud Function `deleteMyAccount`, Admin
+  /// SDK). Isso evita o `requires-recent-login` que o `user.delete()` client-side
+  /// disparava quando a sessão não era "recente" — o fluxo antes falhava sem
+  /// reautenticação (motivo provável da rejeição da Apple). Depois só encerra a
+  /// sessão local (a conta Auth já não existe mais).
   Future<void> deleteAccount() async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('Usuario nao autenticado');
 
-    final uid = user.uid;
+    try {
+      // Best-effort: remove o token de push antes de apagar tudo.
+      await pushNotificationService.onUserLogout();
+    } catch (_) {/* não bloqueia a exclusão */}
 
     try {
-      // 1. Remove FCM token
-      await pushNotificationService.onUserLogout();
-
-      // 2. Get user's academy mappings to delete related data
-      final mapping = await globalUserService.getUserAcademyMapping(uid);
-
-      // 3. Delete student records and academy user docs from each academy
-      if (mapping != null) {
-        for (final academyId in mapping.academyIds) {
-          final academyDetail = mapping.academyDetails?[academyId];
-          if (academyDetail?.studentId != null) {
-            // Mark student as deleted (soft delete for academy records)
-            await _firestore
-                .collection('academies/$academyId/students')
-                .doc(academyDetail!.studentId)
-                .update({
-                  'status': 'deleted',
-                  'deletedAt': FieldValue.serverTimestamp(),
-                  'deletedByUser': true,
-                });
-          }
-          // Remove academy-scoped user document
-          await _firestore
-              .collection('academies/$academyId/users')
-              .doc(uid)
-              .delete();
-        }
-      }
-
-      // 4. Delete userAcademyMapping
-      await _firestore.collection('userAcademyMapping').doc(uid).delete();
-
-      // 5. Delete global user document
-      await _firestore.collection('users').doc(uid).delete();
-
-      // 6. Delete Firebase Auth user (must be last)
-      await user.delete();
-    } catch (e) {
-      // If requires recent login, throw specific error
-      if (e.toString().contains('requires-recent-login')) {
-        throw Exception(
-          'Por seguranca, faca login novamente antes de excluir sua conta',
-        );
-      }
-      rethrow;
+      await FirebaseFunctions.instance.httpsCallable('deleteMyAccount').call();
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception(
+        e.message ?? 'Não foi possível excluir a conta. Tente novamente.',
+      );
     }
+
+    // A conta do Auth foi apagada no servidor — encerra a sessão local para o
+    // listener de auth redirecionar ao login.
+    try {
+      await _auth.signOut();
+    } catch (_) {/* o usuário do Auth já não existe */}
   }
 
   /// Get global user document

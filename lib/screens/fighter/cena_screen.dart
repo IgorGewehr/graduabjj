@@ -556,6 +556,8 @@ class _RankingCard extends ConsumerWidget {
       category: category,
       period: period,
       sport: sport,
+      startMillis: null,
+      endMillis: null,
     )));
     return _White(
       onTap: () => context.push('/portal/ranking'),
@@ -1508,6 +1510,9 @@ class _PartnersRankCard extends StatelessWidget {
         null => 'treinos',
         RankingPeriod.month => 'em 30d',
         RankingPeriod.week => 'em 7d',
+        // Este widget (rank de parceiros da Cena) só usa presets/null; 'custom'
+        // é inalcançável aqui, mas o switch precisa ser exaustivo.
+        RankingPeriod.custom => 'no período',
       };
 
   String get _footerLabel {

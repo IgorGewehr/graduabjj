@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+
+import '../../services/fns.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -2106,6 +2108,79 @@ class _AdminStudentDetailScreenState
     );
   }
 
+  /// Marca uma cobrança (avulsa/mensalidade) como PAGA em dinheiro. Reusa
+  /// PaymentService.markAsPaid, que já cancela best-effort um PIX MP em aberto
+  /// (anti double-charge) e congela o estado. Essencial para avulsas, que não
+  /// têm outra tela onde marcar pago.
+  Future<void> _markChargePaidCash(Payment payment) async {
+    if (!_ensurePermission('financial:create')) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Marcar como pago?'),
+        content: Text(
+          '"${payment.description ?? 'Cobrança'}" (R\$ ${payment.value.toStringAsFixed(2)}) '
+          'será registrada como paga em dinheiro. Um PIX em aberto, se houver, '
+          'é cancelado.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Marcar pago')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await PaymentService(FirebaseService.academyId)
+          .markAsPaid(payment.id, method: PaymentMethod.cash);
+      if (mounted) {
+        context.showSuccess('Cobrança marcada como paga.');
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) context.showError('Erro: $e');
+    }
+  }
+
+  /// Cancela uma cobrança pendente/vencida (avulsa/mensalidade).
+  Future<void> _cancelCharge(Payment payment) async {
+    if (!_ensurePermission('financial:create')) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Cancelar cobrança?'),
+        content: Text(
+          '"${payment.description ?? 'Cobrança'}" será cancelada e não será mais '
+          'cobrada do aluno.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Voltar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Cancelar cobrança'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await PaymentService(FirebaseService.academyId).cancel(payment.id);
+      if (mounted) {
+        context.showSuccess('Cobrança cancelada.');
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) context.showError('Erro: $e');
+    }
+  }
+
   Widget _buildFinancialTab() {
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
     // Creating charges (avulsa / aula particular) requires the
@@ -2321,7 +2396,14 @@ class _AdminStudentDetailScreenState
             ),
           )
         else ...[
-          ...avulsas.map((payment) => _PaymentCard(payment: payment)),
+          ...avulsas.map((payment) => _PaymentCard(
+                payment: payment,
+                onMarkPaid: canCreateCharge
+                    ? () => _markChargePaidCash(payment)
+                    : null,
+                onCancel:
+                    canCreateCharge ? () => _cancelCharge(payment) : null,
+              )),
           const SizedBox(height: 16),
         ],
         // Private lessons (aula particular) — cobrança avulsa que concede uma
@@ -2385,7 +2467,14 @@ class _AdminStudentDetailScreenState
             ),
           ),
           const SizedBox(height: 8),
-          ...mensalidades.map((payment) => _PaymentCard(payment: payment)),
+          ...mensalidades.map((payment) => _PaymentCard(
+                payment: payment,
+                onMarkPaid: canCreateCharge
+                    ? () => _markChargePaidCash(payment)
+                    : null,
+                onCancel:
+                    canCreateCharge ? () => _cancelCharge(payment) : null,
+              )),
         ],
         // Store orders
         if (_storeOrders.isNotEmpty) ...[
@@ -3133,7 +3222,7 @@ class _AdminStudentDetailScreenState
   Future<void> _recomputeMilestones() async {
     final parentContext = context;
     try {
-      final result = await FirebaseFunctions.instance
+      final result = await Fns.functions
           .httpsCallable('recomputeStudentMilestones')
           .call({
         'academyId': FirebaseService.academyId,
@@ -4437,11 +4526,14 @@ class _AdminStudentDetailScreenState
       allHistory.add(
         _HistoryItem(
           date: p.promotionDate,
-          title: p.isBeltChange ? 'Faixa ${p.newBelt}' : 'Grau ${p.newStripes}',
+          title: p.isBeltChange
+              ? 'Faixa ${getGradeLabel(p.getSport(), p.newBelt)}'
+              : '${p.newStripes}º grau • ${getGradeLabel(p.getSport(), p.newBelt)}',
           subtitle: p.notes,
           icon: Icons.military_tech,
           color: getGradeColor(p.getSport(), p.newBelt),
           onDelete: canFixHistory ? () => _deleteProgression(p) : null,
+          progression: canFixHistory ? p : null,
         ),
       );
     }
@@ -4499,9 +4591,15 @@ class _AdminStudentDetailScreenState
             trailing: item.onDelete == null
                 ? null
                 : IconButton(
-                    icon: Icon(LucideIcons.trash2,
-                        size: 18, color: AppTheme.textSecondary),
-                    tooltip: 'Remover registro',
+                    icon: Icon(
+                        item.progression != null
+                            ? LucideIcons.pencil
+                            : LucideIcons.trash2,
+                        size: 18,
+                        color: AppTheme.textSecondary),
+                    tooltip: item.progression != null
+                        ? 'Corrigir / reverter graduação'
+                        : 'Remover registro',
                     onPressed: () => _confirmHistoryDelete(item),
                   ),
           ),
@@ -4511,6 +4609,12 @@ class _AdminStudentDetailScreenState
   }
 
   Future<void> _confirmHistoryDelete(_HistoryItem item) async {
+    // Graduações têm fluxo próprio: além de remover do histórico, o professor
+    // pode REVERTER a faixa (desfazer o grau/faixa dado sem querer).
+    if (item.progression != null) {
+      await _showProgressionCorrectionSheet(item.progression!);
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -4548,8 +4652,12 @@ class _AdminStudentDetailScreenState
   Future<void> _deleteProgression(BeltProgression p) async {
     await BeltProgressionService(FirebaseService.academyId)
         .deleteProgression(p.id);
-    // Best-effort: oculta o post materializado do feed (id determinístico) —
-    // um grau removido não pode continuar celebrado na Galera.
+    await _hideProgressionFeedPost(p);
+  }
+
+  /// Best-effort: oculta o post materializado do feed (id determinístico) —
+  /// uma graduação removida/revertida não pode continuar celebrada na Galera.
+  Future<void> _hideProgressionFeedPost(BeltProgression p) async {
     final uid = _student?.linkedUserId;
     if (uid != null && uid.isNotEmpty) {
       try {
@@ -4558,6 +4666,143 @@ class _AdminStudentDetailScreenState
           true,
         );
       } catch (_) {/* post pode nem existir */}
+    }
+  }
+
+  String _gradeStamp(SportId sport, String belt, int stripes) {
+    final label = getGradeLabel(sport, belt);
+    return stripes > 0 ? '$label • $stripesº grau' : label;
+  }
+
+  /// Correção de graduação (pedido do produto): o professor graduou sem querer
+  /// (ex.: infantil que foi parar na azul) e precisa DESFAZER. Oferece:
+  ///  • Reverter faixa — volta o aluno ao estado anterior e apaga o registro.
+  ///  • Remover só do histórico — mantém a faixa atual, limpa o registro errado.
+  /// Reverter só é oferecido quando esta progressão ainda reflete a faixa atual.
+  Future<void> _showProgressionCorrectionSheet(BeltProgression p) async {
+    if (!_ensurePermission('graduation:manage')) return;
+    final sport = p.getSport();
+    final grade = _student?.getGrade(sport);
+    final isCurrentStanding = grade != null &&
+        grade.currentGrade == p.newBelt &&
+        grade.currentStripes == p.newStripes;
+    final prevStamp = _gradeStamp(sport, p.previousBelt, p.previousStripes);
+    final newStamp = _gradeStamp(sport, p.newBelt, p.newStripes);
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('Corrigir graduação',
+                  style: AppTheme.titleLarge
+                      .copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text(
+                p.isBeltChange
+                    ? 'Registro: $prevStamp → $newStamp'
+                    : 'Registro: $newStamp',
+                style:
+                    AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+              ),
+              const SizedBox(height: 16),
+              if (isCurrentStanding) ...[
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(LucideIcons.undo2, color: AppTheme.warning),
+                  title: const Text('Reverter faixa'),
+                  subtitle: Text('Volta o aluno para $prevStamp e apaga este '
+                      'registro.'),
+                  onTap: () => Navigator.pop(ctx, 'revert'),
+                ),
+                const Divider(height: 8),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading:
+                      Icon(LucideIcons.trash2, color: AppTheme.textSecondary),
+                  title: const Text('Remover só do histórico'),
+                  subtitle: Text('Mantém a faixa atual ($newStamp); apaga só o '
+                      'registro.'),
+                  onTap: () => Navigator.pop(ctx, 'history'),
+                ),
+              ] else ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.infoLight,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(LucideIcons.info, size: 16, color: AppTheme.info),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'A faixa atual do aluno não é mais esta (ele foi '
+                          'graduado depois). Dá para remover este registro '
+                          'antigo do histórico.',
+                          style: AppTheme.bodySmall
+                              .copyWith(color: AppTheme.textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading:
+                      Icon(LucideIcons.trash2, color: AppTheme.textSecondary),
+                  title: const Text('Remover do histórico'),
+                  onTap: () => Navigator.pop(ctx, 'history'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (action == null || !mounted) return;
+    try {
+      if (action == 'revert') {
+        final reverted = await BeltProgressionService(FirebaseService.academyId)
+            .undoProgression(p);
+        await _hideProgressionFeedPost(p);
+        if (mounted) {
+          context.showSuccess(reverted
+              ? 'Graduação desfeita. Aluno voltou para $prevStamp.'
+              : 'Registro removido. A faixa atual não foi alterada.');
+          _loadData();
+        }
+      } else if (action == 'history') {
+        await _deleteProgression(p);
+        if (mounted) {
+          context.showSuccess('Registro removido do histórico.');
+          _loadData();
+        }
+      }
+    } catch (e) {
+      if (mounted) context.showError('Não foi possível: $e');
     }
   }
 
@@ -4668,6 +4913,63 @@ class _AdminStudentDetailScreenState
                     },
                   ),
                 ],
+                // Preview do RESULTADO antes de confirmar — o professor via só
+                // "Confirmar" e graduava às cegas. Mostra a faixa/grau alvo (já
+                // pela escada correta da categoria).
+                if (hasGrades) ...[
+                  const SizedBox(height: 16),
+                  Builder(builder: (context) {
+                    final bool asStripe = isStripe && hasStripes;
+                    final nextGrade =
+                        asStripe ? currentGrade : _getNextGrade(selectedSport, currentGrade);
+                    final maxStripes =
+                        getGradeDefinition(selectedSport, currentGrade)?.maxStripes ?? 0;
+                    final atStripeCap = asStripe && currentStripes >= maxStripes;
+                    final atBeltCap = !asStripe && nextGrade == currentGrade;
+                    final blocked = atStripeCap || atBeltCap;
+                    final label = asStripe
+                        ? '${currentStripes + 1}º grau • ${getGradeLabel(selectedSport, currentGrade)}'
+                        : 'Faixa ${getGradeLabel(selectedSport, nextGrade)}';
+                    return Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: (blocked ? AppTheme.error : AppTheme.success)
+                            .withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: (blocked ? AppTheme.error : AppTheme.success)
+                                .withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            blocked
+                                ? LucideIcons.alertTriangle
+                                : LucideIcons.arrowRight,
+                            size: 16,
+                            color: blocked ? AppTheme.error : AppTheme.success,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              blocked
+                                  ? (atStripeCap
+                                      ? 'Já está no máximo de graus — troque para "Faixa".'
+                                      : 'Já é a última faixa da modalidade.')
+                                  : label,
+                              style: AppTheme.bodySmall.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color:
+                                    blocked ? AppTheme.error : AppTheme.success,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
               ],
             ),
             actions: [
@@ -4675,10 +4977,19 @@ class _AdminStudentDetailScreenState
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Cancelar'),
               ),
-              FilledButton(
-                // Sem sistema de graduação não há o que confirmar: o botão
-                // fica desativado para não fingir um sucesso (confete + msg).
-                onPressed: !hasGrades
+              Builder(builder: (context) {
+              // Bloqueia confirmar quando não há o que graduar: sem sistema de
+              // faixa, no teto de graus, ou já na última faixa (evita gravar
+              // uma "graduação" no-op que ainda soltava confete + registro).
+              final bool asStripe = isStripe && hasStripes;
+              final maxStripes =
+                  getGradeDefinition(selectedSport, currentGrade)?.maxStripes ?? 0;
+              final atStripeCap = asStripe && currentStripes >= maxStripes;
+              final atBeltCap =
+                  !asStripe && _getNextGrade(selectedSport, currentGrade) == currentGrade;
+              final canConfirm = hasGrades && !atStripeCap && !atBeltCap;
+              return FilledButton(
+                onPressed: !canConfirm
                     ? null
                     : () async {
                   try {
@@ -4725,7 +5036,8 @@ class _AdminStudentDetailScreenState
                   }
                 },
                 child: const Text('Confirmar'),
-              ),
+              );
+              }),
             ],
           );
         },
@@ -4734,8 +5046,12 @@ class _AdminStudentDetailScreenState
   }
 
   String _getNextGrade(SportId sportId, String current) {
+    // Escada correta por CATEGORIA (kids/adult): sem isso, um aluno infantil
+    // (ex.: branca → cinza) era promovido pela escada ADULTA (branca → azul),
+    // pulando para uma faixa que nem existe no infantil.
     final grades = getGradesForSport(
       sportId,
+      category: _student?.category.value ?? 'adult',
       muaythaiVariant:
           sportId == SportId.muaythai ? resolveMuaythaiVariant(current) : null,
     );
@@ -5151,8 +5467,14 @@ class _InfoRow extends StatelessWidget {
 /// Payment Card Widget
 class _PaymentCard extends StatelessWidget {
   final Payment payment;
+  // Ações opcionais (marcar pago em dinheiro / cancelar). Sem elas o card é
+  // somente-leitura. Essencial para cobranças AVULSAS, que não aparecem na tela
+  // de Financeiro (sem referenceMonth) — antes ficavam presas em "pendente"
+  // pra sempre e disparavam cobrança automática mesmo já pagas em dinheiro.
+  final VoidCallback? onMarkPaid;
+  final VoidCallback? onCancel;
 
-  const _PaymentCard({required this.payment});
+  const _PaymentCard({required this.payment, this.onMarkPaid, this.onCancel});
 
   @override
   Widget build(BuildContext context) {
@@ -5162,6 +5484,12 @@ class _PaymentCard extends StatelessWidget {
       PaymentStatus.overdue: Colors.red,
       PaymentStatus.cancelled: Colors.grey,
     };
+    // Só cobranças NÃO terminais (pendente/vencida) e não-reembolso podem ser
+    // marcadas/canceladas. Pago/cancelado são estados finais.
+    final canAct = (onMarkPaid != null || onCancel != null) &&
+        !payment.isOvercharge &&
+        payment.status != PaymentStatus.paid &&
+        payment.status != PaymentStatus.cancelled;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -5195,31 +5523,69 @@ class _PaymentCard extends StatelessWidget {
               ),
           ],
         ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+        trailing: Row(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(
-              'R\$ ${payment.value.toStringAsFixed(2)}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            const SizedBox(height: 2),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: statusColors[payment.status]?.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                payment.status.label,
-                style: TextStyle(
-                  fontSize: 9,
-                  color: statusColors[payment.status],
-                  fontWeight: FontWeight.w500,
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  'R\$ ${payment.value.toStringAsFixed(2)}',
+                  style:
+                      const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
-              ),
+                const SizedBox(height: 2),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: statusColors[payment.status]?.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    payment.status.label,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: statusColors[payment.status],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
             ),
+            if (canAct)
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20),
+                tooltip: 'Gerenciar cobrança',
+                onSelected: (v) {
+                  if (v == 'paid') onMarkPaid?.call();
+                  if (v == 'cancel') onCancel?.call();
+                },
+                itemBuilder: (_) => [
+                  if (onMarkPaid != null)
+                    const PopupMenuItem(
+                      value: 'paid',
+                      child: Row(children: [
+                        Icon(Icons.check_circle_outline,
+                            size: 18, color: Colors.green),
+                        SizedBox(width: 10),
+                        Text('Marcar como pago (dinheiro)'),
+                      ]),
+                    ),
+                  if (onCancel != null)
+                    const PopupMenuItem(
+                      value: 'cancel',
+                      child: Row(children: [
+                        Icon(Icons.cancel_outlined,
+                            size: 18, color: Colors.red),
+                        SizedBox(width: 10),
+                        Text('Cancelar cobrança'),
+                      ]),
+                    ),
+                ],
+              ),
           ],
         ),
       ),
@@ -5361,6 +5727,10 @@ class _HistoryItem {
   /// Remoção do registro (correção de erro) — null = sem ação.
   final Future<void> Function()? onDelete;
 
+  /// Quando o item é uma graduação, carrega a progressão para permitir
+  /// REVERTER a faixa (desfazer) além de só remover do histórico.
+  final BeltProgression? progression;
+
   _HistoryItem({
     required this.date,
     required this.title,
@@ -5368,6 +5738,7 @@ class _HistoryItem {
     required this.icon,
     required this.color,
     this.onDelete,
+    this.progression,
   });
 }
 

@@ -597,6 +597,374 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
     });
   }
 
+  // ── DISPLAY read-only de um self-log salvo ────────────────────────────────
+  // Tocar num item do HISTÓRICO abre ESTE dialog (não vai mais direto pra
+  // edição). O lápis no canto superior direito é a única porta pro editor
+  // (_openEdit). Tudo aqui é read-only e organizado por seção.
+  static const List<String> _weekdaysAbbr = [
+    'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'
+  ];
+  static const List<String> _monthsAbbr = [
+    'JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN',
+    'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'
+  ];
+
+  String _longDate(DateTime d) {
+    final wd = _weekdaysAbbr[(d.weekday - 1) % 7];
+    final mo = _monthsAbbr[(d.month - 1) % 12];
+    return '$wd · ${d.day.toString().padLeft(2, '0')} $mo ${d.year}';
+  }
+
+  void _showEntryDetail(TrainEntry e) {
+    if (!e.isSelf) return;
+    final sportId = e.sport != null ? SportId.fromString(e.sport!) : SportId.bjj;
+    final sportDef = getSport(sportId);
+    final unit = sparringUnit(sportId);
+    final countUnit = unit == null
+        ? null
+        : (e.sparringCount == 1 ? unit.one : unit.many).toUpperCase();
+    final hasCount = e.sparringCount > 0 && countUnit != null;
+    final note = e.note?.trim() ?? '';
+    final hasBody = hasCount ||
+        e.intensity != null ||
+        e.feeling != null ||
+        e.techniques.isNotEmpty ||
+        e.partners.isNotEmpty ||
+        note.isNotEmpty;
+
+    showDialog<void>(
+      context: context,
+      barrierColor: _ink.withValues(alpha: 0.55),
+      builder: (c) => Dialog(
+        backgroundColor: _bone,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 40),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440, maxHeight: 640),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Barra superior: selo AUTO · fechar · EDITAR (canto sup. dir) ─
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 16, 12, 6),
+                child: Row(
+                  children: [
+                    const _SourceBadge(source: TrainSource.self),
+                    const Spacer(),
+                    _iconGhost(LucideIcons.x, () => Navigator.pop(c)),
+                    const SizedBox(width: 8),
+                    Pressable(
+                      onTap: () {
+                        Navigator.pop(c);
+                        _openEdit(e);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 9),
+                        decoration: BoxDecoration(
+                          color: _ink,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(LucideIcons.pencil, size: 14, color: _bone),
+                            SizedBox(width: 7),
+                            Text('EDITAR',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.0,
+                                  color: _bone,
+                                )),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // ── Cabeçalho: esporte + data por extenso ─────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 6, 18, 0),
+                child: Row(
+                  children: [
+                    Icon(sportDef.icon, size: 19, color: _ink),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        sportDef.label.toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.4,
+                          color: _ink,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 5, 18, 0),
+                child: Text(
+                  _longDate(e.date),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.4,
+                    color: _blood,
+                    fontFeatures: _tabular,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              // ── Corpo rolável ─────────────────────────────────────────────
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
+                  physics: const BouncingScrollPhysics(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (hasCount) _detailHero(e.sparringCount, countUnit),
+                      if (e.intensity != null || e.feeling != null) ...[
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            if (e.intensity != null)
+                              Expanded(
+                                child: _metaCell(
+                                  LucideIcons.flame,
+                                  'INTENSIDADE',
+                                  _intensities[e.intensity!] ??
+                                      e.intensity!.toUpperCase(),
+                                ),
+                              ),
+                            if (e.intensity != null && e.feeling != null)
+                              const SizedBox(width: 10),
+                            if (e.feeling != null)
+                              Expanded(
+                                child: _metaCell(
+                                  LucideIcons.activity,
+                                  'SENSAÇÃO',
+                                  _feelings[e.feeling!] ??
+                                      e.feeling!.toUpperCase(),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                      if (e.techniques.isNotEmpty)
+                        _detailSection(
+                            LucideIcons.swords, 'O QUE TREINEI', e.techniques),
+                      if (e.partners.isNotEmpty)
+                        _detailSection(
+                            LucideIcons.users, 'PARCEIROS', e.partners),
+                      if (note.isNotEmpty) ...[
+                        const SizedBox(height: 18),
+                        _detailHeader(LucideIcons.target, 'FOCO DO DIA'),
+                        const SizedBox(height: 9),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(13),
+                          decoration: BoxDecoration(
+                            color: _ink.withValues(alpha: 0.03),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: _hair),
+                          ),
+                          child: Text(
+                            note,
+                            style: TextStyle(
+                              fontSize: 14,
+                              height: 1.4,
+                              fontWeight: FontWeight.w600,
+                              color: _ink.withValues(alpha: 0.85),
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (!hasBody) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'TREINO REGISTRADO · SEM DETALHES',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.0,
+                            color: _smoke.withValues(alpha: 0.8),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Botão-ícone fantasma (outline) — usado no fechar do display.
+  Widget _iconGhost(IconData icon, VoidCallback onTap) {
+    return Pressable(
+      onTap: onTap,
+      child: Container(
+        width: 34,
+        height: 34,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _ink.withValues(alpha: 0.18), width: 1),
+        ),
+        child: Icon(icon, size: 16, color: _smoke),
+      ),
+    );
+  }
+
+  /// Bloco herói do display: o número do dia grande, na UNIDADE do esporte.
+  Widget _detailHero(int count, String unit) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+      decoration: BoxDecoration(
+        color: _ink,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          Text(
+            '$count',
+            style: const TextStyle(
+              fontSize: 52,
+              height: 1.0,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -1,
+              color: _bone,
+              fontFeatures: _tabular,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            unit,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 3.0,
+              color: _ash,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Célula de metadado (intensidade / sensação): ícone + label + valor.
+  Widget _metaCell(IconData icon, String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _hair),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 13, color: _smoke),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.0,
+                  color: _smoke,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.4,
+              color: _ink,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Cabeçalho de seção do display: ícone sangue + rótulo.
+  Widget _detailHeader(IconData icon, String label) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: _blood),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.6,
+            color: _ink,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Seção de lista (técnicas / parceiros): cabeçalho + chips read-only.
+  Widget _detailSection(IconData icon, String label, List<String> items) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 18),
+        _detailHeader(icon, '$label · ${items.length}'),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: items.map(_readChip).toList(),
+        ),
+      ],
+    );
+  }
+
+  /// Chip read-only (sem toque/close) — fightwear, raio 8.
+  Widget _readChip(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: _ink.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _ink.withValues(alpha: 0.14), width: 1),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+          color: _ink,
+        ),
+      ),
+    );
+  }
+
   /// Abre um self-log existente para EDITAR — direto no logger COUNT (ajusta o
   /// número + excluir). Verified NUNCA entra aqui (registro da casa, imutável).
   void _openEdit(TrainEntry e) {
@@ -1945,7 +2313,10 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
       final variant = s == SportId.muaythai && teto != null
           ? resolveMuaythaiVariant(teto.currentGrade)
           : null;
-      final grades = getGradesForSport(s, muaythaiVariant: variant);
+      // Escada pela categoria do aluno (kids/adult): sem isso um lutador
+      // infantil via a escada adulta e podia registrar faixas fora do infantil.
+      final grades = getGradesForSport(s,
+          category: student.isKids ? 'kids' : 'adult', muaythaiVariant: variant);
       if (teto == null) return grades;
       final idx = grades.indexWhere((g) => g.id == teto.currentGrade);
       final cap = idx < 0 ? grades.length - 1 : idx;
@@ -2438,7 +2809,7 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
               return _TrainRow(
                 entry: e,
                 onTap: e.isSelf
-                    ? () => _openEdit(e)
+                    ? () => _showEntryDetail(e)
                     : (e.verifiedId != null
                         ? () => _openCount(
                               date: e.date,

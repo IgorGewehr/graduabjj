@@ -863,6 +863,20 @@ service cloud.firestore {
       }
 
       // ============================================
+      // Join Requests Subcollection (self-onboarding)
+      // ============================================
+      // O aluno se cadastra com o código ÚNICO da academia e cria uma
+      // SOLICITAÇÃO pendente. TODAS as escritas passam por Cloud Function
+      // (submitJoinRequest / decideJoinRequest / cancelJoinRequest via Admin
+      // SDK) — o cliente nunca escreve direto. Leitura: staff (para a lista de
+      // "Solicitações") e o próprio solicitante (defesa em profundidade).
+      match /joinRequests/{requestUid} {
+        allow read: if isAcademyStaff(academyId)
+                    || (isAuthenticated() && request.auth.uid == requestUid);
+        allow write: if false;
+      }
+
+      // ============================================
       // Financials Subcollection (CRITICAL - Payment Data)
       // ============================================
       match /financials/{financialId} {

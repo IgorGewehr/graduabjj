@@ -18,6 +18,20 @@ import '../../services/services.dart';
 import 'paying_students_screen.dart';
 import 'financial_reports_screen.dart';
 
+/// Parse robusto de valor em R$ digitado por brasileiro. Aceita "150,50"
+/// (vírgula decimal), "1.500,00" (ponto milhar + vírgula) e "150.50"/"150".
+/// Sem isso, `double.tryParse('150,50')` retornava null → plano salvo em R$0,00
+/// e TODA mensalidade gerada saía zerada.
+double parseBrlAmount(String raw) {
+  var s = raw.trim();
+  if (s.isEmpty) return 0;
+  if (s.contains(',')) {
+    // Formato BR: vírgula é decimal, ponto é separador de milhar.
+    s = s.replaceAll('.', '').replaceAll(',', '.');
+  }
+  return double.tryParse(s) ?? 0;
+}
+
 /// Admin Financial Screen - Matching webapp design
 class AdminFinancialScreen extends ConsumerStatefulWidget {
   const AdminFinancialScreen({super.key});
@@ -35,6 +49,14 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   List<Student> _students = [];
   Map<String, dynamic>? _monthlySummary;
   bool _isLoading = true;
+
+  /// Escrever (criar/gerar/editar plano, gerar mensalidades) exige admin OU
+  /// financial:create. Sem isso, o Financeiro mostrava botões que só levavam a
+  /// um permission-denied cru — agora escondemos o que a pessoa não pode usar.
+  bool get _canManageFinance {
+    final u = ref.read(currentUserProvider).valueOrNull;
+    return u != null && (u.isAdmin || u.hasPermission('financial:create'));
+  }
 
   // State
   DateTime _selectedMonth = DateTime.now();
@@ -180,7 +202,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      floatingActionButton: _buildFAB(),
+      floatingActionButton: _canManageFinance ? _buildFAB() : null,
       body: _isLoading
           ? Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -498,6 +520,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   ),
                 ],
               ),
+              if (_canManageFinance)
               ElevatedButton(
                 onPressed: _showCreatePlanDialog,
                 style: ElevatedButton.styleFrom(
@@ -944,7 +967,8 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                       : 'Valor por ${billingPeriod.periodLabel.capitalize()} (R\$)',
                   valueController,
                   billingPeriod == BillingPeriod.monthly ? 'Ex: 150' : 'Ex: 400',
-                  keyboardType: TextInputType.number,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                 ),
 
                 _buildFormField('Dia de Vencimento', dueDayController, '1-31',
@@ -1018,11 +1042,15 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                               valueController.text.isEmpty) {
                             return;
                           }
+                          final enteredValue =
+                              parseBrlAmount(valueController.text);
+                          if (enteredValue <= 0) {
+                            context.showError('Informe um valor válido (ex: 150,00).');
+                            return;
+                          }
                           try {
                             final service =
                                 PlanService(FirebaseService.academyId);
-                            final enteredValue =
-                                double.tryParse(valueController.text) ?? 0;
                             await service.create(
                               name: nameController.text,
                               monthlyValue: billingPeriod == BillingPeriod.monthly
@@ -1186,7 +1214,8 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                       : 'Valor por ${billingPeriod.periodLabel.capitalize()} (R\$)',
                   valueController,
                   '',
-                  keyboardType: TextInputType.number,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                 ),
 
                 _buildFormField('Dia de Vencimento', dueDayController, '',
@@ -1253,7 +1282,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                             final service =
                                 PlanService(FirebaseService.academyId);
                             final enteredValue =
-                                double.tryParse(valueController.text) ?? 0;
+                                parseBrlAmount(valueController.text);
                             await service.update(plan.id, {
                               'name': nameController.text,
                               'billingPeriod': billingPeriod.name,

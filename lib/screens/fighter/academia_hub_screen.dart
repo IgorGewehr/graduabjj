@@ -3,9 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/feedback_utils.dart';
 import '../../core/fighter_theme.dart';
+import '../../models/join_request.dart';
+import '../../providers/join_request_providers.dart';
 import '../../providers/providers.dart';
 import '../../services/settings_service.dart';
+import '../../services/team_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/polish/polish.dart';
 
@@ -27,6 +31,12 @@ class AcademiaHubScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settingsAsync = ref.watch(academySettingsProvider);
+    // Sem academia: ou o aluno tem uma SOLICITAÇÃO pendente (aguardando o
+    // professor aprovar) → tela de espera; ou não tem nada → prompt de entrar.
+    final pending = ref.watch(pendingJoinRequestProvider).valueOrNull;
+    Widget noAcademy() => pending != null
+        ? _PendingApprovalState(pending: pending)
+        : const _NoAcademyState();
 
     return Scaffold(
       backgroundColor: FighterTheme.bone,
@@ -41,12 +51,138 @@ class AcademiaHubScreen extends ConsumerWidget {
           ),
           // A null settings document means the fighter has no selected academy
           // (the provider returns null when `academyId == null`) — i.e. a free,
-          // academy-less user. Surface the "join" prompt, not an error.
-          error: (_, _) => const _NoAcademyState(),
+          // academy-less user. Surface the pending-approval or "join" prompt.
+          error: (_, _) => noAcademy(),
           data: (settings) {
-            if (settings == null) return const _NoAcademyState();
+            if (settings == null) return noAcademy();
             return _AcademyHubBody(settings: settings);
           },
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pending approval — solicitação enviada, aguardando o professor
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PendingApprovalState extends ConsumerStatefulWidget {
+  final PendingJoinRequest pending;
+  const _PendingApprovalState({required this.pending});
+
+  @override
+  ConsumerState<_PendingApprovalState> createState() =>
+      _PendingApprovalStateState();
+}
+
+class _PendingApprovalStateState
+    extends ConsumerState<_PendingApprovalState> {
+  bool _cancelling = false;
+
+  Future<void> _cancel() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: FighterTheme.paper,
+        title: const Text('Cancelar solicitação?'),
+        content: Text(
+          'Você vai sair da fila de aprovação da ${widget.pending.academyName}. '
+          'Dá pra enviar de novo depois com o mesmo código.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Voltar'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: FighterTheme.blood),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Cancelar solicitação'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _cancelling = true);
+    try {
+      await teamService.cancelJoinRequest(widget.pending.academyId);
+      // O stream de pendingJoinRequestProvider limpa sozinho → volta ao prompt.
+      if (mounted) context.showSuccess('Solicitação cancelada.');
+    } catch (e) {
+      if (mounted) {
+        setState(() => _cancelling = false);
+        context.showError('Não foi possível cancelar. Tente de novo.');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                color: FighterTheme.blood.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+                border: Border.all(
+                    color: FighterTheme.blood.withValues(alpha: 0.35)),
+              ),
+              child: const Icon(LucideIcons.hourglass,
+                  color: FighterTheme.blood, size: 36),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'AGUARDANDO APROVAÇÃO',
+              textAlign: TextAlign.center,
+              style: FighterTheme.heroLabel.copyWith(fontSize: 20),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: FighterTheme.ink,
+                borderRadius: FighterTheme.chipBorderRadius,
+              ),
+              child: Text(
+                widget.pending.academyName.toUpperCase(),
+                style: FighterTheme.heroLabelOnInk.copyWith(fontSize: 12),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Sua solicitação foi enviada ao professor. Assim que ele aprovar, '
+              'o tatame da academia — horários, presenças, graduação e mais — '
+              'aparece aqui automaticamente.\n\nEnquanto isso, o resto do app é '
+              'seu: registre treinos, acompanhe sua jornada e a galera.',
+              textAlign: TextAlign.center,
+              style: FighterTheme.bodyVoice.copyWith(
+                color: FighterTheme.ink.withValues(alpha: 0.7),
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 28),
+            _cancelling
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: FighterTheme.blood),
+                  )
+                : TextButton(
+                    onPressed: _cancel,
+                    style: TextButton.styleFrom(
+                        foregroundColor: FighterTheme.ash),
+                    child: const Text('Cancelar solicitação'),
+                  ),
+          ],
         ),
       ),
     );

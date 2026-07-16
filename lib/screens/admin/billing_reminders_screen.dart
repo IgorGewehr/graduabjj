@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import '../../core/feedback_utils.dart';
@@ -614,11 +615,15 @@ class _AdminBillingRemindersScreenState
                 // Phone
                 if (phone != null && phone.isNotEmpty)
                   IconButton(
-                    onPressed: () {
-                      FeedbackUtils.showInfo(
-                        context,
-                        'Ligar para $studentName: $phone',
-                      );
+                    onPressed: () async {
+                      final digits = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+                      final uri = Uri.parse('tel:$digits');
+                      if (!await launchUrl(uri) && context.mounted) {
+                        FeedbackUtils.showInfo(
+                          context,
+                          'Ligar para $studentName: $phone',
+                        );
+                      }
                     },
                     icon: const Icon(LucideIcons.phone, size: 20),
                     color: AppTheme.textSecondary,
@@ -1302,6 +1307,10 @@ class _AdminBillingRemindersScreenState
       // L3: track WhatsApp link attachment outcomes so the admin sees how many
       // messages went out WITH a PIX/link vs WITHOUT (silent link failures).
       int waWithLink = 0, waWithoutLink = 0;
+      // Motivo #1 de "sem link": aluno (ou responsável, se kids) sem CPF — o PIX
+      // do Mercado Pago exige CPF do pagador. Coleta os nomes pra avisar o
+      // professor (dado acionável: é só cadastrar o CPF na ficha).
+      final missingCpfNames = <String>[];
 
       // ---- PIX pre-generation (bounded concurrency) ----
       // For every WhatsApp-eligible, unpaid item (when the setting is on) we
@@ -1421,6 +1430,10 @@ class _AdminBillingRemindersScreenState
                 waWithLink++;
               } else {
                 waWithoutLink++;
+                if ((contact.effectiveCpf ?? '').trim().isEmpty &&
+                    !missingCpfNames.contains(studentName)) {
+                  missingCpfNames.add(studentName);
+                }
               }
             }
           } else {
@@ -1511,6 +1524,7 @@ class _AdminBillingRemindersScreenState
           alreadyPaidSkipped: alreadyPaidSkipped,
           waWithLink: waWithLink,
           waWithoutLink: waWithoutLink,
+          missingCpfNames: missingCpfNames,
           linkIntended: includePix && whatsappOn,
         );
       }
@@ -1533,6 +1547,7 @@ class _AdminBillingRemindersScreenState
     int alreadyPaidSkipped = 0,
     int waWithLink = 0,
     int waWithoutLink = 0,
+    List<String> missingCpfNames = const [],
     bool linkIntended = false,
   }) {
     showDialog(
@@ -1703,13 +1718,38 @@ class _AdminBillingRemindersScreenState
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: Text(
-                            'WhatsApp — enviadas com link: $waWithLink / sem link: $waWithoutLink',
-                            style: AppTheme.bodySmall.copyWith(
-                              color: waWithoutLink > 0
-                                  ? AppTheme.warning
-                                  : AppTheme.success,
-                            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'WhatsApp — enviadas com link: $waWithLink / sem link: $waWithoutLink',
+                                style: AppTheme.bodySmall.copyWith(
+                                  color: waWithoutLink > 0
+                                      ? AppTheme.warning
+                                      : AppTheme.success,
+                                ),
+                              ),
+                              // Motivo acionável do "sem link": falta de CPF.
+                              if (missingCpfNames.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Sem CPF cadastrado (o PIX do Mercado Pago exige '
+                                  'CPF do pagador). Adicione o CPF na ficha — do '
+                                  'responsável, se for kids — para incluir o link:',
+                                  style: AppTheme.labelSmall.copyWith(
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  missingCpfNames.join(', '),
+                                  style: AppTheme.labelSmall.copyWith(
+                                    color: AppTheme.warning,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
                         ),
                       ],

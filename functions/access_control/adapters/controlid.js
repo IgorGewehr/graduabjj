@@ -131,7 +131,70 @@ function eventPathOf(req) {
   }
   if (/(^|\/)catra_event$/.test(p)) return 'catra_event';
   if (/(^|\/)device_is_alive$/.test(p)) return 'device_is_alive';
+  // Modo ONLINE / Pro: o device reconhece a face localmente e PERGUNTA à nuvem
+  // se libera (resposta síncrona no mesmo POST). É o modo que registra presença
+  // + abre a catraca "como o QR". O device chama .../new_user_identified.fcgi
+  // (às vezes só new_user_identified). Também aceitamos new_card_identified.
+  if (/(^|\/)new_(user|card)_identified(\.fcgi)?$/.test(p)) return 'online';
   return ''; // desconhecido → caímos na heurística por shape do corpo.
+}
+
+/**
+ * Parser de corpo application/x-www-form-urlencoded (wire do Online/Pro da
+ * Control iD, que NÃO é JSON). Puro, tolerante a garbage. Retorna {} vazio.
+ */
+function parseUrlEncoded(rawBody) {
+  const out = {};
+  if (typeof rawBody !== 'string' || rawBody.trim() === '') return out;
+  for (const pair of rawBody.split('&')) {
+    if (!pair) continue;
+    const i = pair.indexOf('=');
+    const k = i < 0 ? pair : pair.slice(0, i);
+    const v = i < 0 ? '' : pair.slice(i + 1);
+    try {
+      out[decodeURIComponent(k.replace(/\+/g, ' '))] =
+        decodeURIComponent(v.replace(/\+/g, ' '));
+    } catch (_) {/* par malformado — ignora */}
+  }
+  return out;
+}
+
+/**
+ * Constrói o AccessEvent do modo ONLINE/Pro (new_user_identified.fcgi). O device
+ * JÁ fez o match facial embarcado e manda o `user_id` perguntando se libera. Marca
+ * `raw.online = true` para o núcleo responder o contrato grant/deny (não ACK).
+ * Aceita corpo form-urlencoded OU JSON.
+ * TODO/FIELD-CONFIRM: nomes exatos dos campos por firmware (user_id, time,
+ * portal_id, device_id) — confirmar com sniffer no piloto.
+ */
+function onlineToEvent(device, req) {
+  const params = safeJson(req && req.rawBody) || parseUrlEncoded(req && req.rawBody);
+  const externalUserId = String(params.user_id == null ? '' : params.user_id);
+  const identified = externalUserId !== '' && externalUserId !== '0';
+  // Online é decisão em TEMPO REAL: usa o time do device se vier, senão agora.
+  const occurredAt = controlidTimeToDate(params.time) || new Date();
+  const devId = String(params.device_id || device.deviceId || '');
+  // Sem id sequencial no Online: id estável por (device, user, time) — retentativa
+  // do MESMO reconhecimento deduplica; o núcleo ainda deduplica presença por dia.
+  const tKey = params.time != null ? String(params.time)
+    : String(Math.floor(occurredAt.getTime() / 1000));
+  const eventId = `${devId}_online_u${externalUserId}_t${tKey}`;
+
+  return {
+    deviceId: device.deviceId,
+    vendor: VENDOR,
+    externalUserId,
+    eventId,
+    occurredAt,
+    direction: resolveDirection(device, params.portal_id),
+    // iDFace Online é facial por definição; multi-método é field-confirm.
+    method: 'face',
+    // No Online o device só RECONHECEU; quem decide o grant final é o núcleo
+    // (mapeado + adimplente + turma). granted=identified deixa o núcleo seguir.
+    granted: identified,
+    eventCode: 'online_identified',
+    raw: { source: 'online', online: true, params },
+  };
 }
 
 /**
@@ -274,8 +337,17 @@ function catraEventToEvent(device, body) {
  */
 function parse(req, device) {
   const dev = device || {};
-  const body = safeJson(req && req.rawBody);
   const path = eventPathOf(req);
+
+  // ---- Modo ONLINE / Pro (new_user_identified.fcgi) ----
+  // Roteado ANTES do safeJson: o corpo é form-urlencoded, não JSON. Marca o
+  // evento com raw.online p/ o núcleo responder grant/deny (abre a catraca).
+  if (path === 'online') {
+    const ev = onlineToEvent(dev, req);
+    return ev ? [ev] : [];
+  }
+
+  const body = safeJson(req && req.rawBody);
 
   // Heartbeat explícito → não é evento de acesso.
   if (path === 'device_is_alive') return [];
@@ -331,5 +403,7 @@ module.exports = {
   controlidTimeToDate,
   accessLogToEvent,
   catraEventToEvent,
+  onlineToEvent,
+  parseUrlEncoded,
   eventPathOf,
 };

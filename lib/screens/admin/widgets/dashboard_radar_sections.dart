@@ -1,4 +1,4 @@
-import 'package:cloud_functions/cloud_functions.dart';
+import '../../../services/fns.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -423,7 +423,7 @@ Future<void> showBroadcastDialog(BuildContext context, String academyId) async {
 
   if (sent != true) return;
   try {
-    await FirebaseFunctions.instance
+    await Fns.functions
         .httpsCallable('sendAcademyNotification')
         .call<Map<String, dynamic>>({
       'academyId': academyId,

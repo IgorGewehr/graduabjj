@@ -152,6 +152,17 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen>
     final List<CompetitionResult> results = profile.competitionResults;
     final List<CompetitionPhoto> photos = profile.photos;
 
+    // Competições ficam na SUA aba, não na de graduações. Sem esta separação, o
+    // fallback _TimelineTab(achievements) despejava as competições (que são
+    // achievements type=competition) na aba GRADUAÇÕES, enquanto a aba
+    // COMPETIÇÕES — que lê competitionResults — aparecia em branco.
+    final List<Achievement> compAchievements = achievements
+        .where((a) => a.type == AchievementType.competition)
+        .toList();
+    final List<Achievement> nonCompAchievements = achievements
+        .where((a) => a.type != AchievementType.competition)
+        .toList();
+
     // VITRINE MATERIALIZADA — lê o espelho `fighterProfiles/{uid}` (1 read),
     // nunca a attendance privada da academia do dono. O id de navegação é o
     // studentId (doc do aluno); o mirror é chaveado pelo auth uid, que vem em
@@ -214,13 +225,18 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen>
               // clássica (mesma academia do visitante) como fallback.
               hasGraduations
                   ? _GraduationsTab(graduations: showcase.graduations)
-                  : _TimelineTab(achievements: achievements),
+                  : _TimelineTab(achievements: nonCompAchievements),
               hasCompetitions
                   ? _CompetitionMarksTab(
                       marks: showcase.competitions,
                       medals: showcase.medals,
                     )
-                  : _CompetitionsTab(results: results),
+                  // Sem vitrine e sem resultados formais: renderiza as
+                  // competições que estão como achievements (o caso do bug),
+                  // senão o estado vazio padrão.
+                  : results.isEmpty && compAchievements.isNotEmpty
+                      ? _TimelineTab(achievements: compAchievements)
+                      : _CompetitionsTab(results: results),
               _PhotosTab(photos: photos),
             ],
           ),

@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import 'abacate_pay_service.dart' show PaymentLink, CardData, CardPaymentResult;
+import 'fns.dart';
 import 'mp_card_tokenizer.dart';
 
 /// Mercado Pago marketplace/split service (student -> admin receivables).
@@ -15,7 +16,7 @@ import 'mp_card_tokenizer.dart';
 /// unchanged.
 class MercadoPagoService {
   final String academyId;
-  final FirebaseFunctions _functions = FirebaseFunctions.instance;
+  final CallableClient _functions = Fns.functions;
 
   MercadoPagoService(this.academyId);
 

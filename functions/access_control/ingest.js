@@ -409,7 +409,42 @@ async function recordAccessEvent(academyId, ev, device, classesCache, accessCont
 // ---------------------------------------------------------------------------
 // CONTRATO DE RESPOSTA por fabricante (crítico p/ NÃO causar re-entrega).
 // ---------------------------------------------------------------------------
-function respond(res, vendor, { granted, message }) {
+// Resposta do modo ONLINE/Pro da Control iD: o device espera, no MESMO POST, o
+// veredito + a AÇÃO física (abrir porta / liberar giro da catraca). Formato:
+//   { "result": { "event": 7, "user_id": N, "actions": [ ... ] } }
+// TODO/FIELD-CONFIRM: os códigos de `event` e o formato de `actions`/`parameters`
+// variam por firmware (iDFace / iDBlock). Confirmar no piloto com sniffer. Tudo
+// é configurável pelo doc do device (controlidAction/catraSense/portalDoor).
+function controlidOnlineResult(device, { granted, message, externalUserId }) {
+  const dev = device || {};
+  const action = String(dev.controlidAction || 'door').toLowerCase();
+  const actions = [];
+  if (granted) {
+    if (action === 'catra') {
+      const sense = String(dev.catraSense || 'clockwise');
+      actions.push({ action: 'catra', parameters: `allow=${sense}` });
+    } else {
+      const door = Number(dev.portalDoor) > 0 ? Number(dev.portalDoor) : 1;
+      actions.push({ action: 'door', parameters: `door=${door}` });
+    }
+  }
+  const uid = Number(externalUserId);
+  return {
+    result: {
+      event: granted ? 7 : 6, // 7 = concedido; 6/sem action = negado.
+      user_id: Number.isFinite(uid) ? uid : 0,
+      actions,
+      ...(message ? { message } : {}),
+    },
+  };
+}
+
+function respond(res, vendor, { granted, message, online, device, externalUserId }) {
+  // Control iD em modo ONLINE: resposta síncrona grant/deny + ação física.
+  if (vendor === 'controlid' && online) {
+    return res.status(200).json(
+      controlidOnlineResult(device, { granted, message, externalUserId }));
+  }
   switch (vendor) {
     case 'zkteco':
       // DEVE ser text/plain "OK" — JSON faz o device achar que falhou e
@@ -439,6 +474,10 @@ const ingestAccessEvent = onRequest(
     // vendor pode ser desconhecido até carregar o device; default zkteco-ish
     // text/plain p/ não quebrar re-entrega antes de sabermos.
     let vendor = String(req.query.vendor || '').toLowerCase();
+    // Modo ONLINE/Pro da Control iD (resposta síncrona grant/deny). Declarados no
+    // escopo externo para o catch fatal também responder no formato certo.
+    let controlidOnline = false;
+    let deviceForResp = null;
     try {
       // §4.1 — método. GET = handshake/heartbeat: responde 200 e sai (não parseia).
       if (req.method !== 'POST') {
@@ -469,6 +508,12 @@ const ingestAccessEvent = onRequest(
       const device = devSnap.data() || {};
       if (device.enabled === false) return res.status(403).send('forbidden');
       vendor = String(device.vendor || vendor || '').toLowerCase();
+      deviceForResp = device;
+      // Online/Pro: o device chama .../new_user_identified.fcgi esperando o
+      // veredito+ação na resposta. (No Monitor o path é /dao|/catra_event.)
+      controlidOnline = vendor === 'controlid' &&
+        /(^|\/)new_(user|card)_identified(\.fcgi)?$/
+          .test(String(req.path || '').toLowerCase());
 
       // §4.4 — IP allowlist opcional.
       const clientIp = (req.headers['x-forwarded-for'] || '')
@@ -477,7 +522,10 @@ const ingestAccessEvent = onRequest(
 
       // §4.5 — rate-limit naive por device.
       if (!(await checkRateLimit(academyId, deviceId, nowMs))) {
-        return respond(res, vendor, { granted: false, message: 'Tente novamente' });
+        return respond(res, vendor, {
+          granted: false, message: 'Tente novamente',
+          online: controlidOnline, device,
+        });
       }
 
       // §4.6 — auth do corpo (HMAC timing-safe OU token fraco). Fail closed.
@@ -494,7 +542,10 @@ const ingestAccessEvent = onRequest(
       if (!parse) {
         console.warn('[ingestAccessEvent] no adapter', { vendor, deviceId });
         // Vendor desconhecido / adapter não implementado: ACK p/ não re-entregar.
-        return respond(res, vendor, { granted: false, message: 'Indisponivel' });
+        return respond(res, vendor, {
+          granted: false, message: 'Indisponivel',
+          online: controlidOnline, device,
+        });
       }
 
       const adapterReq = {
@@ -514,8 +565,13 @@ const ingestAccessEvent = onRequest(
       }
 
       // null = payload irreconhecível; [] = heartbeat/sem eventos. Ambos => ACK.
+      // No Online, "sem evento" = ninguém reconhecido => NEGA (não abre).
       if (!Array.isArray(events) || events.length === 0) {
-        return respond(res, vendor, { granted: true, message: 'OK' });
+        return respond(res, vendor, {
+          granted: !controlidOnline,
+          message: controlidOnline ? 'Nao reconhecido' : 'OK',
+          online: controlidOnline, device,
+        });
       }
 
       // LEITURAS pré-transação, UMA vez por POST (fora de runTransaction):
@@ -557,7 +613,9 @@ const ingestAccessEvent = onRequest(
       // demais eventos AINDA são gravados (auditoria/idempotência). Para vendors de
       // LOTE (zkteco/controlid) a resposta é ACK fire-and-forget (não gateia o giro
       // físico, decidido embarcado), então todos contam no agregado.
-      const verdictFromFirstOnly = vendor === 'intelbras';
+      // Online também é síncrono/1-pessoa (a resposta gateia o giro): veredito só
+      // do 1º evento, como o Intelbras.
+      const verdictFromFirstOnly = vendor === 'intelbras' || controlidOnline;
       let idx = -1;
       for (const ev of events) {
         idx++;
@@ -607,13 +665,26 @@ const ingestAccessEvent = onRequest(
         academyId, deviceId, vendor, count: events.length, anyGranted,
         denied: !anyGranted && !!denyMsg ? 'overdue' : undefined,
       });
-      return respond(res, vendor, { granted: anyGranted, message: finalMsg });
+      // externalUserId da pessoa decidida (1º evento no modo síncrono/online) —
+      // ecoado de volta na resposta Online p/ o device casar com quem passou.
+      const decidedUserId = events[0] && events[0].externalUserId;
+      return respond(res, vendor, {
+        granted: anyGranted, message: finalMsg,
+        online: controlidOnline, device, externalUserId: decidedUserId,
+      });
     } catch (e) {
       console.error('[ingestAccessEvent] fatal', e && e.message);
       // 500 faz ZKTeco re-entregar (idempotência cobre); p/ Intelbras síncrono
       // respondemos veredito negativo 200 p/ não pendurar o device.
       if (vendor === 'intelbras') {
         return respond(res, 'intelbras', { granted: false, message: 'Erro interno' });
+      }
+      // Control iD Online: nega com 200 (não pendura a catraca esperando resposta).
+      if (controlidOnline) {
+        return respond(res, 'controlid', {
+          granted: false, message: 'Erro interno',
+          online: true, device: deviceForResp,
+        });
       }
       return res.status(500).send('error');
     }

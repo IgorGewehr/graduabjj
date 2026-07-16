@@ -16,6 +16,7 @@ import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/join_request_providers.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
@@ -312,6 +313,9 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                 ),
               ),
 
+              // Solicitações de entrada (self-onboarding) — destaque verde.
+              SliverToBoxAdapter(child: _buildRequestsButton()),
+
               // Search and filters
               SliverToBoxAdapter(child: _buildSearchAndFilters()),
               SliverToBoxAdapter(child: _buildInactivityChips()),
@@ -428,6 +432,72 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           chip(14),
           chip(30),
         ],
+      ),
+    );
+  }
+
+  /// Botão de destaque para as SOLICITAÇÕES de entrada. Verde e proeminente
+  /// quando há pendências ("Solicitações (N)"); discreto quando não há (mas
+  /// ainda leva à tela pra ver/compartilhar o código da academia).
+  Widget _buildRequestsButton() {
+    final count = ref.watch(pendingJoinRequestsCountProvider);
+    final has = count > 0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+      child: Material(
+        color: has ? AppTheme.success : AppTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => context.push('/admin/alunos/solicitacoes'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: has ? null : Border.all(color: AppTheme.divider),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  has ? LucideIcons.userCheck : LucideIcons.ticket,
+                  size: 20,
+                  color: has ? Colors.white : AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    has
+                        ? 'Solicitações de entrada'
+                        : 'Código da academia & solicitações',
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: has ? Colors.white : AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+                if (has)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: AppTheme.labelMedium.copyWith(
+                        color: AppTheme.success,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  )
+                else
+                  Icon(LucideIcons.chevronRight,
+                      size: 18, color: AppTheme.textSecondary),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

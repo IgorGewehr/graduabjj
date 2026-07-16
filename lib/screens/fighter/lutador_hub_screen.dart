@@ -6,9 +6,11 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/feed_post.dart';
+import '../../models/join_request.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/friend_providers.dart';
+import '../../providers/join_request_providers.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/student_provider.dart';
 import '../../services/feed_posts_service.dart';
@@ -74,6 +76,11 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
   Widget build(BuildContext context) {
     final user = ref.watch(currentUserProvider).valueOrNull;
     final student = ref.watch(currentStudentProvider).valueOrNull;
+    // Solicitação de entrada pendente (aluno se cadastrou pelo código e aguarda
+    // o professor aprovar) — só relevante quando ainda não há ficha.
+    final pending = student == null
+        ? ref.watch(pendingJoinRequestProvider).valueOrNull
+        : null;
 
     final sports = student?.getSports() ?? const <SportId>[];
     final primary = student?.getPrimarySport() ?? SportId.bjj;
@@ -133,9 +140,18 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
             ),
             const SizedBox(height: 18),
             if (student == null) ...[
-              _emptyStreak(),
-              const SizedBox(height: 14),
-              _unlinked(),
+              // Aluno SEM ficha na academia: ou tem uma SOLICITAÇÃO pendente
+              // (acabou de se cadastrar pelo código) → hero de espera; ou não
+              // tem vínculo nenhum → convite a entrar por código. O card de
+              // streak ("treine essa semana") sai daqui: fora de contexto pra
+              // quem ainda nem entrou numa academia.
+              if (pending != null) ...[
+                _pendingHero(context, pending),
+                const SizedBox(height: 14),
+                _whileWaitingCard(context),
+              ] else ...[
+                _noAcademyCard(context),
+              ],
             ] else if (isFirstStep) ...[
               const _FirstStepCard(),
               const SizedBox(height: 22),
@@ -161,40 +177,142 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
     );
   }
 
-  Widget _emptyStreak() => _DarkCard(
+  // Aluno aguardando o professor aprovar a solicitação de entrada. Toca pra ir
+  // à aba Academia (onde fica a tela completa + cancelar).
+  Widget _pendingHero(BuildContext context, PendingJoinRequest pending) {
+    return GestureDetector(
+      onTap: () => context.go('/portal/academia'),
+      child: _DarkCard(
         child: Row(
           children: [
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('SEM SEQUÊNCIA ATIVA', style: _eyebrow(_T.ash, 12)),
-                  const SizedBox(height: 8),
-                  const Text('TREINE ESSA SEMANA\nPRA ACENDER A CORRENTE.',
-                      style: TextStyle(
-                          color: _T.bone,
-                          height: 1.1,
-                          fontSize: 20,
-                          letterSpacing: 0.2,
-                          fontWeight: FontWeight.w900)),
+                  const Text(
+                    'AGUARDANDO APROVAÇÃO',
+                    style: TextStyle(
+                      color: _T.blood,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    pending.academyName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: _T.ash,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700),
+                  ),
                 ],
               ),
             ),
-            const Icon(LucideIcons.flame, color: _T.blood, size: 36),
+            const SizedBox(width: 12),
+            const Icon(LucideIcons.hourglass, color: _T.blood, size: 28),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Enquanto aguarda: o resto do app já é do aluno. Ações que funcionam sem
+  // academia, pra ele não cair num vazio.
+  Widget _whileWaitingCard(BuildContext context) => _WhiteCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ENQUANTO ISSO, O APP JÁ É SEU', style: _eyebrow(_T.ink, 12)),
+            const SizedBox(height: 14),
+            _waitAction(LucideIcons.flame, 'Registrar um treino',
+                'Sua sequência começa hoje', () => context.go('/portal/diario')),
+            _waitDivider(),
+            _waitAction(LucideIcons.users, 'Encontrar a galera',
+                'Siga parceiros de treino', () => context.go('/portal/cena')),
+            _waitDivider(),
+            _waitAction(LucideIcons.user, 'Completar seu perfil',
+                'Foto, faixa e histórico', () => context.go('/portal/perfil')),
           ],
         ),
       );
 
-  Widget _unlinked() => _WhiteCard(
+  Widget _waitDivider() => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Divider(height: 1, color: _T.ink.withValues(alpha: 0.06)),
+      );
+
+  Widget _waitAction(
+      IconData icon, String title, String sub, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: _T.ink.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, size: 18, color: _T.ink),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          color: _T.ink,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w800)),
+                  Text(sub,
+                      style: TextStyle(color: _T.ash, fontSize: 12.5)),
+                ],
+              ),
+            ),
+            const Icon(LucideIcons.chevronRight, size: 18, color: _T.ash),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Sem academia E sem solicitação: convite a entrar por código.
+  Widget _noAcademyCard(BuildContext context) => _WhiteCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('SUA IDENTIDADE É SUA', style: _eyebrow(_T.ink, 13)),
             const SizedBox(height: 8),
             Text(
-              'Ela anda com você, com ou sem academia. Vincule a uma academia '
-              'pra somar treinos, graus e medalhas.',
+              'Ela anda com você, com ou sem academia. Entre com o código da '
+              'sua equipe pra somar treinos, graus e ranking.',
               style: TextStyle(color: _T.smoke, fontSize: 13.5, height: 1.4),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => context.push('/portal/academias/adicionar'),
+                icon: const Icon(LucideIcons.ticket, size: 18),
+                label: const Text('ENTRAR POR CÓDIGO'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _T.ink,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  textStyle: const TextStyle(
+                      fontWeight: FontWeight.w800, letterSpacing: 0.5),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
             ),
           ],
         ),
@@ -231,19 +349,28 @@ class _Header extends StatelessWidget {
     final stripeLabel =
         stripes > 0 ? ' · ${stripes == 1 ? '1º grau' : '$stripesº grau'}' : '';
     final initials = _nameInitials(name);
-    final onBelt = _onBelt(beltColor);
+    final hasPhoto = photoUrl != null && photoUrl!.isNotEmpty;
+    // Avatar de INICIAIS não pode ser branco: o fundo do app já é bone e some.
+    // Faixa clara (branca) → fundo ink com iniciais claras. Com foto, a cor fica
+    // atrás da imagem e não importa.
+    final isLightBelt = beltColor.computeLuminance() > 0.6;
+    final avatarBg = (!hasPhoto && isLightBelt) ? _T.ink : beltColor;
+    final avatarInk = _onBelt(avatarBg);
     return Row(
       children: [
         Container(
           width: 54,
           height: 54,
           decoration: BoxDecoration(
-            color: beltColor,
+            color: avatarBg,
             borderRadius: BorderRadius.circular(14),
+            border: avatarBg.computeLuminance() > 0.6
+                ? Border.all(color: _T.ink.withValues(alpha: 0.15))
+                : null,
           ),
           clipBehavior: Clip.antiAlias,
           alignment: Alignment.center,
-          child: (photoUrl != null && photoUrl!.isNotEmpty)
+          child: hasPhoto
               ? AppCachedImage(
                   imageUrl: photoUrl,
                   width: 54,
@@ -251,7 +378,7 @@ class _Header extends StatelessWidget {
                   fit: BoxFit.cover,
                   errorIcon: Text(initials,
                       style: TextStyle(
-                          color: onBelt,
+                          color: avatarInk,
                           fontSize: 19,
                           fontWeight: FontWeight.w900,
                           letterSpacing: 0.5)),
@@ -259,7 +386,7 @@ class _Header extends StatelessWidget {
               : Text(
                   initials,
                   style: TextStyle(
-                    color: onBelt,
+                    color: avatarInk,
                     fontSize: 19,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 0.5,
@@ -352,12 +479,18 @@ class _MiniBelt extends StatelessWidget {
   final int stripes;
   @override
   Widget build(BuildContext context) {
+    // Faixa clara (branca) precisa de contorno preto, senão no fundo bone só
+    // sobra a aba escura e parece um risco solto.
+    final needsOutline = beltColor.computeLuminance() > 0.6;
     return Container(
       width: 34,
       height: 14,
       decoration: BoxDecoration(
         color: beltColor,
         borderRadius: BorderRadius.circular(3),
+        border: needsOutline
+            ? Border.all(color: _T.ink.withValues(alpha: 0.7), width: 1)
+            : null,
       ),
       alignment: Alignment.centerRight,
       child: Container(

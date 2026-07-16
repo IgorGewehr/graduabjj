@@ -326,6 +326,440 @@ exports.joinAcademy = onCall(async (request) => {
 });
 
 // ============================================================
+// CÓDIGO ÚNICO DA ACADEMIA + SOLICITAÇÕES DE ENTRADA (self-onboarding)
+// ------------------------------------------------------------
+// Fluxo novo: a academia tem UM código (academy.joinCode, 6 alfanum). O aluno
+// se cadastra sozinho com esse código → cria uma SOLICITAÇÃO (não vincula
+// nada ainda). O professor aprova: linka a uma ficha existente (órfã) OU cria
+// uma ficha nova com os dados do cadastro. O código por-aluno (linkCodes /
+// joinAcademy) continua válido em paralelo (retrocompat).
+// ============================================================
+
+// Alfabeto sem caracteres ambíguos (0/O/1/I) — espelha o de
+// lib/services/link_code_service.dart. 6 chars.
+const JOIN_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const JOIN_CODE_LEN = 6;
+
+function generateJoinCode() {
+  let out = '';
+  const bytes = crypto.randomBytes(JOIN_CODE_LEN);
+  for (let i = 0; i < JOIN_CODE_LEN; i++) {
+    out += JOIN_CODE_CHARS[bytes[i] % JOIN_CODE_CHARS.length];
+  }
+  return out;
+}
+
+/** Gera um código único (não colidindo com o joinCode de outra academia). */
+async function uniqueAcademyJoinCode() {
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const candidate = generateJoinCode();
+    const clash = await db
+        .collection('academies')
+        .where('joinCode', '==', candidate)
+        .limit(1)
+        .get();
+    if (clash.empty) return candidate;
+  }
+  throw new HttpsError('internal', 'Não foi possível gerar um código único.');
+}
+
+// rotateAcademyJoinCode({academyId}) — staff gera/rotaciona o código único da
+// academia (o que vai no grupo do WhatsApp). Idempotente por chamada.
+exports.rotateAcademyJoinCode = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const academyId = ((request.data && request.data.academyId) || '').toString();
+  if (!academyId) {
+    throw new HttpsError('invalid-argument', 'academyId é obrigatório.');
+  }
+  if (!(await isStaff(uid, academyId))) {
+    throw new HttpsError('permission-denied', 'Apenas a equipe da academia pode gerar o código.');
+  }
+  const joinCode = await uniqueAcademyJoinCode();
+  await db.doc(`academies/${academyId}`).set({
+    joinCode,
+    joinCodeUpdatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+  return {success: true, joinCode};
+});
+
+// resolveAcademyCode({code}) — PÚBLICO (sem auth): valida o código único ANTES
+// do cadastro para o app mostrar "Você está entrando na X" e não criar contas
+// órfãs por erro de digitação. Só revela o NOME (sem PII). Espaço de 32^6 ≈ 1B
+// torna enumeração impraticável; espelha a leitura pública de linkCodes não-usados.
+exports.resolveAcademyCode = onCall(async (request) => {
+  const code = ((request.data && request.data.code) || '').toString().trim().toUpperCase();
+  if (!code) return {found: false};
+  const q = await db
+      .collection('academies')
+      .where('joinCode', '==', code)
+      .limit(1)
+      .get();
+  if (q.empty) return {found: false};
+  const doc = q.docs[0];
+  return {
+    found: true,
+    academyId: doc.id,
+    academyName: doc.get('name') || doc.get('academyName') || 'Academia',
+  };
+});
+
+// ============================================================
+// EXCLUSÃO DE CONTA (App Store / Play Store — obrigatória)
+// ------------------------------------------------------------
+// O próprio usuário exclui a conta pelo app (Perfil do aluno E do
+// admin/professor). Roda no Admin SDK para: (1) apagar a conta do Firebase Auth
+// SEM exigir "login recente" (o requires-recent-login travava o fluxo no
+// cliente e a exclusão falhava para o revisor da Apple); (2) limpar os dados
+// do usuário de forma completa (mapping, doc global, vitrine, vínculos por
+// academia). A ficha na academia é SOFT-deletada (status 'deleted') e
+// DESVINCULADA — o histórico operacional (presenças/financeiro) pertence à
+// academia, mas o vínculo com a conta é cortado.
+// ============================================================
+exports.deleteMyAccount = onCall(async (request) => {
+  const uid = requireAuth(request);
+
+  // 1) Vínculos por academia (via mapping).
+  const mappingRef = db.collection('userAcademyMapping').doc(uid);
+  const mapSnap = await mappingRef.get();
+  if (mapSnap.exists) {
+    const data = mapSnap.data() || {};
+    const ids = Array.isArray(data.academyIds) ? data.academyIds : [];
+    const details = data.academyDetails || {};
+    for (const aid of ids) {
+      const studentId = details[aid] && details[aid].studentId;
+      if (studentId) {
+        await db.doc(`academies/${aid}/students/${studentId}`).set({
+          status: 'deleted',
+          deletedAt: FieldValue.serverTimestamp(),
+          deletedByUser: true,
+          linkedUserId: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, {merge: true}).catch((e) =>
+          console.error('[deleteMyAccount] student soft-delete falhou', aid, e && e.message));
+      }
+      // Doc academy-scoped (role/perfil legado).
+      await db.doc(`academies/${aid}/users/${uid}`).delete().catch(() => {});
+      // Solicitação de entrada pendente, se houver.
+      await db.doc(`academies/${aid}/joinRequests/${uid}`).delete().catch(() => {});
+    }
+  }
+
+  // 2) Docs globais/portáteis do usuário.
+  await mappingRef.delete().catch(() => {});
+  await db.collection('users').doc(uid).delete().catch(() => {});
+  await db.collection('fighterProfiles').doc(uid).delete().catch(() => {});
+
+  // 3) Conta do Firebase Auth por último (Admin SDK — sem login recente).
+  await getAuth().deleteUser(uid);
+
+  return {success: true};
+});
+
+// submitJoinRequest({code, fullName?, phone?, cpf?, birthDate?, category?}) —
+// disparado pelo ALUNO recém-cadastrado. Resolve o código ÚNICO da academia e
+// cria uma solicitação PENDENTE. Se o código não for um código de academia,
+// devolve not-found para o cliente cair no fluxo legado (joinAcademy).
+exports.submitJoinRequest = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const code = ((request.data && request.data.code) || '').toString().trim().toUpperCase();
+  if (!code) {
+    throw new HttpsError('invalid-argument', 'Código é obrigatório.');
+  }
+
+  // Resolve academia pelo código único.
+  const acadQuery = await db
+      .collection('academies')
+      .where('joinCode', '==', code)
+      .limit(1)
+      .get();
+  if (acadQuery.empty) {
+    // Não é um código de academia — o cliente tenta o código por-aluno (legado).
+    throw new HttpsError('not-found', 'Código de academia não encontrado.');
+  }
+  const acadDoc = acadQuery.docs[0];
+  const academyId = acadDoc.id;
+  const academyName = acadDoc.get('name') || acadDoc.get('academyName') || 'Academia';
+
+  // Já é membro? Não faz sentido solicitar.
+  const mappingSnap = await db.doc(`userAcademyMapping/${uid}`).get();
+  if (mappingSnap.exists) {
+    const ids = mappingSnap.get('academyIds');
+    if (Array.isArray(ids) && ids.includes(academyId)) {
+      throw new HttpsError('already-exists', 'Você já está nesta academia.');
+    }
+  }
+
+  const userSnap = await db.doc(`users/${uid}`).get();
+  const userData = userSnap.exists ? (userSnap.data() || {}) : {};
+  const email = (request.auth.token && request.auth.token.email) || userData.email || null;
+
+  const clean = (v) => (v == null ? null : v.toString().trim() || null);
+  const digits = (v) => (v == null ? null : (v.toString().replace(/\D/g, '') || null));
+  let birthDate = null;
+  const rawBirth = request.data && request.data.birthDate;
+  if (rawBirth) {
+    const d = new Date(rawBirth);
+    if (!isNaN(d.getTime())) birthDate = Timestamp.fromDate(d);
+  }
+  const category = ['kids', 'adult'].includes(request.data && request.data.category)
+    ? request.data.category
+    : null;
+
+  // 1 solicitação por (academia, usuário): doc id = uid. Re-submeter re-abre.
+  const reqRef = db.doc(`academies/${academyId}/joinRequests/${uid}`);
+  const phone = digits(request.data && request.data.phone);
+  const cpf = digits(request.data && request.data.cpf);
+  const payload = {
+    uid,
+    status: 'pending',
+    fullName: clean(request.data && request.data.fullName) || userData.displayName || email || 'Aluno',
+    email,
+    createdAt: FieldValue.serverTimestamp(),
+    decidedAt: null,
+    decidedBy: null,
+    linkedStudentId: null,
+  };
+  // Opcionais só entram quando têm valor — reenviar SEM um campo não apaga o
+  // que já havia (merge preserva o valor anterior).
+  if (phone) payload.phone = phone;
+  if (cpf) payload.cpf = cpf;
+  if (birthDate) payload.birthDate = birthDate;
+  if (category) payload.category = category;
+  await reqRef.set(payload, {merge: true});
+
+  // Ponteiro no doc raiz do usuário → o app do aluno renderiza "aguardando
+  // aprovação" sem precisar de collectionGroup.
+  await db.doc(`users/${uid}`).set({
+    pendingJoinRequest: {
+      academyId,
+      academyName,
+      requestId: uid,
+      createdAt: FieldValue.serverTimestamp(),
+    },
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  return {success: true, mode: 'request', academyId, academyName};
+});
+
+// cancelJoinRequest({academyId}) — o próprio ALUNO desiste da solicitação.
+exports.cancelJoinRequest = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const academyId = ((request.data && request.data.academyId) || '').toString();
+  if (!academyId) {
+    throw new HttpsError('invalid-argument', 'academyId é obrigatório.');
+  }
+  const reqRef = db.doc(`academies/${academyId}/joinRequests/${uid}`);
+  const snap = await reqRef.get();
+  if (snap.exists && snap.get('status') === 'pending') {
+    await reqRef.delete();
+  }
+  // Limpa o ponteiro se apontar para esta academia.
+  const userSnap = await db.doc(`users/${uid}`).get();
+  const pending = userSnap.exists ? userSnap.get('pendingJoinRequest') : null;
+  if (pending && pending.academyId === academyId) {
+    await db.doc(`users/${uid}`).set({
+      pendingJoinRequest: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+  }
+  return {success: true};
+});
+
+// decideJoinRequest({academyId, requestUid, action:'approve'|'deny', linkStudentId?})
+// — disparado pelo PROFESSOR/admin. Aprovar: linka a uma ficha órfã existente
+// (linkStudentId) OU cria uma ficha nova com os dados do cadastro; depois
+// vincula a conta do ALUNO (mapping + linkedUserId + bagagem). Negar: marca a
+// solicitação e limpa o pendente do aluno.
+exports.decideJoinRequest = onCall(async (request) => {
+  const callerUid = requireAuth(request);
+  const academyId = ((request.data && request.data.academyId) || '').toString();
+  const requestUid = ((request.data && request.data.requestUid) || '').toString();
+  const action = ((request.data && request.data.action) || '').toString();
+  const linkStudentId = ((request.data && request.data.linkStudentId) || '').toString() || null;
+  if (!academyId || !requestUid || !['approve', 'deny'].includes(action)) {
+    throw new HttpsError('invalid-argument', 'Parâmetros inválidos.');
+  }
+  if (!(await isStaff(callerUid, academyId))) {
+    throw new HttpsError('permission-denied', 'Apenas a equipe da academia pode decidir solicitações.');
+  }
+
+  const reqRef = db.doc(`academies/${academyId}/joinRequests/${requestUid}`);
+  const reqSnap = await reqRef.get();
+  if (!reqSnap.exists) {
+    throw new HttpsError('not-found', 'Solicitação não encontrada.');
+  }
+  const reqData = reqSnap.data() || {};
+  if (reqData.status !== 'pending') {
+    throw new HttpsError('failed-precondition', 'Esta solicitação já foi decidida.');
+  }
+
+  const studentUserRef = db.doc(`users/${requestUid}`);
+  const clearPending = async () => {
+    const us = await studentUserRef.get();
+    const p = us.exists ? us.get('pendingJoinRequest') : null;
+    if (p && p.academyId === academyId) {
+      await studentUserRef.set({
+        pendingJoinRequest: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+    }
+  };
+
+  // ---- NEGAR ----
+  if (action === 'deny') {
+    await reqRef.set({
+      status: 'denied',
+      decidedAt: FieldValue.serverTimestamp(),
+      decidedBy: callerUid,
+    }, {merge: true});
+    await clearPending();
+    return {success: true, action: 'denied'};
+  }
+
+  // ---- APROVAR ----
+  const mappingRef = db.doc(`userAcademyMapping/${requestUid}`);
+  const studentsCol = db.collection(`academies/${academyId}/students`);
+  // Ref da ficha nova (se for criar) precisa existir ANTES da transação para
+  // manter reads-antes-de-writes (id novo, sem read necessário).
+  const newStudentRef = studentsCol.doc();
+
+  let finalStudentId = null;
+  await db.runTransaction(async (tx) => {
+    // --- READS ---
+    const rSnap = await tx.get(reqRef);
+    if (!rSnap.exists || rSnap.get('status') !== 'pending') {
+      throw new HttpsError('failed-precondition', 'Esta solicitação já foi decidida.');
+    }
+    const mapSnap = await tx.get(mappingRef);
+    const mapData = mapSnap.exists ? (mapSnap.data() || {}) : null;
+    const userSnap = await tx.get(studentUserRef);
+    const email = (userSnap.exists && userSnap.get('email')) || reqData.email || null;
+
+    let studentRef;
+    let createNew = false;
+    let existingStudentData = {};
+    if (linkStudentId) {
+      studentRef = studentsCol.doc(linkStudentId);
+      const sSnap = await tx.get(studentRef);
+      if (!sSnap.exists) {
+        throw new HttpsError('not-found', 'Ficha selecionada não existe.');
+      }
+      const existingLink = sSnap.get('linkedUserId');
+      if (existingLink && existingLink !== requestUid) {
+        throw new HttpsError('failed-precondition', 'Essa ficha já está vinculada a outra conta.');
+      }
+      existingStudentData = sSnap.data() || {};
+    } else {
+      studentRef = newStudentRef;
+      createNew = true;
+    }
+    finalStudentId = studentRef.id;
+
+    // --- WRITES ---
+    if (createNew) {
+      // Ficha nova a partir dos dados do cadastro (defaults seguros: aluno
+      // nunca começa graduado; ver belt_progression teto).
+      const cat = ['kids', 'adult'].includes(reqData.category) ? reqData.category : 'adult';
+      tx.set(studentRef, {
+        fullName: reqData.fullName || email || 'Aluno',
+        email: email || null,
+        phone: reqData.phone || null,
+        cpf: reqData.cpf || null,
+        birthDate: reqData.birthDate || null,
+        category: cat,
+        status: 'active',
+        sports: ['bjj'],
+        primarySport: 'bjj',
+        currentBelt: 'white',
+        currentStripes: 0,
+        sportData: {bjj: {currentGrade: 'white', currentStripes: 0}},
+        attendanceCount: 0,
+        initialAttendanceCount: 0,
+        isProfilePublic: true,
+        linkedUserId: requestUid,
+        createdBy: callerUid,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } else {
+      // Reivindica a ficha órfã. email = email da conta (autoritativo p/ login).
+      // phone/cpf/birthDate só preenchem o que está VAZIO (fill-não-sobrescreve),
+      // pra não apagar dados que o professor já tinha lançado na ficha.
+      const claim = {
+        linkedUserId: requestUid,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      if (email) claim.email = email;
+      const empty = (v) => v == null || v === '';
+      if (reqData.phone && empty(existingStudentData.phone)) claim.phone = reqData.phone;
+      if (reqData.cpf && empty(existingStudentData.cpf)) claim.cpf = reqData.cpf;
+      if (reqData.birthDate && empty(existingStudentData.birthDate)) claim.birthDate = reqData.birthDate;
+      tx.set(studentRef, claim, {merge: true});
+    }
+
+    // Vincula a CONTA DO ALUNO (não a do professor) — mapping + academy-user doc.
+    const detailEntry = {
+      studentId: finalStudentId,
+      role: 'student',
+      joinedAt: FieldValue.serverTimestamp(),
+      status: 'active',
+    };
+    if (mapData) {
+      tx.update(mappingRef, {
+        academyIds: FieldValue.arrayUnion(academyId),
+        primaryAcademyId: mapData.primaryAcademyId || academyId,
+        [`academyDetails.${academyId}`]: detailEntry,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } else {
+      tx.set(mappingRef, {
+        academyIds: [academyId],
+        primaryAcademyId: academyId,
+        academyDetails: {[academyId]: detailEntry},
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    const academyUserRef = db.doc(`academies/${academyId}/users/${requestUid}`);
+    tx.set(academyUserRef, {
+      role: 'student',
+      email: email || null,
+      status: 'active',
+      isActive: true,
+      studentId: finalStudentId,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+
+    if (userSnap.exists && userSnap.get('accountType') !== 'linked') {
+      tx.set(studentUserRef, {accountType: 'linked', updatedAt: FieldValue.serverTimestamp()}, {merge: true});
+    }
+
+    tx.set(reqRef, {
+      status: 'approved',
+      decidedAt: FieldValue.serverTimestamp(),
+      decidedBy: callerUid,
+      linkedStudentId: finalStudentId,
+    }, {merge: true});
+  });
+
+  // Limpa o ponteiro pendente do aluno (fora da tx: doc do usuário raiz).
+  await clearPending();
+
+  // BAGAGEM DO LUTADOR (best-effort, não-fatal).
+  try {
+    const {importFighterBaggage} = require('./fighter_baggage');
+    await importFighterBaggage({
+      db, uid: requestUid, targetAcademyId: academyId, targetStudentId: finalStudentId,
+    });
+  } catch (e) {
+    console.error('[decideJoinRequest] bagagem falhou (não-fatal):', e.message);
+  }
+
+  return {success: true, action: 'approved', studentId: finalStudentId};
+});
+
+// ============================================================
 // TRANSFERÊNCIA / SAÍDA DE ACADEMIA (preserva histórico)
 // ------------------------------------------------------------
 // Modelo: transferência é mudança de ESTADO, não de DADOS. Nada migra. A ficha

@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:cloud_functions/cloud_functions.dart';
 
+import 'fns.dart';
+
 import 'firebase_service.dart';
 
 /// Payload written to the fixed musculação QR shown at the reception desk.
@@ -44,10 +46,10 @@ class MusculacaoCheckinException implements Exception {
 /// Firestore rules). All validation — membership, mode, operating hours,
 /// active status and one-per-day dedup — happens server-side.
 class MusculacaoCheckinService {
-  final FirebaseFunctions _functions;
+  final CallableClient _functions;
 
-  MusculacaoCheckinService({FirebaseFunctions? functions})
-      : _functions = functions ?? FirebaseFunctions.instance;
+  MusculacaoCheckinService({CallableClient? functions})
+      : _functions = functions ?? Fns.functions;
 
   /// Records a musculação check-in for the current student in [academyId]
   /// (defaults to the active academy). Throws [MusculacaoCheckinException]

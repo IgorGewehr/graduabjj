@@ -33,6 +33,7 @@ import 'screens/portal/schedule_screen.dart';
 import 'screens/portal/qr_scan_screen.dart';
 import 'screens/portal/musculacao_qr_scan_screen.dart';
 import 'screens/admin/admin_social_screen.dart';
+import 'screens/admin/join_requests_screen.dart';
 import 'screens/admin/musculacao_admin_screen.dart';
 import 'screens/portal/workouts_screen.dart';
 import 'screens/admin/workout_plans_screen.dart';
@@ -1063,6 +1064,16 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const AdminStudentFormScreen(),
+            ),
+          ),
+          // Solicitações de entrada (self-onboarding) — declarado ANTES de
+          // '/admin/alunos/:id' senão o :id capturaria 'solicitacoes'.
+          GoRoute(
+            path: '/admin/alunos/solicitacoes',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const AdminJoinRequestsScreen(),
             ),
           ),
           GoRoute(

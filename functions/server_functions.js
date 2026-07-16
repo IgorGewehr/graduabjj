@@ -374,7 +374,10 @@ async function generateReminderPix(academyId, financial) {
       if (stuSnap.exists) {
         const stu = stuSnap.data() || {};
         const isKids = stu.category === 'kids';
-        payerCpf = (isKids ? stu.guardian?.cpf : stu.cpf) || '';
+        // Kids: CPF do responsável, com FALLBACK pro CPF próprio do aluno
+        // (o MP só precisa de um CPF válido pra identificar o pagador). Espelha
+        // o effectiveCpf do app.
+        payerCpf = (isKids ? (stu.guardian?.cpf || stu.cpf) : stu.cpf) || '';
         payerEmail = (isKids ? stu.guardian?.email : stu.email) || undefined;
         payerName = stu.fullName || payerName;
       }
@@ -4102,7 +4105,8 @@ exports.createMpPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request)
   };
 });
 
-// ---- PIX: loja (amount in REAIS, matching createOrderPixPayment) ----------
+// ---- PIX: loja (amount em CENTAVOS; cross-check — a cobrança é derivada
+// server-side de orderAuthoritativeTotalReais, o cliente envia (reais*100)) ----
 exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
   const { academyId, amount, description, orderId, studentId, studentName,
     payerCpf, payerEmail } = request.data || {};
@@ -4256,8 +4260,9 @@ exports.createMpOrderPixPayment = onCall({ secrets: MP_MKT_SECRETS }, async (req
 });
 
 // ---- Card (token tokenized client-side with the admin's public_key) -------
-// Handles BOTH mensalidade (financialId, amount in CENTAVOS) and loja
-// (orderId, amount in REAIS). Card is synchronous: settle inline when approved;
+// Handles BOTH mensalidade (financialId) and loja (orderId). Em AMBOS o cliente
+// envia `amount` em CENTAVOS (cross-check; o valor real é derivado server-side).
+// Card is synchronous: settle inline when approved;
 // the webhook is the backup for async/3DS confirmations.
 exports.createMpCardPayment = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
   const { academyId, amount, description, financialId, orderId, studentId,
@@ -4643,6 +4648,10 @@ async function mpSubSettleCycle(academyId, subscriptionId, token,
         type: 'subscription_overcharge',
         status: 'paid',
         overcharge: true,
+        // Alinhamento com o financial_gate: ele exclui "dinheiro devido ao
+        // aluno" por `isOvercharge === true`. Escreve os dois nomes para o
+        // escritor e o leitor concordarem (nunca prender um pagante por isso).
+        isOvercharge: true,
         needsRefund: true,
         description:
           'Cobrança indevida de assinatura (além do termo/cancelamento) — reembolsar',
