@@ -27,6 +27,14 @@ jobs:
   build-windows:
     runs-on: windows-latest
 
+    env:
+      # O Firebase C++ SDK (baixado no build p/ cloud_firestore/auth no Windows)
+      # ainda declara cmake_minimum_required < 3.5, que o CMake 4.x do runner
+      # removeu — quebra o configure com "Compatibility with CMake < 3.5 has
+      # been removed". Esta env var (equivalente a -DCMAKE_POLICY_VERSION_MINIMUM)
+      # faz o CMake tratar as políticas antigas como 3.5 e seguir o build.
+      CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4

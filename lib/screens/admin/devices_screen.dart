@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +11,7 @@ import '../../core/access_control/turnstile_registry.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
+import 'device_enrollment_screen.dart';
 
 /// Tela de CRUD das catracas (devices) da academia.
 ///
@@ -248,12 +250,25 @@ class _DeviceFormSheetState extends State<_DeviceFormSheet> {
   late final TextEditingController _categoryController;
   late final TextEditingController _toleranceController;
 
+  late final TextEditingController _portalDoorController;
+
   late String _vendorId;
   late bool _enabled;
   late String _secret;
+  // Modo de resposta da Control iD (ver adapters/controlid.js + ingest.js):
+  //   'monitor' = push fire-and-forget (só registra presença; catraca decide
+  //               embarcado); 'online' = SÍNCRONO — a nuvem decide o giro e
+  //               responde grant/deny + ação (abre a catraca "como o QR").
+  late String _responseMode;
+  // Ação física quando concede no modo online: 'catra' (giro) ou 'door' (porta).
+  late String _controlidAction;
+  // Sentido liberado do giro (só quando controlidAction == 'catra').
+  late String _catraSense;
   bool _saving = false;
 
   bool get _isEdit => widget.deviceId != null;
+  bool get _isControlId => _vendorId == 'controlid';
+  bool get _isOnline => _isControlId && _responseMode == 'online';
 
   @override
   void initState() {
@@ -272,11 +287,21 @@ class _DeviceFormSheetState extends State<_DeviceFormSheet> {
     _toleranceController = TextEditingController(
       text: tol == null ? '' : tol.toString(),
     );
+    final door = data['portalDoor'];
+    _portalDoorController = TextEditingController(
+      text: door == null ? '1' : door.toString(),
+    );
     // Default para o primeiro fabricante do registry quando criando.
     _vendorId = (data['vendor'] as String?) ?? kTurnstileVendors.first.id;
     _enabled = data['enabled'] == true || !_isEdit; // novas catracas ja ativas.
     // Mantém o secret existente na edição; gera um novo só na criação.
     _secret = (data['secret'] as String?) ?? _generateSecret();
+    // Modo online é o alvo da integração de presença por catraca (Control iD
+    // iDFace). Default 'online' para Control iD novo; preserva o salvo na edição.
+    _responseMode = (data['responseMode'] as String?) ??
+        (_vendorId == 'controlid' ? 'online' : 'monitor');
+    _controlidAction = (data['controlidAction'] as String?) ?? 'catra';
+    _catraSense = (data['catraSense'] as String?) ?? 'clockwise';
   }
 
   @override
@@ -285,6 +310,7 @@ class _DeviceFormSheetState extends State<_DeviceFormSheet> {
     _sportController.dispose();
     _categoryController.dispose();
     _toleranceController.dispose();
+    _portalDoorController.dispose();
     super.dispose();
   }
 
@@ -298,6 +324,20 @@ class _DeviceFormSheetState extends State<_DeviceFormSheet> {
 
   void _regenerateSecret() {
     setState(() => _secret = _generateSecret());
+  }
+
+  /// URL que a catraca deve chamar. Leva academia + deviceId + segredo (?k=) na
+  /// query, que o `verifyDeviceAuth` do backend valida (token compartilhado). No
+  /// modo online inclui o sub-path `new_user_identified.fcgi` (detecção do modo
+  /// síncrono no ingest.js); no monitor mostra só a base (o device anexa /dao…).
+  String _deviceUrl() {
+    final projectId = Firebase.app().options.projectId;
+    final base =
+        'https://us-central1-$projectId.cloudfunctions.net/ingestAccessEvent';
+    final query =
+        '?acad=${widget.academyId}&deviceId=${widget.deviceId}&k=$_secret';
+    if (_isOnline) return '$base/new_user_identified.fcgi$query';
+    return '$base$query';
   }
 
   Future<void> _save() async {
@@ -328,6 +368,20 @@ class _DeviceFormSheetState extends State<_DeviceFormSheet> {
     if (sport.isNotEmpty) payload['sport'] = sport;
     if (category.isNotEmpty) payload['category'] = category;
     if (tolerance != null) payload['scheduleToleranceMinutes'] = tolerance;
+
+    // Config do modo de resposta da Control iD (lida pelo ingest.js/controlid).
+    if (_isControlId) {
+      payload['responseMode'] = _responseMode;
+      if (_responseMode == 'online') {
+        payload['controlidAction'] = _controlidAction;
+        if (_controlidAction == 'catra') {
+          payload['catraSense'] = _catraSense;
+        } else {
+          final doorNum = int.tryParse(_portalDoorController.text.trim());
+          payload['portalDoor'] = doorNum == null || doorNum <= 0 ? 1 : doorNum;
+        }
+      }
+    }
 
     try {
       final col = FirebaseFirestore.instance
@@ -442,6 +496,68 @@ class _DeviceFormSheetState extends State<_DeviceFormSheet> {
               ),
               const SizedBox(height: 18),
 
+              // Modo de resposta + ação física (só Control iD) -----------------
+              if (_isControlId) ...[
+                _FieldLabel('Modo de operação'),
+                const SizedBox(height: 6),
+                _SegmentedChoice(
+                  value: _responseMode,
+                  options: const [
+                    _ChoiceOption(
+                      'online',
+                      'Online (abre a catraca)',
+                      'A nuvem decide e libera o giro na hora — marca presença '
+                          'como o QR. Recomendado.',
+                    ),
+                    _ChoiceOption(
+                      'monitor',
+                      'Monitor (só registra)',
+                      'A catraca decide sozinha; o app só registra a presença '
+                          'depois. Sem liberar giro pela nuvem.',
+                    ),
+                  ],
+                  onChanged: (v) => setState(() => _responseMode = v),
+                ),
+                const SizedBox(height: 14),
+                if (_isOnline) ...[
+                  _FieldLabel('Ao liberar, acionar'),
+                  const SizedBox(height: 6),
+                  _SegmentedChoice(
+                    value: _controlidAction,
+                    options: const [
+                      _ChoiceOption('catra', 'Catraca (giro)',
+                          'Equipamento com giro (iDBlock/iDFace catraca).'),
+                      _ChoiceOption('door', 'Porta/fechadura',
+                          'Fechadura elétrica ou porta (iDAccess).'),
+                    ],
+                    onChanged: (v) => setState(() => _controlidAction = v),
+                  ),
+                  const SizedBox(height: 14),
+                  if (_controlidAction == 'catra') ...[
+                    _FieldLabel('Sentido do giro liberado'),
+                    const SizedBox(height: 6),
+                    _SegmentedChoice(
+                      value: _catraSense,
+                      options: const [
+                        _ChoiceOption('clockwise', 'Horário', ''),
+                        _ChoiceOption('anticlockwise', 'Anti-horário', ''),
+                      ],
+                      onChanged: (v) => setState(() => _catraSense = v),
+                    ),
+                  ] else ...[
+                    _FieldLabel('Número da porta (door)'),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _portalDoorController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: _inputDecoration('Ex.: 1'),
+                    ),
+                  ],
+                  const SizedBox(height: 18),
+                ],
+              ],
+
               // Enabled --------------------------------------------------------
               Container(
                 padding: const EdgeInsets.symmetric(
@@ -516,33 +632,71 @@ class _DeviceFormSheetState extends State<_DeviceFormSheet> {
               ),
               const SizedBox(height: 14),
 
-              // userMap (enrollment) — fase futura.
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppTheme.infoLight,
-                  borderRadius: BorderRadius.circular(10),
+              // URL do servidor + enrollment (só na edição — precisam do
+              // deviceId, que é o id do doc criado ao salvar).
+              if (_isEdit) ...[
+                _FieldLabel('URL para configurar na catraca'),
+                const SizedBox(height: 6),
+                _UrlBox(url: _deviceUrl()),
+                const SizedBox(height: 6),
+                Text(
+                  _isOnline
+                      ? 'Cole esta URL como servidor de eventos da Control iD '
+                          '(modo Pro/Online). Ela já leva a academia, o ID da '
+                          'catraca e o segredo. Regenerar o segredo muda a URL.'
+                      : 'Cole a base como servidor de eventos (modo Monitor). O '
+                          'equipamento anexa /dao, /catra_event e '
+                          '/device_is_alive automaticamente.',
+                  style: AppTheme.labelSmall
+                      .copyWith(color: AppTheme.textSecondary),
                 ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      LucideIcons.info,
-                      size: 18,
-                      color: AppTheme.info,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Vínculo de usuários da catraca (enrollment) será '
-                        'configurado em uma etapa futura.',
-                        style: AppTheme.labelSmall.copyWith(
-                          color: AppTheme.textPrimary,
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => DeviceEnrollmentScreen(
+                          academyId: widget.academyId,
+                          deviceId: widget.deviceId!,
+                          deviceName: _nameController.text.trim().isEmpty
+                              ? 'Catraca'
+                              : _nameController.text.trim(),
                         ),
                       ),
-                    ),
-                  ],
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.primary,
+                    side: const BorderSide(color: AppTheme.primary),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    minimumSize: const Size(double.infinity, 0),
+                  ),
+                  icon: const Icon(LucideIcons.users, size: 18),
+                  label: const Text('Vincular alunos (enrollment)'),
                 ),
-              ),
+              ] else ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.infoLight,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(LucideIcons.info, size: 18, color: AppTheme.info),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Salve a catraca para ver a URL de configuração e '
+                          'vincular os alunos (enrollment).',
+                          style: AppTheme.labelSmall
+                              .copyWith(color: AppTheme.textPrimary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
 
               // Ações ----------------------------------------------------------
@@ -729,6 +883,135 @@ class _SecretBox extends StatelessWidget {
             onPressed: onRegenerate,
             icon: const Icon(LucideIcons.refreshCw, size: 18),
             color: AppTheme.textSecondary,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Uma opção de [_SegmentedChoice]: valor persistido + rótulo + descrição.
+class _ChoiceOption {
+  final String value;
+  final String label;
+  final String hint;
+  const _ChoiceOption(this.value, this.label, this.hint);
+}
+
+/// Seletor de escolha única em cartões empilhados (mesma linguagem do
+/// _VendorSelector). Usado para modo de operação / ação física / sentido do giro.
+class _SegmentedChoice extends StatelessWidget {
+  const _SegmentedChoice({
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final String value;
+  final List<_ChoiceOption> options;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final o in options)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: InkWell(
+              onTap: () => onChanged(o.value),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: value == o.value ? AppTheme.primary : AppTheme.border,
+                    width: value == o.value ? 2 : 1,
+                  ),
+                  color: value == o.value
+                      ? AppTheme.primary.withValues(alpha: 0.06)
+                      : null,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      value == o.value
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      color: value == o.value
+                          ? AppTheme.primary
+                          : AppTheme.textSecondary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            o.label,
+                            style: AppTheme.bodyMedium
+                                .copyWith(fontWeight: FontWeight.w600),
+                          ),
+                          if (o.hint.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              o.hint,
+                              style: AppTheme.labelSmall
+                                  .copyWith(color: AppTheme.textSecondary),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Caixa que mostra a URL de configuração da catraca com botão de copiar.
+class _UrlBox extends StatelessWidget {
+  const _UrlBox({required this.url});
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: SelectableText(
+              url,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 11,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Copiar URL',
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: url));
+              FeedbackUtils.showSuccess(context, 'URL copiada.');
+            },
+            icon: const Icon(LucideIcons.copy, size: 18),
+            color: AppTheme.primary,
           ),
         ],
       ),
