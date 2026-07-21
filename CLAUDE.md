@@ -165,10 +165,19 @@ adapta o app inteiro sem reescrever tela por tela.
      keychain e o Firebase Auth quebra com erro genérico, sem pista de que a
      causa foi essa flag.
   2. **O cache `build/native_assets` contamina entre simulador↔device.**
-     Se a máquina já rodou um build de simulador, rode `flutter clean`
-     **antes** de `./build.sh ipa` — senão o `objective_c.framework` de
-     simulador vaza para dentro do IPA e a Apple rejeita com "unsupported
-     platform".
+     Se a máquina rodou um build de simulador na MESMA sessão, rode
+     `flutter clean` **antes** de `./build.sh ipa` — senão o
+     `objective_c.framework` de simulador vaza pro IPA e a Apple rejeita com
+     "unsupported platform / x86_64 slice" (caso real: 3.3.4+109, jul/2026,
+     envenenado por um `flutter build ios --simulator` horas antes; o mesmo
+     bug já ocorrera em mar/2026 com objective_c 9.2.4 → override ^9.3.0,
+     hoje ^9.4.1). **Como VERIFICAR um IPA antes do Transporter** (auditoria
+     de 30s que teria pego os dois casos):
+     `unzip -o dist/app.ipa "Payload/Runner.app/Frameworks/objective_c.framework/objective_c"`
+     → `lipo -archs` deve dar SÓ `arm64` e
+     `otool -l ... | grep 'platform '` deve dar **platform 2**.
+     Tabela LC_BUILD_VERSION (não confundir!): 1=macOS, **2=iOS device (OK)**,
+     **7=iOS simulator (REJEIÇÃO)** — x86_64 presente também = simulador.
   3. **`functions/.env` só existe local** (gitignored — confirmado em
      `.gitignore:63`). Deploy de Cloud Functions a partir de outra máquina
      **sem esse arquivo apaga as env vars dos crons/integrações** em

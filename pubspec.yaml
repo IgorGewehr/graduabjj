@@ -76,7 +76,7 @@ dependencies:
   app_links: ^7.0.0
 
 dependency_overrides:
-  objective_c: ^9.3.0
+  objective_c: ^9.4.1
 
 dev_dependencies:
   flutter_test:
