@@ -653,6 +653,12 @@ async function notifyAdminCF(academyId, type, title, message, options) {
     console.error('Error notifying admin:', error);
   }
 }
+// Exportado (helper puro, não é Cloud Function) para reuso por index.js —
+// ver `submitJoinRequest` (notifica a equipe da academia sobre solicitação
+// nova, spec 2.1). index.js precisa stripar essa entrada do destructure de
+// `require('./server_functions')` como já faz para os outros helpers-puros
+// abaixo, senão o discovery de endpoints do Firebase tenta deployá-la.
+exports.notifyAdminCF = notifyAdminCF;
 
 // ============================================
 // Cloud Functions - Firestore Triggers

@@ -5,8 +5,10 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme.dart';
+import '../../models/academy.dart' show AcademyProfile, AcademyProfileExtension;
+import '../../providers/billing_provider.dart';
+import '../../providers/onboarding_providers.dart';
 import '../../providers/providers.dart';
-import '../../services/services.dart';
 import '../polish/polish.dart';
 
 /// Checklist de ativação do admin: um cartão "Comece por aqui" que guia o dono
@@ -73,8 +75,11 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
     final settingsAsync = ref.watch(academySettingsProvider);
     final classesAsync = ref.watch(classesProvider);
     final plansAsync = ref.watch(activePlansProvider);
-    final studentsAsync = ref.watch(_activationStudentsExistProvider);
-    final attendanceAsync = ref.watch(_activationAttendanceExistProvider);
+    final studentsAsync = ref.watch(hasStudentsExistProvider);
+    final attendanceAsync = ref.watch(hasAttendanceExistProvider);
+    // Fatia 0.7 (SPEC_ONBOARDING_2026-07.md): status combinado da automação
+    // de cobrança — drives o novo passo `billing` abaixo.
+    final billingAsync = ref.watch(billingAutomationStatusProvider);
 
     // Qualquer fonte ainda carregando → esqueleto discreto (mantém o lugar do
     // cartão sem "pular" o layout do dashboard).
@@ -82,7 +87,8 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
         classesAsync.isLoading ||
         plansAsync.isLoading ||
         studentsAsync.isLoading ||
-        attendanceAsync.isLoading;
+        attendanceAsync.isLoading ||
+        billingAsync.isLoading;
     if (anyLoading) {
       return const _ChecklistSkeleton();
     }
@@ -94,7 +100,8 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
         classesAsync.hasError ||
         plansAsync.hasError ||
         studentsAsync.hasError ||
-        attendanceAsync.hasError) {
+        attendanceAsync.hasError ||
+        billingAsync.hasError) {
       return const SizedBox.shrink();
     }
 
@@ -106,7 +113,14 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
     final mpConnected = settings.mpConnected;
     final hasStudent = studentsAsync.valueOrNull ?? false;
     final hasAttendance = attendanceAsync.valueOrNull ?? false;
+    final whatsappEnabled = billingAsync.valueOrNull?.whatsappEnabled ?? false;
     final dismissed = settings.onboardingDismissedSteps;
+
+    // Decisão 0.6: `AcademySettings.profile` era ignorado pelo checklist —
+    // passa a esconder "Crie sua 1ª turma" pra fitness (sem-turma/sem-faixa
+    // por design) e a trocar a copy do passo de presença/check-in.
+    final profile = AcademyProfileExtension.fromString(settings.profile);
+    final isFitness = profile == AcademyProfile.fitness;
 
     // Beco sem saída detectado no diagnóstico: aluno cadastrado mas em
     // NENHUMA turma fica invisível na chamada (que filtra por
@@ -119,6 +133,10 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
     final studentsNeedEnrollment =
         hasClass && hasStudent && !hasEnrolledStudent;
 
+    // Ordem money-first (SPEC_ONBOARDING_2026-07.md §1.3, diretiva registrada
+    // em docs/b2c/ATIVACAO_PROFESSOR_2026-07.md linha 47): perfil → turma
+    // (só fight/hybrid) → planos → cobrança automática (NOVO) → Mercado
+    // Pago → alunos → presença/check-in.
     final allSteps = <_ActivationStep>[
       _ActivationStep(
         id: 'profile',
@@ -128,14 +146,18 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
         route: '/admin/configuracoes',
         done: hasProfile,
       ),
-      _ActivationStep(
-        id: 'class',
-        icon: LucideIcons.calendarClock,
-        title: 'Crie sua 1ª turma',
-        subtitle: 'Defina horários e dias de treino',
-        route: '/admin/turmas',
-        done: hasClass,
-      ),
+      // Fitness é sem-turma/sem-faixa por design (0.6) — esconder, não só
+      // marcar como concluído, senão o passo "completo de graça" distorce a
+      // barra de progresso do checklist.
+      if (!isFitness)
+        _ActivationStep(
+          id: 'class',
+          icon: LucideIcons.calendarClock,
+          title: 'Crie sua 1ª turma',
+          subtitle: 'Defina horários e dias de treino',
+          route: '/admin/turmas',
+          done: hasClass,
+        ),
       _ActivationStep(
         id: 'plan',
         icon: LucideIcons.creditCard,
@@ -144,11 +166,26 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
         route: '/admin/financeiro',
         done: hasPlan,
       ),
+      // NOVO (Fatia 3/§1.3) — o aha da ativação: mesmo componente
+      // `BillingActivationStep` do wizard (§1.2), alcançado aqui pelo
+      // checklist para que a base instalada inteira ganhe o aha sem esperar
+      // o wizard (Fatia 7, fora desta fatia).
+      _ActivationStep(
+        id: 'billing',
+        icon: LucideIcons.messageCircle,
+        title: 'Ative a cobrança automática',
+        subtitle: 'Mensagem de WhatsApp com PIX, sozinha, quando o aluno atrasar',
+        route: '/admin/comece-aqui/cobranca',
+        done: whatsappEnabled,
+        dismissible: true,
+      ),
       _ActivationStep(
         id: 'mp',
         icon: LucideIcons.wallet,
         title: 'Conecte o Mercado Pago',
-        subtitle: 'Receba pagamentos online direto no app',
+        // Atualizado (§1.3): deixa claro que o WhatsApp acima já funciona
+        // sem o MP — o Mercado Pago só acrescenta o PIX automático.
+        subtitle: 'Para incluir PIX automático nas cobranças e receber online',
         // Rota PRECISA: Settings → aba Financeiro → scroll + destaque no card.
         route: '/admin/configuracoes?feature=payments',
         done: mpConnected,
@@ -168,8 +205,13 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
       _ActivationStep(
         id: 'attendance',
         icon: LucideIcons.qrCode,
-        title: 'Registre a 1ª presença',
-        subtitle: 'Faça a primeira chamada de treino',
+        // Copy condicional por perfil (§1.3): "check-in" pra fitness (sem
+        // chamada de turma), "presença" pra fight/hybrid — só texto, mesma
+        // lógica de `done` dos dois casos.
+        title: isFitness ? 'Registre o 1º check-in' : 'Registre a 1ª presença',
+        subtitle: isFitness
+            ? 'Faça o primeiro check-in na academia'
+            : 'Faça a primeira chamada de treino',
         route: '/admin/chamada',
         done: hasAttendance,
       ),
@@ -555,30 +597,3 @@ class _ChecklistSkeleton extends StatelessWidget {
     );
   }
 }
-
-// ───────────────────────────────────────────────────────────────────────────
-// Providers de derivação leve (existência), próprios deste componente.
-//
-// Para os passos "Convide alunos" e "1ª presença" basta saber se existe ao
-// menos um documento — então usamos uma query limit(1) em vez de varrer a
-// coleção. Os demais passos reusam providers já existentes (academySettings,
-// classes, activePlans).
-// ───────────────────────────────────────────────────────────────────────────
-
-/// `true` se a academia já tem ao menos um aluno cadastrado.
-final _activationStudentsExistProvider = FutureProvider<bool>((ref) async {
-  final user = await ref.watch(currentUserProvider.future);
-  final academyId = user?.academyId;
-  if (academyId == null) return false;
-  final snap = await Collections(academyId).students.limit(1).get();
-  return snap.docs.isNotEmpty;
-});
-
-/// `true` se já existe ao menos um registro de presença na academia.
-final _activationAttendanceExistProvider = FutureProvider<bool>((ref) async {
-  final user = await ref.watch(currentUserProvider.future);
-  final academyId = user?.academyId;
-  if (academyId == null) return false;
-  final snap = await Collections(academyId).attendance.limit(1).get();
-  return snap.docs.isNotEmpty;
-});

@@ -294,6 +294,14 @@ class AcademySettings {
   /// não vai usar o Mercado Pago dispensa esse passo e o checklist completa.
   final List<String> onboardingDismissedSteps;
 
+  /// Quando o dono saiu do wizard `/admin/comece-aqui` (SPEC_ONBOARDING_2026-07
+  /// §0.1/Fatia 7) — por "Pular" explícito OU por concluir o último passo
+  /// ("Ir para o Painel"). `null` = nunca visto. Único gate de "mostra 1x": o
+  /// router NUNCA redireciona pra lá de novo depois que este campo é setado,
+  /// mesmo que a academia continue sem turma/aluno/presença (ex.: fitness que
+  /// só compartilhou o código e ainda não teve nenhum aluno aprovado).
+  final DateTime? wizardSkippedAt;
+
   /// Perfil de negócio ('fight' | 'fitness' | 'hybrid') — raw string, parsed
   /// via `AcademyProfileExtension.fromString` (models/academy.dart) at the
   /// point of use, which defaults `null`/unrecognized to 'fight'. Kept raw
@@ -365,6 +373,7 @@ class AcademySettings {
     this.monthlyAttendanceGoal = 0,
     this.monitorIds = const [],
     this.onboardingDismissedSteps = const [],
+    this.wizardSkippedAt,
     this.profile,
     this.updatedAt,
   });
@@ -473,6 +482,7 @@ class AcademySettings {
       monitorIds: List<String>.from(data['monitorIds'] ?? []),
       onboardingDismissedSteps:
           List<String>.from(data['onboardingDismissedSteps'] ?? []),
+      wizardSkippedAt: (data['wizardSkippedAt'] as Timestamp?)?.toDate(),
       profile: data['profile'] as String?,
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
@@ -1018,6 +1028,18 @@ class SettingsService {
   Future<void> dismissOnboardingStep(String stepId) async {
     await _academyRef.update({
       'onboardingDismissedSteps': FieldValue.arrayUnion([stepId]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Marca o wizard `/admin/comece-aqui` como visto (SPEC_ONBOARDING_2026-07
+  /// §0.1/Fatia 7) — chamado tanto por um "Pular" explícito em qualquer passo
+  /// quanto pelo "Ir para o Painel" do último passo. Idempotente (pode ser
+  /// chamado mais de uma vez sem efeito colateral: só a 1ª escrita importa
+  /// pro gate, que só olha "não-nulo").
+  Future<void> markWizardSeen() async {
+    await _academyRef.update({
+      'wizardSkippedAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }

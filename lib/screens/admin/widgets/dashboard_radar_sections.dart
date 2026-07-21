@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/brand_tokens.dart';
 import '../../../core/theme.dart';
 import '../../../models/student.dart';
+import '../../../providers/join_request_providers.dart';
 import '../../../providers/retention_providers.dart';
 
 /// Seções B2C do dashboard "Radar do dia" (REPAGINADA §6):
@@ -115,7 +116,45 @@ class DashboardRadarCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final studentsAsync = ref.watch(retentionStudentsProvider);
     final monthStats = ref.watch(retentionMonthStatsProvider).valueOrNull;
+    // Fila de solicitações de entrada pendentes (spec 2.3 — hoje só há um
+    // badge dentro de Alunos; isso dá um 2º ponto de descoberta no dashboard
+    // sem duplicar o badge existente).
+    final pendingRequests = ref.watch(pendingJoinRequestsCountProvider);
 
+    return Column(
+      children: [
+        if (pendingRequests > 0) ...[
+          _Section(
+            title: 'Solicitações',
+            icon: LucideIcons.userPlus,
+            onSeeAll: () => context.push('/admin/alunos/solicitacoes'),
+            seeAllLabel: 'Ver',
+            child: GestureDetector(
+              onTap: () => context.push('/admin/alunos/solicitacoes'),
+              child: Text(
+                pendingRequests == 1
+                    ? '1 solicitação de aluno aguardando'
+                    : '$pendingRequests solicitações de alunos aguardando',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Brand.ink,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        _buildRetentionSection(context, studentsAsync, monthStats),
+      ],
+    );
+  }
+
+  Widget _buildRetentionSection(
+    BuildContext context,
+    AsyncValue<List<Student>> studentsAsync,
+    RetentionMonthStats? monthStats,
+  ) {
     return _Section(
       title: 'Radar de retenção',
       icon: LucideIcons.heartPulse,

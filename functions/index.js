@@ -527,6 +527,22 @@ exports.submitJoinRequest = onCall(async (request) => {
   if (category) payload.category = category;
   await reqRef.set(payload, {merge: true});
 
+  // Avisa a equipe da academia (push + notificação in-app) sobre a
+  // solicitação nova — spec 2.1 (docs/ux/SPEC_ONBOARDING_2026-07.md), fecha o
+  // gap "zero push" do onboarding do aluno. Reusa o helper já usado em 15+
+  // pontos do backend (server_functions.js:notifyAdminCF); require lazy
+  // porque este módulo é carregado ANTES de `require('./server_functions')`
+  // rodar mais abaixo (mesmo padrão já usado em `decideJoinRequest` para
+  // `fighter_baggage`). notifyAdminCF já é internamente best-effort (nunca
+  // lança), mas o try/catch aqui cobre também uma falha do próprio require.
+  try {
+    const {notifyAdminCF} = require('./server_functions');
+    await notifyAdminCF(academyId, 'join_request_new', 'Nova solicitação',
+        `${payload.fullName} pediu para entrar na sua academia`, {studentId: null});
+  } catch (e) {
+    console.error('[submitJoinRequest] notifyAdminCF falhou (não-fatal):', e.message);
+  }
+
   // Ponteiro no doc raiz do usuário → o app do aluno renderiza "aguardando
   // aprovação" sem precisar de collectionGroup.
   await db.doc(`users/${uid}`).set({
@@ -539,6 +555,12 @@ exports.submitJoinRequest = onCall(async (request) => {
     updatedAt: FieldValue.serverTimestamp(),
   }, {merge: true});
 
+  // TODO(analytics, spec §5 SPEC_ONBOARDING_2026-07.md): emitir
+  // `join_request_submitted {academyId}` daqui quando este backend tiver um
+  // padrão de log de analytics server-side (hoje não existe nenhum em
+  // functions/ — grep confirmado). Até lá, o client loga via
+  // AnalyticsService.logJoinRequestSubmitted logo após esta callable retornar
+  // sucesso (ver lib/services/analytics_service.dart).
   return {success: true, mode: 'request', academyId, academyName};
 });
 
@@ -636,6 +658,14 @@ exports.decideJoinRequest = onCall(async (request) => {
     const userSnap = await tx.get(studentUserRef);
     const email = (userSnap.exists && userSnap.get('email')) || reqData.email || null;
 
+    // Perfil de negócio da academia (spec 0.4 — docs/ux/SPEC_ONBOARDING_2026-07.md):
+    // decide os campos esportivos default da ficha NOVA abaixo. Mesma regra
+    // usada na criação da própria conta da academia (auth_provider.dart:521-525).
+    // 'fitness' não tem cultura de faixa; 'fight'/'hybrid'/ausente seguem o
+    // comportamento histórico (zero regressão — ver AcademyProfileExtension.fromString).
+    const academySnap = await tx.get(db.doc(`academies/${academyId}`));
+    const academyProfile = academySnap.exists ? academySnap.get('profile') : null;
+
     let studentRef;
     let createNew = false;
     let existingStudentData = {};
@@ -659,8 +689,25 @@ exports.decideJoinRequest = onCall(async (request) => {
     // --- WRITES ---
     if (createNew) {
       // Ficha nova a partir dos dados do cadastro (defaults seguros: aluno
-      // nunca começa graduado; ver belt_progression teto).
+      // nunca começa graduado; ver belt_progression teto). Campos esportivos
+      // dependem do perfil da academia (spec 0.4, ver leitura de academyProfile
+      // acima): 'fitness' grava só a modalidade, SEM currentBelt/currentStripes/
+      // sportData (nunca inventa uma "faixa branca" fantasma numa ficha que não
+      // tem cultura de graduação); 'fight'/'hybrid'/ausente seguem exatamente o
+      // que já era gravado antes desta mudança.
       const cat = ['kids', 'adult'].includes(reqData.category) ? reqData.category : 'adult';
+      const sportFields = academyProfile === 'fitness'
+          ? {
+            sports: ['musculacao'],
+            primarySport: 'musculacao',
+          }
+          : {
+            sports: ['bjj'],
+            primarySport: 'bjj',
+            currentBelt: 'white',
+            currentStripes: 0,
+            sportData: {bjj: {currentGrade: 'white', currentStripes: 0}},
+          };
       tx.set(studentRef, {
         fullName: reqData.fullName || email || 'Aluno',
         email: email || null,
@@ -669,11 +716,7 @@ exports.decideJoinRequest = onCall(async (request) => {
         birthDate: reqData.birthDate || null,
         category: cat,
         status: 'active',
-        sports: ['bjj'],
-        primarySport: 'bjj',
-        currentBelt: 'white',
-        currentStripes: 0,
-        sportData: {bjj: {currentGrade: 'white', currentStripes: 0}},
+        ...sportFields,
         attendanceCount: 0,
         initialAttendanceCount: 0,
         isProfilePublic: true,
@@ -756,6 +799,13 @@ exports.decideJoinRequest = onCall(async (request) => {
     console.error('[decideJoinRequest] bagagem falhou (não-fatal):', e.message);
   }
 
+  // TODO(analytics, spec §5 SPEC_ONBOARDING_2026-07.md): emitir
+  // `join_request_approved {academyId, minutesToApproval, profile}` daqui
+  // quando houver um padrão de log server-side (hoje não existe em
+  // functions/). minutesToApproval = (agora - reqData.createdAt) em minutos;
+  // profile = academyProfile lido acima na transação. Até lá, o admin app
+  // loga via AnalyticsService.logJoinRequestApproved após esta callable
+  // retornar sucesso (ver join_requests_screen.dart).
   return {success: true, action: 'approved', studentId: finalStudentId};
 });
 
@@ -2354,6 +2404,10 @@ exports.trialExpiryReminder = onSchedule(
     processAcademyGamification: _procGami,
     computeCurrentStreak: _computeStreak,
     rankFromGamificationPairs: _rankPairs,
+    // notifyAdminCF é usado diretamente (require lazy) dentro de
+    // `submitJoinRequest` acima — também um helper puro, não uma Cloud
+    // Function, então precisa do mesmo strip.
+    notifyAdminCF: _notifyAdminCF,
     ...serverTriggers
   } = require('./server_functions');
   Object.assign(exports, serverTriggers);

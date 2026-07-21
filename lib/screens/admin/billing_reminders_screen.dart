@@ -7,10 +7,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import '../../core/feedback_utils.dart';
+import '../../providers/billing_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../services/billing_reminder_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/academy_page_header.dart';
+import '../../widgets/common/billing_automation_banner.dart';
 import '../../widgets/polish/polish.dart';
 
 /// Admin Billing Reminders Screen ("Cobrança").
@@ -320,55 +322,14 @@ class _AdminBillingRemindersScreenState
   }
 
   /// Status da automação em destaque (dono: "o aha da cobrança automática").
-  /// Chave = whatsappEnabled, o mesmo getter que já liga a régua automática
-  /// de WhatsApp (ver subtítulo do switch em Configurações). ON = banner
-  /// discreto positivo; OFF = CTA que abre o dialog de configurações já
-  /// existente.
-  Widget _buildAutomationBanner() {
-    final on = _notificationSettings?.whatsappEnabled ?? false;
-    final color = on ? AppTheme.success : AppTheme.warning;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.25)),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              on ? LucideIcons.checkCircle2 : LucideIcons.alertTriangle,
-              size: 18,
-              color: color,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                on
-                    ? 'Cobrança automática ligada — o sistema cobra sozinho pelo WhatsApp'
-                    : 'Cobrança automática desligada',
-                style: AppTheme.bodySmall.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            if (!on)
-              TextButton(
-                onPressed: () => _showSettingsDialog(),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  minimumSize: const Size(0, 32),
-                ),
-                child: const Text('Ligar', style: TextStyle(fontSize: 13)),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+  /// SPEC_ONBOARDING_2026-07.md §1.4/Fatia 4 — extraído para
+  /// `widgets/common/billing_automation_banner.dart` e reusado 1:1 pelo
+  /// Dashboard, para não duplicar esta UI em dois lugares. O CTA "Ligar" (só
+  /// visível quando desligada) agora abre o novo passo `BillingActivationStep`
+  /// (`/admin/comece-aqui/cobranca`, com preview real da mensagem) em vez do
+  /// dialog cru abaixo — que continua acessível pelo ícone de engrenagem no
+  /// topo desta tela.
+  Widget _buildAutomationBanner() => const BillingAutomationBanner();
 
   /// Progressive disclosure: estatísticas agregadas + quebra por tempo de
   /// atraso, colapsadas atrás de "Ver detalhes" (não competem com a lista
@@ -2585,6 +2546,11 @@ class _AdminBillingRemindersScreenState
                         // Update notification service with new templates
                         _notificationService?.customTemplates = templates;
                       });
+                      // Fatia 0.7: o banner desta tela (BillingAutomationBanner)
+                      // e o checklist/Dashboard leem `billingAutomationStatusProvider`
+                      // — invalida pra refletir o novo estado sem esperar o
+                      // próximo rebuild natural do provider.
+                      ref.invalidate(billingAutomationStatusProvider);
 
                       if (dialogContext.mounted) {
                         Navigator.pop(dialogContext);

@@ -75,6 +75,11 @@ class AcademyVocab {
   /// headers relacionados). 'Lutador' (fight/hybrid) / 'Treino' (fitness).
   final String hubLabel;
 
+  /// Se a cultura de faixa/grau ("faixa", "graduação") deve aparecer na UI
+  /// (spec 0.5). Espelha [Academy.showsBeltCulture] — false só para fitness;
+  /// fight/hybrid mantêm true (idêntico ao comportamento histórico).
+  final bool showsBeltCulture;
+
   const AcademyVocab._({
     required this.memberNoun,
     required this.memberNounPlural,
@@ -82,6 +87,7 @@ class AcademyVocab {
     required this.comebackHeadline,
     required this.greetingInterjection,
     required this.hubLabel,
+    required this.showsBeltCulture,
   });
 
   /// Vocabulário original do app — INTOCÁVEL (ver ZERO-REGRESSION RULE acima).
@@ -92,6 +98,7 @@ class AcademyVocab {
     comebackHeadline: 'DE VOLTA AO TATAME',
     greetingInterjection: 'Oss',
     hubLabel: 'Lutador',
+    showsBeltCulture: true,
   );
 
   static const AcademyVocab _fitness = AcademyVocab._(
@@ -101,6 +108,7 @@ class AcademyVocab {
     comebackHeadline: 'DE VOLTA AO TREINO',
     greetingInterjection: null,
     hubLabel: 'Treino',
+    showsBeltCulture: false,
   );
 
   /// Academias híbridas ensinam artes marciais (além da musculação), então

@@ -72,10 +72,12 @@ import 'screens/portal/monitor_student_form_screen.dart';
 import 'screens/portal/public_profile_screen.dart';
 import 'screens/portal/notification_prefs_screen.dart';
 import 'providers/portal_providers.dart';
+import 'providers/onboarding_providers.dart';
 import 'screens/splash_screen.dart';
 import 'screens/paywall_screen.dart';
 import 'screens/kiosk/kiosk_screen.dart';
 import 'widgets/onboarding/onboarding_gate.dart';
+import 'widgets/onboarding/billing_activation_step.dart';
 import 'widgets/common/back_button_handler.dart';
 // Admin screens
 import 'screens/admin/admin_screens.dart';
@@ -503,6 +505,13 @@ final routerProvider = Provider<GoRouter>((ref) {
   ref.listen(appBootstrapProvider, (_, _) => scheduleRefresh());
   ref.listen(currentUserProvider, (_, _) => scheduleRefresh());
   ref.listen(isCreatingAccountProvider, (_, _) => scheduleRefresh());
+  // Fatia 7 (SPEC_ONBOARDING_2026-07.md §0.1): o gate do wizard depende de
+  // providers (turmas/alunos/presença) que resolvem DEPOIS do bootstrap —
+  // sem este listener, uma academia genuinamente vazia podia "perder a
+  // janela" do redirect se esses dados ainda estivessem carregando no
+  // instante exato do pouso (ver [wizardGateStatusProvider] e o uso de
+  // `state.matchedLocation == '/admin'` abaixo).
+  ref.listen(wizardGateStatusProvider, (_, _) => scheduleRefresh());
   ref.onDispose(() {
     disposed = true;
     refresh.dispose();
@@ -634,6 +643,22 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (state.matchedLocation == '/kiosk') {
         if (user == null) return '/login';
         if (!user.isAdmin) return '/portal';
+      }
+
+      // Fatia 7 (SPEC_ONBOARDING_2026-07.md §0.1): gate do wizard "Comece em
+      // 3 minutos". Só dispara quando o admin está exatamente na raiz
+      // `/admin` (dashboard) — nunca intercepta um deep link direto pra uma
+      // sub-rota (ex.: `/admin/configuracoes`), então não existe "trap": o
+      // dono sempre pode navegar livremente, o wizard só aparece na landing
+      // natural pós-login. `wizardGateStatusProvider.loading` (dados ainda
+      // resolvendo) deixa passar sem decidir — o listener acima re-roda o
+      // redirect assim que resolver, enquanto o admin ainda estiver em
+      // `/admin`.
+      if (user != null &&
+          user.isAdmin &&
+          state.matchedLocation == '/admin' &&
+          ref.read(wizardGateStatusProvider) == WizardGateStatus.show) {
+        return '/admin/comece-aqui';
       }
 
       // Ready AND already sitting on a post-login route → we've landed. Latch
@@ -1335,6 +1360,18 @@ final routerProvider = Provider<GoRouter>((ref) {
               child: const AdminBillingRemindersScreen(),
             ),
           ),
+          // Passo "Como vai funcionar a cobrança" (SPEC_ONBOARDING_2026-07.md
+          // §1.2/Fatia 5) — alcançado hoje pelo passo `billing` do
+          // ActivationChecklist e pelo banner de automação do Dashboard/
+          // Cobrança; preparado para ser reusado por um futuro wizard.
+          GoRoute(
+            path: '/admin/comece-aqui/cobranca',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const BillingActivationStep(),
+            ),
+          ),
           GoRoute(
             path: '/admin/retencao',
             pageBuilder: (context, state) => _buildPageWithCrossfade(
@@ -1399,6 +1436,25 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
         ],
+      ),
+
+      // Wizard "Comece em 3 minutos" (Fatia 7, SPEC_ONBOARDING_2026-07.md
+      // §0.1/§1.1) — fora do ShellRoute de propósito: sem bottom nav/rail do
+      // AdminShell distraindo, cada passo é uma tela cheia de verdade. Só é
+      // alcançado pelo gate do redirect acima; `isRootRoute: true` porque não
+      // há "voltar" significativo (chegada é sempre via redirect pós-login,
+      // igual /paywall).
+      GoRoute(
+        path: '/admin/comece-aqui',
+        pageBuilder: (context, state) => _buildPageWithFadeTransition(
+          context: context,
+          state: state,
+          child: const BackButtonHandler(
+            currentLocation: '/admin/comece-aqui',
+            isRootRoute: true,
+            child: AdminOnboardingWizardScreen(),
+          ),
+        ),
       ),
 
       // Admin Notifications (outside shell for full-screen overlay)

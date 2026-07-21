@@ -142,6 +142,9 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
               beltColor: beltColor,
               sport: sport,
               photoUrl: student?.photoUrl,
+              // Fitness não tem cultura de faixa/grau (spec 0.5) — some a
+              // linha inteira. Fight/hybrid: idêntico ao atual.
+              showsBeltCulture: vocab.showsBeltCulture,
               canSwitch: sports.length > 1,
               onSwitchSport: sports.length > 1
                   ? () {
@@ -366,6 +369,7 @@ class _Header extends StatelessWidget {
     required this.sport,
     required this.canSwitch,
     required this.onSwitchSport,
+    required this.showsBeltCulture,
     this.photoUrl,
   });
 
@@ -376,6 +380,9 @@ class _Header extends StatelessWidget {
   final SportId sport;
   final bool canSwitch;
   final VoidCallback? onSwitchSport;
+  // Spec 0.5: fitness não mostra faixa/grau em lugar nenhum da UI. Some a
+  // linha inteira (que também hospeda o switch de esporte) quando false.
+  final bool showsBeltCulture;
   final String? photoUrl;
 
   @override
@@ -444,33 +451,38 @@ class _Header extends StatelessWidget {
                   letterSpacing: 0.3,
                 ),
               ),
-              const SizedBox(height: 4),
-              Pressable(
-                onTap: onSwitchSport,
-                child: Row(
-                  children: [
-                    _MiniBelt(beltColor: beltColor, stripes: stripes),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        '$gradeLabel$stripeLabel',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _T.smoke,
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
+              // Fitness (spec 0.5): sem faixa/grau em lugar nenhum da UI —
+              // some a linha inteira (junto com o switch de esporte que ela
+              // hospeda). Fight/hybrid: idêntico ao atual.
+              if (showsBeltCulture) ...[
+                const SizedBox(height: 4),
+                Pressable(
+                  onTap: onSwitchSport,
+                  child: Row(
+                    children: [
+                      _MiniBelt(beltColor: beltColor, stripes: stripes),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          '$gradeLabel$stripeLabel',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _T.smoke,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
-                    ),
-                    if (canSwitch) ...[
-                      const SizedBox(width: 4),
-                      const Icon(LucideIcons.chevronsUpDown,
-                          size: 15, color: _T.smoke),
+                      if (canSwitch) ...[
+                        const SizedBox(width: 4),
+                        const Icon(LucideIcons.chevronsUpDown,
+                            size: 15, color: _T.smoke),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ],
           ),
         ),

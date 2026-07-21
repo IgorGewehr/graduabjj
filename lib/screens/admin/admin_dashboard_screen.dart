@@ -6,7 +6,9 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/billing_provider.dart';
 import '../../services/services.dart';
+import '../../widgets/common/billing_automation_banner.dart';
 import '../../widgets/polish/polish.dart';
 import '../../widgets/onboarding/activation_checklist.dart';
 import 'widgets/dashboard_radar_sections.dart';
@@ -114,6 +116,12 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     final currentUser = ref.watch(currentUserProvider);
     final userName =
         currentUser.valueOrNull?.displayName.split(' ').first ?? 'Admin';
+    // Fatia 4 (SPEC_ONBOARDING_2026-07.md §1.4): banner de automação de
+    // cobrança, gated por !whatsappEnabled — some sozinho assim que a
+    // cobrança é ativada (mesmo provider do checklist acima).
+    final billingStatus = ref.watch(billingAutomationStatusProvider).valueOrNull;
+    final showBillingBanner =
+        billingStatus != null && !billingStatus.whatsappEnabled;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -137,6 +145,14 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                       padding: EdgeInsets.fromLTRB(20, 4, 20, 0),
                       child: ActivationChecklist(),
                     ),
+
+                    // Banner de automação de cobrança (Fatia 4) — mesmo
+                    // componente 1:1 da tela Cobrança (billing_reminders_screen
+                    // .dart); só aparece enquanto a automação estiver
+                    // desligada. CTA primário "Chamada" das quick actions
+                    // abaixo PERMANECE intocado — decisão explícita da spec.
+                    if (showBillingBanner) const BillingAutomationBanner(),
+
                     const SizedBox(height: 16),
 
                     // Quick Actions

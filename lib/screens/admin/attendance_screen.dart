@@ -13,24 +13,28 @@ import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../services/checkin_service.dart';
 import '../../widgets/checkin_confirm_dialog.dart';
+import '../../widgets/onboarding/quick_create_class_form.dart';
 import '../../widgets/polish/polish.dart';
-
-const _weekdayLabels = [
-  'Domingo',
-  'Segunda',
-  'Terça',
-  'Quarta',
-  'Quinta',
-  'Sexta',
-  'Sábado',
-];
-
-String _formatTimeOfDay(TimeOfDay t) =>
-    '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
 /// Admin Attendance Screen - Mobile-optimized matching webapp UX
 class AdminAttendanceScreen extends ConsumerStatefulWidget {
-  const AdminAttendanceScreen({super.key});
+  /// Fatia 7 (SPEC_ONBOARDING_2026-07.md, W4 do wizard "Sua primeira
+  /// chamada"): quando presente, a turma correspondente já entra
+  /// pré-selecionada — o dono não precisa escolher no dropdown de novo logo
+  /// depois de criá-la. `null` preserva o comportamento de sempre (nenhuma
+  /// turma pré-selecionada).
+  final String? initialClassId;
+
+  /// Quando não-nulo, mostra um banner leve no topo com este texto até o
+  /// primeiro toque marcar alguém presente (some sozinho depois). Usado só
+  /// pelo wizard — fora dele o parâmetro fica `null` e nada muda.
+  final String? wizardBannerText;
+
+  const AdminAttendanceScreen({
+    super.key,
+    this.initialClassId,
+    this.wizardBannerText,
+  });
 
   @override
   ConsumerState<AdminAttendanceScreen> createState() =>
@@ -96,12 +100,28 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       final classes = results[0] as List<BJJClass>;
       final students = results[1] as List<Student>;
 
+      // Fatia 7: pré-seleciona a turma do wizard (widget.initialClassId), se
+      // informada e ainda existente. Sem isso, mantém o padrão de sempre
+      // (nenhuma turma selecionada — o dono escolhe no dropdown).
+      BJJClass? preselected;
+      if (widget.initialClassId != null) {
+        for (final c in classes) {
+          if (c.id == widget.initialClassId) {
+            preselected = c;
+            break;
+          }
+        }
+      }
+
       setState(() {
         _classes = classes;
         _students = students;
-        _selectedClass = null;
+        _selectedClass = preselected;
         _isLoading = false;
       });
+      if (preselected != null) {
+        await _loadAttendanceForClass();
+      }
     } catch (e) {
       setState(() => _isLoading = false);
     }
@@ -643,6 +663,50 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                         ),
                       ),
 
+                      // Fatia 7 (SPEC_ONBOARDING_2026-07.md, W4 do wizard):
+                      // banner leve — some sozinho no 1º toque que marcar
+                      // alguém presente. Fora do wizard, wizardBannerText é
+                      // null e este sliver nunca aparece.
+                      if (widget.wizardBannerText != null &&
+                          _presentStudentIds.isEmpty)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: AppTheme.primary.withValues(alpha: 0.2),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    LucideIcons.handMetal,
+                                    size: 18,
+                                    color: AppTheme.primary,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      widget.wizardBannerText!,
+                                      style: AppTheme.bodySmall.copyWith(
+                                        color: AppTheme.textPrimary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
                       // Search bar
                       if (_selectedClass != null)
                         SliverToBoxAdapter(
@@ -996,105 +1060,27 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   /// nova já entra selecionada na chamada (sem isso ele cai de volta no
   /// "escolha uma turma" e perde o fio).
   void _showQuickCreateClassSheet() {
-    final nameController = TextEditingController();
-    bool isSaving = false;
-    bool showMoreOptions = false;
-    // Se a academia já tem alunos cadastrados sem turma (o Beco 1 do
-    // diagnóstico), o caminho mais provável é "são todos dessa turma" —
-    // então vem pré-marcado, mas o professor pode desmarcar.
-    bool enrollAllStudents = _students.isNotEmpty;
-    int? scheduleDayOfWeek;
-    TimeOfDay scheduleStart = const TimeOfDay(hour: 19, minute: 0);
-    TimeOfDay scheduleEnd = const TimeOfDay(hour: 20, minute: 30);
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) {
-          Future<void> pickTime(bool isStart) async {
-            final picked = await showTimePicker(
-              context: context,
-              initialTime: isStart ? scheduleStart : scheduleEnd,
-            );
-            if (picked != null) {
-              setSheetState(() {
-                if (isStart) {
-                  scheduleStart = picked;
-                } else {
-                  scheduleEnd = picked;
-                }
-              });
-            }
-          }
-
-          Future<void> save() async {
-            final name = nameController.text.trim();
-            if (name.isEmpty) {
-              sheetContext.showWarning('Nome da turma é obrigatório');
-              return;
-            }
-
-            setSheetState(() => isSaving = true);
-            // Captura o Navigator ANTES do primeiro await: depois de um gap
-            // assíncrono não dá pra usar `sheetContext` com segurança (o
-            // sheet pode já ter sido fechado por fora).
-            final navigator = Navigator.of(sheetContext);
-
-            try {
-              final currentUser = ref.read(currentUserProvider).valueOrNull;
-              if (currentUser?.academyId == null) return;
-              final service = ClassService(currentUser!.academyId!);
-
-              final schedule = scheduleDayOfWeek == null
-                  ? const <ClassSchedule>[]
-                  : [
-                      ClassSchedule(
-                        dayOfWeek: scheduleDayOfWeek!,
-                        startTime: _formatTimeOfDay(scheduleStart),
-                        endTime: _formatTimeOfDay(scheduleEnd),
-                      ),
-                    ];
-
-              var created = await service.create(name: name, schedule: schedule);
-
-              if (enrollAllStudents && _students.isNotEmpty) {
-                await service.addStudents(
-                  created.id,
-                  _students.map((s) => s.id).toList(),
-                );
-                created = await service.getById(created.id) ?? created;
-              }
-
-              if (!mounted) return;
-              setState(() {
-                _classes = [..._classes, created];
-                _selectedClass = created;
-              });
-              navigator.pop();
-              // `this.context`: dentro do StatefulBuilder o parâmetro local
-              // `context` esconde o context da tela — precisa ser explícito
-              // pro `mounted` acima realmente valer como guarda.
-              this.context.showSuccess('Turma criada!');
-              await _loadAttendanceForClass();
-            } catch (e) {
-              setSheetState(() => isSaving = false);
-              if (mounted) this.context.showError('Erro: $e');
-            }
-          }
-
-          return Container(
-            padding: EdgeInsets.only(
-              left: 20,
-              right: 20,
-              top: 20,
-              bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-            ),
-            decoration: const BoxDecoration(
-              color: AppTheme.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
+      builder: (sheetContext) {
+        // Captura o Navigator ANTES do primeiro await (dentro do form): depois
+        // de um gap assíncrono não dá pra usar `sheetContext` com segurança (o
+        // sheet pode já ter sido fechado por fora).
+        final navigator = Navigator.of(sheetContext);
+        return Container(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
+          ),
+          decoration: const BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1137,175 +1123,29 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                   ],
                 ),
                 const SizedBox(height: 20),
-                Text(
-                  'Nome da turma',
-                  style: AppTheme.labelSmall.copyWith(
-                    color: AppTheme.textSecondary,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.divider),
-                  ),
-                  child: TextField(
-                    controller: nameController,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      hintText: 'Ex: Turma Iniciante',
-                      hintStyle: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.textDisabled,
-                      ),
-                      prefixIcon: const Icon(
-                        LucideIcons.tag,
-                        color: AppTheme.textSecondary,
-                        size: 20,
-                      ),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                TextButton.icon(
-                  onPressed: () =>
-                      setSheetState(() => showMoreOptions = !showMoreOptions),
-                  icon: Icon(
-                    showMoreOptions
-                        ? LucideIcons.chevronUp
-                        : LucideIcons.chevronDown,
-                    size: 16,
-                  ),
-                  label: Text(
-                    showMoreOptions ? 'Menos opções' : 'Mais opções (horário)',
-                  ),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.textSecondary,
-                    padding: EdgeInsets.zero,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-                if (showMoreOptions) ...[
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surfaceVariant,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppTheme.divider),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: DropdownButton<int?>(
-                            value: scheduleDayOfWeek,
-                            isExpanded: true,
-                            underline: const SizedBox(),
-                            items: [
-                              const DropdownMenuItem<int?>(
-                                value: null,
-                                child: Text('Sem horário fixo'),
-                              ),
-                              ...List.generate(
-                                7,
-                                (i) => DropdownMenuItem<int?>(
-                                  value: i,
-                                  child: Text(_weekdayLabels[i]),
-                                ),
-                              ),
-                            ],
-                            onChanged: (value) => setSheetState(
-                              () => scheduleDayOfWeek = value,
-                            ),
-                          ),
-                        ),
-                        if (scheduleDayOfWeek != null) ...[
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: () => pickTime(true),
-                            child: Text(
-                              _formatTimeOfDay(scheduleStart),
-                              style: AppTheme.bodySmall.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            ' - ',
-                            style: AppTheme.bodySmall.copyWith(
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: () => pickTime(false),
-                            child: Text(
-                              _formatTimeOfDay(scheduleEnd),
-                              style: AppTheme.bodySmall.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-                if (_students.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  CheckboxListTile(
-                    value: enrollAllStudents,
-                    onChanged: (v) =>
-                        setSheetState(() => enrollAllStudents = v ?? false),
-                    contentPadding: EdgeInsets.zero,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    title: Text(
-                      'Matricular todos os ${_students.length} alunos nesta turma',
-                      style: AppTheme.bodyMedium.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: isSaving ? null : save,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.textPrimary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: isSaving
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text('Criar turma'),
-                  ),
+                // Fatia 7 (SPEC_ONBOARDING_2026-07.md): conteúdo (nome + "mais
+                // opções" + matricular-todos + salvar) extraído para
+                // QuickCreateClassForm — reusado aqui E no wizard
+                // `/admin/comece-aqui` (W1 fight/hybrid), sem duplicar lógica.
+                QuickCreateClassForm(
+                  students: _students,
+                  analyticsSource: 'chamada_empty_state',
+                  onCreated: (created) async {
+                    if (!mounted) return;
+                    setState(() {
+                      _classes = [..._classes, created];
+                      _selectedClass = created;
+                    });
+                    navigator.pop();
+                    context.showSuccess('Turma criada!');
+                    await _loadAttendanceForClass();
+                  },
                 ),
               ],
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
