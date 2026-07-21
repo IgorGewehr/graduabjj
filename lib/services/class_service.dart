@@ -469,6 +469,43 @@ class ClassService {
   }
 
   // ============================================
+  // Add Multiple Students to Class (bulk)
+  //
+  // Used by "Selecionar todos" flows (manage-students sheet, quick class
+  // creation with existing students). One Firestore write for the whole
+  // studentIds batch instead of N sequential updates; the sport-enrollment
+  // side effect still runs per-student (parallelized) since each student
+  // doc needs its own seed.
+  // ============================================
+  Future<void> addStudents(String classId, List<String> studentIds) async {
+    if (studentIds.isEmpty) return;
+    final cls = await getById(classId);
+    if (cls == null) throw Exception('Turma não encontrada');
+
+    await _collections.classDoc(classId).update({
+      'studentIds': FieldValue.arrayUnion(studentIds),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await Future.wait(
+      studentIds.map(
+        (id) => _enrollStudentInSport(id, cls.getSport(), cls.category),
+      ),
+    );
+  }
+
+  // ============================================
+  // Remove Multiple Students from Class (bulk)
+  // ============================================
+  Future<void> removeStudents(String classId, List<String> studentIds) async {
+    if (studentIds.isEmpty) return;
+    await _collections.classDoc(classId).update({
+      'studentIds': FieldValue.arrayRemove(studentIds),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ============================================
   // Toggle Student in Class
   // ============================================
   Future<BJJClass> toggleStudent(String classId, String studentId) async {

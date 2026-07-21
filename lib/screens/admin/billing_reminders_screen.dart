@@ -10,11 +10,17 @@ import '../../core/feedback_utils.dart';
 import '../../services/firebase_service.dart';
 import '../../services/billing_reminder_service.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/polish/polish.dart';
 
-/// Admin Billing Reminders Screen
-/// Displays overdue payments organized by collection stages (D+1, D+3, D+7, D+15, D+30+)
-/// with WhatsApp and Email billing capabilities.
+/// Admin Billing Reminders Screen ("Cobrança").
+///
+/// UX 2026-07 (NOTAS_FINANCEIRO_2026-07.md, feedback do dono): a régua
+/// D+0/D+1/D+3/D+7/D+15/D+30 é jargão interno de engenharia — a tela virou
+/// uma LISTA ÚNICA de devedores ordenada por dias de atraso, com um botão
+/// "Cobrar todos" e o status da automação em destaque. Os dados/serviços por
+/// estágio (getOverdueWithStages, sendBulk*ForStage, etc.) continuam
+/// existindo por baixo sem nenhuma mudança — só a apresentação agrega.
 class AdminBillingRemindersScreen extends ConsumerStatefulWidget {
   const AdminBillingRemindersScreen({super.key});
 
@@ -24,8 +30,7 @@ class AdminBillingRemindersScreen extends ConsumerStatefulWidget {
 }
 
 class _AdminBillingRemindersScreenState
-    extends ConsumerState<AdminBillingRemindersScreen>
-    with SingleTickerProviderStateMixin {
+    extends ConsumerState<AdminBillingRemindersScreen> {
   // Data
   Map<BillingStage, List<Map<String, dynamic>>> _overdueStages = {
     BillingStage.d0: [],
@@ -46,7 +51,11 @@ class _AdminBillingRemindersScreenState
   bool _isLoading = true;
   bool _isSending = false;
 
-  late TabController _tabController;
+  // Progressive disclosure: stats agregados + quebra por tempo de atraso
+  // ficam colapsados atrás de "Ver detalhes" (dono: tela virou "sala de
+  // controle simples").
+  bool _showDetails = false;
+
   late BillingReminderService _billingService;
   BillingNotificationService? _notificationService;
 
@@ -56,18 +65,8 @@ class _AdminBillingRemindersScreenState
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(
-      length: BillingStage.values.length,
-      vsync: this,
-    );
     _billingService = BillingReminderService(FirebaseService.academyId);
     _loadData();
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -116,123 +115,617 @@ class _AdminBillingRemindersScreenState
     }
   }
 
-  int _stageCount(BillingStage stage) {
-    return _overdueStages[stage]?.length ?? 0;
+  /// Todos os devedores, achatados e ordenados por dias de atraso (desc) —
+  /// a lista única que substitui as abas D+0..D+30. Cada item mantém o par
+  /// (BillingStage, dados) porque o estágio real ainda é necessário por
+  /// baixo (template de mensagem, PIX, log de contato); só não aparece mais
+  /// na UI.
+  List<MapEntry<BillingStage, Map<String, dynamic>>> get _sortedDebtors {
+    final all = <MapEntry<BillingStage, Map<String, dynamic>>>[];
+    for (final stage in BillingStage.values) {
+      for (final item in _overdueStages[stage] ?? const []) {
+        all.add(MapEntry(stage, item));
+      }
+    }
+    all.sort((a, b) {
+      final da = a.value['daysOverdue'] as int? ?? 0;
+      final db = b.value['daysOverdue'] as int? ?? 0;
+      return db.compareTo(da);
+    });
+    return all;
   }
 
-  BillingStage get _currentStage => BillingStage.values[_tabController.index];
+  /// Rótulo humano do estágio para a área "Ver detalhes" — a régua D+N é
+  /// jargão de engenharia; aqui vira faixa de dias, sem código interno.
+  String _humanStageLabel(BillingStage stage) {
+    switch (stage) {
+      case BillingStage.d0:
+        return 'Vence hoje';
+      case BillingStage.d1:
+        return '1-2 dias de atraso';
+      case BillingStage.d3:
+        return '3-6 dias de atraso';
+      case BillingStage.d7:
+        return '7-14 dias de atraso';
+      case BillingStage.d15:
+        return '15-29 dias de atraso';
+      case BillingStage.d30:
+        return '30+ dias de atraso';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final debtors = _sortedDebtors;
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('Regua de Cobranca'),
-        actions: [
-          IconButton(
-            onPressed: () => _showSettingsDialog(),
-            icon: const Icon(LucideIcons.settings, size: 20),
-            tooltip: 'Configuracoes',
-          ),
-          IconButton(
-            onPressed: _loadData,
-            icon: const Icon(LucideIcons.refreshCw, size: 20),
-          ),
-        ],
-      ),
-      body: Stack(
+      body: Column(
         children: [
-          _isLoading
-              ? Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                  child: PolishSkeleton.list(count: 6),
-                )
-              : RefreshIndicator(
-                  onRefresh: _loadData,
-                  child: Column(
-                    children: [
-                      // Stats Header
-                      _buildStatsHeader(),
-                      const SizedBox(height: 8),
-
-                      // API Warning
-                      if (_notificationSettings != null &&
-                          !_notificationSettings!.hasWhatsAppApi &&
-                          !_notificationSettings!.hasEmailApi)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: AppTheme.warning.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: AppTheme.warning.withValues(alpha: 0.3),
-                              ),
+          AcademyPageHeader(
+            compact: true,
+            title: 'Cobrança',
+            // Rota pushada (Menu > Financeiro > Cobrança, ou agora também a
+            // partir do Financeiro) — precisa do próprio botão de voltar, já
+            // que o header compacto não tem AppBar por baixo. Espelha o
+            // `automaticallyImplyLeading` que o AppBar antigo dava de graça.
+            leading: Navigator.canPop(context)
+                ? IconButton(
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    icon: const Icon(LucideIcons.arrowLeft, size: 20),
+                    tooltip: 'Voltar',
+                  )
+                : null,
+            actions: [
+              IconButton(
+                onPressed: () => _showSettingsDialog(),
+                icon: const Icon(LucideIcons.settings, size: 20),
+                tooltip: 'Configurações',
+              ),
+              IconButton(
+                onPressed: _loadData,
+                icon: const Icon(LucideIcons.refreshCw, size: 20),
+                tooltip: 'Atualizar',
+              ),
+            ],
+          ),
+          Expanded(
+            child: Stack(
+              children: [
+                _isLoading
+                    ? Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: PolishSkeleton.list(count: 6),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: _loadData,
+                        child: CustomScrollView(
+                          slivers: [
+                            // Status da automação em destaque — o "aha" da
+                            // cobrança: liga sozinho, ou CTA pra ligar.
+                            SliverToBoxAdapter(
+                              child: _buildAutomationBanner(),
                             ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  LucideIcons.alertTriangle,
-                                  size: 16,
-                                  color: AppTheme.warning,
+
+                            // API Warning (nenhum canal configurado ainda)
+                            if (_notificationSettings != null &&
+                                !_notificationSettings!.hasWhatsAppApi &&
+                                !_notificationSettings!.hasEmailApi)
+                              SliverToBoxAdapter(child: _buildApiWarning()),
+
+                            // Botão primário "Cobrar todos (N)"
+                            SliverToBoxAdapter(
+                              child: _buildBulkAllButton(debtors),
+                            ),
+
+                            // Stats/estágios — atrás de "Ver detalhes"
+                            SliverToBoxAdapter(
+                              child: _buildDetailsDisclosure(),
+                            ),
+
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 4),
+                            ),
+
+                            // Lista única de devedores, por dias de atraso
+                            if (debtors.isEmpty)
+                              const SliverFillRemaining(
+                                hasScrollBody: false,
+                                child: PolishedEmptyState(
+                                  icon: LucideIcons.checkCircle,
+                                  title: 'Nenhum pagamento em atraso',
+                                  subtitle: 'Tudo em dia por aqui.',
+                                  accent: AppTheme.success,
                                 ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'Habilite os canais de cobranca (WhatsApp e/ou Email) nas configuracoes para enviar cobrancas automaticas.',
-                                    style: AppTheme.bodySmall.copyWith(
-                                      color: AppTheme.warning,
-                                    ),
+                              )
+                            else
+                              SliverPadding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  4,
+                                  16,
+                                  96,
+                                ),
+                                sliver: SliverList(
+                                  delegate: SliverChildBuilderDelegate(
+                                    (context, index) => _buildPaymentItem(
+                                      debtors[index].value,
+                                      debtors[index].key,
+                                    ).entrance(index: index),
+                                    childCount: debtors.length,
                                   ),
                                 ),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                      const SizedBox(height: 8),
-
-                      // Tab Bar
-                      _buildTabBar(),
-
-                      // Bulk action buttons
-                      _buildBulkActions(),
-
-                      // Tab Content
-                      Expanded(
-                        child: TabBarView(
-                          controller: _tabController,
-                          children: BillingStage.values
-                              .map((stage) => _buildStageList(stage))
-                              .toList(),
+                              ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
-          // Loading overlay during bulk send
-          if (_isSending)
-            Container(
-              color: Colors.black.withValues(alpha: 0.3),
-              child: const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: Colors.white),
-                    SizedBox(height: 16),
-                    Text(
-                      'Enviando cobrancas...',
-                      style: TextStyle(color: Colors.white, fontSize: 16),
+                // Loading overlay during bulk send
+                if (_isSending)
+                  Container(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    child: const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(color: Colors.white),
+                          SizedBox(height: 16),
+                          Text(
+                            'Enviando cobrancas...',
+                            style: TextStyle(color: Colors.white, fontSize: 16),
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
-                ),
-              ),
+                  ),
+              ],
             ),
+          ),
         ],
       ),
     );
+  }
+
+  Widget _buildApiWarning() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.warning.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: AppTheme.warning.withValues(alpha: 0.3),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              LucideIcons.alertTriangle,
+              size: 16,
+              color: AppTheme.warning,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Habilite os canais de cobranca (WhatsApp e/ou Email) nas configuracoes para enviar cobrancas automaticas.',
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.warning,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Status da automação em destaque (dono: "o aha da cobrança automática").
+  /// Chave = whatsappEnabled, o mesmo getter que já liga a régua automática
+  /// de WhatsApp (ver subtítulo do switch em Configurações). ON = banner
+  /// discreto positivo; OFF = CTA que abre o dialog de configurações já
+  /// existente.
+  Widget _buildAutomationBanner() {
+    final on = _notificationSettings?.whatsappEnabled ?? false;
+    final color = on ? AppTheme.success : AppTheme.warning;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              on ? LucideIcons.checkCircle2 : LucideIcons.alertTriangle,
+              size: 18,
+              color: color,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                on
+                    ? 'Cobrança automática ligada — o sistema cobra sozinho pelo WhatsApp'
+                    : 'Cobrança automática desligada',
+                style: AppTheme.bodySmall.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (!on)
+              TextButton(
+                onPressed: () => _showSettingsDialog(),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 32),
+                ),
+                child: const Text('Ligar', style: TextStyle(fontSize: 13)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Progressive disclosure: estatísticas agregadas + quebra por tempo de
+  /// atraso, colapsadas atrás de "Ver detalhes" (não competem com a lista
+  /// de devedores/ação primária por espaço no topo).
+  Widget _buildDetailsDisclosure() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => setState(() => _showDetails = !_showDetails),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _showDetails ? 'Ocultar detalhes' : 'Ver detalhes',
+                    style: AppTheme.labelMedium.copyWith(
+                      color: AppTheme.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    _showDetails
+                        ? LucideIcons.chevronUp
+                        : LucideIcons.chevronDown,
+                    size: 16,
+                    color: AppTheme.textSecondary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_showDetails) ...[
+            const SizedBox(height: 8),
+            _buildStatsHeader(),
+            const SizedBox(height: 12),
+            _buildStageBreakdown(),
+            const SizedBox(height: 4),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Quebra por tempo de atraso (era a régua D+N) com rótulo humano e uma
+  /// ação "Cobrar" por faixa — reusa o mesmo `_showBulkSendDialog` de
+  /// sempre, só que a partir do painel de detalhes em vez de uma aba.
+  Widget _buildStageBreakdown() {
+    if (_stats == null) return const SizedBox.shrink();
+    final entries = BillingStage.values
+        .where((s) => (_stats!.byStage[s]?.count ?? 0) > 0)
+        .toList();
+    if (entries.isEmpty) return const SizedBox.shrink();
+    final hasChannel =
+        (_notificationSettings?.hasWhatsAppApi ?? false) ||
+        (_notificationSettings?.hasEmailApi ?? false);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Por tempo de atraso',
+            style: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          ...entries.map((stage) {
+            final data = _stats!.byStage[stage]!;
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: _stageColor(stage),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${_humanStageLabel(stage)} — ${data.count} '
+                      '${data.count == 1 ? 'aluno' : 'alunos'} — '
+                      '${_currencyFormat.format(data.amount)}',
+                      style: AppTheme.bodySmall,
+                    ),
+                  ),
+                  if (hasChannel)
+                    TextButton(
+                      onPressed: () => _showBulkSendDialog(stage),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 32),
+                      ),
+                      child: const Text(
+                        'Cobrar',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ============================================
+  // Bulk "Cobrar todos" (todos os estágios de uma vez)
+  // ============================================
+  Widget _buildBulkAllButton(
+    List<MapEntry<BillingStage, Map<String, dynamic>>> debtors,
+  ) {
+    if (debtors.isEmpty) return const SizedBox.shrink();
+    final hasChannel =
+        (_notificationSettings?.hasWhatsAppApi ?? false) ||
+        (_notificationSettings?.hasEmailApi ?? false);
+    if (!hasChannel) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: SizedBox(
+        width: double.infinity,
+        child: _isSending
+            ? const Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            : ElevatedButton.icon(
+                onPressed: () => _confirmSendAll(debtors),
+                icon: const Icon(LucideIcons.send, size: 16),
+                label: Text('Cobrar todos (${debtors.length})'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.success,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+
+  /// Confirmação leve antes de disparar "Cobrar todos": mostra quantos
+  /// telefones/emails serão alcançados. Sem editor de mensagem única aqui —
+  /// os alunos estão em estágios diferentes, cada um recebe o texto (padrão
+  /// ou customizado em Configurações) correspondente ao PRÓPRIO atraso.
+  void _confirmSendAll(
+    List<MapEntry<BillingStage, Map<String, dynamic>>> debtors,
+  ) {
+    if (_notificationService == null) return;
+    final allItems = debtors.map((e) => e.value).toList();
+    final recipients = _notificationService!.collectRecipientsForStage(
+      financials: allItems,
+      contacts: _studentContacts,
+    );
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              Icon(LucideIcons.send, color: AppTheme.success, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Cobrar todos (${debtors.length})',
+                  style: AppTheme.titleLarge.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Envia a cobrança pelo WhatsApp/Email para todos os '
+                '${debtors.length} alunos em atraso. Cada aluno recebe a '
+                'mensagem correspondente ao tempo de atraso dele.',
+                style: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Icon(
+                    LucideIcons.messageCircle,
+                    size: 14,
+                    color: AppTheme.success,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${recipients.phones.length} telefone(s)',
+                    style: AppTheme.bodySmall,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(LucideIcons.mail, size: 14, color: AppTheme.info),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${recipients.emails.length} email(s)',
+                    style: AppTheme.bodySmall,
+                  ),
+                ],
+              ),
+              if (recipients.skipped > 0) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(
+                      LucideIcons.alertTriangle,
+                      size: 14,
+                      color: Colors.orange,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${recipients.skipped} sem contato',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: Colors.orange,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(
+                'Cancelar',
+                style: TextStyle(color: AppTheme.textSecondary),
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _sendAllOverdue(debtors);
+              },
+              icon: const Icon(LucideIcons.send, size: 16),
+              label: const Text('Enviar Agora'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.success,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Envia a cobrança "Cobrar todos" percorrendo cada estágio não-vazio e
+  /// reutilizando o MESMO núcleo de envio de `_executeBulkSendNew`
+  /// (`_runBulkSendCore` — PIX best-effort, recheck de pago, log de
+  /// contato), só que acumulando o resultado de todos os estágios em UM
+  /// dialog final em vez de um por estágio.
+  Future<void> _sendAllOverdue(
+    List<MapEntry<BillingStage, Map<String, dynamic>>> debtors,
+  ) async {
+    if (_notificationService == null) return;
+    if (!(_notificationSettings?.whatsappEnabled ?? false) &&
+        !(_notificationSettings?.emailEnabled ?? false)) {
+      FeedbackUtils.showError(
+        context,
+        'Nenhum canal de notificacao esta habilitado. Habilite WhatsApp ou Email nas configuracoes.',
+      );
+      return;
+    }
+
+    final nonEmptyStages = BillingStage.values
+        .where((s) => (_overdueStages[s]?.isNotEmpty ?? false))
+        .toList();
+    if (nonEmptyStages.isEmpty) return;
+
+    setState(() => _isSending = true);
+    final aggregated = _BulkSendOutcome();
+    try {
+      for (final stage in nonEmptyStages) {
+        final items = _overdueStages[stage] ?? [];
+        final message = _notificationService!.generateGenericStageMessage(
+          stage,
+        );
+        final subject = _notificationService!.generateGenericEmailSubject(
+          stage,
+        );
+        final outcome = await _runBulkSendCore(
+          stage: stage,
+          allItems: items,
+          messageTemplate: message,
+          subjectTemplate: subject,
+        );
+        aggregated.merge(outcome);
+      }
+
+      if (!aggregated.hadItemsToSend) {
+        if (mounted) {
+          FeedbackUtils.showInfo(
+            context,
+            aggregated.alreadyPaidSkipped > 0
+                ? 'Todas as ${aggregated.alreadyPaidSkipped} cobrancas ja foram pagas — nada a enviar.'
+                : 'Nada a enviar.',
+          );
+        }
+      } else if (mounted) {
+        _showBulkServerResultDialog(
+          aggregated.toResult(),
+          alreadyPaidSkipped: aggregated.alreadyPaidSkipped,
+          waWithLink: aggregated.waWithLink,
+          waWithoutLink: aggregated.waWithoutLink,
+          missingCpfNames: aggregated.missingCpfNames.toList(),
+          linkIntended:
+              (_notificationSettings?.includePaymentLink ?? false) &&
+              (_notificationSettings?.whatsappEnabled ?? false),
+        );
+      }
+      await _loadData();
+    } catch (e) {
+      if (mounted) {
+        FeedbackUtils.showError(context, 'Erro no envio em massa: $e');
+      }
+    } finally {
+      setState(() => _isSending = false);
+    }
   }
 
   // ============================================
@@ -324,59 +817,6 @@ class _AdminBillingRemindersScreenState
     );
   }
 
-  // ============================================
-  // Tab Bar
-  // ============================================
-  Widget _buildTabBar() {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppTheme.divider, width: 1)),
-      ),
-      child: TabBar(
-        controller: _tabController,
-        isScrollable: true,
-        tabAlignment: TabAlignment.start,
-        labelColor: AppTheme.textPrimary,
-        unselectedLabelColor: AppTheme.textSecondary,
-        indicatorColor: AppTheme.primary,
-        labelStyle: AppTheme.titleSmall,
-        unselectedLabelStyle: AppTheme.bodySmall,
-        onTap: (_) => setState(() {}),
-        tabs: BillingStage.values.map((stage) {
-          final count = _stageCount(stage);
-          return Tab(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(stage.label),
-                if (count > 0) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _stageColor(stage),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      '$count',
-                      style: AppTheme.labelSmall.copyWith(
-                        color: Colors.white,
-                        fontSize: 10,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
   Color _stageColor(BillingStage stage) {
     switch (stage) {
       case BillingStage.d0:
@@ -392,79 +832,6 @@ class _AdminBillingRemindersScreenState
       case BillingStage.d30:
         return Colors.red.shade900;
     }
-  }
-
-  // ============================================
-  // Bulk Action Buttons (Unified)
-  // ============================================
-  Widget _buildBulkActions() {
-    final currentStage = _currentStage;
-    final stageItems = _overdueStages[currentStage] ?? [];
-    if (stageItems.isEmpty) return const SizedBox.shrink();
-
-    final hasWhatsApp = _notificationSettings?.hasWhatsAppApi ?? false;
-    final hasEmail = _notificationSettings?.hasEmailApi ?? false;
-
-    if (!hasWhatsApp && !hasEmail) return const SizedBox.shrink();
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: SizedBox(
-        width: double.infinity,
-        child: _isSending
-            ? const Center(
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              )
-            : ElevatedButton.icon(
-                onPressed: () => _showBulkSendDialog(currentStage),
-                icon: const Icon(LucideIcons.send, size: 16),
-                label: Text(
-                  'Cobrar todos (${stageItems.length})',
-                  style: const TextStyle(fontSize: 13),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.success,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
-      ),
-    );
-  }
-
-  // ============================================
-  // Stage List
-  // ============================================
-  Widget _buildStageList(BillingStage stage) {
-    final items = _overdueStages[stage] ?? [];
-
-    if (items.isEmpty) {
-      return const PolishedEmptyState(
-        icon: LucideIcons.checkCircle,
-        title: 'Nenhum pagamento neste estagio',
-        subtitle: 'Tudo em dia por aqui.',
-        accent: AppTheme.success,
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: items.length,
-      itemBuilder: (context, index) {
-        final item = items[index];
-        return _buildPaymentItem(item, stage).entrance(index: index);
-      },
-    );
   }
 
   Widget _buildPaymentItem(Map<String, dynamic> item, BillingStage stage) {
@@ -1260,6 +1627,11 @@ class _AdminBillingRemindersScreenState
   // ============================================
   // Execute Bulk Send (personalized per student)
   // ============================================
+  /// Wraps [_runBulkSendCore] with the single-stage UI lifecycle (loading
+  /// flag, one result dialog, reload) — this is what `_showBulkSendDialog`
+  /// calls for a single stage. `_sendAllOverdue` calls `_runBulkSendCore`
+  /// directly, once per non-empty stage, and shows ONE aggregated dialog
+  /// instead — same core send logic, different UI wrapper.
   Future<void> _executeBulkSendNew({
     required BillingStage stage,
     required String message,
@@ -1282,23 +1654,19 @@ class _AdminBillingRemindersScreenState
 
     try {
       final allItems = _overdueStages[stage] ?? [];
-
-      // M4: re-read live status for the whole batch and DROP anything already
-      // paid (or no longer collectible) before sending. Surface the skip count.
-      final paidIds = await _billingService.getPaidFinancialIds(
-        allItems.map((i) => i['id'] as String? ?? ''),
+      final outcome = await _runBulkSendCore(
+        stage: stage,
+        allItems: allItems,
+        messageTemplate: message,
+        subjectTemplate: subject,
       );
-      final items = allItems
-          .where((i) => !paidIds.contains(i['id'] as String? ?? ''))
-          .toList();
-      final alreadyPaidSkipped = allItems.length - items.length;
 
-      if (items.isEmpty) {
+      if (!outcome.hadItemsToSend) {
         if (mounted) {
           FeedbackUtils.showInfo(
             context,
-            alreadyPaidSkipped > 0
-                ? 'Todas as $alreadyPaidSkipped cobrancas ja foram pagas — nada a enviar.'
+            outcome.alreadyPaidSkipped > 0
+                ? 'Todas as ${outcome.alreadyPaidSkipped} cobrancas ja foram pagas — nada a enviar.'
                 : 'Nada a enviar.',
           );
         }
@@ -1306,233 +1674,16 @@ class _AdminBillingRemindersScreenState
         return;
       }
 
-      final messageTemplate = message;
-      final subjectTemplate = subject;
-      int waSent = 0, waFailed = 0, waTotal = 0;
-      int emSent = 0, emFailed = 0, emTotal = 0;
-      final failures = <BulkFailure>[];
-      // L3: track WhatsApp link attachment outcomes so the admin sees how many
-      // messages went out WITH a PIX/link vs WITHOUT (silent link failures).
-      int waWithLink = 0, waWithoutLink = 0;
-      // Motivo #1 de "sem link": aluno (ou responsável, se kids) sem CPF — o PIX
-      // do Mercado Pago exige CPF do pagador. Coleta os nomes pra avisar o
-      // professor (dado acionável: é só cadastrar o CPF na ficha).
-      final missingCpfNames = <String>[];
-
-      // ---- PIX pre-generation (bounded concurrency) ----
-      // For every WhatsApp-eligible, unpaid item (when the setting is on) we
-      // generate a PIX up front, with at most 5 concurrent CF calls. Results
-      // are keyed by financialId; a missing/empty entry => send without PIX.
-      final pixByFinancialId = <String, ({String pixCode, String ticketUrl})>{};
-      final includePix = _notificationSettings?.includePaymentLink ?? false;
-      final whatsappOn = _notificationSettings?.whatsappEnabled ?? false;
-
-      if (includePix && whatsappOn) {
-        final eligible = items.where((item) {
-          final studentId = item['studentId'] as String? ?? '';
-          final contact = _studentContacts[studentId];
-          final phone = contact?.effectivePhone;
-          final status = item['status'] as String? ?? '';
-          return contact != null &&
-              phone != null &&
-              phone.isNotEmpty &&
-              status != 'paid';
-        }).toList();
-
-        const concurrency = 5;
-        for (var i = 0; i < eligible.length; i += concurrency) {
-          final chunk = eligible.sublist(
-            i,
-            (i + concurrency) > eligible.length
-                ? eligible.length
-                : i + concurrency,
-          );
-          final results = await Future.wait(
-            chunk.map((item) async {
-              final financialId = item['id'] as String? ?? '';
-              final studentId = item['studentId'] as String? ?? '';
-              final contact = _studentContacts[studentId];
-              final pix = await _notificationService!.ensureValidPixForFinancial(
-                academyId: FirebaseService.academyId,
-                financialId: financialId,
-                amount: (item['amount'] as num?)?.toDouble() ?? 0,
-                studentId: studentId,
-                studentName: item['studentName'] as String? ?? '',
-                payerCpf: contact?.effectiveCpf,
-              );
-              return MapEntry(financialId, pix);
-            }),
-          );
-          for (final entry in results) {
-            if (entry.value.pixCode.isNotEmpty) {
-              pixByFinancialId[entry.key] = entry.value;
-            }
-          }
-        }
-      }
-
-      for (final item in items) {
-        final studentId = item['studentId'] as String? ?? '';
-        final contact = _studentContacts[studentId];
-        if (contact == null) continue;
-
-        final studentName = item['studentName'] as String? ?? '';
-        final amount = (item['amount'] as num?)?.toDouble() ?? 0;
-        final dueDate = item['dueDate'] as DateTime;
-        final daysOverdue = item['daysOverdue'] as int? ?? 0;
-        final financialId = item['id'] as String? ?? '';
-
-        // Email + base message: no PIX block (markers auto-strip).
-        final personalizedMessage = _notificationService!.applyMessageTemplate(
-          messageTemplate,
-          studentName,
-          amount,
-          dueDate,
-          daysOverdue,
-        );
-        final personalizedSubject = _notificationService!.applyMessageTemplate(
-          subjectTemplate,
-          studentName,
-          amount,
-          dueDate,
-          daysOverdue,
-        );
-
-        // WhatsApp message: inject the pre-generated PIX (if any) for this
-        // financial. When absent, the [[PIX]] block strips to a clean message.
-        final pix = pixByFinancialId[financialId];
-        final whatsAppMessage = _notificationService!.applyMessageTemplate(
-          messageTemplate,
-          studentName,
-          amount,
-          dueDate,
-          daysOverdue,
-          pixCode: pix?.pixCode,
-          ticketUrl: pix?.ticketUrl,
-        );
-
-        // Send WhatsApp (only if enabled in settings)
-        final phone = contact.effectivePhone;
-        if ((_notificationSettings?.whatsappEnabled ?? false) &&
-            phone != null &&
-            phone.isNotEmpty) {
-          waTotal++;
-          final result = await _notificationService!.sendWhatsApp(
-            phone: phone,
-            studentName: studentName,
-            studentId: studentId,
-            financialId: financialId,
-            amount: amount,
-            dueDate: dueDate,
-            daysOverdue: daysOverdue,
-            stage: stage,
-            message: whatsAppMessage,
-          );
-          if (result.success) {
-            waSent++;
-            // L3: only meaningful when a link was actually intended (PIX setting
-            // on + WhatsApp on). Otherwise neither counter moves.
-            if (includePix && whatsappOn) {
-              if (pix != null && pix.pixCode.isNotEmpty) {
-                waWithLink++;
-              } else {
-                waWithoutLink++;
-                if ((contact.effectiveCpf ?? '').trim().isEmpty &&
-                    !missingCpfNames.contains(studentName)) {
-                  missingCpfNames.add(studentName);
-                }
-              }
-            }
-          } else {
-            waFailed++;
-            failures.add(
-              BulkFailure(
-                type: 'whatsapp',
-                recipient: phone,
-                error: result.error ?? '',
-              ),
-            );
-          }
-        }
-
-        // Send Email (only if enabled in settings)
-        final email = contact.effectiveEmail;
-        if ((_notificationSettings?.emailEnabled ?? false) &&
-            email != null &&
-            email.isNotEmpty) {
-          emTotal++;
-          final result = await _notificationService!.sendEmail(
-            email: email,
-            studentName: studentName,
-            studentId: studentId,
-            financialId: financialId,
-            amount: amount,
-            dueDate: dueDate,
-            daysOverdue: daysOverdue,
-            stage: stage,
-            subject: personalizedSubject,
-            message: personalizedMessage,
-          );
-          if (result.success) {
-            emSent++;
-          } else {
-            emFailed++;
-            failures.add(
-              BulkFailure(
-                type: 'email',
-                recipient: email,
-                error: result.error ?? '',
-              ),
-            );
-          }
-        }
-
-        // Auto-log contact
-        final sentWhatsApp =
-            (_notificationSettings?.whatsappEnabled ?? false) &&
-            phone != null &&
-            phone.isNotEmpty;
-        final sentEmail =
-            (_notificationSettings?.emailEnabled ?? false) &&
-            email != null &&
-            email.isNotEmpty;
-        if (sentWhatsApp || sentEmail) {
-          await _billingService.logContactAttempt(
-            financialId: financialId,
-            studentId: studentId,
-            studentName: studentName,
-            type: sentWhatsApp ? ContactType.whatsapp : ContactType.email,
-            notes: 'Cobranca em massa (personalizada)',
-            stage: stage.value,
-            daysOverdue: daysOverdue,
-            contactedBy: FirebaseService.currentUserId ?? '',
-            contactedByName: 'Admin',
-          );
-        }
-      }
-
       if (mounted) {
         _showBulkServerResultDialog(
-          BulkServerResult(
-            success: true,
-            scheduled: false,
-            whatsapp: BulkChannelSummary(
-              total: waTotal,
-              sent: waSent,
-              failed: waFailed,
-            ),
-            email: BulkChannelSummary(
-              total: emTotal,
-              sent: emSent,
-              failed: emFailed,
-            ),
-            failures: failures,
-          ),
-          alreadyPaidSkipped: alreadyPaidSkipped,
-          waWithLink: waWithLink,
-          waWithoutLink: waWithoutLink,
-          missingCpfNames: missingCpfNames,
-          linkIntended: includePix && whatsappOn,
+          outcome.toResult(),
+          alreadyPaidSkipped: outcome.alreadyPaidSkipped,
+          waWithLink: outcome.waWithLink,
+          waWithoutLink: outcome.waWithoutLink,
+          missingCpfNames: outcome.missingCpfNames.toList(),
+          linkIntended:
+              (_notificationSettings?.includePaymentLink ?? false) &&
+              (_notificationSettings?.whatsappEnabled ?? false),
         );
       }
       // Refresh so the just-paid/charged items reflect current state.
@@ -1544,6 +1695,227 @@ class _AdminBillingRemindersScreenState
     } finally {
       setState(() => _isSending = false);
     }
+  }
+
+  /// Core send loop for one stage — extracted verbatim from the original
+  /// single-stage `_executeBulkSendNew` so both the single-stage flow and
+  /// the new "Cobrar todos" (all stages) flow share the exact same PIX
+  /// generation / paid-recheck / send / contact-log logic. Does NOT touch
+  /// `_isSending`, does NOT show a dialog and does NOT reload — callers own
+  /// that lifecycle.
+  Future<_BulkSendOutcome> _runBulkSendCore({
+    required BillingStage stage,
+    required List<Map<String, dynamic>> allItems,
+    required String messageTemplate,
+    required String subjectTemplate,
+  }) async {
+    final outcome = _BulkSendOutcome();
+
+    // M4: re-read live status for the whole batch and DROP anything already
+    // paid (or no longer collectible) before sending. Surface the skip count.
+    final paidIds = await _billingService.getPaidFinancialIds(
+      allItems.map((i) => i['id'] as String? ?? ''),
+    );
+    final items = allItems
+        .where((i) => !paidIds.contains(i['id'] as String? ?? ''))
+        .toList();
+    outcome.alreadyPaidSkipped = allItems.length - items.length;
+
+    if (items.isEmpty) return outcome;
+    outcome.hadItemsToSend = true;
+
+    // ---- PIX pre-generation (bounded concurrency) ----
+    // For every WhatsApp-eligible, unpaid item (when the setting is on) we
+    // generate a PIX up front, with at most 5 concurrent CF calls. Results
+    // are keyed by financialId; a missing/empty entry => send without PIX.
+    final pixByFinancialId = <String, ({String pixCode, String ticketUrl})>{};
+    final includePix = _notificationSettings?.includePaymentLink ?? false;
+    final whatsappOn = _notificationSettings?.whatsappEnabled ?? false;
+
+    if (includePix && whatsappOn) {
+      final eligible = items.where((item) {
+        final studentId = item['studentId'] as String? ?? '';
+        final contact = _studentContacts[studentId];
+        final phone = contact?.effectivePhone;
+        final status = item['status'] as String? ?? '';
+        return contact != null &&
+            phone != null &&
+            phone.isNotEmpty &&
+            status != 'paid';
+      }).toList();
+
+      const concurrency = 5;
+      for (var i = 0; i < eligible.length; i += concurrency) {
+        final chunk = eligible.sublist(
+          i,
+          (i + concurrency) > eligible.length
+              ? eligible.length
+              : i + concurrency,
+        );
+        final results = await Future.wait(
+          chunk.map((item) async {
+            final financialId = item['id'] as String? ?? '';
+            final studentId = item['studentId'] as String? ?? '';
+            final contact = _studentContacts[studentId];
+            final pix = await _notificationService!.ensureValidPixForFinancial(
+              academyId: FirebaseService.academyId,
+              financialId: financialId,
+              amount: (item['amount'] as num?)?.toDouble() ?? 0,
+              studentId: studentId,
+              studentName: item['studentName'] as String? ?? '',
+              payerCpf: contact?.effectiveCpf,
+            );
+            return MapEntry(financialId, pix);
+          }),
+        );
+        for (final entry in results) {
+          if (entry.value.pixCode.isNotEmpty) {
+            pixByFinancialId[entry.key] = entry.value;
+          }
+        }
+      }
+    }
+
+    for (final item in items) {
+      final studentId = item['studentId'] as String? ?? '';
+      final contact = _studentContacts[studentId];
+      if (contact == null) continue;
+
+      final studentName = item['studentName'] as String? ?? '';
+      final amount = (item['amount'] as num?)?.toDouble() ?? 0;
+      final dueDate = item['dueDate'] as DateTime;
+      final daysOverdue = item['daysOverdue'] as int? ?? 0;
+      final financialId = item['id'] as String? ?? '';
+
+      // Email + base message: no PIX block (markers auto-strip).
+      final personalizedMessage = _notificationService!.applyMessageTemplate(
+        messageTemplate,
+        studentName,
+        amount,
+        dueDate,
+        daysOverdue,
+      );
+      final personalizedSubject = _notificationService!.applyMessageTemplate(
+        subjectTemplate,
+        studentName,
+        amount,
+        dueDate,
+        daysOverdue,
+      );
+
+      // WhatsApp message: inject the pre-generated PIX (if any) for this
+      // financial. When absent, the [[PIX]] block strips to a clean message.
+      final pix = pixByFinancialId[financialId];
+      final whatsAppMessage = _notificationService!.applyMessageTemplate(
+        messageTemplate,
+        studentName,
+        amount,
+        dueDate,
+        daysOverdue,
+        pixCode: pix?.pixCode,
+        ticketUrl: pix?.ticketUrl,
+      );
+
+      // Send WhatsApp (only if enabled in settings)
+      final phone = contact.effectivePhone;
+      if ((_notificationSettings?.whatsappEnabled ?? false) &&
+          phone != null &&
+          phone.isNotEmpty) {
+        outcome.waTotal++;
+        final result = await _notificationService!.sendWhatsApp(
+          phone: phone,
+          studentName: studentName,
+          studentId: studentId,
+          financialId: financialId,
+          amount: amount,
+          dueDate: dueDate,
+          daysOverdue: daysOverdue,
+          stage: stage,
+          message: whatsAppMessage,
+        );
+        if (result.success) {
+          outcome.waSent++;
+          // L3: only meaningful when a link was actually intended (PIX setting
+          // on + WhatsApp on). Otherwise neither counter moves.
+          if (includePix && whatsappOn) {
+            if (pix != null && pix.pixCode.isNotEmpty) {
+              outcome.waWithLink++;
+            } else {
+              outcome.waWithoutLink++;
+              if ((contact.effectiveCpf ?? '').trim().isEmpty) {
+                outcome.missingCpfNames.add(studentName);
+              }
+            }
+          }
+        } else {
+          outcome.waFailed++;
+          outcome.failures.add(
+            BulkFailure(
+              type: 'whatsapp',
+              recipient: phone,
+              error: result.error ?? '',
+            ),
+          );
+        }
+      }
+
+      // Send Email (only if enabled in settings)
+      final email = contact.effectiveEmail;
+      if ((_notificationSettings?.emailEnabled ?? false) &&
+          email != null &&
+          email.isNotEmpty) {
+        outcome.emTotal++;
+        final result = await _notificationService!.sendEmail(
+          email: email,
+          studentName: studentName,
+          studentId: studentId,
+          financialId: financialId,
+          amount: amount,
+          dueDate: dueDate,
+          daysOverdue: daysOverdue,
+          stage: stage,
+          subject: personalizedSubject,
+          message: personalizedMessage,
+        );
+        if (result.success) {
+          outcome.emSent++;
+        } else {
+          outcome.emFailed++;
+          outcome.failures.add(
+            BulkFailure(
+              type: 'email',
+              recipient: email,
+              error: result.error ?? '',
+            ),
+          );
+        }
+      }
+
+      // Auto-log contact
+      final sentWhatsApp =
+          (_notificationSettings?.whatsappEnabled ?? false) &&
+          phone != null &&
+          phone.isNotEmpty;
+      final sentEmail =
+          (_notificationSettings?.emailEnabled ?? false) &&
+          email != null &&
+          email.isNotEmpty;
+      if (sentWhatsApp || sentEmail) {
+        await _billingService.logContactAttempt(
+          financialId: financialId,
+          studentId: studentId,
+          studentName: studentName,
+          type: sentWhatsApp ? ContactType.whatsapp : ContactType.email,
+          notes: 'Cobranca em massa (personalizada)',
+          stage: stage.value,
+          daysOverdue: daysOverdue,
+          contactedBy: FirebaseService.currentUserId ?? '',
+          contactedByName: 'Admin',
+        );
+      }
+    }
+
+    return outcome;
   }
 
   // ============================================
@@ -2401,6 +2773,50 @@ class _AdminBillingRemindersScreenState
           },
         );
       },
+    );
+  }
+}
+
+/// Accumulator for `_runBulkSendCore` — mutable counters filled in by a
+/// single-stage run; `merge` folds another stage's outcome in so
+/// "Cobrar todos" can show ONE combined result dialog instead of one per
+/// stage. Mirrors the fields `_showBulkServerResultDialog` already expects.
+class _BulkSendOutcome {
+  int waSent = 0;
+  int waFailed = 0;
+  int waTotal = 0;
+  int emSent = 0;
+  int emFailed = 0;
+  int emTotal = 0;
+  int alreadyPaidSkipped = 0;
+  int waWithLink = 0;
+  int waWithoutLink = 0;
+  bool hadItemsToSend = false;
+  final List<BulkFailure> failures = [];
+  final Set<String> missingCpfNames = {};
+
+  void merge(_BulkSendOutcome other) {
+    waSent += other.waSent;
+    waFailed += other.waFailed;
+    waTotal += other.waTotal;
+    emSent += other.emSent;
+    emFailed += other.emFailed;
+    emTotal += other.emTotal;
+    alreadyPaidSkipped += other.alreadyPaidSkipped;
+    waWithLink += other.waWithLink;
+    waWithoutLink += other.waWithoutLink;
+    hadItemsToSend = hadItemsToSend || other.hadItemsToSend;
+    failures.addAll(other.failures);
+    missingCpfNames.addAll(other.missingCpfNames);
+  }
+
+  BulkServerResult toResult() {
+    return BulkServerResult(
+      success: true,
+      scheduled: false,
+      whatsapp: BulkChannelSummary(total: waTotal, sent: waSent, failed: waFailed),
+      email: BulkChannelSummary(total: emTotal, sent: emSent, failed: emFailed),
+      failures: failures,
     );
   }
 }

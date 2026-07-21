@@ -294,6 +294,14 @@ class AcademySettings {
   /// não vai usar o Mercado Pago dispensa esse passo e o checklist completa.
   final List<String> onboardingDismissedSteps;
 
+  /// Perfil de negócio ('fight' | 'fitness' | 'hybrid') — raw string, parsed
+  /// via `AcademyProfileExtension.fromString` (models/academy.dart) at the
+  /// point of use, which defaults `null`/unrecognized to 'fight'. Kept raw
+  /// here (not the enum) so this service stays decoupled from the model.
+  /// Drives copy/vocabulary (core/academy_vocab.dart) and the academy's
+  /// default modality — NOT a feature gate.
+  final String? profile;
+
   final DateTime? updatedAt;
 
   AcademySettings({
@@ -357,6 +365,7 @@ class AcademySettings {
     this.monthlyAttendanceGoal = 0,
     this.monitorIds = const [],
     this.onboardingDismissedSteps = const [],
+    this.profile,
     this.updatedAt,
   });
 
@@ -464,6 +473,7 @@ class AcademySettings {
       monitorIds: List<String>.from(data['monitorIds'] ?? []),
       onboardingDismissedSteps:
           List<String>.from(data['onboardingDismissedSteps'] ?? []),
+      profile: data['profile'] as String?,
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
   }
@@ -916,6 +926,16 @@ class SettingsService {
       'muaythaiGradeSystem': system,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  // ============================================
+  // Update Academy Profile ('fight' | 'fitness' | 'hybrid')
+  // ============================================
+  Future<void> updateAcademyProfile(String profile) async {
+    await _academyRef.set({
+      'profile': profile,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   // ============================================

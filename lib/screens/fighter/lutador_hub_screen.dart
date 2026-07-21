@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/academy_vocab.dart';
+import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/feed_post.dart';
@@ -15,6 +17,7 @@ import '../../providers/portal_providers.dart';
 import '../../providers/student_provider.dart';
 import '../../services/analytics_service.dart';
 import '../../services/feed_posts_service.dart';
+import '../../services/musculacao_checkin_service.dart';
 import '../../services/settings_service.dart';
 import '../../services/share_card_service.dart';
 import '../../services/streak_freeze_service.dart';
@@ -101,9 +104,16 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
         0;
     final beltColor = AppTheme.getBeltColor(belt);
 
+    // Fallback quando não há nome nenhum (raro): usa o substantivo da
+    // academia ('Lutador' / 'Aluno' — ver core/academy_vocab.dart). Para
+    // perfil 'fight' (default) o texto é idêntico ao anterior.
+    final vocab = ref.watch(academyVocabProvider);
+    final memberNounCapitalized = vocab.memberNoun.isEmpty
+        ? vocab.memberNoun
+        : vocab.memberNoun[0].toUpperCase() + vocab.memberNoun.substring(1);
     final name = (student?.nickname != null && student!.nickname!.isNotEmpty)
         ? student.nickname!
-        : (student?.fullName ?? user?.displayName ?? 'Lutador');
+        : (student?.fullName ?? user?.displayName ?? memberNounCapitalized);
 
     // ATIVAÇÃO 1ª SESSÃO (§2.1): zero treinos verificados E zero histórico de
     // streak (presença ∪ self-log) → o espaço streak/stats vira UM convite ao
@@ -142,6 +152,16 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
                   : null,
             ),
             const SizedBox(height: 18),
+            // CHECK-IN diário sem turma (pivô fitness, jul/2026 — ver
+            // docs/ux/ARQUITETURA_CHECKIN_DIARIO_2026-07.md §2.2). Colocado
+            // ANTES de todas as ramificações abaixo de propósito: é o mesmo
+            // elemento em toda situação (pendente/1º passo/normal), e para
+            // academia 'fitness' é dos PRIMEIROS elementos que o aluno vê. O
+            // widget se autogateia (modalidade sem-turma do aluno + settings
+            // da academia) e não ocupa espaço nenhum quando não se aplica —
+            // caller nunca precisa checar nada.
+            if (student != null)
+              _CheckinButtonCard(studentId: student.id, sports: sports),
             if (student == null) ...[
               // Aluno SEM ficha na academia: ou tem uma SOLICITAÇÃO pendente
               // (acabou de se cadastrar pelo código) → hero de espera; ou não
@@ -534,6 +554,315 @@ class _MiniBelt extends StatelessWidget {
             : null,
       ),
     );
+  }
+}
+
+// =============================================================================
+// CHECK-IN BUTTON CARD (pivô fitness, jul/2026 — docs/ux/ARQUITETURA_CHECKIN_
+// DIARIO_2026-07.md §2.2) — check-in diário para modalidades SEM-TURMA
+// (musculação/boxe/MMA, GradeSystem.none em core/sports.dart): sem QR, sem
+// turma, sem horário fixo. 1 tap chama a Cloud Function `selfCheckin`
+// (client wrapper: MusculacaoCheckinService, hoje generalizada pra aceitar
+// qualquer modalidade sem-turma via `sport`) e celebra.
+//
+// GATE (server já valida tudo de novo — isto é só UX, dupla barreira):
+//   - aluno pratica ≥1 modalidade sem-turma (GradeSystem.none)
+//   - musculacaoEnabled == true (master switch da academia)
+//   - musculacaoCheckinMode == 'button' (modo 'qr' mantém o scanner
+//     dedicado; 'manual' = só a equipe registra — o aluno não vê botão)
+// Falhando qualquer um, o card retorna SizedBox.shrink() — academia de luta
+// pura (zero modalidade sem-turma) nunca vê nada disto.
+//
+// 1 modalidade sem-turma → toque direto, zero fricção. ≥2 → bottom sheet de
+// escolha (mesma linguagem visual do sheet de freeze do streak, acima).
+// "Feito hoje" é ESTADO, não desaparecimento: vira um card branco discreto
+// com check — o momento de chegar na academia vale mais que o espaço aqui.
+// =============================================================================
+class _CheckinButtonCard extends ConsumerStatefulWidget {
+  const _CheckinButtonCard({required this.studentId, required this.sports});
+
+  final String studentId;
+  final List<SportId> sports;
+
+  @override
+  ConsumerState<_CheckinButtonCard> createState() =>
+      _CheckinButtonCardState();
+}
+
+class _CheckinButtonCardState extends ConsumerState<_CheckinButtonCard> {
+  bool _loading = false;
+
+  /// Estado EFÊMERO de sessão — mesmo espírito do `_doneToday` de
+  /// MusculacaoCheckinCard (não persiste, não gateia nada). Se o app reabrir
+  /// hoje já feito, o card volta ativo até o próximo toque, que reconcilia
+  /// com o servidor via a msg 'já registrou presença hoje' (ver _checkin).
+  final Set<SportId> _doneToday = {};
+
+  List<SportId> get _scheduleless => widget.sports
+      .where((s) => getSport(s).gradeSystem == GradeSystem.none)
+      .toList(growable: false);
+
+  @override
+  Widget build(BuildContext context) {
+    final musculacaoEnabled = ref.watch(
+      academySettingsProvider.select(
+        (s) => s.valueOrNull?.musculacaoEnabled ?? true,
+      ),
+    );
+    final mode = ref.watch(
+      academySettingsProvider.select(
+        (s) => s.valueOrNull?.musculacaoCheckinMode ?? 'manual',
+      ),
+    );
+    final scheduleless = _scheduleless;
+
+    if (!musculacaoEnabled || mode != 'button' || scheduleless.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final allDone = scheduleless.every(_doneToday.contains);
+    final vocab = ref.watch(academyVocabProvider);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: allDone
+          ? _doneCard()
+          : _activeCard(scheduleless, vocab.trainingPlace),
+    );
+  }
+
+  Widget _activeCard(List<SportId> scheduleless, String trainingPlace) {
+    final single = scheduleless.length == 1;
+    return _DarkCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('CHECK-IN', style: _eyebrow(_T.ash, 12)),
+              const Spacer(),
+              const Icon(LucideIcons.zap, color: _T.blood, size: 22),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'MARQUE SUA\nPRESENÇA HOJE.',
+            style: TextStyle(
+              color: _T.bone,
+              height: 1.1,
+              fontSize: 22,
+              letterSpacing: 0.2,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            single
+                ? 'Chegou na $trainingPlace? Sem turma, sem horário — um toque e pronto.'
+                : 'Escolha a modalidade e registre em um toque.',
+            style: TextStyle(
+              color: _T.ash,
+              fontSize: 13.5,
+              height: 1.4,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Pressable(
+            onTap: _loading ? null : () => _handleTap(scheduleless),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                  color: _T.blood, borderRadius: BorderRadius.circular(8)),
+              alignment: Alignment.center,
+              child: _loading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text(
+                      'CHECK-IN',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _doneCard() {
+    return _WhiteCard(
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: _T.blood.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            alignment: Alignment.center,
+            child: const Icon(LucideIcons.checkCircle2,
+                size: 20, color: _T.blood),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('PRESENÇA DE HOJE REGISTRADA',
+                    style: _eyebrow(_T.ink, 12)),
+                const SizedBox(height: 3),
+                Text('Bom treino — volte amanhã.',
+                    style: TextStyle(
+                        color: _T.smoke,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleTap(List<SportId> scheduleless) async {
+    if (scheduleless.length == 1) {
+      await _checkin(scheduleless.single);
+      return;
+    }
+    final chosen = await _pickSportSheet(scheduleless);
+    if (chosen != null) await _checkin(chosen);
+  }
+
+  /// Sheet de escolha quando o aluno pratica ≥2 modalidades sem-turma — mesma
+  /// linguagem visual do sheet de freeze do streak (fundo ink, handle,
+  /// opções em linha). Modalidades já feitas hoje aparecem com check e não
+  /// são tocáveis (evita um 2º check-in redundante na mesma sessão).
+  Future<SportId?> _pickSportSheet(List<SportId> scheduleless) {
+    return showModalBottomSheet<SportId>(
+      context: context,
+      backgroundColor: _T.ink,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 10),
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 18, 24, 10),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.zap, size: 18, color: _T.blood),
+                  const SizedBox(width: 10),
+                  Text('ESCOLHA A MODALIDADE',
+                      style: const TextStyle(
+                          color: _T.bone,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.0)),
+                ],
+              ),
+            ),
+            for (final s in scheduleless)
+              _sportOption(sheetContext, s, done: _doneToday.contains(s)),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sportOption(BuildContext sheetContext, SportId s,
+      {required bool done}) {
+    final def = getSport(s);
+    return Pressable(
+      onTap: done ? null : () => Navigator.pop(sheetContext, s),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              alignment: Alignment.center,
+              child: Icon(def.icon, size: 19, color: _T.bone),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                def.label,
+                style: const TextStyle(
+                    color: _T.bone,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.8),
+              ),
+            ),
+            if (done)
+              const Icon(LucideIcons.check, size: 18, color: _T.blood),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Chama a Cloud Function `selfCheckin` (via MusculacaoCheckinService,
+  /// generalizada pra aceitar `sport`) e reflete o resultado no card. Erros
+  /// da própria função (fora do horário, sem a modalidade, etc.) chegam já
+  /// com mensagem amigável em [MusculacaoCheckinException.message].
+  Future<void> _checkin(SportId sport) async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    try {
+      await MusculacaoCheckinService().checkIn(sport: sport.value);
+      if (!mounted) return;
+      setState(() => _doneToday.add(sport));
+      // Reusa a MESMA celebração do QR fixo de musculação (confetti +
+      // confirmação) — ver musculacao_qr_scan_screen.dart.
+      Celebration.confetti(context);
+      context.showSuccess('Presença registrada!');
+      AnalyticsService.logCheckinScanned(kind: 'button');
+    } on MusculacaoCheckinException catch (e) {
+      if (!mounted) return;
+      // Já registrou hoje (reabriu o app e a UI efêmera esqueceu): reconcilia
+      // com o estado real do servidor em vez de mostrar isso como um erro.
+      if (e.message.toLowerCase().contains('já registrou presen')) {
+        setState(() => _doneToday.add(sport));
+      } else {
+        context.showError(e.message);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      context.showError('Falha inesperada. Tente de novo.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 }
 
@@ -1507,6 +1836,10 @@ class _ActivityRowState extends ConsumerState<_ActivityRow> {
           giverUid: me.id,
           postId: widget.post.postId,
           authorUid: widget.post.authorUid,
+          // TODO(vocab): fallback grava 'Lutador' em dado persistido (feed
+          // like), não só copy de tela — trocar por AcademyVocab exige
+          // decidir se o valor já gravado de likes antigos deve ser migrado.
+          // Fora do escopo deste wire inicial.
           giverName: profile?.nickname?.isNotEmpty == true
               ? profile!.nickname!
               : (profile?.fullName ?? 'Lutador'),

@@ -251,6 +251,51 @@ class AcademySubscription {
   }
 }
 
+/// Academy business profile. Controls VOCABULARY ("casca" — copy like
+/// "lutador"/"tatame"/"Oss") and the default modality for a brand-new
+/// academy. It is NOT a permissions/feature gate — multi-modalidade (which
+/// sports are offered, belt vs. presence-only) is governed independently by
+/// `sports`/`AcademySettings`, per [SportDefinition.gradeSystem] in
+/// core/sports.dart.
+///
+/// * `fight`    — martial-arts academy (belts, "lutador", "tatame"). This is
+///   the app's original, only behavior — and the DEFAULT for every academy
+///   that never declared a profile.
+/// * `fitness`  — gym/CT sem-faixa (musculação e afins). No belt/grade
+///   culture should surface in copy for these.
+/// * `hybrid`   — both under one roof. Keeps the `fight` vocabulary (still
+///   teaches martial arts), see `AcademyVocab` in core/academy_vocab.dart.
+enum AcademyProfile { fight, fitness, hybrid }
+
+extension AcademyProfileExtension on AcademyProfile {
+  String get value {
+    switch (this) {
+      case AcademyProfile.fight:
+        return 'fight';
+      case AcademyProfile.fitness:
+        return 'fitness';
+      case AcademyProfile.hybrid:
+        return 'hybrid';
+    }
+  }
+
+  /// Tolerant parse: anything unrecognized — including `null` (field absent
+  /// on legacy academy docs) — resolves to [AcademyProfile.fight], which is
+  /// the historical, only behavior this app has ever had. This is the single
+  /// source of truth for that default; every reader (model, settings,
+  /// AcademyVocab) should go through here instead of re-implementing it.
+  static AcademyProfile fromString(String? value) {
+    switch (value) {
+      case 'fitness':
+        return AcademyProfile.fitness;
+      case 'hybrid':
+        return AcademyProfile.hybrid;
+      default:
+        return AcademyProfile.fight;
+    }
+  }
+}
+
 /// Academy Model (Tenant)
 class Academy {
   final String id;
@@ -318,6 +363,10 @@ class Academy {
   /// Empty list means single-modality (defaults to BJJ for legacy academies).
   final List<String> sports;
 
+  /// Business profile ('fight' | 'fitness' | 'hybrid') — see [AcademyProfile].
+  /// Defaults to [AcademyProfile.fight] when absent (legacy academies).
+  final AcademyProfile profile;
+
   // Metadata
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -359,6 +408,7 @@ class Academy {
     this.studentCheckinEnabled = false,
     this.subscription,
     this.sports = const [],
+    this.profile = AcademyProfile.fight,
     required this.createdAt,
     required this.updatedAt,
     required this.ownerId,
@@ -368,6 +418,16 @@ class Academy {
   /// for legacy academies that never declared the field.
   List<String> get effectiveSports =>
       sports.isNotEmpty ? sports : const ['bjj'];
+
+  /// True for pure-fitness academies (musculação/CT sem faixa). Use this to
+  /// gate anything that assumes belt/grade culture — not to gate whole
+  /// features (that's still `sports`/`AcademySettings`).
+  bool get isFitness => profile == AcademyProfile.fitness;
+
+  /// Whether belt/grade culture ("faixa", "graduação") should surface in
+  /// copy for this academy. False only for [AcademyProfile.fitness] — both
+  /// `fight` and `hybrid` keep it.
+  bool get showsBeltCulture => profile != AcademyProfile.fitness;
 
   factory Academy.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -416,6 +476,7 @@ class Academy {
       sports: data['sports'] is List
           ? List<String>.from((data['sports'] as List).map((e) => e.toString()))
           : const [],
+      profile: AcademyProfileExtension.fromString(data['profile'] as String?),
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       ownerId: data['ownerId'] ?? '',
@@ -458,6 +519,7 @@ class Academy {
       'studentCheckinEnabled': studentCheckinEnabled,
       'subscription': subscription?.toMap(),
       if (sports.isNotEmpty) 'sports': sports,
+      'profile': profile.value,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(DateTime.now()),
       'ownerId': ownerId,
@@ -508,6 +570,8 @@ class Academy {
     int? storeMinOrderAmount,
     bool? studentCheckinEnabled,
     AcademySubscription? subscription,
+    List<String>? sports,
+    AcademyProfile? profile,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? ownerId,
@@ -547,6 +611,8 @@ class Academy {
       storeMinOrderAmount: storeMinOrderAmount ?? this.storeMinOrderAmount,
       studentCheckinEnabled: studentCheckinEnabled ?? this.studentCheckinEnabled,
       subscription: subscription ?? this.subscription,
+      sports: sports ?? this.sports,
+      profile: profile ?? this.profile,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       ownerId: ownerId ?? this.ownerId,

@@ -8,6 +8,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/brand_tokens.dart';
+import '../../models/academy.dart';
 import '../../providers/auth_provider.dart';
 
 // =============================================================================
@@ -60,6 +61,9 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   final _academyNameController = TextEditingController();
   final _documentController = TextEditingController();
   _DocumentType _documentType = _DocumentType.cpf;
+  // "Que tipo de academia?" — obrigatório, nenhum selecionado por padrão
+  // (ver CONTEXTO ESTRATÉGICO: app generalista, não só artes marciais).
+  AcademyProfile? _academyProfile;
 
   // General state
   bool _isLoading = false;
@@ -218,6 +222,13 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
     } else if (_currentStep == 1) {
       if (!(_academyFormKey.currentState?.validate() ?? false)) return;
 
+      if (_academyProfile == null) {
+        setState(() {
+          _errorMessage = 'Escolha o tipo da sua academia para continuar.';
+        });
+        return;
+      }
+
       if (!_acceptedTerms) {
         setState(() {
           _errorMessage = 'Você precisa aceitar os Termos de Serviço para continuar.';
@@ -255,6 +266,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         academyName: _academyNameController.text.trim(),
         documentType: _documentType == _DocumentType.cpf ? 'cpf' : 'cnpj',
         documentNumber: documentDigits,
+        profile: (_academyProfile ?? AcademyProfile.fight).value,
       );
 
       // All Firestore documents are created. Force Riverpod to reload user data.
@@ -763,6 +775,59 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                 return null;
               },
             ).animate().fadeIn(delay: 200.ms).slideX(begin: -0.1),
+
+            const SizedBox(height: 24),
+
+            // Que tipo de academia? — obrigatório, define vocabulário
+            // (lutador/aluno, tatame/academia) e, se Fitness, a modalidade
+            // padrão (musculação, sem faixas).
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'QUE TIPO DE ACADEMIA?',
+                style: _eyebrow(_C.smoke, 11),
+              ),
+            ).animate().fadeIn(delay: 220.ms),
+
+            const SizedBox(height: 10),
+
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _DocumentTypeCard(
+                  icon: LucideIcons.swords,
+                  title: 'Artes Marciais',
+                  subtitle: 'Faixas, graus e graduação',
+                  selected: _academyProfile == AcademyProfile.fight,
+                  onTap: () => setState(() {
+                    _academyProfile = AcademyProfile.fight;
+                    _errorMessage = null;
+                  }),
+                ),
+                const SizedBox(height: 10),
+                _DocumentTypeCard(
+                  icon: LucideIcons.dumbbell,
+                  title: 'Musculação & Fitness',
+                  subtitle: 'Check-in, sem faixas',
+                  selected: _academyProfile == AcademyProfile.fitness,
+                  onTap: () => setState(() {
+                    _academyProfile = AcademyProfile.fitness;
+                    _errorMessage = null;
+                  }),
+                ),
+                const SizedBox(height: 10),
+                _DocumentTypeCard(
+                  icon: LucideIcons.layers,
+                  title: 'Ambos',
+                  subtitle: 'Artes marciais e musculação',
+                  selected: _academyProfile == AcademyProfile.hybrid,
+                  onTap: () => setState(() {
+                    _academyProfile = AcademyProfile.hybrid;
+                    _errorMessage = null;
+                  }),
+                ),
+              ],
+            ).animate().fadeIn(delay: 260.ms),
 
             const SizedBox(height: 24),
 

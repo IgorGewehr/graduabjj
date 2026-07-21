@@ -8,9 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/brand_tokens.dart';
 import '../../../core/theme.dart';
 import '../../../models/student.dart';
-import '../../../providers/portal_providers.dart';
 import '../../../providers/retention_providers.dart';
-import '../../../services/class_service.dart';
 
 /// Seções B2C do dashboard "Radar do dia" (REPAGINADA §6):
 /// HOJE (aulas do dia + chamada 1-tap) · RADAR (alunos esfriando) ·
@@ -100,101 +98,11 @@ Widget _emptyLine(String msg) => Padding(
       ),
     );
 
-// ════════════════════════════════════════════════════════════════════════════
-// 1. HOJE — aulas do dia + chamada 1-tap
-// ════════════════════════════════════════════════════════════════════════════
+// Card HOJE removido por decisão do dono (21/07): o professor conhece a
+// própria grade — o card era redundante no dashboard. A chamada 1-tap
+// permanece nas ações rápidas do dashboard e na aba Chamada.
 
-class DashboardHojeCard extends ConsumerWidget {
-  const DashboardHojeCard({super.key});
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final classesAsync = ref.watch(classesProvider);
-    // DateTime.weekday: seg=1..dom=7 → schedule usa 0=domingo..6=sábado.
-    final todayDow = DateTime.now().weekday % 7;
-
-    return _Section(
-      title: 'Hoje',
-      icon: LucideIcons.calendarClock,
-      child: classesAsync.when(
-        loading: () => _emptyLine('Carregando grade...'),
-        error: (_, _) => _emptyLine('Grade indisponível.'),
-        data: (classes) {
-          // (turma, horário de hoje) ordenado por horário.
-          final today = <(BJJClass, String)>[];
-          for (final c in classes) {
-            if (!c.isActive) continue;
-            for (final s in c.schedule) {
-              if (s.dayOfWeek == todayDow) today.add((c, s.startTime));
-            }
-          }
-          today.sort((a, b) => a.$2.compareTo(b.$2));
-          if (today.isEmpty) {
-            return _emptyLine('Sem aulas na grade de hoje.');
-          }
-          return Column(
-            children: [
-              for (final (c, time) in today.take(5))
-                _ClassRow(bjjClass: c, time: time),
-              if (today.length > 5)
-                _emptyLine('+ ${today.length - 5} aulas hoje'),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _ClassRow extends StatelessWidget {
-  const _ClassRow({required this.bjjClass, required this.time});
-  final BJJClass bjjClass;
-  final String time;
-
-  @override
-  Widget build(BuildContext context) {
-    // Linha inteira tocável → Chamada. Sem botão por linha: o quick action
-    // "Chamada" logo acima já é O CTA — repetir o rótulo 5x na mesma dobra
-    // era ruído (feedback do dono).
-    return InkWell(
-      onTap: () => context.go('/admin/chamada'),
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 46,
-              child: Text(
-                time,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  fontFeatures: Brand.tabular,
-                  color: Brand.blood,
-                ),
-              ),
-            ),
-            Expanded(
-              child: Text(
-                bjjClass.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-            ),
-            Icon(LucideIcons.chevronRight,
-                size: 15, color: AppTheme.textDisabled),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 // ════════════════════════════════════════════════════════════════════════════
 // 2. RADAR DE RETENÇÃO — quem está esfriando + taxa de recuperação

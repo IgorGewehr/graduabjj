@@ -1368,24 +1368,120 @@ exports.getAttendanceRanking = onCall(async (request) => {
 });
 
 // ============================================================
-// selfCheckin — student self check-in for schedule-less modalities (musculação)
+// selfCheckin — student self check-in for schedule-less modalities
 // ============================================================
 //
-// Body: { academyId: string }
-// The student (caller) records their own attendance for musculação. Used by the
-// "button" and "fixed QR" check-in modes, where the client cannot write to the
-// attendance subcollection directly (rules restrict it to staff/monitors).
+// Body: { academyId: string, sport?: string }
+// The student (caller) records their own attendance for a modality that has
+// NEITHER a class schedule NOR a belt/grade system (musculação/boxe/MMA hoje
+// — ver SELF_CHECKIN_SPORTS abaixo). Used by the "button" and "fixed QR"
+// check-in modes, where the client cannot write to the attendance
+// subcollection directly (rules restrict it to staff/monitors).
+//
+// GENERALIZAÇÃO (2026-07, pivô fitness — docs/ux/ARQUITETURA_CHECKIN_DIARIO_
+// 2026-07.md §2.1): a função nasceu hardcoded pra musculação. `sport` agora é
+// um parâmetro OPCIONAL que aceita qualquer modalidade sem-turma/sem-faixa.
+// Default 'musculacao' ⇒ retrocompat TOTAL: qualquer chamada existente do
+// app (que nunca manda `sport`) resulta no MESMO docId, MESMO classId e MESMO
+// shape de doc de antes — zero mudança de comportamento pra musculação.
 //
 // Validates server-side: membership (resolves the caller's studentId from the
-// mapping), the academy's configured mode allows self check-in, operating
-// hours, that the student practices musculação and is active, and one-per-day
-// dedup via a deterministic doc id. Mirrors AttendanceService.markPresent so
-// reports and counts stay consistent.
+// mapping), that `sport` é uma modalidade elegível pro check-in diário
+// (allowlist — dupla barreira com a checagem de sports do aluno abaixo), the
+// academy's configured mode allows self check-in, operating hours, that the
+// student practices essa modalidade and is active, and one-per-day dedup via
+// a deterministic doc id. Mirrors AttendanceService.markPresent so reports
+// and counts stay consistent.
+//
+// Gate financeiro: DE PROPÓSITO não há checagem de inadimplência aqui (spec
+// §2.1, decisão de arquitetura) — o bloqueio físico de quem não pagou é papel
+// da catraca; negar o REGISTRO de presença de um aluno que está fisicamente
+// na academia só produz dado errado (streak/retenção furados por engano). Se
+// no futuro quisermos sinalizar isso, é um campo informativo (`overdue`) no
+// doc, nunca um bloqueio — não adicionar um `throw` aqui sem revisitar essa
+// decisão.
+
+// Modalidades SEM-TURMA/SEM-FAIXA elegíveis pro check-in diário do aluno.
+// Espelha GRADELESS_SPORTS em ./self_graduation_guard.js, que por sua vez
+// espelha as entradas GradeSystem.none do catálogo cliente lib/core/sports.dart
+// (musculação/boxe/MMA não têm escada de graus — a presença JÁ É o registro
+// completo, não existe turma pra marcar chamada). Não importamos direto de
+// self_graduation_guard.js porque aquele módulo só exporta o trigger, não a
+// constante — duplicar aqui é mais simples que criar um módulo compartilhado
+// só pra isto. TODO: se um esporte novo GradeSystem.none entrar no catálogo
+// Dart (ex.: crossfit, funcional), adicione o id AQUI e em GRADELESS_SPORTS —
+// os dois precisam concordar ou o check-in ficará mais restritivo que a
+// graduação (fail-closed é seguro, mas gera confusão de suporte).
+const SELF_CHECKIN_SPORTS = new Set(['musculacao', 'boxing', 'mma']);
+
+// Rótulo de exibição pra `className` do doc de presença. Puramente cosmético
+// (não há catálogo de nomes no servidor) — fallback é o próprio id do sport.
+const SELF_CHECKIN_SPORT_LABELS = {
+  musculacao: 'Musculação',
+  boxing: 'Boxe',
+  mma: 'MMA',
+};
+
+/**
+ * Sanitiza um sport id pra uso seguro dentro de um doc id do Firestore:
+ * minúsculo, apenas [a-z0-9_]. Defesa em profundidade — o valor já passou
+ * pelo allowlist SELF_CHECKIN_SPORTS antes de chegar aqui (então isto nunca
+ * deveria remover nada na prática), mas doc id é superfície sensível
+ * (colisão/formato) e a checagem é praticamente grátis.
+ */
+function sanitizeSportSegment(sport) {
+  return String(sport || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+}
+
+/**
+ * Núcleo PURO do selfCheckin: dado o sport pedido e o studentId/data, calcula
+ * o docId e os campos derivados do doc de presença. Sem nenhum I/O — extraído
+ * assim de propósito pra ser testável sem mockar Firestore/Auth (smoke test
+ * chama esta função diretamente).
+ *
+ * Revalida o sport contra SELF_CHECKIN_SPORTS (mesmo que o caller em
+ * `exports.selfCheckin` já tenha validado) porque esta função também precisa
+ * ser segura chamada isoladamente/em teste.
+ *
+ * docId: musculação MANTÉM `{studentId}_musculacao_{YYYYMMDD}` — compat total
+ * com dados e dedupe já existentes (é a maioria da base hoje). Demais
+ * modalidades usam `{studentId}_checkin_{sport}_{YYYYMMDD}` — namespace
+ * próprio, nunca colide com o formato antigo nem com attendance de turma.
+ */
+function _selfCheckinCore({sport, studentId, now}) {
+  const normalizedSport = String(sport || 'musculacao').toLowerCase();
+  if (!SELF_CHECKIN_SPORTS.has(normalizedSport)) {
+    throw new HttpsError('invalid-argument',
+        `Modalidade '${normalizedSport}' não aceita check-in diário sem turma.`);
+  }
+  const y = now.getFullYear().toString().padStart(4, '0');
+  const m = (now.getMonth() + 1).toString().padStart(2, '0');
+  const d = now.getDate().toString().padStart(2, '0');
+  const isMusculacao = normalizedSport === 'musculacao';
+  const docId = isMusculacao ?
+      `${studentId}_musculacao_${y}${m}${d}` :
+      `${studentId}_checkin_${sanitizeSportSegment(normalizedSport)}_${y}${m}${d}`;
+  const classId = isMusculacao ? 'musculacao' : `checkin_${normalizedSport}`;
+  const className = SELF_CHECKIN_SPORT_LABELS[normalizedSport] || normalizedSport;
+  return {sport: normalizedSport, docId, classId, className};
+}
+exports._selfCheckinCore = _selfCheckinCore;
+
 exports.selfCheckin = onCall(async (request) => {
   const uid = requireAuth(request);
   const academyId = (request.data && request.data.academyId || '').toString().trim();
   if (!academyId) {
     throw new HttpsError('invalid-argument', 'academyId é obrigatório.');
+  }
+  // `sport` é opcional — default 'musculacao' preserva o comportamento
+  // pré-generalização pra todo caller existente do app. Validado já aqui
+  // (fail-fast, antes de qualquer leitura de Firestore) contra o allowlist de
+  // modalidades sem-turma/sem-faixa.
+  const requestedSport = (request.data && request.data.sport || 'musculacao')
+      .toString().trim().toLowerCase();
+  if (!SELF_CHECKIN_SPORTS.has(requestedSport)) {
+    throw new HttpsError('invalid-argument',
+        `Modalidade '${requestedSport}' não aceita check-in diário sem turma.`);
   }
 
   // 1. Resolve caller's studentId for this academy from the mapping.
@@ -1398,10 +1494,14 @@ exports.selfCheckin = onCall(async (request) => {
   const studentId = entry.studentId;
 
   // 2. Academy mode must allow self check-in and respect operating hours.
+  //    `selfCheckinMode` é o nome generalizado do campo (ainda não escrito
+  //    pelo cliente); `musculacaoCheckinMode` é o campo que o app ESCREVE
+  //    hoje (settings_screen.dart) — mantido como fallback pra não exigir
+  //    migração de dado nem deploy coordenado com o app.
   const academyRef = db.collection('academies').doc(academyId);
   const academySnap = await academyRef.get();
   const settings = (academySnap.exists && academySnap.data()) || {};
-  const mode = settings.musculacaoCheckinMode || 'manual';
+  const mode = settings.selfCheckinMode || settings.musculacaoCheckinMode || 'manual';
   if (mode !== 'qr' && mode !== 'button') {
     throw new HttpsError('failed-precondition',
         'O check-in pelo aluno não está habilitado nesta academia.');
@@ -1411,7 +1511,7 @@ exports.selfCheckin = onCall(async (request) => {
         'Fora do horário de funcionamento da academia.');
   }
 
-  // 3. Student must exist, practice musculação, and be active.
+  // 3. Student must exist, practice the requested modality, and be active.
   const studentRef = academyRef.collection('students').doc(studentId);
   const studentSnap = await studentRef.get();
   if (!studentSnap.exists) {
@@ -1419,22 +1519,20 @@ exports.selfCheckin = onCall(async (request) => {
   }
   const student = studentSnap.data() || {};
   const sports = Array.isArray(student.sports) ? student.sports : [];
-  if (!sports.includes('musculacao')) {
+  if (!sports.includes(requestedSport)) {
     throw new HttpsError('failed-precondition',
-        'Você não está matriculado na musculação.');
+        'Você não está matriculado nesta modalidade.');
   }
   if (student.status && student.status !== 'active') {
     throw new HttpsError('failed-precondition', 'Sua matrícula não está ativa.');
   }
 
-  // 4. Deterministic id → one check-in per day. Transaction makes it idempotent
-  //    (matches AttendanceService._deterministicAttendanceId).
+  // 4. Deterministic id → one check-in per day per modalidade. Transaction
+  //    makes it idempotent (matches AttendanceService._deterministicAttendanceId
+  //    pra musculação; namespace próprio pras demais — ver _selfCheckinCore).
   const now = new Date();
-  const y = now.getFullYear().toString().padStart(4, '0');
-  const m = (now.getMonth() + 1).toString().padStart(2, '0');
-  const d = now.getDate().toString().padStart(2, '0');
-  const docId = `${studentId}_musculacao_${y}${m}${d}`;
-  const attendanceRef = academyRef.collection('attendance').doc(docId);
+  const plan = _selfCheckinCore({sport: requestedSport, studentId, now});
+  const attendanceRef = academyRef.collection('attendance').doc(plan.docId);
   const studentName = student.fullName || student.nickname || 'Aluno';
 
   await db.runTransaction(async (tx) => {
@@ -1445,13 +1543,13 @@ exports.selfCheckin = onCall(async (request) => {
     tx.set(attendanceRef, {
       studentId,
       studentName,
-      classId: 'musculacao',
-      className: 'Musculação',
+      classId: plan.classId,
+      className: plan.className,
       date: Timestamp.fromDate(now),
       verifiedBy: uid,
       verifiedByName: studentName,
-      sport: 'musculacao',
-      source: mode === 'qr' ? 'self_qr' : 'self_button',
+      sport: plan.sport,
+      source: 'self_checkin',
       createdAt: FieldValue.serverTimestamp(),
     });
     tx.update(studentRef, {

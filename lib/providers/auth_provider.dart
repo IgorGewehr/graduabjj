@@ -470,6 +470,11 @@ class AuthService {
     required String academyName,
     String? documentType,
     String? documentNumber,
+    // Business profile ('fight' | 'fitness' | 'hybrid') chosen in the "Que
+    // tipo de academia?" step — see AcademyProfile in models/academy.dart.
+    // Defaults to 'fight' to preserve the app's original-only behavior for
+    // any caller that doesn't pass it.
+    String profile = 'fight',
   }) async {
     // Step 1: Create Firebase Auth user
     final credential = await _auth.createUserWithEmailAndPassword(
@@ -509,6 +514,15 @@ class AuthService {
       'abacatePayEnabled': false,
       'autoGraduationEnabled': false,
       'studentCheckinEnabled': true,
+      // Business profile — drives copy/vocabulary (core/academy_vocab.dart).
+      // Legacy academies (field absent) parse to 'fight' — zero behavior
+      // change for them, see AcademyProfileExtension.fromString.
+      'profile': profile,
+      // Fitness-only academies default to musculação, which has no
+      // belt/grade system (GradeSystem.none in core/sports.dart) — "sem
+      // faixas em lugar nenhum" falls out of the existing multimodal system
+      // automatically, no special-casing needed elsewhere.
+      if (profile == 'fitness') 'sports': ['musculacao'],
     };
 
     // Add document info if provided

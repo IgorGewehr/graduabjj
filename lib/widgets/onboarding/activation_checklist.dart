@@ -100,12 +100,24 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
 
     final hasProfile = settings.name.trim().isNotEmpty &&
         (settings.logoUrl?.trim().isNotEmpty ?? false);
-    final hasClass = (classesAsync.valueOrNull ?? const []).isNotEmpty;
+    final classes = classesAsync.valueOrNull ?? const [];
+    final hasClass = classes.isNotEmpty;
     final hasPlan = (plansAsync.valueOrNull ?? const []).isNotEmpty;
     final mpConnected = settings.mpConnected;
     final hasStudent = studentsAsync.valueOrNull ?? false;
     final hasAttendance = attendanceAsync.valueOrNull ?? false;
     final dismissed = settings.onboardingDismissedSteps;
+
+    // Beco sem saída detectado no diagnóstico: aluno cadastrado mas em
+    // NENHUMA turma fica invisível na chamada (que filtra por
+    // studentIds da turma). Quando já existe turma, "concluído" nesse
+    // passo exige matrícula de verdade — não só o cadastro do aluno.
+    // Sem turma ainda, mantém o critério antigo (o passo "Crie sua 1ª
+    // turma" já cobre esse caso separadamente).
+    final hasEnrolledStudent = classes.any((c) => c.studentIds.isNotEmpty);
+    final studentsStepDone = hasClass ? hasEnrolledStudent : hasStudent;
+    final studentsNeedEnrollment =
+        hasClass && hasStudent && !hasEnrolledStudent;
 
     final allSteps = <_ActivationStep>[
       _ActivationStep(
@@ -147,9 +159,11 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
         id: 'students',
         icon: LucideIcons.userPlus,
         title: 'Cadastre seus alunos',
-        subtitle: 'Adicione alunos e gere o código de acesso de cada um',
+        subtitle: studentsNeedEnrollment
+            ? 'Coloque seus alunos numa turma'
+            : 'Adicione alunos e gere o código de acesso de cada um',
         route: '/admin/alunos',
-        done: hasStudent,
+        done: studentsStepDone,
       ),
       _ActivationStep(
         id: 'attendance',

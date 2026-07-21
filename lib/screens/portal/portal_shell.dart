@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/academy_vocab.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/navigation/nav_catalog.dart';
 import '../../core/navigation/nav_resolver.dart';
@@ -34,11 +35,14 @@ class _PortalShellState extends ConsumerState<PortalShell> {
   // Lutador = identidade portátil (global); Cena = social/descoberta (global);
   // Treinei = a ação central (Diário/check-in); Academia = o ÚNICO contexto de
   // academia (switcher + telas contextuais); Perfil = conta.
-  static const _NavItem _lutadorNavItem = _NavItem(
-    label: 'Lutador',
-    icon: LucideIcons.shield,
-    path: '/portal',
-  );
+  // O label do 1º item NÃO é mais const: para academias 'fitness' vira
+  // AcademyVocab.hubLabel ('Treino'). Para 'fight'/'hybrid' (default) o texto
+  // renderizado é idêntico a antes ('Lutador') — zero regressão visual.
+  _NavItem _lutadorNavItem(String hubLabel) => _NavItem(
+        label: hubLabel,
+        icon: LucideIcons.shield,
+        path: '/portal',
+      );
   static const _NavItem _cenaNavItem = _NavItem(
     label: 'Galera',
     icon: LucideIcons.users,
@@ -65,9 +69,10 @@ class _PortalShellState extends ConsumerState<PortalShell> {
   List<_NavItem> _bottomNavItemsFor({
     required bool isMonitor,
     required bool hasAttendancePerm,
+    required String hubLabel,
   }) {
-    return const [
-      _lutadorNavItem,
+    return [
+      _lutadorNavItem(hubLabel),
       _cenaNavItem,
       _treineiNavItem,
       _academiaNavItem,
@@ -240,9 +245,11 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     final isMonitor = studentIds.any(monitorIds.contains);
     final hasAttendancePerm =
         currentUser?.hasPermission('attendance:take') == true;
+    final hubLabel = ref.watch(academyVocabProvider).hubLabel;
     final bottomNavItems = _bottomNavItemsFor(
       isMonitor: isMonitor,
       hasAttendancePerm: hasAttendancePerm,
+      hubLabel: hubLabel,
     );
 
     // Get current location from GoRouter

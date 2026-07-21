@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/academy_vocab.dart';
 import '../../core/constants.dart';
 import '../../core/sports.dart';
 import '../../models/fighter_profile.dart';
@@ -1266,7 +1267,8 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
             children: [
               const SizedBox(height: 20),
               _centerNote(
-                'SUA JORNADA\nCOMEÇA NO TATAME',
+                'SUA JORNADA\nCOMEÇA NO '
+                '${ref.watch(academyVocabProvider).trainingPlace.toUpperCase()}',
                 'Quando sua academia marcar presença e graduação, sua evolução '
                     'aparece aqui — graduações, streak e competições.',
                 icon: LucideIcons.dumbbell,
@@ -1358,6 +1360,7 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
     // União de dias únicos do feed (verificados ∪ self). Boundado pelos ~30+60
     // docs carregados; suficiente para o contexto de "Jornada".
     final sessoesTatame = _feed.map((e) => e.date).toSet().length;
+    final vocab = ref.watch(academyVocabProvider);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1401,7 +1404,8 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
               TextSpan(
                 children: [
                   TextSpan(
-                    text: '$sessoesTatame SESSÕES DE TATAME',
+                    text:
+                        '$sessoesTatame SESSÕES DE ${vocab.trainingPlace.toUpperCase()}',
                     style: const TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w800,
@@ -1410,6 +1414,9 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
                       color: _smoke,
                     ),
                   ),
+                  // TODO(vocab): "não conta pra faixa" pressupõe cultura de
+                  // faixa (perfil 'fitness' não tem) — não é troca de
+                  // palavra, é conteúdo condicional; fica pra outra wave.
                   TextSpan(
                     text: '  ·  inclui avulsos · não conta pra faixa',
                     style: TextStyle(
@@ -3450,7 +3457,11 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
                 // que retenção mais importa, e a UI ficava muda nele — troca
                 // a confirmação genérica por reforço, sem mexer em nada
                 // abaixo (count-up/delta/caveat continuam iguais).
-                _rewardComeback ? 'DE VOLTA AO TATAME' : 'REGISTRADO',
+                // Vocabulário por perfil (core/academy_vocab.dart): 'fight'
+                // (default) renderiza o texto original, idêntico.
+                _rewardComeback
+                    ? ref.watch(academyVocabProvider).comebackHeadline
+                    : 'REGISTRADO',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w800,

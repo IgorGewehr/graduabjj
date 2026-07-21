@@ -21,12 +21,26 @@ class AcademyPageHeader extends ConsumerWidget {
   final String? description;
   final List<Widget> actions;
 
+  /// When true, renders a single dense row (small title + actions) with no
+  /// icon, no description and no academy chip — for screens where the full
+  /// header ate too much vertical space before any actionable content
+  /// (dono feedback, NOTAS_FINANCEIRO_2026-07.md). Opt-in per screen; the
+  /// default (false) render path below is untouched.
+  final bool compact;
+
+  /// Optional leading widget for the compact row (e.g. a back button on
+  /// screens reached via push rather than the bottom nav). Ignored unless
+  /// [compact] is true.
+  final Widget? leading;
+
   const AcademyPageHeader({
     super.key,
     required this.title,
     this.icon,
     this.description,
     this.actions = const [],
+    this.compact = false,
+    this.leading,
   });
 
   void _openSwitcher(BuildContext context, WidgetRef ref) {
@@ -42,6 +56,32 @@ class AcademyPageHeader extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (compact) {
+      // Dense single row: no icon, no description, no academy chip — those
+      // still exist in the default variant below for screens that haven't
+      // migrated yet.
+      return Container(
+        padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          border: Border(bottom: BorderSide(color: AppTheme.divider)),
+        ),
+        child: Row(
+          children: [
+            if (leading != null) ...[leading!, const SizedBox(width: 4)],
+            Expanded(
+              child: Text(
+                title,
+                style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            ...actions,
+          ],
+        ),
+      );
+    }
+
     // Only watch the small derived bits we actually render — `.select` keeps
     // this header (used on most pages) inert when other fields of the
     // mapping/info change.

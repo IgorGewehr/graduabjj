@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
@@ -214,12 +215,14 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 maxWidth: kContentMaxWidthList,
                 child: CustomScrollView(
                   slivers: [
-                    const SliverToBoxAdapter(child: SizedBox(height: 16)),
                     SliverToBoxAdapter(child: _buildHeader()),
                     SliverToBoxAdapter(child: _buildMonthSelector()),
 
-                    // Stats Grid
-                    SliverToBoxAdapter(child: _buildStatsGrid()),
+                    // Uma linha de ação só quando há atraso (substitui os
+                    // cards Recebido/Pendente/Atrasado + barra de taxa —
+                    // essa informação já vive na aba Relatórios/:779 e em
+                    // AdminFinancialReportsScreen; zero perda, só reposição).
+                    SliverToBoxAdapter(child: _buildOverdueActionRow()),
 
                     // Tab Bar
                     SliverToBoxAdapter(child: _buildTabBar()),
@@ -261,41 +264,71 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     );
   }
 
+  // Header compacto (NOTAS_FINANCEIRO_2026-07.md): "Alunos Pagantes" e
+  // "Relatórios" saíram dos IconButtons do header — já existem como entrada
+  // dentro da própria aba Relatórios (_QuickInsightCard + "Ver Relatórios
+  // Detalhados", logo abaixo), então 2 dos 3 ícones eram redundantes com um
+  // destino um toque mais perto. Decisão: manter só "Atualizar" no header
+  // compacto (1 linha, sem ícone grande/descrição/chip) e reaproveitar os
+  // pontos de entrada já existentes na aba — zero função removida, só
+  // reposicionada.
   Widget _buildHeader() {
     return AcademyPageHeader(
-      icon: LucideIcons.dollarSign,
+      compact: true,
       title: 'Financeiro',
-      description: 'Mensalidades e pagamentos',
       actions: [
         IconButton(
           onPressed: _loadData,
           icon: const Icon(LucideIcons.refreshCw, size: 20),
           tooltip: 'Atualizar',
         ),
-        IconButton(
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => PayingStudentsScreen(
-                students: _students,
-                plans: _plans,
-              ),
-            ),
-          ),
-          icon: const Icon(LucideIcons.users, size: 20),
-          tooltip: 'Alunos Pagantes',
-        ),
-        IconButton(
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const AdminFinancialReportsScreen(),
-            ),
-          ),
-          icon: const Icon(LucideIcons.barChart2, size: 20),
-          tooltip: 'Relatórios',
-        ),
       ],
+    );
+  }
+
+  /// Substitui os cards Recebido/Pendente/Atrasado + barra "Taxa" no topo:
+  /// uma única linha clicável, só quando há atraso (some por completo quando
+  /// não há nada a cobrar — nada de card vazio). Os valores vêm da mesma
+  /// `_monthlySummary` que alimentava os cards removidos.
+  Widget _buildOverdueActionRow() {
+    final summary = _monthlySummary ?? {};
+    final totalOverdue = (summary['overdue']?['value'] ?? 0).toDouble();
+    final overdueCount = summary['overdue']?['count'] ?? 0;
+
+    if (overdueCount <= 0) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => context.push('/admin/cobranca'),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppTheme.error.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.error.withValues(alpha: 0.2)),
+          ),
+          child: Row(
+            children: [
+              Icon(LucideIcons.alertTriangle, size: 16, color: AppTheme.error),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '$overdueCount em atraso — ${_formatCurrency(totalOverdue)} · COBRAR',
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(LucideIcons.arrowRight, size: 16, color: AppTheme.error),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -307,9 +340,11 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
           DateFormat("MMM", 'pt_BR').format(_selectedMonth).capitalize(),
         );
 
+    // Mais enxuto: padding/margem reduzidos e setas menores — o seletor
+    // continua a única forma de trocar de mês, só ocupa menos altura.
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
@@ -322,7 +357,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
             onTap: () => _changeMonth(-1),
             child: const Icon(
               LucideIcons.chevronLeft,
-              size: 24,
+              size: 20,
               color: AppTheme.textSecondary,
             ),
           ),
@@ -336,103 +371,8 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
             onTap: () => _changeMonth(1),
             child: const Icon(
               LucideIcons.chevronRight,
-              size: 24,
+              size: 20,
               color: AppTheme.textSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatsGrid() {
-    final summary = _monthlySummary ?? {};
-    final totalPaid = (summary['paid']?['value'] ?? 0).toDouble();
-    final totalPending = (summary['pending']?['value'] ?? 0).toDouble();
-    final totalOverdue = (summary['overdue']?['value'] ?? 0).toDouble();
-    final paidCount = summary['paid']?['count'] ?? 0;
-    final pendingCount = summary['pending']?['count'] ?? 0;
-    final overdueCount = summary['overdue']?['count'] ?? 0;
-    final totalExpected = (summary['totalExpected'] ?? 0).toDouble();
-
-    final rate = totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0.0;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        children: [
-          // 3-column stats grid (always visible)
-          Row(
-            children: [
-              Expanded(
-                child: _StatCard(
-                  icon: LucideIcons.checkCircle,
-                  iconColor: AppTheme.success,
-                  label: 'Recebido',
-                  value: _formatCurrency(totalPaid),
-                  subtitle: '$paidCount pagos',
-                ).entrance(index: 0),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _StatCard(
-                  icon: LucideIcons.clock,
-                  iconColor: AppTheme.warning,
-                  label: 'Pendente',
-                  value: _formatCurrency(totalPending),
-                  subtitle: '$pendingCount pend.',
-                ).entrance(index: 1),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _StatCard(
-                  icon: LucideIcons.alertTriangle,
-                  iconColor: AppTheme.error,
-                  label: 'Atrasado',
-                  value: _formatCurrency(totalOverdue),
-                  subtitle: '$overdueCount atras.',
-                ).entrance(index: 2),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Progress bar for collection rate
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.surface,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.divider),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  LucideIcons.trendingUp,
-                  size: 18,
-                  color: rate >= 70 ? AppTheme.success : rate >= 40 ? AppTheme.warning : AppTheme.error,
-                ),
-                const SizedBox(width: 10),
-                AnimatedCountUp(
-                  value: rate,
-                  prefix: 'Taxa: ',
-                  suffix: '%',
-                  style: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: rate / 100,
-                      minHeight: 8,
-                      backgroundColor: AppTheme.divider,
-                      valueColor: AlwaysStoppedAnimation(
-                        rate >= 70 ? AppTheme.success : rate >= 40 ? AppTheme.warning : AppTheme.error,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
             ),
           ),
         ],
@@ -721,6 +661,8 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   Widget _buildReportsTab() {
     final summary = _monthlySummary ?? {};
     final totalPaid = (summary['paid']?['value'] ?? 0).toDouble();
+    final totalPending = (summary['pending']?['value'] ?? 0).toDouble();
+    final totalOverdue = (summary['overdue']?['value'] ?? 0).toDouble();
     final totalExpected = (summary['totalExpected'] ?? 0).toDouble();
     final rate = totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0.0;
 
@@ -799,9 +741,37 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                           Text('Taxa', style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
                           const SizedBox(height: 4),
                           Text('${rate.toStringAsFixed(0)}%', style: AppTheme.titleMedium.copyWith(
-                            fontWeight: FontWeight.w700, 
+                            fontWeight: FontWeight.w700,
                             color: rate >= 70 ? AppTheme.success : rate >= 40 ? AppTheme.warning : AppTheme.error,
                           )),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // Pendente/Atrasado: mesma informação que antes vivia nos
+                // cards do topo — preservada aqui (zero perda) desde que os
+                // cards saíram de cima.
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Pendente', style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
+                          const SizedBox(height: 4),
+                          Text(_formatCurrency(totalPending), style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700, color: AppTheme.warning)),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Atrasado', style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
+                          const SizedBox(height: 4),
+                          Text(_formatCurrency(totalOverdue), style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700, color: AppTheme.error)),
                         ],
                       ),
                     ),
@@ -1614,11 +1584,30 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
       }
 
       final paymentService = PaymentService(FirebaseService.academyId);
+
+      // Best-effort PIX: quando o Mercado Pago está conectado, anexa o
+      // copia-e-cola/link ao lembrete manual — mesmo padrão do canal de
+      // cobrança automática (BillingNotificationService.
+      // ensureValidPixForFinancial). Sem MP configurado, `pixCode` volta
+      // vazio e a mensagem sai igual à de antes.
+      final payerCpf = student!.isKids
+          ? (student.guardian?.cpf ?? student.cpf)
+          : student.cpf;
+      final pix = await paymentService.generateReminderPix(
+        financialId: payment.id,
+        studentId: payment.studentId,
+        studentName: payment.studentName,
+        amount: payment.value,
+        cpf: payerCpf,
+      );
+
       final whatsappLink = paymentService.getWhatsAppReminderLink(
         studentName: payment.studentName,
         amount: payment.value,
         dueDate: payment.dueDate,
-        phone: student!.phone!,
+        phone: student.phone!,
+        pixCode: pix.pixCode.isNotEmpty ? pix.pixCode : null,
+        ticketUrl: pix.ticketUrl.isNotEmpty ? pix.ticketUrl : null,
       );
 
       final uri = Uri.parse(whatsappLink);
@@ -3082,63 +3071,6 @@ class _StatItem extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// Compact stat card for the 3-column stats grid
-class _StatCard extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String label;
-  final String value;
-  final String subtitle;
-
-  const _StatCard({
-    required this.icon,
-    required this.iconColor,
-    required this.label,
-    required this.value,
-    required this.subtitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: iconColor),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  label,
-                  style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w700),
-            overflow: TextOverflow.ellipsis,
-          ),
-          Text(
-            subtitle,
-            style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary, fontSize: 10),
-          ),
-        ],
-      ),
     );
   }
 }

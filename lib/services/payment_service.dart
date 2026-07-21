@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'fns.dart';
 
 import 'firebase_service.dart';
+import 'mercado_pago_service.dart';
 import 'notification_dispatcher.dart';
 import 'plan_service.dart';
 import 'student_service.dart';
@@ -1091,11 +1092,19 @@ class PaymentService {
   // ============================================
   // Get WhatsApp Reminder Link
   // ============================================
+  /// [pixCode]/[ticketUrl] are optional — when present (MP conectado e PIX
+  /// gerado com sucesso), o lembrete manual ganha o mesmo copia-e-cola/link
+  /// que o canal automático de cobrança já anexa (ver
+  /// [generateReminderPix] e BillingNotificationService.injectPaymentInfo).
+  /// Sem eles (default), a mensagem sai IDÊNTICA à de antes — assinatura
+  /// compatível com todo caller existente.
   String getWhatsAppReminderLink({
     required String phone,
     required String studentName,
     required double amount,
     required DateTime dueDate,
+    String? pixCode,
+    String? ticketUrl,
   }) {
     final formattedPhone = phone.replaceAll(RegExp(r'[^\d]'), '');
     final phoneWithCountry = formattedPhone.startsWith('55')
@@ -1106,14 +1115,52 @@ class PaymentService {
         '${dueDate.day.toString().padLeft(2, '0')}/${dueDate.month.toString().padLeft(2, '0')}/${dueDate.year}';
     final formattedAmount = 'R\$ ${amount.toStringAsFixed(2)}';
 
+    final hasPix = pixCode != null && pixCode.isNotEmpty;
+    final pixBlock = hasPix
+        ? 'Pague agora pelo PIX (copia e cola):\n$pixCode\n\n'
+            '${(ticketUrl != null && ticketUrl.isNotEmpty) ? 'Ou acesse: $ticketUrl\n\n' : ''}'
+        : '';
+
     final message = Uri.encodeComponent(
       'Olá! Este é um lembrete sobre a mensalidade de $studentName.\n\n'
       'Valor: $formattedAmount\n'
       'Vencimento: $formattedDate\n\n'
+      '$pixBlock'
       'Por favor, entre em contato caso tenha alguma dúvida.',
     );
 
     return 'https://wa.me/$phoneWithCountry?text=$message';
+  }
+
+  // ============================================
+  // Best-effort PIX for the manual WhatsApp reminder
+  // ============================================
+  /// Mirrors BillingNotificationService.ensureValidPixForFinancial (o canal
+  /// de cobrança automático) para o lembrete manual desta tela. NUNCA lança —
+  /// qualquer falha (MP desconectado, erro de rede, CF) retorna vazio e o
+  /// lembrete manual segue sem link, como antes.
+  Future<({String pixCode, String ticketUrl})> generateReminderPix({
+    required String financialId,
+    required String studentId,
+    required String studentName,
+    required double amount,
+    String? cpf,
+  }) async {
+    try {
+      final mp = MercadoPagoService(academyId);
+      if (!await mp.isEnabled()) return (pixCode: '', ticketUrl: '');
+      final link = await mp.createPixPayment(
+        amount: amount,
+        financialId: financialId,
+        studentId: studentId,
+        studentName: studentName,
+        cpf: cpf,
+      );
+      if (link == null) return (pixCode: '', ticketUrl: '');
+      return (pixCode: link.pixCode, ticketUrl: link.ticketUrl ?? '');
+    } catch (_) {
+      return (pixCode: '', ticketUrl: '');
+    }
   }
 }
 

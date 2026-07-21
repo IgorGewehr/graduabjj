@@ -23,6 +23,7 @@ import '../../core/formatters.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../core/access_control/turnstile_registry.dart';
+import '../../models/academy.dart' show AcademyProfileExtension;
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
@@ -94,6 +95,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _workoutPlansEnabled = false;
   bool _trainingVideosEnabled = false;
   bool _physicalEvolutionEnabled = false;
+
+  // Tipo de academia ('fight' | 'fitness' | 'hybrid') — vocabulário/casca,
+  // ver core/academy_vocab.dart. Normalizado (nunca lixo) via
+  // AcademyProfileExtension.fromString.
+  String _academyProfile = 'fight';
 
   // Reserva de aula (A1)
   bool _bookingEnabled = false;
@@ -219,6 +225,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _physicalEvolutionEnabled,
       _musculacaoEnabled,
       _musculacaoCheckinMode,
+      _academyProfile,
       hours,
       _muaythaiGradeSystem,
       _autoGraduationEnabled,
@@ -314,6 +321,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _physicalEvolutionEnabled = settings.physicalEvolutionEnabled;
           _musculacaoEnabled = settings.musculacaoEnabled;
           _musculacaoCheckinMode = settings.musculacaoCheckinMode;
+          _academyProfile =
+              AcademyProfileExtension.fromString(settings.profile).value;
           _accessControlEnabled = settings.accessControlEnabled;
           _accessControlVendor = settings.accessControlVendor;
           _accessControlBlockOnOverdue = settings.accessControlBlockOnOverdue;
@@ -535,6 +544,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         service.updateJournalVisibility(_journalVisibleToStudents),
         service.updateRankingVisibility(_rankingVisibleToStudents),
         service.updateMusculacaoEnabled(_musculacaoEnabled),
+        service.updateAcademyProfile(_academyProfile),
         service.updateAccessControl(
           enabled: _accessControlEnabled,
           vendor: _accessControlVendor.isEmpty ? null : _accessControlVendor,
@@ -1080,6 +1090,19 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                   maxLines: 2,
                 ),
               ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Tipo de academia — vocabulário (lutador/aluno, tatame/academia)
+          // e modalidade padrão. Discreto: não é um feature toggle, é "casca".
+          _SettingsCard(
+            title: 'Tipo de Academia',
+            icon: LucideIcons.layoutGrid,
+            child: _AcademyProfileSelector(
+              value: _academyProfile,
+              onChanged: (v) => setState(() => _academyProfile = v),
             ),
           ),
 
@@ -3228,6 +3251,52 @@ class _MusculacaoCheckinModeSelector extends StatelessWidget {
           icon: Icons.touch_app,
           selected: value == 'button',
           onTap: () => onChanged('button'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Selector for the academy's business profile ('fight' | 'fitness' |
+/// 'hybrid'). Drives copy/vocabulary (core/academy_vocab.dart) and the
+/// default modality offered to new academies — editable here so an academy
+/// that grows into a hybrid gym (or the other way around) can update it.
+class _AcademyProfileSelector extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _AcademyProfileSelector({
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _ModeCard(
+          title: 'Artes Marciais',
+          subtitle: 'Faixas, graus e graduação',
+          icon: LucideIcons.swords,
+          selected: value == 'fight',
+          onTap: () => onChanged('fight'),
+        ),
+        const SizedBox(height: 8),
+        _ModeCard(
+          title: 'Musculação & Fitness',
+          subtitle: 'Check-in, sem faixas',
+          icon: LucideIcons.dumbbell,
+          selected: value == 'fitness',
+          onTap: () => onChanged('fitness'),
+        ),
+        const SizedBox(height: 8),
+        _ModeCard(
+          title: 'Ambos',
+          subtitle: 'Artes marciais e musculação',
+          icon: LucideIcons.layers,
+          selected: value == 'hybrid',
+          onTap: () => onChanged('hybrid'),
         ),
       ],
     );
