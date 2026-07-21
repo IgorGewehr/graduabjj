@@ -641,8 +641,36 @@ class BillingNotificationService {
   // notification server can route per-app. Match it for parity.
   static const String _appId = 'gestao-raiz';
 
+  // ── WhatsApp Cloud API (Meta) — envio por template ──────────────────────
+  // Rota /api/send-whatsapp-template no notification-server. Ver
+  // PLANO_MIGRACAO_META.md e TEMPLATES_META.md. Se WHATSAPP_TEMPLATE_API_URL
+  // não vier, derivamos de _whatsappApiUrl. O uso REAL é opt-in via
+  // WHATSAPP_USE_TEMPLATES=true — enquanto false, o fluxo antigo (Baileys/texto
+  // livre) segue inalterado.
+  static const String _templateApiUrlEnv =
+      String.fromEnvironment('WHATSAPP_TEMPLATE_API_URL', defaultValue: '');
+  static const String _templateLang =
+      String.fromEnvironment('WHATSAPP_TEMPLATE_LANG', defaultValue: 'pt_BR');
+  static const bool _useTemplatesEnv =
+      bool.fromEnvironment('WHATSAPP_USE_TEMPLATES', defaultValue: false);
+
   bool get hasWhatsAppApi => _whatsappApiUrl.isNotEmpty;
   bool get hasEmailApi => _emailApiUrl.isNotEmpty;
+
+  String get _templateApiUrl {
+    if (_templateApiUrlEnv.isNotEmpty) return _templateApiUrlEnv;
+    if (_whatsappApiUrl.isNotEmpty) {
+      return _whatsappApiUrl.replaceAll(
+          '/api/send-whatsapp', '/api/send-whatsapp-template');
+    }
+    return '';
+  }
+
+  bool get hasTemplateApi => _templateApiUrl.isNotEmpty;
+
+  /// Quando true, cobranças saem por template Meta (canal oficial). Opt-in:
+  /// só liga com WHATSAPP_USE_TEMPLATES=true E URL de template disponível.
+  bool get useTemplates => _useTemplatesEnv && hasTemplateApi;
 
   String get _bulkApiUrl {
     if (_bulkApiUrlEnv.isNotEmpty) return _bulkApiUrlEnv;
@@ -904,6 +932,134 @@ class BillingNotificationService {
         studentName: studentName,
         studentId: studentId,
         error: isTimeout ? 'Timeout: API demorou mais de 30 segundos' : e.toString(),
+      );
+    }
+  }
+
+  // ============================================
+  // Template name per stage (Meta Cloud API)
+  // ============================================
+  /// Mapeia estágio → nome do template aprovado na Meta. `hasPix` escolhe a
+  /// variante com bloco PIX (nome base) ou sem (sufixo `_sempix`). Os nomes
+  /// DEVEM bater exatamente com os templates criados no WhatsApp Manager —
+  /// ver TEMPLATES_META.md.
+  static const Map<String, String> _stageTemplateBase = {
+    'D+0': 'cobranca_d0',
+    'D+1': 'cobranca_d1',
+    'D+3': 'cobranca_d3',
+    'D+7': 'cobranca_d7',
+    'D+15': 'cobranca_d15',
+    'D+30': 'cobranca_d30',
+  };
+
+  String templateNameForStage(BillingStage stage, {required bool hasPix}) {
+    final base = _stageTemplateBase[stage.value] ?? 'cobranca_d1';
+    return hasPix ? base : '${base}_sempix';
+  }
+
+  // ============================================
+  // Send WhatsApp via TEMPLATE (Meta Cloud API)
+  // ============================================
+  /// Envia uma cobrança pelo canal OFICIAL (template aprovado). É o caminho que
+  /// não derruba o chip. Variáveis, em ordem fixa (ver TEMPLATES_META.md):
+  ///   {{1}}=nome  {{2}}=academia  {{3}}=valor  {{4}}=vencimento  [{{5}}=pix]
+  /// O `ticketUrl` vira o parâmetro do botão dinâmico (variante com PIX).
+  ///
+  /// `fallbackMessage` (texto livre já montado) é enviado ao servidor para o
+  /// fallback híbrido Baileys, caso a Meta recuse o envio.
+  Future<NotificationResult> sendWhatsAppTemplate({
+    required String phone,
+    required String studentName,
+    required String studentId,
+    required String financialId,
+    required double amount,
+    required DateTime dueDate,
+    required int daysOverdue,
+    required BillingStage stage,
+    String? pixCode,
+    String? ticketUrl,
+    String? fallbackMessage,
+  }) async {
+    if (!hasTemplateApi) {
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: 'API de template (Cloud) nao configurada',
+      );
+    }
+
+    final hasPix = pixCode != null && pixCode.isNotEmpty;
+    final templateName = templateNameForStage(stage, hasPix: hasPix);
+
+    // Ordem das variáveis do corpo. PIX é a 5ª (só na variante com PIX).
+    final variables = <String>[
+      studentName,
+      academyName,
+      _currencyFormat.format(amount),
+      _dateFormat.format(dueDate),
+      // Condição auto-promotora (não depende de promoção via `hasPix`): dentro
+      // deste if o Dart garante pixCode não-nulo.
+      if (pixCode != null && pixCode.isNotEmpty) pixCode,
+    ];
+
+    try {
+      final body = <String, dynamic>{
+        'appId': _appId,
+        'phone': _normalizePhone(phone),
+        'templateName': templateName,
+        'languageCode': _templateLang,
+        'variables': variables,
+        'studentId': studentId,
+        'financialId': financialId,
+        'stage': stage.value,
+        'type': 'billing_reminder',
+      };
+      // Botão dinâmico com o link do checkout (só variante com PIX).
+      if (hasPix && ticketUrl != null && ticketUrl.isNotEmpty) {
+        body['buttonUrl'] = ticketUrl;
+      }
+      // Fallback híbrido → Baileys no servidor, se a Meta recusar.
+      if (fallbackMessage != null && fallbackMessage.isNotEmpty) {
+        body['fallbackMessage'] = fallbackMessage;
+      }
+
+      final response = await http.post(
+        Uri.parse(_templateApiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          if (_whatsappApiKey.isNotEmpty) 'x-api-key': _whatsappApiKey,
+        },
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return NotificationResult(
+            success: true, studentName: studentName, studentId: studentId);
+      } else {
+        return NotificationResult(
+          success: false,
+          studentName: studentName,
+          studentId: studentId,
+          error: 'Erro do servidor (${response.statusCode})',
+        );
+      }
+    } on http.ClientException {
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: 'Erro de conexao - verifique sua internet',
+      );
+    } catch (e) {
+      final isTimeout = e.toString().contains('TimeoutException');
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: isTimeout
+            ? 'Timeout: API demorou mais de 30 segundos'
+            : e.toString(),
       );
     }
   }
