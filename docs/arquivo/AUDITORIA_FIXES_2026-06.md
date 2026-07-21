@@ -1,3 +1,7 @@
+> **Arquivado (2026-07):** log de um workflow de hardening pós-auditoria
+> (2026-06). As correções aqui listadas já estão no código atual. Mantido como
+> registro histórico do que foi corrigido/adiado naquela rodada.
+
 Vou estruturar o relatório a partir dos dados fornecidos.
 
 ## Resumo

@@ -1,3 +1,6 @@
+> **Arquivado (2026-07):** validação de acompanhamento de
+> `REVISAO_CAMPEONATOS_2026-06.md` (também arquivado). Registro histórico.
+
 Confirmed. `request.resource.data.createdBy` is never validated against `request.auth.uid` on create. Now I have everything verified. Writing the report.
 
 The findings are accurate, with one important correction: the visualization bug AND the instructor-permission fixes are already implemented in the working tree (uncommitted) — they only need committing/deploying. The real outstanding code work is in `storage.rules` plus two `firestore.rules` hardenings.

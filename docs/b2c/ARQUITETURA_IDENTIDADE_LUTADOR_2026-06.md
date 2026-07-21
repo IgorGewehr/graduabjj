@@ -1,5 +1,13 @@
 # ARQUITETURA — Fase do Lutador (Identidade person-level sobre base academy-scoped)
 
+> **Status de execução (2026-07):** os dois blocos "genuinamente novos" que
+> este doc pedia — `fighterProfiles/{uid}` (mirror público person-level) e o
+> trigger `onAttendanceWrite` (materialização event-driven) — **foram
+> construídos e estão em produção**. Motor 1 (cards) também shipped. **Motor
+> 2/3 (scoreboards, temporadas, ligas) e a descoberta geo (`academyProfiles`/
+> geohash) continuam não implementados** — esta arquitetura permanece a
+> referência viva para essa parte pendente.
+
 Branch: `firebase-production` · Firestore `arpjj-76350` · Flutter + Cloud Functions + Firestore. Tudo verificado contra o código real; refs são `arquivo:linha`.
 
 **Tese central.** A fundação pessoa↔fichas **já existe e é cost-safe** (`userAcademyMapping/{uid}` + `students.linkedUserId`, ambos com backfill aplicado). Os **dois únicos blocos genuinamente novos** são: (1) um **mirror público person-level keyed por uid** (`fighterProfiles/{uid}`) — o `publicProfiles` atual é academy-scoped por `studentId` e **não serve** descoberta/passaporte; (2) a **materialização event-driven de agregados** começando por um trigger de attendance que **hoje não existe**. Todo o resto é generalização de `syncHighestBelt`, reuso de `CrossAcademyService` como leitura e da allowlist `buildPublicProfileProjection` como projeção única. Nada move docs; tudo **adiciona** coleção/campo/trigger, preservando o legado em prod.

@@ -1,3 +1,7 @@
+> **Arquivado (2026-07):** veredito de prontidão para um deploy específico de
+> 2026-06 (rules + backfill de permissões de instrutor). Esse deploy já foi
+> feito; documento é um runbook histórico, não um checklist recorrente.
+
 # Veredito FINAL de Production-Readiness — GraduaBJJ (`firebase-production` → arpjj-76350)
 
 ## Veredito

@@ -1,5 +1,14 @@
 # Relatório de Pesquisa de Mercado + Playbook de Retenção — Portal do Lutador (GraduaBJJ)
 
+> **Nota (2026-07):** a pesquisa de mecânicas de retenção deste doc (jun/2026)
+> foi **corrigida e aprofundada** por
+> `PESQUISA_PSICOLOGIA_RETENCAO_RIVAIS_2026-07.md` (verificada, refuta alguns
+> benchmarks daqui — ex. curva U-shape em vez de "-53% bottom 40"). A seção 5
+> ("Gaps concretos") também está desatualizada: cita "zero `share_plus`" e
+> "streak quebra com 1 dia de gap" — ambos já foram corrigidos no código
+> (`share_plus` shipped; `weekly_streak.dart` substituiu o streak antigo).
+> Mantido como pesquisa de mercado/cultura, ainda válida na maior parte.
+
 **Autor:** Head of Product/Growth
 **Escopo:** o que faz o lutador VOLTAR todo dia por vontade própria e o que cria CULTURA — explicitamente NÃO monetização.
 **Tese de uma frase:** o GraduaBJJ já tem todos os *troféus* (faixa, conquistas, ranking, streak, timeline), mas o loop hoje é dirigido pela academia (presença marcada pelo professor). Falta tudo que faz o lutador abrir o app num dia sem treino. A virada B2C é tratar `student` como *lutador-com-uma-jornada* — e não como *aluno-de-uma-academia*.

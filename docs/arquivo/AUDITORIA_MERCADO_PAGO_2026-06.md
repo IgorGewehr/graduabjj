@@ -1,3 +1,11 @@
+> **Arquivado (2026-07):** auditoria pontual de 2026-06-11. Os achados críticos
+> (`pausedBy` indistinguível de pausa por recusa de cartão, cancelamento
+> best-effort que seguia cobrando após falha no PUT do MP) foram corrigidos no
+> código atual (`server_functions.js` — guarda `pausedBy:'user'` e
+> `cancelMpSubscription` com propagação não-best-effort). Para o estado vivo da
+> integração MP, ver `docs/PAGAMENTOS_MP.md` e `docs/recorrencia-mp-contract.md`.
+> Mantido aqui só como registro histórico.
+
 # Auditoria da Integração Mercado Pago — GraduaBJJ
 
 **Data:** 2026-06-11 · **Branch:** `firebase-production` · **Método:** workflow multi-agente (6 auditores por dimensão + verificação adversarial por achado; 46 agentes). Todo achado abaixo foi confirmado por um verificador independente lendo o código real; 4 achados foram refutados e descartados.

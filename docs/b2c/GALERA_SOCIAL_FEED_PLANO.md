@@ -1,5 +1,11 @@
 # Galera — Camada Social de RETENÇÃO (FEED de Parceiros) — Plano (b2c)
 
+> **Status de execução (2026-07):** **implementado e deployado** —
+> `feedPosts`, `feed_post.dart`, `feed_posts_service.dart`, `likes` +
+> `feed_like_counter.js` (CF), reciprocidade de oss (`oss_providers.dart`).
+> A camada de audiência `trainingPairs` (co-presença, Fase 3) continua **não
+> construída** — resta como próximo passo.
+
 > **Escopo**: arquitetura ACIONÁVEL da camada social de retenção do app do LUTADOR. NÃO implementado — este doc é o blueprint. READ-ONLY até aqui.
 > **Branch**: `b2c`. **Projeto Firestore**: `arpjj-76350`.
 > **Evolui**: [`GALERA_PARCEIROS_TREINEI_PLANO.md`](GALERA_PARCEIROS_TREINEI_PLANO.md) — aquele plano fundou PARCEIROS (co-presença → `trainingPairs`) e KUDOS (salve por `targetKey`). Esta rodada **eleva** o kudos-sobre-item-derivado para um **FEED de POSTS materializados**, com **controle de ruído** como decisão central.

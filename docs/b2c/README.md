@@ -11,10 +11,10 @@ O GraduaBJJ deixa de ser um painel de gestão renderizado para o aluno e vira o 
 1. **`00_PLANO_MESTRE`** *(síntese executiva — a visão, a North-Star WAS-solo, os guardrails e a kill-list num lugar só)*
 2. **`01_ROADMAP`** *(o plano faseado Fase 0→1→2→3, com a sequência de build alinhada às features)*
 
-Depois, os **8 documentos de detalhe**, agrupados por categoria:
+Depois, os **8 documentos de detalhe originais** (pesquisa/design que fundamentou a síntese), agrupados por categoria:
 
 ### Pesquisa de mercado / retenção
-3. `PESQUISA_RETENCAO_B2C_2026-06.md`
+3. `PESQUISA_RETENCAO_B2C_2026-06.md` *(ver nota de correção no topo do arquivo — parte dos benchmarks foi refutada por `PESQUISA_PSICOLOGIA_RETENCAO_RIVAIS_2026-07.md`)*
 4. `PESQUISA_B2C_APROFUNDADA_2026-06.md`
 
 ### Cultura
@@ -28,27 +28,35 @@ Depois, os **8 documentos de detalhe**, agrupados por categoria:
 
 ### Arquitetura
 8. `ARQUITETURA_IDENTIDADE_LUTADOR_2026-06.md`
-9. `PREP_FASE_LUTADOR_2026-06.md`
 
-### Status atual
-10. `MULTIACADEMIA_STATUS_2026-06.md`
+> **Nota (2026-07):** os documentos `09_PREP_FASE_LUTADOR_2026-06.md` e
+> `10_MULTIACADEMIA_STATUS_2026-06.md`, listados originalmente aqui, saíram
+> desta pasta — cada um só continha o resumo do agente que os gerou ("Estrutura
+> entregue: ...") em vez do conteúdo real (bug de geração, nunca corrigido).
+> Foram movidos para `docs/arquivo/b2c_PREP_FASE_LUTADOR_2026-06_STUB_QUEBRADO.md`
+> e `docs/arquivo/b2c_MULTIACADEMIA_STATUS_2026-06_STUB_QUEBRADO.md` (histórico,
+> zero conteúdo útil). O estado real de multi-academia vive em
+> `docs/MULTIACADEMIA_DESIGN_2026-06.md` (arquivado, histórico) e na seção de
+> arquitetura de `ARQUITETURA_IDENTIDADE_LUTADOR_2026-06.md` acima.
 
-> Observação: os documentos `00_PLANO_MESTRE` e `01_ROADMAP` consolidam e reconciliam os 8 docs de detalhe abaixo. Onde os 8 se contradizem (ex.: posição do Diário de Rolagem, social na Fase 1 vs 2), a decisão final vive na síntese — os docs de detalhe preservam o raciocínio original.
+> Observação: os documentos `00_PLANO_MESTRE` e `01_ROADMAP` consolidam e reconciliam os docs de detalhe abaixo. Onde eles se contradizem (ex.: posição do Diário de Rolagem, social na Fase 1 vs 2), a decisão final vive na síntese — os docs de detalhe preservam o raciocínio original.
 
-## Mapa dos documentos (uma linha cada)
+## Segunda onda (jul/2026) — planos de feature específica
 
-| # | Documento | O que traz |
+Depois da síntese inicial, cada evolução pontual ganhou seu próprio doc de
+arquitetura (padrão: "Status de execução" no topo de cada um diz o que já foi
+construído vs o que continua em aberto — **não estavam listados aqui antes**):
+
+| Documento | O que traz | Status (ver header do próprio arquivo) |
 |---|---|---|
-| 00 | **PLANO_MESTRE** | Síntese executiva: visão única, North-Star WAS-solo, KPIs, guardrails e kill-list — o ponto de entrada de qualquer pessoa nova. |
-| 01 | **ROADMAP** | Plano faseado (Fase 0 fundação invisível → 1 identidade → 2 social → 3 arena) com o racional da ordem e a sequência de build. |
-| 03 | **PESQUISA_RETENCAO_B2C** | Benchmarks de retenção (curva fitness D1~20-27%/D7~7%/D30~3% vs curva social ~2x) e as mecânicas que movem D1/D7/D30. |
-| 04 | **PESQUISA_B2C_APROFUNDADA** | Estudo de caso dos vencedores (Hevy/Strong, Strava, Letterboxd, Beli) — prova que o log de baixíssima fricção é a fundação do hábito (eleva o Diário à Fase 1). |
-| 05 | **PESQUISA_CULTURA_LUTADOR** | A cultura da tribo do BJJ: por que se gamifica processo e não a cor da faixa, e por que "genérico = AI slop" mata a credibilidade. |
-| 06 | **IDEACAO_FEATURES_LUTADOR** | Catálogo de features candidatas (Passaporte, Diário, Cards, Streak, Mapa do Tatame, Mat Wars, Ligas) e sua big-bet inicial. |
-| 07 | **UIUX_DESIGN_PORTAL_LUTADOR** | Direção visual "Linhagem" + nav fighter-first `[Lutador · Cena · (•)Treinei · Academia · Perfil]`, paleta anti-slop, motor de cards. |
-| 08 | **ARQUITETURA_IDENTIDADE_LUTADOR** | Modelo de dados global vs academy-scoped, os 3 motores reusáveis (Cards/Placar/Temporadas), backfills e rules cost-safe. |
-| 09 | **PREP_FASE_LUTADOR** | Preparação de fase: o que destravar primeiro (home solo, onboarding sem-academia) e os pré-requisitos técnicos de cada bloco. |
-| 10 | **MULTIACADEMIA_STATUS** | Estado atual da arquitetura multi-academia (`userAcademyMapping`, `linkedUserId`) — a fundação pessoa↔ficha que já existe em produção. |
+| `JORNADA_MULTISPORT_PLANO.md` | Presenças/turmas/graduações/Perfil/Treinei coesos com multi-esporte no centro; auto-graduação com teto | Implementado |
+| `GALERA_PARCEIROS_TREINEI_PLANO.md` | Parceiros de treino por co-presença, kudos, "dois números" (aula verificada vs sessão de tatame) | Kudos/rótulo evoluiu para o doc seguinte; `trainingPairs` (co-presença) ainda não construído |
+| `GALERA_SOCIAL_FEED_PLANO.md` | Evolui o anterior: feed materializado (`feedPosts`) com controle de ruído | Implementado (feed); só falta a camada de audiência por co-presença |
+| `REPAGINADA_ADMIN_ALUNO100_PLANO.md` | `onAttendanceWrite` como fundação única de 3 loops de retenção; Retenção 2.0/Radar do dia; design system unificado | F0-F4 implementadas; F5 (social profundo) em aberto |
+| `STREAK_JORNADA_PLANO.md` | Streak por dias-esperados configuráveis, Jornada do visitante, Avatar do Lutador | Parcial — streak shipado com modelo mais simples (ISO-semanal) que o proposto |
+| `ATIVACAO_PROFESSOR_2026-07.md` | Ativação do professor (chamada vazia, turmas, CSV, WhatsApp cobrança) | **Ativo/WIP nesta branch (ux-ativacao)** — não é histórico |
+| `DIAGNOSTICO_RETENCAO_2026-07.md` | Diagnóstico de causas-raiz de retenção fraca (push, self-log, grafo social morto) | **Ativo/WIP nesta branch (ux-ativacao)** — não é histórico |
+| `PESQUISA_PSICOLOGIA_RETENCAO_RIVAIS_2026-07.md` | Pesquisa aprofundada/verificada de psicologia de retenção + rivalidade; corrige benchmarks de `PESQUISA_RETENCAO_B2C_2026-06.md` | Pesquisa viva — citada diretamente pelo código (`oss_providers.dart`) |
 
 ---
 

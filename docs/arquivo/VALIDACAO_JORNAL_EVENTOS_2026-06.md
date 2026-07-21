@@ -1,3 +1,7 @@
+> **Arquivado (2026-07):** validação pontual de 2026-06. Registro histórico;
+> não reverificado se a conflação de flags (`journalVisibleToStudents` como
+> gate de gestão) foi corrigida.
+
 All findings are confirmed against the code. Here is the validated report.
 
 ---

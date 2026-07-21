@@ -1,6 +1,10 @@
 # Plano de Implementação — Modalidade Musculação
 
-> Status: planejamento (nada implementado ainda)
+> **Status (2026-07): IMPLEMENTADO em produção** — `SportId.musculacao` em
+> `lib/core/sports.dart`, `lib/services/musculacao_checkin_service.dart`,
+> `lib/screens/admin/musculacao_admin_screen.dart`, CF `selfCheckin` em
+> `functions/index.js`. Mantido como especificação de referência do que foi
+> construído.
 > Contexto: app Flutter + Firebase (iOS e Android) que hoje atende artes marciais.
 > Objetivo: adicionar a modalidade **musculação**, que tem particularidades:
 > sem graduação, sem horário de aula fixo, com entrega de vídeos e planilhas de treino.

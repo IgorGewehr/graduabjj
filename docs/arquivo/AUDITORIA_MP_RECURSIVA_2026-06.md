@@ -1,3 +1,8 @@
+> **Arquivado (2026-07):** re-auditoria recursiva de 2026-06 (4 rodadas). A
+> maioria dos achados high/medium foi corrigida em `server_functions.js` e nos
+> services de loja/pagamento no código atual. Mantido como registro histórico
+> das correções aplicadas; não é referência viva.
+
 I'll write the audit report directly from the provided data.
 
 ## Resumo

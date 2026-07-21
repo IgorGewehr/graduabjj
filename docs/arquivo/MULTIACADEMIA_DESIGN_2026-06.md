@@ -1,3 +1,13 @@
+> **Arquivado (2026-07):** as propostas centrais deste doc (2026-06) — `Student
+> Status.transferred`, `applyTransfer`, aprovação de vínculo com "bagagem do
+> lutador" — **foram implementadas** (`lib/models/student.dart:9`,
+> `functions/index.js:846` `applyTransfer`, `functions/fighter_baggage.js`,
+> `decideJoinRequest`). **Gap residual conhecido:** `cross_academy_service.dart`
+> (client) ainda só resolve 1 das 3 eras de vínculo conta↔ficha — o backend
+> (`fighter_baggage.js`) já trata as 3, o client não. Esse gap está rastreado
+> como item ativo em `docs/ANTI_HIDRA_2026-07.md` (achado #6 / roadmap Fase 1).
+> Mantido aqui como registro do design original.
+
 # MAPA + DESIGN — Fluxo Multi-Academia / Transferência (GraduaBJJ, branch `firebase-production`)
 
 Base para implementação. Todas as refs são `arquivo:linha` do estado atual.

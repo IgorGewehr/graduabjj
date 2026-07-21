@@ -1,5 +1,12 @@
 # Jornada Multi-Esporte — Plano de Implementação
 
+> **Status de execução (2026-07): IMPLEMENTADO em produção.** O código cita
+> este documento diretamente — `lib/models/self_record.dart` (classe
+> `SelfGraduation`) referencia "§1.3/§1.4 do plano" verbatim. Ver também
+> `self_records_service.dart`, `self_graduation_guard.js` (CF de teto) e
+> `my_sports_screen.dart`. Mantido como especificação de referência do que foi
+> construído (não é rascunho morto).
+
 > Síntese técnica para tornar **presenças, turmas, graduações, Perfil e Treinei** coesos e profissionais, com **multi-esporte no centro**. Branch alvo: `b2c` (modelo aditivo sobre `firebase-production`).
 >
 > Princípio-mestre: **NÃO há schema novo de coleção para o core multi-esporte** — `sportsList`, `sportData`, `primarySport` e o campo `sport` em `attendance`/`beltProgressions`/`classes` JÁ existem e o legado `null` já é tratado como `'bjj'` em todos os call sites. As únicas coleções novas são para o conteúdo **auto-declarado** (graduações/competições do próprio lutador).

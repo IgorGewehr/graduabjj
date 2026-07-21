@@ -1,3 +1,11 @@
+> **Arquivado (2026-07):** este documento (2026-06) auditou a catraca como
+> "implementada mas não wired, não deployada, sem UI" e propôs o plano de UI
+> de configuração. **Esse plano já foi construído e deployado** — `AdminDevices
+> Screen`/`DeviceEnrollmentScreen` existem, `accessEvents`/`devices` têm regras
+> no `firestore.rules`, e a catraca está em produção (piloto Control iD). Ver
+> `functions/access_control/README.md` para o estado vivo. Mantido como
+> registro histórico do gap que motivou a UI.
+
 Confirmed: `accessEvents`/`devices` have zero rules (finding validated). All findings are accurate against the actual code. Here is the report.
 
 ---

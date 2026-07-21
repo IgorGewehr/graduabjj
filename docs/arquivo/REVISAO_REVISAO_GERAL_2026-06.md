@@ -1,3 +1,8 @@
+> **Arquivado (2026-07):** auditoria geral de saúde/crash de 2026-06. O crash
+> bloqueante de onboarding de professor por convite descrito aqui foi
+> corrigido na emergência de 2026-06 (ver histórico do projeto — hotfix
+> 2.5.1). Registro histórico; não reverificado achado a achado.
+
 All findings confirmed against actual code. The `main.dart` ErrorWidget.builder is confirmed to swallow errors silently (no `FlutterError.presentError`/Crashlytics call). The overcharge findings confirmed (paid branch increments unconditionally, no `isOvercharge` guard). I have enough to write the report.
 
 ## Resumo

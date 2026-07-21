@@ -1,5 +1,13 @@
 # Repaginada Admin/Professor + Aluno 100% — Plano (b2c)
 
+> **Status de execução (2026-07): F0-F4 IMPLEMENTADAS E DEPLOYADAS.**
+> `onAttendanceWrite` dispatcher, `computeRetentionDaily`, `bluesRisk`,
+> Retenção promovida no `nav_catalog.dart:174-179` (não é mais órfã), "Radar
+> do dia" no dashboard, `brand_tokens.dart` (design system unificado), e o
+> passo de modalidades no onboarding (F4) shipped em commit recente. **Só a F5
+> (`trainingPairs`, social profundo) continua em aberto** — mesma peça
+> pendente descrita em `GALERA_PARCEIROS_TREINEI_PLANO.md`.
+
 > Documento de ARQUITETURA (não implementado). Base: GraduaBJJ Flutter + Firebase (arpjj-76350), branch `b2c`.
 > Escopo READ-ONLY já mapeado (2 varreduras admin + 2 varreduras aluno, 2026-07-01) — este doc é o roteiro acionável.
 > Missão única deste plano: **reduzir churn de aluno da academia**. Toda decisão abaixo responde a "isso ajuda a manter o aluno treinando?".

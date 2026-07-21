@@ -1,3 +1,7 @@
+> **Arquivado (2026-07):** revisão pontual de gating de navegação (2026-06).
+> Registro histórico dos 15 achados; não confirmado se todos foram corrigidos —
+> tratar como ponto de partida para nova varredura se a área for revisitada.
+
 Locations match the findings. The data is verified and ready to compile into the report.
 
 # Relatório — Dashboard / Menu (Gating e UI/UX)

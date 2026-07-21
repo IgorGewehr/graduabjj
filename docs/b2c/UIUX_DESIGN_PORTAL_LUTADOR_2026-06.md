@@ -1,5 +1,14 @@
 # Guia de UI/UX & Design — Portal do Lutador (GraduaBJJ)
 
+> **Status de execução (2026-07):** nav fighter-first e motor de cards
+> **shipped** (`portal_shell.dart:32-90` espelha a lista de abas deste doc
+> quase verbatim; `share_card_service.dart`/`fighter_share_card.dart`
+> implementam o motor de cards; `brand_tokens.dart` traz paleta/dark mode) —
+> a implementação real usa uma estrutura interna diferente do enum `NavDomain`
+> proposto aqui, mas o resultado visível bate. Itens não reverificados:
+> renomeação Perfil→Passaporte, redesign do pódio do Ranking. Mantido como
+> referência de design.
+
 > Documento de referência (PT-BR) consolidado a partir de quatro frentes de pesquisa: IA/navegação, linguagem visual anti-"AI-made", sistema de cards compartilháveis e crítica/redesign do portal atual. Norte único: **o app é a extensão da "terapia do tatame" e do orgulho do lutador — não um painel de gestão renderizado para o aluno.**
 
 ---

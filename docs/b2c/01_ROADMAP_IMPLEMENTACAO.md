@@ -1,5 +1,11 @@
 # Roadmap de Implementação — App do Lutador (GraduaBJJ)
 
+> **Status de execução (2026-07):** F0-F2 (fundação `fighterProfiles`/
+> `onAttendanceWrite`, identidade/diário/cards, nav fighter-first) **shipped**
+> — confirmado arquivo-a-arquivo contra o código atual. **Motor 2/3
+> (scoreboard/temporadas/ligas) e a Fase 3 (Arena) não foram construídos** —
+> continuam sendo o roadmap vivo daqui pra frente.
+
 > Documento de execução. Os 8 docs de `docs/b2c/` são a **pesquisa**; este é o **plano de build**. Aqui cada feature vira tarefa concreta de FRONT e BACK, com o PORQUÊ (gatilho de retenção que honra), a métrica que move e a ordem de dependências.
 >
 > **North-star:** WAS-solo — lutadores que numa semana fizeram ≥1 ação de identidade/log/social que **não depende da academia ter marcado presença**.

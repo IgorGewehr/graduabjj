@@ -1,5 +1,14 @@
 # Plano: Streak por dias-esperados, Jornada do visitante e Avatar do Lutador
 
+> **Status de execução (2026-07): PARCIALMENTE implementado, com desenho
+> diferente do proposto.** `lib/services/weekly_streak.dart` shipped com
+> freeze/modo-lesão e janela de graça (mesmo espírito do doc), mas o modelo
+> central §1-2 (`expectedTrainingDays` por dia-da-semana configurável) **não
+> foi construído** — o que foi ao ar é um streak semanal ISO mais simples.
+> Perfil de visitante = JORNADA e Avatar do Lutador: não reverificados nesta
+> passada. Tratar este doc como a proposta original, não como descrição do
+> que está em produção hoje.
+
 > Documento de ARQUITETURA (não implementado). Base: app do LUTADOR (Flutter + Firebase, branch b2c).
 > Escopo READ-ONLY já mapeado — este doc é o roteiro acionável de implementação.
 > Convenção de dia canônica adotada em todo o doc: **weekday 1=Seg … 7=Dom** (padrão `DateTime.weekday`).

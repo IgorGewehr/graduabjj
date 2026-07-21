@@ -1,5 +1,15 @@
 <!-- Gerado por .claude/workflows/aula-particular-turmas-architecture.js -->
 
+> **Status (2026-07):** **Feature A (aula particular 1:1) está IMPLEMENTADA
+> em produção** — `grantPrivateLessonAttendance` existe em
+> `functions/server_functions.js:5929`, com `docIdOverride` determinístico
+> (`{studentId}_aula_particular_{ymd}_{financialId}`), wired nos 3 caminhos
+> (webhook PIX/cartão, settle inline, `markAsPaid` offline) descritos na
+> seção 2 abaixo. **Feature B (bulk "Adicionar Todos" + filtros
+> categoria/gênero nas Turmas) NÃO foi implementada** — `ClassService.
+> addStudentsBulk`/`removeStudentsBulk` não existem no código (zero hits).
+> A seção 3 (e o roadmap B0-B5 na seção 5) continua sendo o blueprint válido
+> para quando essa feature entrar em produção.
 
 ## ✅ Decisões do dono (travadas)
 - **Aula particular — concessão de presença:** automática **ao confirmar o pagamento** (via webhook). Sem ação do professor.

@@ -1,5 +1,16 @@
 # 00 — PLANO MESTRE · App do Lutador (GraduaBJJ)
 
+> **Status de execução (2026-07):** **Fases 0-2 largamente implementadas e
+> deployadas** — `fighterProfiles/{uid}` (mirror global), dispatcher
+> `onAttendanceWrite`, nav fighter-first `[Lutador·Cena·Treinei·Academia·
+> Perfil]` (`portal_shell.dart:32-90`, verbatim), motor de cards
+> (`share_card_service.dart`), oss/kudos (`oss_providers.dart`), Jornada
+> multi-esporte, Retenção 2.0/Radar do dia, streak com freeze. **Fase 3 (Arena
+> & Ligas — Mat Wars, Liga dos Faixas, `academyProfiles`/geohash) continua
+> NÃO construída** — é o roadmap ainda em aberto. Ver
+> `01_ROADMAP_IMPLEMENTACAO.md`, `REPAGINADA_ADMIN_ALUNO100_PLANO.md` e
+> `STREAK_JORNADA_PLANO.md` para o detalhe de cada frente.
+
 > Documento executivo e decidido. Integra e reconcilia os 8 documentos de pesquisa/design em `docs/b2c/`. Onde os docs se contradizem, este plano **decide** e marca a reconciliação. Linguagem: PT-BR. Data-base: jun/2026. Branch de produção: `firebase-production` (Firestore `arpjj-76350`).
 
 ---

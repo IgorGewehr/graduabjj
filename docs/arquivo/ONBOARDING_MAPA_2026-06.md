@@ -1,3 +1,10 @@
+> **Arquivado (2026-07):** design de onboarding de 2026-06, largamente
+> implementado desde então (`lib/widgets/onboarding/onboarding_gate.dart`,
+> `spotlight_overlay.dart`, `activation_checklist.dart`,
+> `billing_activation_step.dart`). O spec vivo/atual do onboarding é
+> `docs/ux/SPEC_ONBOARDING_2026-07.md` (audita e estende esta implementação).
+> Mantido como registro do design original.
+
 # MAPA DE ONBOARDING PREMIUM — GraduaBJJ
 
 > Base consolidada (PT-BR) para a fase de DESENHO + IMPLEMENTAÇÃO. Sintetiza jornadas por papel, momentos de valor, pontos de injeção técnica, persistência e inventário de design system. Verdade-norte: **o app já conhece o papel** (vem do convite/cadastro) → ramificar automaticamente, nunca perguntar "quem é você".

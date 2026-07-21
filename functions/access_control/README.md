@@ -1,9 +1,33 @@
 # Access Control — Ingestão de Catracas (Arquitetura C / push-cloud)
 
-> **Status:** greenfield / aditivo. A CF `ingestAccessEvent` está **exportada**
-> em `functions/index.js` mas **não foi deployada** e **não está wired** a
-> nenhuma catraca real. Antes de produção, **confirmar em campo** os TODOs
-> marcados nos adapters (códigos de evento, unidade de tempo, método, direção).
+> **Status (2026-07):** **DEPLOYADA em produção** (`arpjj-76350`). A CF
+> `ingestAccessEvent` está exportada em `functions/index.js` e **wired a
+> catraca real** — piloto em modo Online da **Control iD Face**, com o app
+> Windows de balcão (`docs/WINDOWS.md`) e as telas admin `AdminDevicesScreen`
+> (`lib/screens/admin/devices_screen.dart`, CRUD de `devices/{deviceId}`) e
+> `DeviceEnrollmentScreen` (`lib/screens/admin/device_enrollment_screen.dart`,
+> UI para popular `userMap`/`userNames` — o enroll **não é mais manual via
+> Firestore**). Também existe `lib/screens/kiosk/kiosk_screen.dart` (tela
+> IDLE/RECONHECIDO/NEGADO) e `lib/core/access_control/turnstile_registry.dart`.
+>
+> Duas features aditivas já entraram além do MVP de ingestão: **resolução de
+> turma real** (`class_resolver.js` — a presença cai na turma em andamento em
+> vez de sempre num registro sintético `catraca_{deviceId}`) e **bloqueio por
+> inadimplência** (`financial_gate.js` + `overdue_util.js` — opt-in por
+> academia via `academies/{id}.accessControl.blockOnOverdue`, **default OFF**,
+> fail-open). Ver seção 7 abaixo.
+>
+> O que **continua pendente**: os `TODO/FIELD-CONFIRM` marcados nos adapters
+> (`GRANTED_EVENT_CODES` por firmware, unidade de `time`/`CreateTime`,
+> `portalDirection`/`methodByRule` por device, `inoutstatus`/`verifytype`
+> ZKTeco) ainda não foram validados contra hardware de **todos** os
+> fabricantes — o piloto em produção é **Control iD**; ZKTeco e Intelbras têm
+> os adapters prontos (`node --check` OK) mas aguardam confirmação de campo
+> antes do primeiro deploy real nesses vendors. Ver
+> `docs/arquivo/CATRACAS_INTEGRACAO_2026-06.md` e
+> `docs/arquivo/CATRACAS_TURMA_BLOQUEIO_2026-06.md` para os relatórios de fase
+> (histórico, inclusive achados de segurança C1/H1 já corrigidos no código
+> atual).
 
 ---
 
@@ -40,9 +64,12 @@ deste endpoint, que só faz **ingestão (device→cloud)**.
 |---|---|
 | `ingest.js` | **Núcleo** + a CF `ingestAccessEvent`. Segurança, idempotência, gravação de presença, contrato de resposta. Único lugar com Firestore/HTTP. |
 | `canonical.js` | Forma `AccessEvent` canônica + contrato `parse(req, device)` + helpers `normalizeDirection`/`normalizeMethod`. Módulo **puro**. |
-| `adapters/controlid.js` | Wire-format Control iD (`/dao`, `/catra_event`, `/device_is_alive`). |
-| `adapters/zkteco.js` | Wire-format ZKTeco ADMS/iclock (`rtlog`/`ATTLOG`, key=value/tab). |
-| `adapters/intelbras.js` | Wire-format Intelbras Bio-T "Modo Online" (multipart + key=value/JSON). |
+| `class_resolver.js` | Resolve a **turma real** em andamento (grade/modalidade/categoria/matrícula/janela de tolerância) a partir do horário do evento — helper puro, sem I/O. Sem match, cai no fallback sintético `catraca_{deviceId}`. |
+| `financial_gate.js` | **Bloqueio por inadimplência** opt-in por academia (`accessControl.blockOnOverdue`, default OFF). Fail-open total: qualquer erro/config ausente libera o giro. |
+| `overdue_util.js` | Fonte única de "vencido" (`isOverdueBR`/`daysOverdueBR`), compartilhada entre a catraca e o cron de cobrança (`server_functions.js`) — os dois nunca discordam de quem está em atraso. |
+| `adapters/controlid.js` | Wire-format Control iD (`/dao`, `/catra_event`, `/device_is_alive`). **Piloto em produção.** |
+| `adapters/zkteco.js` | Wire-format ZKTeco ADMS/iclock (`rtlog`/`ATTLOG`, key=value/tab). Pronto, aguarda field-confirm antes do 1º deploy real. |
+| `adapters/intelbras.js` | Wire-format Intelbras Bio-T "Modo Online" (multipart + key=value/JSON). Pronto, aguarda field-confirm antes do 1º deploy real. |
 
 Cada adapter exporta `parse(req, device) -> AccessEvent[] | null` e **só** conhece
 o wire format do seu fabricante. O núcleo nunca vê campos específicos de vendor.
@@ -253,21 +280,61 @@ Content-Type: image/jpeg
 
 ---
 
-## 7. TODOs de validação em campo (antes de produção)
+## 7. Check-in na turma real + bloqueio por inadimplência
+
+Duas features aditivas por cima da ingestão pura, adicionadas em jul/2026
+(`class_resolver.js`, `financial_gate.js`, `overdue_util.js`):
+
+**Turma real:** o handler lê as turmas ativas da academia (`isActive == true`)
+uma vez por POST e o resolver (`resolveActiveClass`, puro, sem I/O) casa o
+evento por modalidade (`device.sport`), categoria (`device.category`),
+matrícula (`acceptsCheckinFrom`, mesma regra do check-in por QR) e janela de
+tolerância (PRE/POST 30min, override por `device.scheduleToleranceMinutes`),
+com desempate determinístico (aula em andamento > slot mais recente > aluno
+matriculado > `classId` ascendente — a re-entrega do mesmo evento sempre
+resolve a mesma turma). Sem match, cai no fallback sintético de sempre
+(`classId = catraca_{deviceId}`). O doc-id de presença passou de
+`studentId_{device}_YYYYMMDD` para `studentId_{classId}_YYYYMMDD` (1
+presença/aluno/turma/dia). `classId` real é revalidado por `isSafeSegment`
+antes de compor o doc-id (defesa contra path injection, achado C1 abaixo).
+
+**Bloqueio por inadimplência:** opt-in por academia via
+`academies/{id}.accessControl = { blockOnOverdue: false, graceDays: 0,
+blockTypes: ['monthly_tuition'] }` — **default OFF** (deploy é no-op até a
+academia optar). Quando ligado, `checkOverdueGate` consulta `financials` do
+aluno e nega o giro (`denied_overdue`, sem presença, sem
+`increment(attendanceCount)`) se houver cobrança vencida do tipo configurado
+(default: só mensalidade — avulsa/`private_lesson`/`subscription_overcharge`
+nunca prendem). **Fail-open total**: qualquer erro de query/config libera.
+`isOverdueBR`/`daysOverdueBR` são compartilhados com o cron de cobrança
+(`server_functions.js`) — portão e cobrança nunca discordam de quem está em
+atraso. Índice composto `financials {studentId ASC, status ASC}` já provisionado
+em `firestore.indexes.json`.
+
+Achado MAJOR conhecido (não-bloqueante): em lote misto (ZKTeco/Control iD
+entregam vários eventos por POST) o veredito agregado pode mascarar um
+`denied_overdue` individual na resposta consolidada — sem risco de segurança
+(cada evento já foi negado individualmente), mas relevante se/quando o
+Intelbras síncrono (que gateia o giro pela resposta) for habilitado com >1
+evento por POST — precisa de guard de 1-evento/POST antes disso.
+
+---
+
+## 8. TODOs de validação em campo (antes do 1º deploy real de ZKTeco/Intelbras)
 
 Comuns:
 
 - **Apontar `device.secret` real** por device (e rotacionar). Decidir HMAC-forte
   (proxy/firmware) vs token fraco + HTTPS + IP allowlist.
-- **Popular `device.userMap`** (e `userNames`) no enroll — sem ele todo acesso vira
-  `no_match`.
-- Confirmar a **semântica de presença**: hoje = **1 presença/aluno/device/dia** na
-  **entrada** (`classId = catraca_{deviceId}`, `sport: 'bjj'` default). Se a
-  academia quiser contar por aula/modalidade, resolver a turma ativa pela grade é
-  um **job de reconciliação posterior** (fora do caminho crítico) — o doc-id por
-  dia é o ponto único de mudança.
+- ~~Popular `device.userMap` (e `userNames`) no enroll~~ — **resolvido**: UI
+  dedicada em `DeviceEnrollmentScreen`
+  (`lib/screens/admin/device_enrollment_screen.dart`). Sem entrada mapeada o
+  acesso ainda vira `no_match` — é operacional (a academia precisa cadastrar
+  cada aluno por device), não uma lacuna de código.
+- ~~Semântica de presença 1/dia vs por turma~~ — **resolvido**: ver seção 7
+  (check-in na turma real, com fallback sintético).
 
-Control iD:
+Control iD (piloto em produção — validar com o hardware real da academia):
 
 - **`GRANTED_EVENT_CODES`**: só `event="12"` foi observado na doc pública.
   Capturar o set real de "acesso concedido" por firmware (iDAccess/iDBlock/iDFace).

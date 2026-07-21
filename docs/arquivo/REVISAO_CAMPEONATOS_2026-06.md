@@ -1,3 +1,7 @@
+> **Arquivado (2026-07):** revisão pontual do módulo de Campeonatos (2026-06).
+> Registro histórico dos 24 achados; não confirmado se todos foram corrigidos —
+> tratar como ponto de partida para nova varredura se o módulo for revisitado.
+
 The findings match the current code. I have enough verification to produce the report.
 
 ## Resumo

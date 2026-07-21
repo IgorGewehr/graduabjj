@@ -1,3 +1,11 @@
+> **Arquivado (2026-07):** o achado CRÍTICO (account takeover via
+> `firestore.rules` — self-elevate a admin e claim de `studentId` de outra
+> academia) foi **corrigido** no commit `1ddf1e7` (2026-06-30): `firestore.
+> rules` agora exige `academies/{id}.ownerId == request.auth.uid` para criar o
+> 2º admin, e `userAcademyMapping` exige `linkedUserId` desocupado antes de
+> vincular. Verificado no `firestore.rules` atual. Mantido como registro
+> histórico do incidente e da correção.
+
 # Relatório de Auditoria — GraduaBJJ
 
 **Data:** 2026-06-22  

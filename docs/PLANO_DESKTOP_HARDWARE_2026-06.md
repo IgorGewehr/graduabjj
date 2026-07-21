@@ -2,6 +2,20 @@ Confirmado: `firebase_options.dart:19-33` lança `UnsupportedError` para macOS/W
 
 ---
 
+> **Status de execução (2026-07):** **F0-F3 executadas** (com escopo Windows —
+> Mac ainda não). App Windows de balcão em produção (`docs/WINDOWS.md`,
+> `lib/core/fns.dart` para Cloud Functions via HTTP), guardas de plataforma em
+> `main.dart`, CI GitHub Actions builda o `.exe`. Catraca Control iD Face em
+> modo Online **deployada em produção** (`ingestAccessEvent`,
+> `functions/access_control/README.md`), com UI admin
+> (`AdminDevicesScreen`/`DeviceEnrollmentScreen`) e MODO KIOSK
+> (`lib/screens/kiosk/kiosk_screen.dart`). **F4 (enroll facial + LGPD) e F5
+> (Local Agent B + ZKTeco/Intelbras/Henry/Topdata) continuam NÃO
+> implementadas** — field-confirm de firmware ainda pendente para
+> ZKTeco/Intelbras (ver `functions/access_control/README.md` §8). macOS
+> continua greenfield (só Windows foi construído). Este plano permanece a
+> referência viva para F4/F5 e para macOS.
+
 # Plano de Arquitetura — GraduaBJJ Desktop (Windows/Mac) + Catracas e Biometria
 
 ## Resumo executivo

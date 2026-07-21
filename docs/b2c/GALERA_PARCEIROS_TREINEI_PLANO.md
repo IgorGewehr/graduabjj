@@ -1,5 +1,13 @@
 # Galera / Parceiros / Treinei — Plano de Evolução (b2c)
 
+> **Status de execução (2026-07):** o **kudos/salve** (item 3) e o rótulo
+> "Treinei"/dois-números (item 4) evoluíram para o que está implementado hoje
+> — ver `GALERA_SOCIAL_FEED_PLANO.md` (o sucessor direto deste doc, com
+> `feedPosts`/`likes` shipped). **`trainingPairs` por co-presença (item 1-2,
+> Fase 3) continua NÃO implementado** — só placeholders
+> `retention_functions.js:21,353` ("Handlers futuros: GALERA F3"). Este doc
+> permanece a referência viva para essa parte pendente.
+
 > **Escopo**: arquitetura acionável para 4 evoluções do app do LUTADOR. NÃO implementado ainda — este doc é o blueprint.
 > **Branch**: `b2c`. **Projeto Firestore**: `arpjj-76350`.
 > **Princípio-guia**: dado real e verificado > ego. A peça central é **PARCEIRO DE TREINO** descoberto por co-presença, não "amigo por código".

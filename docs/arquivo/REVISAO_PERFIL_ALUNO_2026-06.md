@@ -1,3 +1,10 @@
+> **Arquivado (2026-07):** o achado CRÍTICO (leitura pública do doc bruto de
+> `students/{studentId}` com `isProfilePublic==true`, vazando toda a PII) foi
+> **corrigido** — `firestore.rules:579-584` documenta a remoção desse read
+> público; o acesso público hoje é só via `publicProfiles` (espelho sem PII).
+> Os demais achados (gates de permissão client-only, faixa errada no monitor
+> multimodal) não foram reverificados; registro histórico.
+
 The key claims are verified against the actual code. The critical Firestore rule (line 444), the unguarded `as int?` cast (line 582), the ungated admin menu (lines 308-380), and the getGrade null-return all confirm. Producing the report.
 
 # Auditoria do Perfil do Aluno — GraduaBJJ

@@ -1,3 +1,6 @@
+> **Arquivado (2026-07):** validação E2E pontual de 2026-06-28 contra um commit
+> específico. Registro histórico; para o estado vivo ver `docs/PAGAMENTOS_MP.md`.
+
 All findings are verified against the live code. The `markAsPaid` (lines 640-688) is exactly the model the high-sev `cancel` fix should mirror. Now I have everything to write the report.
 
 # Validacao End-to-End — Pagamentos Mercado Pago (GraduaBJJ)
