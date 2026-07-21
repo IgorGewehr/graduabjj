@@ -4,14 +4,12 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/academy_vocab.dart';
-import '../../core/feedback_utils.dart';
 import '../../core/navigation/nav_catalog.dart';
 import '../../core/navigation/nav_resolver.dart';
 import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/providers.dart';
-import '../../widgets/common/more_menu_sheet.dart';
 import '../../widgets/common/back_button_handler.dart';
 import '../../widgets/academy_switcher.dart';
 import '../../widgets/update_banner.dart';
@@ -96,12 +94,6 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     context.go(items[index].path);
   }
 
-  Widget _buildAppBarTitle(WidgetRef ref) {
-    // Fighter-first: o seletor de academia NÃO vive mais na AppBar global —
-    // ele é exclusivo da aba Academia. Cada tab tem seu próprio header.
-    return const SizedBox.shrink();
-  }
-
   /// Entradas visíveis do portal (mesmos feature-flags + gates contextuais do
   /// menu "Mais"), usadas pela rail do desktop. Mobile não chama (usa BottomNav).
   List<NavEntry> _resolveVisiblePortalEntries() {
@@ -137,99 +129,13 @@ class _PortalShellState extends ConsumerState<PortalShell> {
     ).where((r) => r.isVisible).map((r) => r.entry).toList();
   }
 
-  void _showMoreMenu() {
-    final currentLocation = GoRouterState.of(context).matchedLocation;
-    final navigator = GoRouter.of(context);
-
-    final student = ref.read(currentStudentProvider).valueOrNull;
-    final isKids = student?.category == StudentCategory.kids;
-
-    final settings = ref.read(academySettingsProvider).valueOrNull;
-    final isStorePublished = settings?.storePublished ?? false;
-
-    final currentUser = ref.read(currentUserProvider).valueOrNull;
-    final studentId = currentUser?.studentId;
-    final linkedStudentIds = currentUser?.linkedStudentIds ?? const <String>[];
-    final allStudentIds = studentId != null
-        ? [studentId, ...linkedStudentIds]
-        : linkedStudentIds;
-    final monitorIds = settings?.monitorIds ?? const <String>[];
-    final isMonitor = allStudentIds.any(monitorIds.contains);
-    final hasAttendancePermMenu =
-        currentUser?.hasPermission('attendance:take') == true;
-
-    final studentDocId = student?.id;
-    final hasPlan = studentDocId != null &&
-        ref.read(studentPlanProvider(studentDocId)).valueOrNull != null;
-
-    final graduationVisible =
-        settings?.graduationProgressVisibleToStudents ?? false;
-
-    // Resolve the portal catalog (feature flags + contextual gates). The portal
-    // model is simple: a feature OFF or an unmet gate => the entry is hidden
-    // (the student never sees a "locked" entry — discovery is admin-only).
-    final ctx = PortalNavContext(
-      isKids: isKids,
-      isMonitorOrAttendance: isMonitor || hasAttendancePermMenu,
-      hasPlan: hasPlan,
-      storePublished: isStorePublished,
-      graduationProgressVisible: graduationVisible,
-      multiSport: (student?.getSports().length ?? 0) > 1,
-      hasMultipleAcademies: ref.read(hasMultipleAcademiesProvider),
-    );
-    final resolved = resolvePortalCatalog(
-      catalog: kPortalNavCatalog,
-      settings: settings,
-      ctx: ctx,
-    );
-    final entries =
-        resolved.where((r) => r.isVisible).map((r) => r.entry).toList();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => MoreMenuSheet(
-        headerTitle: 'Menu',
-        headerSubtitle: settings?.name ?? 'Meu Portal',
-        items: entries
-            .map(
-              (e) => MoreMenuItem(
-                label: e.label,
-                icon: e.icon,
-                path: e.route,
-                isActive: currentLocation == e.route,
-                category: e.section.label,
-              ),
-            )
-            .toList(),
-        onLogout: () async {
-          final confirmed = await FeedbackUtils.showConfirmDialog(
-            sheetContext,
-            title: 'Sair da conta',
-            message: 'Tem certeza que deseja sair?',
-            confirmText: 'Sair',
-            icon: Icons.logout,
-          );
-          if (!confirmed) return;
-          if (sheetContext.mounted) Navigator.pop(sheetContext);
-          final authService = ref.read(authServiceProvider);
-          await authService.signOut();
-        },
-        onNavigate: (path) {
-          Navigator.pop(sheetContext);
-          navigator.go(path);
-        },
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     // Watch auth state for reactive updates
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
 
-    // Pre-load student plan so it's available synchronously in _showMoreMenu
+    // Pre-load student plan so it's available synchronously for the desktop
+    // rail (_resolveVisiblePortalEntries) and other plan-gated nav entries.
     final student = ref.watch(currentStudentProvider).valueOrNull;
     if (student != null) {
       ref.watch(studentPlanProvider(student.id));
@@ -464,46 +370,6 @@ class _BottomNavItem extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// Notification bell icon with unread badge
-class _NotificationBell extends ConsumerWidget {
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final unreadCount = ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
-
-    return IconButton(
-      icon: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          const Icon(LucideIcons.bell, size: 20),
-          if (unreadCount > 0)
-            Positioned(
-              right: -6,
-              top: -4,
-              child: Container(
-                padding: const EdgeInsets.all(3),
-                decoration: const BoxDecoration(
-                  color: Colors.red,
-                  shape: BoxShape.circle,
-                ),
-                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                child: Text(
-                  unreadCount > 9 ? '9+' : '$unreadCount',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
-        ],
-      ),
-      onPressed: () => context.push('/portal/notificacoes'),
     );
   }
 }

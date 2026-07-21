@@ -1000,12 +1000,11 @@ class _DataTile extends StatelessWidget {
 // KEPT WIDGETS (unchanged)
 // ============================================
 
-/// Section Header with optional edit button
+/// Section Header
 class _SectionHeader extends StatelessWidget {
   final String title;
-  final VoidCallback? onEdit;
 
-  const _SectionHeader({required this.title, this.onEdit});
+  const _SectionHeader({required this.title});
 
   @override
   Widget build(BuildContext context) {
@@ -1014,26 +1013,6 @@ class _SectionHeader extends StatelessWidget {
         Container(width: 14, height: 2, color: _T.blood),
         const SizedBox(width: 8),
         Expanded(child: Text(title, style: _eyebrow(_T.ink, 13))),
-        if (onEdit != null)
-          Pressable(
-            onTap: onEdit,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: _T.card,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: _T.hair),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(LucideIcons.pencil, size: 12, color: _T.ink),
-                  const SizedBox(width: 5),
-                  Text('EDITAR', style: _eyebrow(_T.ink, 10)),
-                ],
-              ),
-            ),
-          ),
       ],
     );
   }

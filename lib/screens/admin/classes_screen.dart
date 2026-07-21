@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
+import '../../core/formatters.dart' show formatTimeOfDay;
 import '../../core/responsive.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
@@ -17,12 +19,7 @@ import '../../widgets/polish/polish.dart';
 
 // Helper to convert dayOfWeek int to label
 String _getDayLabel(int dayOfWeek) {
-  const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
-  return days[dayOfWeek % 7];
-}
-
-String _formatTimeOfDay(TimeOfDay t) {
-  return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  return DayOfWeekLabels.short[dayOfWeek % 7];
 }
 
 TimeOfDay _parseTimeString(String time) {
@@ -498,7 +495,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                     initialTime: _parseTimeString(schedule.startTime),
                   );
                   if (time != null) {
-                    schedule.startTime = _formatTimeOfDay(time);
+                    schedule.startTime = formatTimeOfDay(time);
                     onChanged();
                   }
                 },
@@ -527,7 +524,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                     initialTime: _parseTimeString(schedule.endTime),
                   );
                   if (time != null) {
-                    schedule.endTime = _formatTimeOfDay(time);
+                    schedule.endTime = formatTimeOfDay(time);
                     onChanged();
                   }
                 },

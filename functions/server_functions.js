@@ -1571,10 +1571,11 @@ function localDayKey(d) {
 }
 
 // Local-time YYYY-MM for a JS Date (the monthly ranking autoKey period).
+// Same wall-clock 'YYYY-MM' format as referenceMonthKey above — delegates to
+// it so the two call sites (ranking) and the billing reference-month logic
+// can never drift apart.
 function localMonthKey(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
+  return referenceMonthKey(d);
 }
 
 // Pure: current consecutive-day streak ending at the most recent attendance

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/formatters.dart' show formatTimeOfDay;
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
@@ -21,9 +22,6 @@ const _quickCreateWeekdayLabels = [
   'Sexta',
   'Sábado',
 ];
-
-String _formatQuickCreateTime(TimeOfDay t) =>
-    '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
 /// Conteúdo (SEM chrome de sheet/tela) de criação rápida de turma — extraído
 /// de `_showQuickCreateClassSheet` (lib/screens/admin/attendance_screen.dart)
@@ -122,8 +120,8 @@ class _QuickCreateClassFormState extends ConsumerState<QuickCreateClassForm> {
           : [
               ClassSchedule(
                 dayOfWeek: _scheduleDayOfWeek!,
-                startTime: _formatQuickCreateTime(_scheduleStart),
-                endTime: _formatQuickCreateTime(_scheduleEnd),
+                startTime: formatTimeOfDay(_scheduleStart),
+                endTime: formatTimeOfDay(_scheduleEnd),
               ),
             ];
 
@@ -249,7 +247,7 @@ class _QuickCreateClassFormState extends ConsumerState<QuickCreateClassForm> {
                   GestureDetector(
                     onTap: () => _pickTime(true),
                     child: Text(
-                      _formatQuickCreateTime(_scheduleStart),
+                      formatTimeOfDay(_scheduleStart),
                       style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -260,7 +258,7 @@ class _QuickCreateClassFormState extends ConsumerState<QuickCreateClassForm> {
                   GestureDetector(
                     onTap: () => _pickTime(false),
                     child: Text(
-                      _formatQuickCreateTime(_scheduleEnd),
+                      formatTimeOfDay(_scheduleEnd),
                       style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
                     ),
                   ),

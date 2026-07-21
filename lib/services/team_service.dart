@@ -1,5 +1,3 @@
-import 'package:cloud_functions/cloud_functions.dart';
-
 import 'fns.dart';
 
 /// Member entry returned by [TeamService.listMembers].
