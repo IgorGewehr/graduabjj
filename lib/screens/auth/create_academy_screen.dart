@@ -8,6 +8,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/brand_tokens.dart';
+import '../../core/sports.dart';
 import '../../models/academy.dart';
 import '../../providers/auth_provider.dart';
 
@@ -64,6 +65,29 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   // "Que tipo de academia?" — obrigatório, nenhum selecionado por padrão
   // (ver CONTEXTO ESTRATÉGICO: app generalista, não só artes marciais).
   AcademyProfile? _academyProfile;
+
+  // Modalidades escolhidas quando o perfil é Artes Marciais/Ambos (chips
+  // logo abaixo do seletor de perfil). Pré-seleciona BJJ pra quem só clica
+  // "continuar" sem mexer — mas o chip é editável (ANTI_HIDRA achado nº1:
+  // antes disso toda academia nascia com sports:['bjj'] hardcoded, mesmo
+  // Judô/Muay Thai/Karatê). Fitness não usa isto: musculação é automática
+  // (ver createAcademyAccount em auth_provider.dart).
+  final Set<SportId> _selectedSports = {SportId.bjj};
+
+  void _toggleSport(SportId id) {
+    setState(() {
+      if (_selectedSports.contains(id)) {
+        // Nunca deixa a seleção zerar — sempre precisa sobrar 1 modalidade
+        // pra virar primarySport.
+        if (_selectedSports.length > 1) {
+          _selectedSports.remove(id);
+        }
+      } else {
+        _selectedSports.add(id);
+      }
+      _errorMessage = null;
+    });
+  }
 
   // General state
   bool _isLoading = false;
@@ -258,6 +282,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
       final documentDigits = _documentController.text.replaceAll(RegExp(r'\D'), '');
 
+      final resolvedProfile = _academyProfile ?? AcademyProfile.fight;
       final authService = ref.read(authServiceProvider);
       await authService.createAcademyAccount(
         email: _emailController.text.trim(),
@@ -266,7 +291,12 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         academyName: _academyNameController.text.trim(),
         documentType: _documentType == _DocumentType.cpf ? 'cpf' : 'cnpj',
         documentNumber: documentDigits,
-        profile: (_academyProfile ?? AcademyProfile.fight).value,
+        profile: resolvedProfile.value,
+        // Só relevante pra fight/hybrid — fitness ignora e usa musculação
+        // automaticamente (ver createAcademyAccount).
+        sports: resolvedProfile == AcademyProfile.fitness
+            ? null
+            : _selectedSports.map((s) => s.value).toList(),
       );
 
       // All Firestore documents are created. Force Riverpod to reload user data.
@@ -829,6 +859,35 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               ],
             ).animate().fadeIn(delay: 260.ms),
 
+            // Seletor de modalidades — só aparece pra Artes Marciais/Ambos.
+            // Fitness segue sem seletor (musculação automática). Pré-marca
+            // BJJ, mas o professor pode desmarcar/trocar/adicionar livremente.
+            if (_academyProfile == AcademyProfile.fight ||
+                _academyProfile == AcademyProfile.hybrid) ...[
+              const SizedBox(height: 24),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'QUAIS MODALIDADES?',
+                  style: _eyebrow(_C.smoke, 11),
+                ),
+              ).animate().fadeIn(delay: 280.ms),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: sportOptions.map((id) {
+                  final def = getSport(id);
+                  return _SportChip(
+                    icon: def.icon,
+                    label: def.label,
+                    selected: _selectedSports.contains(id),
+                    onTap: () => _toggleSport(id),
+                  );
+                }).toList(),
+              ).animate().fadeIn(delay: 300.ms),
+            ],
+
             const SizedBox(height: 24),
 
             // Document type toggle
@@ -1111,6 +1170,66 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Chip minimalista de modalidade — multi-select, mesma paleta ink/blood/bone
+/// do resto do wizard, mas em formato de pílula (várias por linha) em vez do
+/// cartão largo do [_DocumentTypeCard], já que aqui há até 9 opções.
+class _SportChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _SportChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? _C.blood.withValues(alpha: 0.08) : _C.card,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected ? _C.blood : _C.hairline,
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 15, color: selected ? _C.blood : _C.smoke),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: selected ? _C.blood : _C.ink,
+                ),
+              ),
+              if (selected) ...[
+                const SizedBox(width: 6),
+                const Icon(LucideIcons.check, size: 13, color: _C.blood),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

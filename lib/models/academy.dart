@@ -416,6 +416,30 @@ class Academy {
 
   /// Returns the effective list of sports offered, defaulting to ['bjj']
   /// for legacy academies that never declared the field.
+  ///
+  /// ANTI_HIDRA achado nº1 (docs/ANTI_HIDRA_2026-07.md): esta é a fonte única
+  /// de verdade do fallback "sports ausente/vazio → ['bjj']" no CLIENTE — o
+  /// mesmo fallback foi replicado no SERVIDOR em
+  /// `functions/index.js` (`decideJoinRequest`, consts `academySports`/
+  /// `academyPrimarySport`) porque Dart e Node não compartilham módulo; os
+  /// dois precisam concordar ou uma ficha nova pode nascer com modalidade
+  /// diferente da que a academia realmente oferece.
+  ///
+  /// Hoje SEM call site em `lib/`: `Academy.fromFirestore`/`toFirestore`
+  /// (a classe inteira) também têm zero chamadores — os consumidores reais de
+  /// dados de academia usam modelos paralelos e mais leves
+  /// (`AcademySettings` em `services/settings_service.dart`,
+  /// `AcademySubscription`, `AcademyInfo` em `selected_academy_provider.dart`),
+  /// nenhum dos quais ainda expõe `sports`/`primarySport`. Este getter existe
+  /// para o dia em que um desses (mais provável: `AcademySettings`, já usada
+  /// por `academyVocabProvider`) ganhar os campos `sports`/`primarySport` e
+  /// precisar do MESMO fallback — ex.: badges de modalidade num
+  /// switcher/listagem de academias (`academies_screen.dart`), ou filtrar o
+  /// editor "Requisitos por faixa" (`settings_screen.dart`
+  /// `_buildPerBeltRequirements`) para só as modalidades que a academia
+  /// realmente oferece em vez do catálogo `sportOptions` inteiro. Sempre ler
+  /// por aqui (nunca `sports` cru) nesses futuros consumidores — `sports`
+  /// pode legitimamente ser `[]` em doc legado.
   List<String> get effectiveSports =>
       sports.isNotEmpty ? sports : const ['bjj'];
 

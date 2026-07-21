@@ -665,6 +665,20 @@ exports.decideJoinRequest = onCall(async (request) => {
     // comportamento histórico (zero regressão — ver AcademyProfileExtension.fromString).
     const academySnap = await tx.get(db.doc(`academies/${academyId}`));
     const academyProfile = academySnap.exists ? academySnap.get('profile') : null;
+    // ANTI_HIDRA achado nº1: as modalidades da ficha nova devem espelhar as
+    // modalidades REAIS da academia (`academy.sports`/`primarySport`, gravadas
+    // no seletor do wizard — create_academy_screen.dart), não um 'bjj' fixo.
+    // Fallback 'bjj' só quando a academia não declarou o campo (retrocompat
+    // total: academias antigas sem `sports` continuam ganhando ficha BJJ,
+    // comportamento idêntico ao de antes desta mudança).
+    const academySportsRaw = academySnap.exists ? academySnap.get('sports') : null;
+    const academySports = Array.isArray(academySportsRaw) && academySportsRaw.length > 0
+        ? academySportsRaw.map((s) => String(s))
+        : ['bjj'];
+    const academyPrimarySportRaw = academySnap.exists ? academySnap.get('primarySport') : null;
+    const academyPrimarySport = typeof academyPrimarySportRaw === 'string' && academyPrimarySportRaw
+        ? academyPrimarySportRaw
+        : academySports[0];
 
     let studentRef;
     let createNew = false;
@@ -693,21 +707,29 @@ exports.decideJoinRequest = onCall(async (request) => {
       // dependem do perfil da academia (spec 0.4, ver leitura de academyProfile
       // acima): 'fitness' grava só a modalidade, SEM currentBelt/currentStripes/
       // sportData (nunca inventa uma "faixa branca" fantasma numa ficha que não
-      // tem cultura de graduação); 'fight'/'hybrid'/ausente seguem exatamente o
-      // que já era gravado antes desta mudança.
+      // tem cultura de graduação); 'fight'/'hybrid'/ausente usam as modalidades
+      // REAIS da academia (academySports/academyPrimarySport lidos acima) — e só
+      // ganham currentBelt/sportData quando o primarySport TEM escada de graus
+      // (espelho GRADELESS SELF_CHECKIN_SPORTS, linha ~1465: esporte sem faixa
+      // não ganha "faixa branca" fantasma, igual ao ramo fitness).
       const cat = ['kids', 'adult'].includes(reqData.category) ? reqData.category : 'adult';
       const sportFields = academyProfile === 'fitness'
           ? {
             sports: ['musculacao'],
             primarySport: 'musculacao',
           }
-          : {
-            sports: ['bjj'],
-            primarySport: 'bjj',
-            currentBelt: 'white',
-            currentStripes: 0,
-            sportData: {bjj: {currentGrade: 'white', currentStripes: 0}},
-          };
+          : SELF_CHECKIN_SPORTS.has(academyPrimarySport)
+              ? {
+                sports: academySports,
+                primarySport: academyPrimarySport,
+              }
+              : {
+                sports: academySports,
+                primarySport: academyPrimarySport,
+                currentBelt: 'white',
+                currentStripes: 0,
+                sportData: {[academyPrimarySport]: {currentGrade: 'white', currentStripes: 0}},
+              };
       tx.set(studentRef, {
         fullName: reqData.fullName || email || 'Aluno',
         email: email || null,

@@ -475,6 +475,14 @@ class AuthService {
     // Defaults to 'fight' to preserve the app's original-only behavior for
     // any caller that doesn't pass it.
     String profile = 'fight',
+    // Modalidades escolhidas nos chips do wizard (create_academy_screen.dart)
+    // quando profile é 'fight'/'hybrid' — ex.: ['bjj', 'muaythai']. Vira
+    // `academy.sports` + `primarySport` (1ª da lista). `null`/vazio cai no
+    // fallback ['bjj'] — mesma semântica de [Academy.effectiveSports] e do
+    // espelho server-side em `functions/index.js` `decideJoinRequest`
+    // (ANTI_HIDRA achado nº1: retrocompat com academias antigas sem o campo).
+    // Ignorado quando profile == 'fitness' (musculação automática abaixo).
+    List<String>? sports,
   }) async {
     // Step 1: Create Firebase Auth user
     final credential = await _auth.createUserWithEmailAndPassword(
@@ -496,6 +504,15 @@ class AuthService {
     // Step 4: Create academy document with auto-generated ID
     final academyRef = _firestore.collection('academies').doc();
     final academyId = academyRef.id;
+
+    // Modalidades efetivas da academia nova. 'fitness' é sempre musculação
+    // (automático, sem seletor); 'fight'/'hybrid' usam os chips escolhidos no
+    // wizard, com fallback ['bjj'] caso o caller não informe nada (retrocompat
+    // — mesmo fallback de [Academy.effectiveSports]/`decideJoinRequest`).
+    final resolvedSports = profile == 'fitness'
+        ? const ['musculacao']
+        : (sports != null && sports.isNotEmpty ? sports : const ['bjj']);
+    final resolvedPrimarySport = resolvedSports.first;
 
     final academyData = <String, dynamic>{
       'name': academyName,
@@ -521,8 +538,14 @@ class AuthService {
       // Fitness-only academies default to musculação, which has no
       // belt/grade system (GradeSystem.none in core/sports.dart) — "sem
       // faixas em lugar nenhum" falls out of the existing multimodal system
-      // automatically, no special-casing needed elsewhere.
-      if (profile == 'fitness') 'sports': ['musculacao'],
+      // automatically, no special-casing needed elsewhere. Fight/hybrid write
+      // whatever the wizard's sport chips selected (resolvedSports above).
+      // ANTI_HIDRA achado nº1: antes desta mudança, academias fight/hybrid
+      // nunca gravavam `sports`, o que fazia toda ficha nova nascer 'bjj' via
+      // hardcode em `decideJoinRequest` — agora a academia declara sua própria
+      // modalidade e o servidor lê daqui (com o mesmo fallback ['bjj']).
+      'sports': resolvedSports,
+      'primarySport': resolvedPrimarySport,
     };
 
     // Add document info if provided
