@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/platform_support.dart';
 import '../../core/theme.dart';
+import '../../services/analytics_service.dart';
 import '../../services/musculacao_checkin_service.dart';
 import '../../widgets/polish/polish.dart';
 
@@ -86,6 +87,8 @@ class _MusculacaoQrScanScreenState
       });
       // Genuine win: musculação check-in confirmed.
       Celebration.confetti(context);
+      // Analytics (jul/2026): check-in do QR fixo da musculação confirmado.
+      AnalyticsService.logCheckinScanned(kind: 'musculacao');
     } on MusculacaoCheckinException catch (e) {
       if (!mounted) return;
       setState(() {

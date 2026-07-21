@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -86,12 +88,20 @@ void main() async {
 
   // Initialize Push Notifications — FCM só existe em mobile (firebase_messaging
   // não tem desktop). No desktop o PC de balcão lê o Firestore por stream.
-  // HOTFIX (crash iOS 26): o firebase_messaging crasha NATIVAMENTE no init em
-  // iOS 26 — crash nativo, então o try-catch Dart de initialize() NÃO pega, e o
-  // app fechava 100% no boot no iPhone (tela branca + crash). Desabilitado no
-  // iOS para ESTANCAR o crash; Android mantém push normalmente.
-  // TODO restaurar push no iOS: atualizar o Firebase iOS SDK para versão
-  // compatível com iOS 26 + revalidar no simulador antes de religar este bloco.
+  //
+  // ANDROID: init síncrono aqui mesmo, ANTES do runApp — comportamento
+  // INALTERADO desde sempre (é o caminho estável; a mudança de timing feita
+  // pro iOS abaixo não pode atrasar nem arriscar este bloco).
+  //
+  // iOS (TAREFA 2, jul/2026 — religando após o hotfix do commit 1ddf1e7): o
+  // firebase_messaging crasha NATIVAMENTE no init em iOS 26 — crash nativo,
+  // então o try/catch Dart de initialize() NÃO pega, e por isso o commit
+  // 1ddf1e7 desligou o FCM inteiramente no iOS pra estancar o crash 100% no
+  // boot. Em vez de manter desligado pra sempre, o init agora roda DEFERIDO
+  // pra depois do 1º frame (bloco após runApp, mais abaixo), atrás de um
+  // kill-switch remoto cacheado (appConfig/flags.fcmIosEnabled — ver
+  // push_notification_service.dart) que permite desligar de novo, em
+  // produção e sem nova build, se o crash reaparecer em campo.
   if (isMobile && !Platform.isIOS) {
     await pushNotificationService.initialize();
   }
@@ -119,6 +129,34 @@ void main() async {
   }
 
   runApp(const ProviderScope(child: GraduaBJJApp()));
+
+  // TAREFA 2 (iOS): init do FCM deferido pra depois do 1º frame — se o
+  // crash nativo do plugin (ver comentário acima) voltar a acontecer, o
+  // usuário já viu a UI renderizada (splash/portal) em vez de tela branca
+  // instantânea no boot. A leitura que decide o boot ATUAL é só o cache
+  // local (SharedPreferences, síncrono-rápido) — NUNCA o Firestore, que só
+  // entra depois, em background, pra preparar o PRÓXIMO boot (ver a
+  // máquina de estados documentada em iosKillSwitchCachedValue()).
+  if (isMobile && Platform.isIOS) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final enabled = await pushNotificationService.iosKillSwitchCachedValue();
+      if (enabled) {
+        await pushNotificationService.initialize();
+        // TAREFA 1 (token em toda abertura autenticada): a sessão pode já
+        // estar autenticada por restore/silent-login do FirebaseAuth — reusa
+        // o MESMO caminho idempotente do login (auth_provider.dart) em vez
+        // de depender só do listener genérico do router (app.dart), que
+        // pode ter rodado ANTES do FCM terminar de inicializar aqui (no iOS
+        // o init só começa depois do 1º frame, então há uma corrida real).
+        if (FirebaseAuth.instance.currentUser != null) {
+          await pushNotificationService.onUserLogin();
+        }
+      }
+      // Nunca aguardado pelo boot atual: só prepara o cache pro PRÓXIMO
+      // processo (ver syncIosKillSwitchInBackground).
+      unawaited(pushNotificationService.syncIosKillSwitchInBackground());
+    });
+  }
 
   // Check for mandatory app update (Android only)
   _checkForImmediateUpdate();

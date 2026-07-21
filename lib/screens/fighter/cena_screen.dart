@@ -18,6 +18,7 @@ import '../../providers/portal_providers.dart';
 import '../../providers/ranking_providers.dart';
 import '../../providers/student_provider.dart';
 import '../../services/achievement_service.dart';
+import '../../services/analytics_service.dart';
 import '../../services/competition_service.dart';
 import '../../services/feed_posts_service.dart';
 import '../../services/friend_service.dart';
@@ -65,6 +66,15 @@ class _CenaScreenState extends ConsumerState<CenaScreen> {
   RankingPeriod _period = RankingPeriod.month;
   // null = GERAL (totalTrainings histórico); não-null = presenças no período.
   RankingPeriod? _partnerPeriod;
+
+  @override
+  void initState() {
+    super.initState();
+    // Analytics (jul/2026): 1x por entrada na tela — initState roda uma vez
+    // por criação do widget, ao contrário de build() (que re-roda a cada
+    // troca de segmento/setState).
+    AnalyticsService.logFeedViewed();
+  }
 
   @override
   Widget build(BuildContext context) {

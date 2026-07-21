@@ -4,8 +4,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/constants.dart';
 import '../../core/sports.dart';
 import '../../models/fighter_profile.dart';
 import '../../providers/auth_provider.dart';
@@ -13,17 +15,28 @@ import '../../providers/friend_providers.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/sparring_providers.dart';
 import '../../providers/student_provider.dart';
+import '../../services/analytics_service.dart';
 import '../../services/attendance_service.dart';
+import '../../services/share_card_service.dart';
 import '../../services/sparring_engine.dart';
 import '../../services/self_records_service.dart';
 import '../../services/training_log_service.dart';
+import '../../services/weekly_streak.dart' show isoWeekKeyOf, mondayUtcOfIsoWeekKey;
+import '../../widgets/fighter_share_card.dart';
 import '../../widgets/polish/polish.dart';
 
-/// TREINEI — A JORNADA DA EVOLUÇÃO DO LUTADOR (= o perfil público dele).
+/// TREINEI — O GESTO-MESTRE DO LUTADOR (+ A JORNADA = o perfil público dele).
 ///
-/// Modelo (decidido com o dono): o "Treinei" deixa de ser um diário dia-a-dia e
-/// vira a JORNADA da caminhada — a mesma coisa que o visitante vê quando abre o
-/// meu perfil. Três unidades de BJJ (não corrida):
+/// Modelo (decidido com o dono, revisado jul/2026 — diagnóstico de retenção):
+/// o "Treinei" (self-log — 1 toque, sem precisar do professor: open mat, drill
+/// em casa, aula fora) é o ato-CHAVE do app. Ele já alimenta o streak semanal
+/// (funde presença+self-log, ver `weekly_streak.dart`), vira post no feed E
+/// aparece na própria Jornada (seção "ATIVIDADE RECENTE", selo AUTO) — a UI
+/// não pode mais tratá-lo como um desvio escondido atrás de um toggle. A tela
+/// abre direto no logger quando o usuário chega por um CTA de "registrar"
+/// (`?open=log` — ver [didChangeDependencies]); senão abre na JORNADA, que
+/// mostra a caminhada — a mesma coisa que o visitante vê no meu perfil. Três
+/// unidades de BJJ (não corrida):
 ///   1. STREAK   — consistência (herói: dias seguidos + recorde).
 ///   2. GRADUAÇÕES — cada faixa/grau, QUANDO, e o esforço por trás
 ///      ("NN TREINOS · MM MESES ATÉ AQUI"). Verificadas (academia, = TETO) são
@@ -36,11 +49,13 @@ import '../../widgets/polish/polish.dart';
 /// o mesmo blob em 1 read — nunca a attendance privada da academia. O auto-
 /// declarado NUNCA toca `beltProgressions` (= TETO) — vive em coleções `self*`.
 ///
-/// O SELF-LOG ("TREINEI HOJE") — treino sem professor (open mat, drill em casa)
-/// — continua existindo, mas REBAIXADO para a aba HISTÓRICO. Ele NÃO alimenta os
-/// números da jornada (jornada = só `attendance` verificada). Anti-fraude já
-/// garantido no backend: graduação-por-presença lê `academies/{id}/attendance`,
-/// nunca `training_logs`. A UI só sinaliza isso (selo AUTO + microcopy seca).
+/// TETO DE SEGURANÇA (isto NÃO muda): a distinção entre VERIFICADO e AUTO é só
+/// uma CAMADA a mais — não uma punição. Só a presença confirmada pelo
+/// professor conta pra graduação; o self-log nunca toca `sportData`/
+/// `beltProgressions`. Anti-fraude já garantido no backend: graduação-por-
+/// presença lê `academies/{id}/attendance`, nunca `training_logs`. A UI
+/// comunica isso com um selo discreto (✓ verificada / AUTO) + nota — nunca
+/// com aviso em caixa-alta ou tom de "isso aqui não vale".
 ///
 /// Fontes do HISTÓRICO:
 ///  - VERIFICADO: `AttendanceService(academyId).getByStudentPaginated(uid,30)`
@@ -153,8 +168,22 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
   /// Atalhos rápidos de contagem (1 toque = seta o número).
   static const List<int> _kQuickCounts = [3, 5, 8, 10, 15];
 
+  /// Nota da camada AUTO×VERIFICADO — item 1 da missão "gesto-mestre": a
+  /// versão antiga ("REGISTRO AVULSO — NÃO CONTA PRA GRADUAÇÃO", caixa-alta,
+  /// tom de aviso) rebaixava o gesto bem no momento em que o lutador acabou
+  /// de fazê-lo. Mesma informação, tom de informação e não de punição — só
+  /// aparece quando a academia gradua por presença ([_showGraduationCaveat]).
+  static const String _kAutoLayerNote =
+      'Conta pro seu streak e pro seu histórico. '
+      'Presenças confirmadas pelo professor valem pra graduação.';
+
   /// Visão ativa: 0 = JORNADA (a estrela), 1 = HISTÓRICO (feed + self-log).
   int _view = 0;
+
+  /// Guarda contra reler a query string a cada `didChangeDependencies` (esse
+  /// hook dispara em toda mudança de dependência InheritedWidget, não só no
+  /// mount — sem isso, o deep link reabriria o logger em qualquer rebuild).
+  bool _initialRouteRead = false;
 
   // ── Estado de carregamento do feed do HISTÓRICO ───────────────────────────
   bool _loadingFeed = true;
@@ -172,6 +201,11 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
   // ── Estado de gravação ────────────────────────────────────────────────────
   _Phase _phase = _Phase.idle;
   bool _saving = false;
+
+  /// true quando o registro que ACABOU de salvar é o primeiro depois de 1+
+  /// semana ISO inteira sem nenhum treino (verificado ou self) — dispara a
+  /// celebração de comeback na fase reward. Ver [_saveCount].
+  bool _rewardComeback = false;
 
   // ── Estado do logger count-first + detalhes opcionais do self-log ─────────
   DocumentReference<Map<String, dynamic>>? _logRef;
@@ -212,6 +246,30 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
   void initState() {
     super.initState();
     _loadFeed();
+  }
+
+  /// Deep link `?open=log` — usado pelos CTAs "Registrar treino" do hub
+  /// (`lutador_hub_screen.dart`). O gesto é o mestre do app: quem já decidiu
+  /// registrar não deveria passear pela Jornada nem pelo toggle Histórico
+  /// antes de chegar no logger. Não dá pra fazer isso no construtor (rota é
+  /// `const DiarioScreen()` fixa em `app.dart`) — a tela lê a query string
+  /// dela mesma via [GoRouterState], mesmo padrão já usado alhures (ex.:
+  /// `AdminSettingsScreen`/`focusFeature`, só que lido de dentro em vez de no
+  /// `pageBuilder`).
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_initialRouteRead) return;
+    _initialRouteRead = true;
+    final wantsLogger =
+        GoRouterState.of(context).uri.queryParameters['open'] == 'log';
+    if (!wantsLogger) return;
+    // HISTÓRICO por trás do logger — se o usuário voltar (seta), cai num
+    // lugar que faz sentido (feed + botão de registrar), não na Jornada.
+    _view = 1;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _openCount();
+    });
   }
 
   @override
@@ -422,6 +480,33 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
     return prior.isEmpty ? null : prior.first.sparringCount;
   }
 
+  /// "É a primeira vez que treina depois de 1+ semana ISO inteira sem nada?"
+  /// — comeback da fase reward (item de retenção: o app fica MUDO exatamente
+  /// no momento em que o lutador volta, que é quando mais precisa de reforço).
+  ///
+  /// Deriva do MESMO dado já carregado pro HISTÓRICO (`_feed` — attendance
+  /// verificada + self-log, igual ao streak semanal em `weekly_streak.dart`):
+  /// nenhuma query nova. Só considera comeback quando:
+  ///  - é HOJE (editar/registrar um dia passado não é "voltar agora");
+  ///  - não é edição de um self-log já existente (`_editing` — reabrir hoje
+  ///    pra corrigir um detalhe não deve repetir a celebração);
+  ///  - existe QUALQUER treino anterior no feed (senão é 1º treino de sempre,
+  ///    já coberto pela ativação de 1ª sessão do hub — não é "volta").
+  /// A semana usa a MESMA identidade ISO (segunda-a-segunda) do streak: se a
+  /// semana do treino anterior e a de hoje não são a mesma nem adjacentes, há
+  /// pelo menos 1 semana cheia no meio sem nenhum treino.
+  bool _isComebackToday() {
+    if (_editing) return false;
+    if (!DateUtils.isSameDay(_logDate, DateTime.now())) return false;
+    final prior = _feed.where((e) => e.date.isBefore(_logDate)).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+    if (prior.isEmpty) return false;
+    final lastMonday = mondayUtcOfIsoWeekKey(isoWeekKeyOf(prior.first.date));
+    final todayMonday = mondayUtcOfIsoWeekKey(isoWeekKeyOf(_logDate));
+    if (lastMonday == null || todayMonday == null) return false;
+    return todayMonday.difference(lastMonday).inDays >= 14;
+  }
+
   // ── Toque 2: grava o count do dia (upsert-by-day) ─────────────────────────
   Future<void> _saveCount() async {
     final uid = _uid;
@@ -431,6 +516,9 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
     final count = hasSparring ? _sparringCount : 0;
     // Delta positivo ANTES do optimistic insert (senão compara consigo mesmo).
     final prev = _previousSelfCount();
+    // Idem pro comeback: precisa do _feed ANTES do insert de hoje (senão o
+    // próprio registro que estamos salvando viraria "o treino anterior").
+    final comeback = _isComebackToday();
     try {
       final academyId = ref.read(currentUserProvider).valueOrNull?.academyId;
       final id = await TrainingLogService(uid).upsertForDay(
@@ -474,12 +562,15 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
         _rewardCount = count;
         _rewardDelta =
             (hasSparring && prev != null && count > prev) ? count - prev : null;
+        _rewardComeback = comeback;
         _saving = false;
         _phase = _Phase.reward;
       });
       // Recalcula os insights de sparring (total/recorde/esforço/tendência).
       // NÃO invalida o showcase — a jornada verificada só lê attendance.
       ref.invalidate(sparringInsightsProvider);
+      // Analytics best-effort: nunca bloqueia nem propaga erro do save real.
+      unawaited(AnalyticsService.logTreineiLogged(comeback: comeback));
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -1182,6 +1273,7 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
               ),
               const SizedBox(height: 26),
               _sparringSection(),
+              _recentActivitySection(),
             ],
           );
         }
@@ -1201,12 +1293,59 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
             const SizedBox(height: 18),
             _nextPromotionCard(),
             _sparringSection(),
+            _recentActivitySection(),
             _graduationsSection(grads, multiSport, self),
             const SizedBox(height: 22),
             _competitionsSection(comps, medals, self),
           ],
         );
       },
+    );
+  }
+
+  /// ATIVIDADE RECENTE — item 3 da missão "gesto-mestre": o self-log
+  /// ("Treinei") era invisível na própria Jornada (só existia no HISTÓRICO) —
+  /// o dono registrava e nunca via o registro refletido na sua vitrine.
+  /// Espelho READ-ONLY dos últimos itens de `_feed` (já carregado pro
+  /// HISTÓRICO — nenhuma leitura nova), verificado ✓ + AUTO lado a lado, MESMA
+  /// linha ([_feedRow]) e MESMO selo discreto do Histórico ([_SourceBadge]).
+  /// NÃO mexe em nenhum número oficial: streak/graduação continuam vindo só
+  /// de `p` (attendance verificada) — a nota abaixo deixa isso explícito sem
+  /// tom de aviso.
+  Widget _recentActivitySection() {
+    if (_feed.isEmpty) return const SizedBox.shrink();
+    final recent = _feed.take(5).toList();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _sectionHeader('ATIVIDADE RECENTE'),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _hair),
+            ),
+            child: Column(
+              children: [for (final e in recent) _feedRow(e)],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '✓ confirmada pelo professor conta pra graduação · '
+            'AUTO é seu registro pessoal',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.2,
+              height: 1.3,
+              color: _smoke,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2711,12 +2850,13 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
         if (_showGraduationCaveat) ...[
           const SizedBox(height: 9),
           Text(
-            'REGISTRO AVULSO — NÃO CONTA PRA GRADUAÇÃO',
+            _kAutoLayerNote,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.0,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.2,
+              height: 1.3,
               color: _smoke,
             ),
           ),
@@ -2789,13 +2929,24 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
                     color: _ink,
                   )),
               const Spacer(),
-              Text('VERIFICADO = PROFESSOR · AUTO = VOCÊ',
+              // Neutro, não-hierárquico — ambos os selos são "treino que
+              // aconteceu"; a diferença é só QUEM confirmou (item 1 missão).
+              // Flexible+ellipsis: string ficou mais longa que a antiga
+              // ("VERIFICADO = PROFESSOR...") — evita overflow em tela estreita.
+              Flexible(
+                child: Text(
+                  '✓ confirmada pelo professor · AUTO registrada por você',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
                   style: TextStyle(
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
-                    letterSpacing: 0.6,
+                    letterSpacing: 0.4,
                     color: _smoke,
-                  )),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -2804,26 +2955,32 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
             physics: const BouncingScrollPhysics(),
             padding: EdgeInsets.zero,
             itemCount: _feed.length,
-            itemBuilder: (_, i) {
-              final e = _feed[i];
-              return _TrainRow(
-                entry: e,
-                onTap: e.isSelf
-                    ? () => _showEntryDetail(e)
-                    : (e.verifiedId != null
-                        ? () => _openCount(
-                              date: e.date,
-                              sport: e.sport != null
-                                  ? SportId.fromString(e.sport!)
-                                  : null,
-                              linkedAttendanceId: e.verifiedId,
-                            )
-                        : null),
-              );
-            },
+            itemBuilder: (_, i) => _feedRow(_feed[i]),
           ),
         ),
       ],
+    );
+  }
+
+  /// Uma linha do feed unificado, com o mesmo onTap nos dois lugares que a
+  /// usam: o HISTÓRICO (lista cheia) e a "ATIVIDADE RECENTE" da JORNADA
+  /// (item 3 da missão — self-logs deixam de existir só no Histórico).
+  /// self → abre o detalhe read-only; verified → abre o count pra anexar
+  /// rolas à aula (mesmo fluxo de sempre, sem onTap se não tiver id).
+  Widget _feedRow(TrainEntry e) {
+    return _TrainRow(
+      entry: e,
+      onTap: e.isSelf
+          ? () => _showEntryDetail(e)
+          : (e.verifiedId != null
+              ? () => _openCount(
+                    date: e.date,
+                    sport: e.sport != null
+                        ? SportId.fromString(e.sport!)
+                        : null,
+                    linkedAttendanceId: e.verifiedId,
+                  )
+              : null),
     );
   }
 
@@ -2847,8 +3004,11 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: const [
+            // Antes: "TREINOU SEM PROFESSOR?" — framing pela AUSÊNCIA
+            // (definia o gesto pelo que falta). Troca por framing positivo:
+            // é VOCÊ quem registra, ponto (item 1 missão).
             Text(
-              'TREINOU SEM PROFESSOR?',
+              'REGISTRE VOCÊ MESMO',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
@@ -2984,12 +3144,13 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
           Padding(
             padding: const EdgeInsets.only(top: 6, bottom: 14),
             child: Text(
-              'REGISTRO AVULSO — NÃO CONTA PRA GRADUAÇÃO',
+              _kAutoLayerNote,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.0,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.2,
+                height: 1.3,
                 color: _smoke,
               ),
             ),
@@ -3220,6 +3381,8 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _rewardHeader(),
+                const SizedBox(height: 12),
+                _shareCardButton(),
                 const SizedBox(height: 28),
                 const _SectionLabel('COMO FOI?'),
                 const SizedBox(height: 10),
@@ -3283,16 +3446,31 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
               const SuccessCheck(size: 26, color: _blood),
               const SizedBox(width: 10),
               Text(
-                'REGISTRADO',
+                // Comeback (§4 da missão): "voltar a treinar" é o momento em
+                // que retenção mais importa, e a UI ficava muda nele — troca
+                // a confirmação genérica por reforço, sem mexer em nada
+                // abaixo (count-up/delta/caveat continuam iguais).
+                _rewardComeback ? 'DE VOLTA AO TATAME' : 'REGISTRADO',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1.4,
-                  color: _ash,
+                  color: _rewardComeback ? _blood : _ash,
                 ),
               ),
             ],
           ),
+          if (_rewardComeback) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Semana recomeça agora — bora.',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: _ash,
+              ),
+            ),
+          ],
           const SizedBox(height: 18),
           if (hasSparring)
             Row(
@@ -3338,12 +3516,14 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
             ),
           if (_showGraduationCaveat) ...[
             const SizedBox(height: 10),
+            // Compacta (cartão pequeno) da mesma nota de _kAutoLayerNote —
+            // era "TREINO AVULSO · NÃO CONTA PRA FAIXA" (item 1 missão).
             Text(
-              'TREINO AVULSO · NÃO CONTA PRA FAIXA',
+              'AUTO · conta pro streak e histórico',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
+                letterSpacing: 0.4,
                 color: _ash,
               ),
             ),
@@ -3369,6 +3549,79 @@ class _DiarioScreenState extends ConsumerState<DiarioScreen> {
           ],
         ],
       ),
+    );
+  }
+
+  // ── MOTOR DE CARDS (jul/2026): o app não tinha NENHUM share externo — k
+  // viral = 0 por construção. Este botão abre o preview do card "treino" pra
+  // soltar no status do WhatsApp/stories, transformando o momento de reward
+  // (o pico emocional do gesto-mestre) na alavanca de distribuição.
+  // SÓ reusa dado JÁ barato na tela: `currentStudentProvider` (ficha já
+  // carregada pra tela inteira) + `studentStreakInfoProvider` (MESMO provider
+  // não-autoDispose que o hub usa pro card de streak — se o lutador já visitou
+  // o hub nesta sessão, é cache puro). NUNCA dispara `myShowcaseProvider`
+  // (progressões + attendance bound 2000 + write condicional) só pro card.
+  Widget _shareCardButton() {
+    return Pressable(
+      onTap: _openShareCard,
+      child: Container(
+        height: 50,
+        decoration: BoxDecoration(
+          color: _bone,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _ink, width: 1.4),
+        ),
+        alignment: Alignment.center,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(LucideIcons.share2, size: 16, color: _ink),
+            const SizedBox(width: 8),
+            const Text(
+              'COMPARTILHAR',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.4,
+                color: _ink,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openShareCard() async {
+    final student = ref.read(currentStudentProvider).valueOrNull;
+    final sport = _sport ?? student?.getPrimarySport() ?? SportId.bjj;
+    // Faixa: só o que já está barato (ficha do aluno já carregada) — nunca
+    // dispara leitura nova só pro card (mesmo critério de myShowcaseProvider).
+    final belt =
+        student?.getGrade(sport)?.currentGrade ?? student?.currentBelt;
+    final streak = student != null
+        ? ref.read(studentStreakInfoProvider(student.id)).valueOrNull
+        : null;
+
+    final card = FighterShareCard(
+      variant: FighterShareCardVariant.treino,
+      comeback: _rewardComeback,
+      fighterName: student?.displayName ?? 'Lutador',
+      dateLabel: _dmy(_logDate),
+      modalidadeLabel: _sport != null ? sports[_sport]?.labelShort : null,
+      totalTrainings: student?.totalAttendanceCount,
+      currentStreakWeeks: streak?.currentWeeks,
+      beltLabel: belt != null ? getGradeLabel(sport, belt) : null,
+      beltColor: belt != null ? _beltColor(sport, belt) : null,
+    );
+
+    await ShareCardService.presentAndShare(
+      context: context,
+      card: card,
+      width: FighterShareCard.designWidth,
+      height: FighterShareCard.designHeight,
+      shareText: 'Treinando com o ${AppConstants.appName}.',
+      onShared: () => AnalyticsService.logShareCard('treino'),
     );
   }
 

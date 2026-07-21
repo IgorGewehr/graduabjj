@@ -11,6 +11,7 @@ import 'core/navigator_key.dart';
 import 'core/navigation/nav_catalog.dart';
 import 'providers/auth_provider.dart';
 import 'services/push_notification_service.dart';
+import 'services/analytics_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/auth/link_code_screen.dart';
@@ -451,6 +452,24 @@ class _OverlayProgressStep extends StatelessWidget {
 /// glitch. Reset on logout so the next session re-gates from scratch.
 bool _sessionLanded = false;
 
+/// TAREFA 1 (jul/2026) — token FCM em toda abertura autenticada.
+///
+/// Diagnóstico em prod: o token só era salvo nos fluxos EXPLÍCITOS de
+/// login/criação de conta (auth_provider.dart chama
+/// `pushNotificationService.onUserLogin()` dentro de signInWithEmail/
+/// createAccount/etc). Um app reaberto com sessão JÁ autenticada (restore/
+/// silent-login do FirebaseAuth — o caso mais comum no dia a dia: o usuário
+/// mata e reabre o app) nunca passava por nenhum desses métodos, e por isso
+/// só ~19% dos usuários tinham fcmTokens salvos.
+///
+/// Guard "1x por sessão de processo": o `redirect` do GoRouter roda a CADA
+/// navegação depois que a sessão "pousa" (`_sessionLanded=true`), não só
+/// quando o refreshListenable dispara — sem este latch, cada troca de aba
+/// geraria um novo write no Firestore. Reseta junto com `_sessionLanded`
+/// quando o bootstrap volta a `unauthenticated` (logout), pra a PRÓXIMA
+/// sessão sincronizar de novo.
+bool _pushTokenSyncedThisSession = false;
+
 /// Router Provider
 final routerProvider = Provider<GoRouter>((ref) {
   // Watch the coarse bootstrap status (auth + user + academy settings + linked
@@ -494,6 +513,14 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: '/',
     debugLogDiagnostics: true,
     refreshListenable: refresh,
+    // Analytics (jul/2026): screen_view automático a cada navegação — null
+    // fora de Android/iOS (ver AnalyticsService._enabled), então isto é um
+    // no-op no build desktop. Nenhuma rota daqui seta `name:`, então o
+    // GoRouter usa o TEMPLATE do path como screen_name (ex. '/portal/profile/
+    // :id'), que é agregável e não vaza o id dinâmico no valor do evento.
+    observers: [
+      if (AnalyticsService.observer != null) AnalyticsService.observer!,
+    ],
     redirect: (context, state) {
       final bootstrap = ref.read(appBootstrapProvider);
       final currentUser = ref.read(currentUserProvider);
@@ -519,6 +546,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Not logged in: reset the landing latch and route to the auth flow.
       if (bootstrap == AppBootstrapStatus.unauthenticated) {
         _sessionLanded = false;
+        // TAREFA 1: rearma o guard do token pra próxima sessão poder
+        // sincronizar de novo (ex.: logout de um usuário e login de outro
+        // sem reiniciar o processo).
+        _pushTokenSyncedThisSession = false;
         if (isAuthRoute) return null;
         return '/login';
       }
@@ -609,6 +640,45 @@ final routerProvider = Provider<GoRouter>((ref) {
       // so any subsequent transient reload keeps the user here (no splash
       // bounce). Stay put.
       _sessionLanded = true;
+
+      // TAREFA 1: dispara o MESMO caminho idempotente de registro de token
+      // que o login explícito usa (auth_provider.dart), agora também para
+      // sessão restaurada silenciosamente — é exatamente aqui que o app
+      // "decide que a sessão está pronta". addPostFrameCallback porque
+      // `redirect` roda DURANTE a fase de build/navegação do GoRouter —
+      // side-effects de rede/plugin nativo não podem rodar no meio disso.
+      // onUserLogin() é best-effort e faz no-op sozinho se o FCM não foi
+      // inicializado nesta sessão (guard `_initialized` interno) — cobre o
+      // kill-switch do iOS (Tarefa 2): se o FCM não ligou, não há token a
+      // salvar. No iOS o init roda deferido (main.dart) e pode terminar
+      // DEPOIS deste ponto — por isso main.dart também chama onUserLogin()
+      // logo após o init lá, fechando essa corrida (dupla chamada é segura:
+      // mesmo token, mesmo merge:true).
+      if (!_pushTokenSyncedThisSession) {
+        _pushTokenSyncedThisSession = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          pushNotificationService.onUserLogin();
+          // Analytics (jul/2026): mesmo latch do token FCM — "sessão pousou"
+          // é exatamente o momento de contar app_open_auth (1x por sessão de
+          // processo, não a cada troca de aba) e fixar o contexto de usuário
+          // (uid/academia/role) pro resto dos eventos desta sessão. `user`
+          // pode ser null aqui (ex.: rota fora de /kiosk sem sessão resolvida)
+          // — nesse caso só o token sync roda, sem contexto pra fixar.
+          AnalyticsService.logAppOpenAuthenticated();
+          if (user != null) {
+            AnalyticsService.setUserContext(
+              uid: user.id,
+              academyId: user.academyId,
+              // `.name` (enum nativo) em vez do getter `.value` de
+              // UserRoleExtension — evitar importar models/user.dart aqui só
+              // pela extension; os valores são idênticos ('admin',
+              // 'instructor', 'student', 'guardian').
+              role: user.role.name,
+            );
+          }
+        });
+      }
+
       return null;
     },
     routes: [

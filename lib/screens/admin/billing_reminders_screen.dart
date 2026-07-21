@@ -38,6 +38,11 @@ class _AdminBillingRemindersScreenState
   CollectionStats? _stats;
   Map<String, StudentContact> _studentContacts = {};
   BillingNotificationSettings? _notificationSettings;
+  // AUDITORIA: doc separado de _notificationSettings (settings/billing, não
+  // settings/billingReminders) — ver BillingReminderService.getAutoTuitionEnabled.
+  // Pré-carregado aqui (junto do resto) para que o dialog de configurações
+  // abra com o valor já disponível, sem precisar de FutureBuilder/spinner.
+  bool _autoTuitionEnabled = false;
   bool _isLoading = true;
   bool _isSending = false;
 
@@ -77,6 +82,7 @@ class _AdminBillingRemindersScreenState
         _billingService.getCollectionStats(),
         _billingService.getStudentContacts(),
         _billingService.getNotificationSettings(),
+        _billingService.getAutoTuitionEnabled(),
       ]);
 
       // Get academy name for notification service
@@ -94,6 +100,7 @@ class _AdminBillingRemindersScreenState
         _stats = results[1] as CollectionStats;
         _studentContacts = results[2] as Map<String, StudentContact>;
         _notificationSettings = notifSettings;
+        _autoTuitionEnabled = results[4] as bool;
         _notificationService = BillingNotificationService(
           academyId: academyId,
           academyName: academyName,
@@ -1839,6 +1846,9 @@ class _AdminBillingRemindersScreenState
     bool whatsappEnabled = _notificationSettings?.whatsappEnabled ?? false;
     bool emailEnabled = _notificationSettings?.emailEnabled ?? false;
     bool includePaymentLink = _notificationSettings?.includePaymentLink ?? true;
+    // Pré-carregado em _loadData (doc settings/billing, separado dos demais
+    // toggles acima que moram em settings/billingReminders).
+    bool autoTuitionEnabled = _autoTuitionEnabled;
     // Clone current templates or start empty
     final waTemplates = Map<String, String>.from(
       _notificationSettings?.messageTemplates?.whatsapp ?? {},
@@ -1905,6 +1915,12 @@ class _AdminBillingRemindersScreenState
                       const SizedBox(height: 16),
                       SwitchListTile(
                         title: const Text('Cobranca via WhatsApp'),
+                        subtitle: Text(
+                          'Envia lembretes automaticos por WhatsApp na regua D+0, D+1, D+3, D+7, D+15 e D+30 (diariamente as 9h), alem dos envios manuais desta tela.',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
                         secondary: Icon(
                           LucideIcons.phone,
                           color: whatsappEnabled
@@ -1952,6 +1968,47 @@ class _AdminBillingRemindersScreenState
                         contentPadding: EdgeInsets.zero,
                         onChanged: (value) {
                           setDialogState(() => includePaymentLink = value);
+                        },
+                      ),
+
+                      const Divider(height: 24),
+
+                      // ============================================
+                      // Automação: geração de mensalidades + régua de
+                      // WhatsApp (o switch de WhatsApp fica acima, em
+                      // "Canais de Cobranca" — aqui só a flag nova).
+                      // ============================================
+                      Text('Automacao', style: AppTheme.titleSmall),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Controle o que roda sozinho, sem voce precisar abrir o app.',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SwitchListTile(
+                        title: const Text('Gerar mensalidades automaticamente'),
+                        subtitle: Text(
+                          'Na virada do mes, gera as mensalidades de todos os planos ativos (diariamente as 6h). Planos mensais no cartao continuam pela assinatura automatica.',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        secondary: Icon(
+                          LucideIcons.repeat,
+                          color: autoTuitionEnabled
+                              ? AppTheme.success
+                              : AppTheme.textSecondary,
+                        ),
+                        value: autoTuitionEnabled,
+                        // AUDITORIA: `activeThumbColor` (não `activeColor`,
+                        // já deprecated) — mesma cor/densidade visual dos
+                        // switches vizinhos, sem introduzir warning novo.
+                        activeThumbColor: AppTheme.success,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) {
+                          setDialogState(() => autoTuitionEnabled = value);
                         },
                       ),
 
@@ -2137,12 +2194,22 @@ class _AdminBillingRemindersScreenState
                         messageTemplates: templates,
                       );
 
-                      await _billingService.saveNotificationSettings(
-                        newSettings,
-                      );
+                      // Mesmo fluxo/botão dos demais toggles: salva os dois
+                      // docs juntos (settings/billingReminders +
+                      // settings/billing) para que "Salvar" seja uma ação
+                      // única e previsível para o admin.
+                      await Future.wait([
+                        _billingService.saveNotificationSettings(
+                          newSettings,
+                        ),
+                        _billingService.setAutoTuitionEnabled(
+                          autoTuitionEnabled,
+                        ),
+                      ]);
 
                       setState(() {
                         _notificationSettings = newSettings;
+                        _autoTuitionEnabled = autoTuitionEnabled;
                         // Update notification service with new templates
                         _notificationService?.customTemplates = templates;
                       });

@@ -528,6 +528,42 @@ class BillingReminderService {
         .doc('billingReminders')
         .set(data, SetOptions(merge: true));
   }
+
+  // ============================================
+  // Get / Save Auto-Tuition-Generation Toggle
+  // ============================================
+  // AUDITORIA: doc DIFERENTE de billingReminders acima — o cron
+  // `scheduledMonthlyTuitionGeneration` (server_functions.js) lê
+  // `academies/{id}/settings/billing` campo `autoTuitionEnabled`, não
+  // `settings/billingReminders`. Seguro por padrão (false): sem essa flag
+  // ligada, o cron não gera nenhuma mensalidade pra academia.
+  Future<bool> getAutoTuitionEnabled() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('academies')
+          .doc(academyId)
+          .collection('settings')
+          .doc('billing')
+          .get();
+      if (!doc.exists) return false;
+      return doc.data()?['autoTuitionEnabled'] as bool? ?? false;
+    } catch (_) {
+      // Nunca throwa: falha de leitura -> trata como desligado (seguro).
+      return false;
+    }
+  }
+
+  Future<void> setAutoTuitionEnabled(bool enabled) async {
+    await FirebaseFirestore.instance
+        .collection('academies')
+        .doc(academyId)
+        .collection('settings')
+        .doc('billing')
+        .set({
+      'autoTuitionEnabled': enabled,
+      'updatedAt': Timestamp.fromDate(DateTime.now()),
+    }, SetOptions(merge: true));
+  }
 }
 
 // ============================================

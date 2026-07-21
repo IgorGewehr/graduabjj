@@ -48,7 +48,54 @@ async function getUserTokens(userId) {
   return tokensSnapshot.docs.map((doc) => doc.data().token);
 }
 
+// ---------------------------------------------------------------------------
+// Gate de preferências do aluno (fix jul/2026: "prefs eram placebo" — nenhum
+// sender deste arquivo consultava users/{uid}.notificationPrefs antes de
+// mandar push). Mesma filosofia de push_functions.js:sendPushIfAllowed —
+// mapa de categoria → chave PT-BR gravada por
+// lib/screens/portal/notification_prefs_screen.dart —, MAS só entra em ação
+// quando o chamador marca `data.category` explicitamente. A esmagadora
+// maioria dos usos de sendToUser aqui é notificação a ADMIN/professor (sem
+// toggle nenhum na UI) ou callables genéricas onde o admin decide o próprio
+// conteúdo; sem category, o comportamento é IDÊNTICO ao de sempre (sempre
+// envia) — cobre a exigência de não quebrar push de admin/professor sem
+// precisar tocar em cada call site individualmente.
+//
+// 'financial' (cobrança) NÃO está no mapa de propósito: a tela mostra
+// "Cobrancas e pagamentos sao sempre notificados" com switch fixo/desabilitado
+// — cobrança nunca é filtrada por preferência, em nenhum dos dois canais de
+// push (aqui ou push_functions.js). Os senders de cobrança abaixo marcam
+// `category: 'financial'` mesmo assim, só para documentar a decisão no
+// payload — o gate abaixo trata como não-gateável (equivalente a não marcar).
+const CATEGORY_PREF_KEY = { social: 'social', training: 'treino', academy: 'academia' };
+
+/**
+ * true se o push da `category` deve ser DROPADO por preferência do aluno
+ * (campo ausente = permitido — mesma semântica de push_functions.js).
+ * Categorias fora do mapa (ex.: 'financial', ou nenhuma) nunca são
+ * filtradas. Fail-open em erro de leitura: melhor 1 push a mais do que
+ * quebrar um sender de cobrança por instabilidade transitória do Firestore.
+ */
+async function isOptedOutOfCategory(userId, category) {
+  const prefKey = CATEGORY_PREF_KEY[category];
+  if (!prefKey) return false;
+  try {
+    const snap = await db.collection('users').doc(userId).get();
+    const prefs = (snap.exists && (snap.data() || {}).notificationPrefs) || {};
+    return prefs[prefKey] === false;
+  } catch (e) {
+    console.warn(`[sendToUser] leitura de prefs falhou uid=${userId}:`, e.message);
+    return false;
+  }
+}
+
 async function sendToUser(userId, title, body, data) {
+  const category = data && data.category;
+  if (category && (await isOptedOutOfCategory(userId, category))) {
+    console.log(`[push] drop (prefs opt-out categoria '${category}') uid=${userId}`);
+    return false;
+  }
+
   const tokens = await getUserTokens(userId);
   if (tokens.length === 0) {
     console.log(`No FCM tokens found for user: ${userId}`);
@@ -435,7 +482,16 @@ async function sendBillingReminderWhatsApp(
 ) {
   try {
     const settings = billingSettings || {};
-    if (settings.whatsappEnabled === false) return;
+    // AUDITORIA (opt-in explícito): o gate era `=== false`, o que trata o
+    // doc AUSENTE (settings/billingReminders nunca salvo) como LIGADO. O
+    // cliente (BillingReminderService.getNotificationSettings) faz o oposto:
+    // default whatsappEnabled=false quando o doc não existe. Enquanto
+    // WHATSAPP_API_KEY estava vazia isso era inofensivo (sendWhatsAppServer
+    // nunca disparava); assim que a chave for configurada, TODAS as
+    // academias sem settings salvos passariam a receber WhatsApp automático
+    // sem nunca terem optado. `!== true` alinha o server com o default do
+    // cliente: só envia para quem opt-in explicitamente.
+    if (settings.whatsappEnabled !== true) return;
 
     // Resolve recipient phone from the student doc (effectivePhone semantics).
     // Auditoria (LGPD): respeita o opt-out POR ALUNO (whatsappOptOut===true) —
@@ -635,6 +691,8 @@ exports.onFinancialCreated = functions.firestore
         type: 'financial',
         id: financialId,
         academyId,
+        category: 'financial', // sempre notificado — ver comentário no gate acima
+        actionUrl: '/portal/financeiro',
       }
     );
 
@@ -672,6 +730,7 @@ exports.onCompetitionCreated = functions.firestore
         type: 'competition',
         id: competitionId,
         academyId,
+        actionUrl: `/portal/competicoes/${competitionId}`,
       }
     );
 
@@ -747,6 +806,7 @@ exports.onTimelineEventCreated = functions.firestore
       id: eventId,
       academyId,
       studentId,
+      actionUrl: '/portal/linha-do-tempo',
     });
 
     // Create in-app notification
@@ -1031,6 +1091,8 @@ exports.scheduledOverdueCheck = functions.pubsub
                 type: 'financial',
                 id: financialDoc.id,
                 academyId,
+                category: 'financial', // sempre notificado — ver comentário no gate acima
+                actionUrl: '/portal/financeiro',
               }
             );
             await createInternalNotification(academyId, userId, 'financial', 'high',
@@ -1181,6 +1243,8 @@ exports.scheduledDueSoonReminder = functions.pubsub
                 type: 'financial',
                 id: financialDoc.id,
                 academyId,
+                category: 'financial', // sempre notificado — ver comentário no gate acima
+                actionUrl: '/portal/financeiro',
               }
             );
             await createInternalNotification(academyId, userId, 'financial', 'normal',
@@ -1620,6 +1684,7 @@ async function upsertAutoAchievement(academyId, fields) {
           type: 'achievement',
           achievementType: fields.type || '',
           academyId,
+          actionUrl: '/portal/perfil',
         });
         await createInternalNotification(
           academyId, uid, 'achievement', 'normal',
@@ -6561,7 +6626,11 @@ async function notifySubscriptionStudent(academyId, sub, type, title, message, o
   try {
     const uid = await getBillingRecipientUid(sub.studentId, academyId);
     if (!uid) return;
-    await sendToUser(uid, title, message, { type, academyId });
+    await sendToUser(uid, title, message, {
+      type, academyId,
+      category: 'financial', // sempre notificado — ver comentário no gate acima
+      actionUrl: '/portal/financeiro',
+    });
     await createInternalNotification(academyId, uid, type, 'high', title, message, {
       actionUrl: '/portal/financeiro', actionLabel: 'Atualizar cartão',
       studentId: sub.studentId, expiresInDays: 30,
@@ -7445,7 +7514,9 @@ exports.cancelClassReservation = onCall(async (request) => {
           actionUrl: '/portal/reservas', actionLabel: 'Ver reservas',
           studentId: result.promotedStudentId, expiresInDays: 7,
         });
-        await sendToUser(uid, title, msg, { type: 'class_booking', academyId });
+        await sendToUser(uid, title, msg, {
+          type: 'class_booking', academyId, actionUrl: '/portal/reservas',
+        });
       }
     } catch (e) {
       console.error('promote notify failed:', e);

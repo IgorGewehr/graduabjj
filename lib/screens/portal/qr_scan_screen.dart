@@ -8,6 +8,7 @@ import '../../core/platform_support.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/student_provider.dart';
+import '../../services/analytics_service.dart';
 import '../../services/qr_attendance_service.dart';
 import '../../widgets/polish/polish.dart';
 
@@ -452,6 +453,10 @@ class _SuccessViewState extends State<_SuccessView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) Celebration.confetti(context);
     });
+    // Analytics (jul/2026): check-in por QR de turma confirmado. Aqui (não no
+    // handler de scan) porque _SuccessView só constrói quando o resultado já
+    // voltou com sucesso — 1x por check-in, sem contar tentativas com erro.
+    AnalyticsService.logCheckinScanned(kind: 'qr');
   }
 
   @override

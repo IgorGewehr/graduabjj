@@ -13,11 +13,14 @@ import '../../providers/friend_providers.dart';
 import '../../providers/join_request_providers.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/student_provider.dart';
+import '../../services/analytics_service.dart';
 import '../../services/feed_posts_service.dart';
 import '../../services/settings_service.dart';
+import '../../services/share_card_service.dart';
 import '../../services/streak_freeze_service.dart';
 import '../../services/weekly_streak.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/fighter_share_card.dart';
 import '../../widgets/polish/polish.dart';
 
 // =============================================================================
@@ -157,7 +160,13 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
               const SizedBox(height: 22),
               _FriendsSection(),
             ] else ...[
-              _StreakCard(studentId: student.id),
+              _StreakCard(
+                studentId: student.id,
+                fighterName: name,
+                sport: sport,
+                belt: belt,
+                beltColor: beltColor,
+              ),
               const SizedBox(height: 14),
               _MissionCard(goal: student.activeGoal),
               _GraduationCard(
@@ -227,8 +236,14 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
           children: [
             Text('ENQUANTO ISSO, O APP JÁ É SEU', style: _eyebrow(_T.ink, 12)),
             const SizedBox(height: 14),
-            _waitAction(LucideIcons.flame, 'Registrar um treino',
-                'Sua sequência começa hoje', () => context.go('/portal/diario')),
+            // `?open=log`: aterrissa DIRETO no logger do "Treinei" (gesto-
+            // mestre) — não na Jornada nem atrás do toggle Histórico. Lido
+            // por `DiarioScreen.didChangeDependencies`.
+            _waitAction(
+                LucideIcons.flame,
+                'Registrar um treino',
+                'Sua sequência começa hoje',
+                () => context.go('/portal/diario?open=log')),
             _waitDivider(),
             _waitAction(LucideIcons.users, 'Encontrar a galera',
                 'Siga parceiros de treino', () => context.go('/portal/cena')),
@@ -529,8 +544,22 @@ class _MiniBelt extends StatelessWidget {
 // discreta: snowflake no canto ou long-press no card.
 // =============================================================================
 class _StreakCard extends ConsumerStatefulWidget {
-  const _StreakCard({required this.studentId});
+  const _StreakCard({
+    required this.studentId,
+    required this.fighterName,
+    required this.sport,
+    required this.belt,
+    required this.beltColor,
+  });
   final String studentId;
+
+  // Dados JÁ computados pelo hub pra montar o card compartilhável — o
+  // ícone de share não dispara NENHUMA leitura nova (mesmo espírito do
+  // botão equivalente em diario_screen.dart).
+  final String fighterName;
+  final SportId sport;
+  final String belt;
+  final Color beltColor;
 
   @override
   ConsumerState<_StreakCard> createState() => _StreakCardState();
@@ -632,6 +661,21 @@ class _StreakCardState extends ConsumerState<_StreakCard> {
                             : Colors.white.withValues(alpha: 0.35)),
                   ),
                 ),
+                if (current > 0) ...[
+                  // Motor de Cards (jul/2026): ação discreta pra soltar o
+                  // card "X semanas seguidas" no status do WhatsApp — mesmo
+                  // critério de descoberta do freeze (ícone pequeno, sem
+                  // texto), só aparece quando há streak pra celebrar.
+                  Pressable(
+                    onTap: () => _openShareCard(current),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(LucideIcons.share2,
+                          size: 15, color: Colors.white.withValues(alpha: 0.35)),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                ],
                 const SizedBox(width: 6),
                 const Icon(LucideIcons.flame, color: _T.blood, size: 26),
               ],
@@ -663,6 +707,28 @@ class _StreakCardState extends ConsumerState<_StreakCard> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Motor de Cards (jul/2026): abre o preview do card "X semanas seguidas"
+  /// pra soltar no status do WhatsApp/stories. Dados 100% já computados pelo
+  /// hub (`widget.fighterName`/`belt`/`beltColor` + o [current] que este
+  /// build já tem em mãos) — zero leitura nova disparada só pelo ícone.
+  Future<void> _openShareCard(int current) async {
+    final card = FighterShareCard(
+      variant: FighterShareCardVariant.streak,
+      fighterName: widget.fighterName,
+      currentStreakWeeks: current,
+      beltLabel: getGradeLabel(widget.sport, widget.belt),
+      beltColor: widget.beltColor,
+    );
+    await ShareCardService.presentAndShare(
+      context: context,
+      card: card,
+      width: FighterShareCard.designWidth,
+      height: FighterShareCard.designHeight,
+      shareText: 'Sequência ativa no tatame.',
+      onShared: () => AnalyticsService.logShareCard('streak'),
     );
   }
 
@@ -968,7 +1034,9 @@ class _FirstStepCard extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Pressable(
-            onTap: () => context.go('/portal/diario'),
+            // `?open=log` — mesmo deep link do `_whileWaitingCard`: direto no
+            // logger, sem passar pela Jornada (ver DiarioScreen doc no topo).
+            onTap: () => context.go('/portal/diario?open=log'),
             child: Container(
               height: 48,
               decoration: BoxDecoration(

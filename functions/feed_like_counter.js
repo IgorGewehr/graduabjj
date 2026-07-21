@@ -110,7 +110,9 @@ exports.onFeedLikeWrite = onDocumentWritten(
         category: 'social',
         title: `${likerName} curtiu seu marco`,
         body: headline || 'Seu marco recebeu um salve.',
-        data: { type: 'feed_like', postId },
+        // actionUrl: não há rota de post individual no vocabulário do app
+        // (o feed vive dentro da Cena) — cai no hub/feed genérico.
+        data: { type: 'feed_like', postId, actionUrl: '/portal/cena' },
       });
     } catch (e) {
       // Push é best-effort — nunca falha o contador por causa dele.

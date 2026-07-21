@@ -12,9 +12,14 @@
  *        (lastAttendanceDate só-avança + weeklyBuckets por semana ISO, com
  *        poda automática de buckets além de ~9 semanas);
  *      • feed: dispara a materialização server-side dos marcos do aluno
- *        (./feed_materializer, contrato fixo — best-effort).
- *    Handlers futuros (§9.1: push goal-gradient/streak, GALERA F3:
- *    trainingPairs) plugam no array ATTENDANCE_HANDLERS.
+ *        (./feed_materializer, contrato fixo — best-effort);
+ *      • attendancePush (jul/2026, §9.1): push IMEDIATO no CREATE — "o
+ *        momento de pico" do loop de retenção — via o portão único
+ *        sendPushIfAllowed (./push_functions), categoria 'attendance'.
+ *        Nunca dispara para presença retroativa (backfill/reconciliação —
+ *        ver ATTENDANCE_PUSH_MAX_AGE_MS) nem quebra o dispatcher se falhar.
+ *    Handlers futuros (GALERA F3: trainingPairs) plugam no array
+ *    ATTENDANCE_HANDLERS.
  *
  * 2) computeRetentionDaily — job agendado (03:30 America/Sao_Paulo) que, por
  *    academia, recomputa as janelas rolantes de TODOS os alunos ativos a
@@ -249,13 +254,107 @@ async function feedHandler({ academyId, effects }) {
 }
 
 // ============================================================
+// Handler: push do ATO da presença (o momento de pico) — §9.1
+// ============================================================
+
+/** Idade máxima (ms) de uma presença para ainda disparar o push "na hora".
+ * Acima disso é backfill/reconciliação/correção manual — nunca o "ato". */
+const ATTENDANCE_PUSH_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12h
+
+/**
+ * Push IMEDIATO ao criar uma presença — o momento de maior dopamina do loop
+ * de retenção ("cheguei, treinei, contou"). Até jul/2026 esse momento era
+ * mudo (ver header do módulo — era literalmente "handler futuro").
+ *
+ * Guards (todos silenciosos — nunca lançam para o dispatcher):
+ *  • effect.kind !== 'create' → ignora. Delete de presença nunca notifica;
+ *    um update que troca studentId/date vira delete+create (mesma
+ *    normalização de retentionHandler/feedHandler) e É tratado aqui como um
+ *    create legítimo — consistente com os outros dois handlers, que também
+ *    reagem a esse create sintético.
+ *  • presença "velha" (effect.date há mais de 12h de AGORA) → pula. Backfill
+ *    e reconciliação de chamada não podem virar spam de push atrasado.
+ *  • aluno sem linkedUserId (sem conta fighter vinculada) → nada a notificar.
+ *
+ * uid: MESMO campo que feedHandler usa (student.linkedUserId) — NÃO
+ * getBillingRecipientUid (aquilo é resolução de cobrança/responsável
+ * financeiro, semântica diferente, ver server_functions.js). Para infantil,
+ * o push vai para quem quer que esteja de fato vinculado (aluno ou
+ * responsável) — idêntico ao resto do app social do lutador, sem caso
+ * especial aqui.
+ *
+ * Custo: no máximo 1 read por efeito de create (o doc do aluno, só para
+ * linkedUserId via fieldMask — className/studentName já vieram de graça no
+ * `effect`, populados pelo próprio evento do trigger, ver onAttendanceWrite
+ * acima). Deliberadamente NÃO lemos retention.weeklyBuckets aqui para
+ * enriquecer o corpo (ex.: "3ª vez essa semana"): embora fosse a MESMA
+ * leitura (bastaria somar ao fieldMask), o valor só sai correto se
+ * retentionHandler já rodou e teve sucesso NESTA mesma invocação — acoplar
+ * a ordem dos handlers trocaria uma mensagem simples e sempre-correta por
+ * uma levemente mais rica e ocasionalmente errada (ex.: se retentionHandler
+ * falhar, o número sai subestimado). Não vale o risco.
+ *
+ * try/catch total (por efeito, dentro do próprio handler): falha de push
+ * NUNCA pode derrubar o pipeline de presença — nem os outros efeitos deste
+ * mesmo write, nem os handlers seguintes (o dispatcher já isola por handler,
+ * mas isolamos por efeito aqui também, mesmo padrão de feedHandler).
+ */
+async function attendancePushHandler({ academyId, effects }) {
+  // Lazy require (mesmo padrão de feedHandler para ./feed_materializer):
+  // isola falha de import a este handler e evita o custo de carregar
+  // push_functions.js em writes que não são create (delete puro).
+  // eslint-disable-next-line global-require
+  const { sendPushIfAllowed } = require('./push_functions');
+  const now = Date.now();
+
+  for (const effect of effects) {
+    if (effect.kind !== 'create') continue; // só o ATO — delete nunca notifica
+    const { studentId, date, className } = effect;
+    if (!studentId || !date) continue; // doc malformado — nada a fazer
+
+    // Anti-spam de backfill/reconciliação: presença "velha" não é o ato.
+    if (now - date.getTime() > ATTENDANCE_PUSH_MAX_AGE_MS) continue;
+
+    try {
+      const studentRef = db
+        .collection('academies').doc(academyId)
+        .collection('students').doc(studentId);
+      const [studentSnap] = await db.getAll(studentRef, { fieldMask: ['linkedUserId'] });
+      const uid = studentSnap.exists ? (studentSnap.data() || {}).linkedUserId : null;
+      if (!uid) continue; // sem conta fighter vinculada — sem push
+
+      const clsLabel = (className || '').toString().trim();
+      const body = clsLabel
+        ? `${clsLabel} contou pra sua semana. Bora manter o ritmo!`
+        : 'Sua presença contou pra sua semana. Bora manter o ritmo!';
+
+      await sendPushIfAllowed({
+        db, uid,
+        category: 'attendance',
+        title: 'Presença registrada! 🥋',
+        body,
+        // actionUrl: diário do lutador (streak/treinos) — vocabulário
+        // compartilhado com push_functions.js (streak_risk/weekly_recap).
+        data: { type: 'attendance', academyId, studentId, actionUrl: '/portal/diario' },
+      });
+    } catch (e) {
+      console.error(
+        `[onAttendanceWrite:push] falhou (academy ${academyId}, student ${studentId})`,
+        e && e.message
+      );
+    }
+  }
+}
+
+// ============================================================
 // Dispatcher onAttendanceWrite (extensível: 1 trigger, N handlers)
 // ============================================================
 
-// Handlers novos (push §9.1, trainingPairs GALERA F3) entram aqui.
+// Handlers novos (trainingPairs GALERA F3) entram aqui.
 const ATTENDANCE_HANDLERS = [
   { name: 'retention', fn: retentionHandler },
   { name: 'feed', fn: feedHandler },
+  { name: 'attendancePush', fn: attendancePushHandler },
 ];
 
 exports.onAttendanceWrite = onDocumentWritten(
@@ -270,9 +369,17 @@ exports.onAttendanceWrite = onDocumentWritten(
     // Efeitos normalizados: create → +1; delete → -1; update que troca
     // studentId/date → delete(before) + create(after); update irrelevante
     // (notas, verifiedBy...) → ignora.
+    // className/studentName são ADITIVOS ao shape do effect (retentionHandler
+    // e feedHandler seguem lendo só kind/studentId/date, ignoram o resto):
+    // vêm de graça do próprio doc do evento, para o handler de push
+    // (attendancePushHandler) montar o corpo da notificação sem reler o
+    // attendance que acabou de disparar o trigger.
     const effects = [];
     if (!before && after) {
-      effects.push({ kind: 'create', studentId: after.studentId, date: attendanceDate(after) });
+      effects.push({
+        kind: 'create', studentId: after.studentId, date: attendanceDate(after),
+        className: after.className, studentName: after.studentName,
+      });
     } else if (before && !after) {
       effects.push({ kind: 'delete', studentId: before.studentId, date: attendanceDate(before) });
     } else if (before && after) {
@@ -283,7 +390,10 @@ exports.onAttendanceWrite = onDocumentWritten(
         (beforeDate ? beforeDate.getTime() : null) === (afterDate ? afterDate.getTime() : null);
       if (sameStudent && sameDate) return; // update sem impacto nos agregados
       effects.push({ kind: 'delete', studentId: before.studentId, date: beforeDate });
-      effects.push({ kind: 'create', studentId: after.studentId, date: afterDate });
+      effects.push({
+        kind: 'create', studentId: after.studentId, date: afterDate,
+        className: after.className, studentName: after.studentName,
+      });
     } else {
       return;
     }

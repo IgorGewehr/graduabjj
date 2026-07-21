@@ -5,8 +5,13 @@
  * Exporta:
  *  - sendPushIfAllowed({ db, uid, category, title, body, data }) — helper
  *    compartilhado que TODA CF de push do aluno deve usar. Aplica, NA ORDEM:
- *      (1) users/{uid}.notificationPrefs[category] — campo AUSENTE = true
- *          (opt-out); 'billing' não passa por aqui (não é desligável).
+ *      (1) users/{uid}.notificationPrefs[CATEGORY_PREF_KEY[category]] —
+ *          campo AUSENTE = true (opt-out); 'billing' não passa por aqui
+ *          (não é desligável). FIX (jul/2026): a leitura é pela chave PT-BR
+ *          real que o cliente grava (ver CATEGORY_PREF_KEY abaixo) — antes
+ *          lia `prefs[category]` (EN) direto e os toggles "Treino"/
+ *          "Academia" eram placebo (a chave nunca batia, então sempre caía
+ *          no default "permitido").
  *      (2) quiet hours 21h–8h America/Sao_Paulo — dentro da janela o push é
  *          DROPADO com log (não enfileira para depois).
  *      (3) cap semanal para category 'training': máx. 3 pushes de
@@ -64,7 +69,34 @@ const QUIET_HOURS_START = 21; // >= 21h → silêncio
 const QUIET_HOURS_END = 8;    // < 8h  → silêncio (8h em diante volta a enviar)
 const TRAINING_WEEKLY_CAP = 3; // máx. pushes category 'training' por semana ISO
 
-const PUSH_CATEGORIES = new Set(['social', 'training', 'academy']);
+// 'attendance' (retention_functions.js — push do ATO da presença, jul/2026)
+// NÃO consome TRAINING_WEEKLY_CAP (ver step 3 de sendPushIfAllowed abaixo):
+// é auto-limitado a 1x/presença e já gated pela janela de 12h no próprio
+// handler, então competir pelo mesmo orçamento semanal do streak/recap/
+// lembrete faria o push do "momento de pico" sumir justamente para quem
+// mais treina — o oposto do objetivo.
+const PUSH_CATEGORIES = new Set(['social', 'training', 'academy', 'attendance']);
+
+/**
+ * Categoria interna (como os handlers chamam sendPushIfAllowed) → chave
+ * PT-BR gravada por `_NotifPrefs.toMap()` em
+ * lib/screens/portal/notification_prefs_screen.dart. FIX (jul/2026): antes
+ * o código lia `prefs[category]` DIRETAMENTE — como o cliente grava em
+ * PT-BR ('treino'/'academia') e aqui a categoria é em EN ('training'/
+ * 'academy'), os toggles "Treino" e "Academia" eram PLACEBO: a chave lida
+ * nunca batia com a gravada, então caía sempre no default "ausente =
+ * permitido" e o push saía do mesmo jeito com o toggle desligado. 'social'
+ * já funcionava, por coincidência (mesma grafia nos dois lados).
+ * 'attendance' não tem toggle dedicado na UI — reaproveita a MESMA chave
+ * 'treino' ("Streak, lembretes de aula e recap da semana"): semanticamente
+ * é o mesmo balde de preferência.
+ */
+const CATEGORY_PREF_KEY = {
+  social: 'social',
+  training: 'treino',
+  academy: 'academia',
+  attendance: 'treino',
+};
 
 // ============================================================
 // Helpers de tempo — wall-clock de São Paulo + semana ISO
@@ -262,11 +294,14 @@ async function sendPushIfAllowed({ db: dbRef, uid, category, title, body, data }
   const userRef = database.collection('users').doc(uid);
 
   // (1) Preferências — campo AUSENTE = true (opt-out explícito com false).
+  // Lê pela chave PT-BR REAL (CATEGORY_PREF_KEY) — NÃO pela categoria crua
+  // (era a raiz do bug de toggle-placebo, ver comentário do mapa acima).
   const userSnap = await userRef.get();
   if (!userSnap.exists) return { sent: false, reason: 'no-user' };
   const prefs = (userSnap.data() || {}).notificationPrefs || {};
-  if (prefs[category] === false) {
-    console.log(`[push] drop (prefs.${category}=false) uid=${uid}`);
+  const prefKey = CATEGORY_PREF_KEY[category] || category;
+  if (prefs[prefKey] === false) {
+    console.log(`[push] drop (prefs.${prefKey}=false, categoria ${category}) uid=${uid}`);
     return { sent: false, reason: 'prefs-opt-out' };
   }
 
@@ -454,7 +489,9 @@ exports.streakRiskCheck = onSchedule(
         category: 'training',
         title: 'A semana ainda tá aberta 🔥',
         body: `Seu streak de ${bridgedStreak} semanas segue vivo — um treino essa semana mantém a chama.`,
-        data: { type: 'streak_risk', academyId, weekKey: currentKey },
+        // actionUrl: diário do lutador (streak/treinos) — mesmo vocabulário
+        // de rotas usado pelo createInternalNotification server-side.
+        data: { type: 'streak_risk', academyId, weekKey: currentKey, actionUrl: '/portal/diario' },
       });
       if (res.sent) sentCount++;
     });
@@ -515,7 +552,8 @@ exports.weeklyRecapSunday = onSchedule(
         category: 'training',
         title: 'Semana fechada 🥋',
         body: `Sua semana: ${treinoTxt}${rolasTxt} — ${streakTxt}.`,
-        data: { type: 'weekly_recap', academyId, weekKey: currentKey },
+        // actionUrl: mesmo destino do streak_risk — o recap É sobre o diário.
+        data: { type: 'weekly_recap', academyId, weekKey: currentKey, actionUrl: '/portal/diario' },
       });
       if (res.sent) sentCount++;
     });
@@ -642,6 +680,8 @@ exports.classReminderHourly = onSchedule(
                 type: 'class_reminder',
                 academyId: academyRef.id,
                 classId: classDoc.id,
+                // actionUrl: grade de horários — é literalmente do que o push fala.
+                actionUrl: '/portal/horarios',
               },
             });
             if (res.sent) {
