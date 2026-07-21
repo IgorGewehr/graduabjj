@@ -43,9 +43,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
   double _totalRevenue = 0;
   double _totalPending = 0;
   double _totalOverdue = 0;
-  int _paidPayments = 0;
-  int _pendingPayments = 0;
-  int _overduePayments = 0;
   double _lastMonthRevenue = 0;
   double _averageTicket = 0;
 
@@ -348,9 +345,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     final paidInMonth = monthPayments
         .where((p) => p.status.value == 'paid' && !p.isOvercharge)
         .toList();
-    final pendingInMonth = monthPayments
-        .where((p) => p.status.value == 'pending')
-        .toList();
     final overdueInMonth = monthPayments
         .where((p) => p.status.value == 'overdue')
         .toList();
@@ -370,9 +364,6 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
       _totalRevenue = (summary['totalPaid'] ?? 0.0) as double;
       _totalPending = (summary['totalPending'] ?? 0.0) as double;
       _totalOverdue = overdueTotal;
-      _paidPayments = paidInMonth.length;
-      _pendingPayments = pendingInMonth.length;
-      _overduePayments = overdueInMonth.length;
       _lastMonthRevenue = (lastMonthSummary['totalPaid'] ?? 0.0) as double;
       _averageTicket = avgTicket;
     });
@@ -920,9 +911,8 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
     final tuitionRevenueRate = tuitionTotal > 0
         ? _totalRevenue / tuitionTotal
         : 0.0;
-    final revenueChange = _lastMonthRevenue > 0
-        ? ((_totalRevenue - _lastMonthRevenue) / _lastMonthRevenue * 100)
-        : 0.0;
+    // revenueChange removido: só alimentava o card de receita duplicado
+    // (agora excluído) e não é mais consumido nesta aba.
     final hasStore =
         _storeRevenue > 0 || _storeOrderCount > 0 || _storePendingCount > 0;
 
@@ -971,44 +961,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
             const SizedBox(height: 16),
           ],
 
-          // Main stat card - tuition only
-          _buildMainStatCard(
-            title: 'Receita Mensalidades',
-            value: 'R\$ ${_formatCurrency(_totalRevenue)}',
-            subtitle: '$_paidPayments pagamentos recebidos',
-            icon: LucideIcons.dollarSign,
-            color: AppTheme.success,
-            change: revenueChange,
-            isPositive: revenueChange >= 0,
-          ).entrance(index: 1),
-          const SizedBox(height: 16),
-
-          // Tuition stats
-          Row(
-            children: [
-              Expanded(
-                child: _MiniStatCard(
-                  icon: LucideIcons.clock,
-                  label: 'Pendente',
-                  value: 'R\$ ${_formatCurrency(_totalPending)}',
-                  subtitle: '$_pendingPayments pagtos',
-                  color: AppTheme.warning,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _MiniStatCard(
-                  icon: LucideIcons.alertCircle,
-                  label: 'Atrasado',
-                  value: 'R\$ ${_formatCurrency(_totalOverdue)}',
-                  subtitle: '$_overduePayments pagtos',
-                  color: AppTheme.error,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
+          // Card de receita/pendente/atrasado removido: já coberto por
+          // _buildStatusDistribution() acima (decisão do dono: sem funções
+          // repetidas na mesma tela).
           Row(
             children: [
               Expanded(
@@ -1036,42 +991,9 @@ class _AdminReportsScreenState extends ConsumerState<AdminReportsScreen>
           ),
           const SizedBox(height: 16),
 
-          // Tuition breakdown card
-          _ReportCard(
-            title: 'Detalhamento',
-            icon: LucideIcons.pieChart,
-            badge: '$_paidPayments recebidos',
-            child: Column(
-              children: [
-                _ProgressRow(
-                  label: 'Recebido',
-                  value: 'R\$ ${_formatCurrency(_totalRevenue)}',
-                  percentage: tuitionTotal > 0
-                      ? _totalRevenue / tuitionTotal
-                      : 0,
-                  color: AppTheme.success,
-                ),
-                const SizedBox(height: 16),
-                _ProgressRow(
-                  label: 'Pendente',
-                  value: 'R\$ ${_formatCurrency(_totalPending)}',
-                  percentage: tuitionTotal > 0
-                      ? _totalPending / tuitionTotal
-                      : 0,
-                  color: AppTheme.warning,
-                ),
-                const SizedBox(height: 16),
-                _ProgressRow(
-                  label: 'Atrasado',
-                  value: 'R\$ ${_formatCurrency(_totalOverdue)}',
-                  percentage: tuitionTotal > 0
-                      ? _totalOverdue / tuitionTotal
-                      : 0,
-                  color: AppTheme.error,
-                ),
-              ],
-            ),
-          ),
+          // Card "Detalhamento" (Recebido/Pendente/Atrasado) removido: dado
+          // duplicado do painel de status acima (decisão do dono: sem
+          // funções repetidas na mesma tela).
 
           // =============================================
           // SECTION: Vendas da Loja
@@ -2483,72 +2405,6 @@ class _ReportCard extends StatelessWidget {
   }
 }
 
-/// Progress Row for financial breakdown
-class _ProgressRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final double percentage;
-  final Color color;
-
-  const _ProgressRow({
-    required this.label,
-    required this.value,
-    required this.percentage,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(label, style: AppTheme.bodySmall),
-              ],
-            ),
-            Text(
-              value,
-              style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Stack(
-          children: [
-            Container(
-              height: 8,
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            FractionallySizedBox(
-              widthFactor: percentage.clamp(0.0, 1.0),
-              child: Container(
-                height: 8,
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
+// _ProgressRow removido: só era usado pelo card "Detalhamento" (dado
+// duplicado do painel de status), removido em _buildFinancialTab.
 

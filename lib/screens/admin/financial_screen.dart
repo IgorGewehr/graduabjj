@@ -2028,17 +2028,9 @@ class _PaymentCard extends StatelessWidget {
               PopupMenuButton<String>(
                 icon: const Icon(LucideIcons.moreVertical, size: 20),
                 itemBuilder: (context) => [
-                  if (!isPaid && !isCancelled)
-                    const PopupMenuItem(
-                      value: 'mark_paid',
-                      child: Row(
-                        children: [
-                          Icon(LucideIcons.check, size: 16),
-                          SizedBox(width: 8),
-                          Text('Dar Baixa'),
-                        ],
-                      ),
-                    ),
+                  // Decisão do dono: sem funções repetidas na mesma tela —
+                  // "Dar Baixa" removido daqui; o botão "Confirmar" (abaixo)
+                  // já é a única via de dar baixa no pagamento.
                   if (!isPaid && !isCancelled)
                     PopupMenuItem(
                       value: 'cancel',
@@ -2070,9 +2062,8 @@ class _PaymentCard extends StatelessWidget {
                 ],
                 onSelected: (value) {
                   switch (value) {
-                    case 'mark_paid':
-                      onMarkPaid?.call();
-                      break;
+                    // 'mark_paid' removido: única via de dar baixa é o
+                    // botão "Confirmar" (decisão do dono, sem duplicidade).
                     case 'cancel':
                       onCancel?.call();
                       break;

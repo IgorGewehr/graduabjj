@@ -182,6 +182,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _storeWelcomeController,
       _storeMinAmountController,
       _autoGraduationAttendancesController,
+      _minSkillPctController,
     ]) {
       c.addListener(_onFieldChanged);
     }
@@ -196,6 +197,17 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           ..sort((a, b) => a.key.compareTo(b.key)))
         .map((e) => '${e.key}:${e.value.open}-${e.value.close}')
         .join(',');
+    final requirementsBySport = (_graduationRequirementsBySport.entries
+            .toList()
+          ..sort((a, b) => a.key.compareTo(b.key)))
+        .map((e) {
+          final grades = (e.value.entries.toList()
+                ..sort((a, b) => a.key.compareTo(b.key)))
+              .map((g) => '${g.key}:${g.value}')
+              .join(',');
+          return '${e.key}[$grades]';
+        })
+        .join(';');
     return [
       _nameController.text,
       _displayNameController.text,
@@ -232,6 +244,12 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _useClassWeights,
       _graduationMode,
       _graduationProgressVisibleToStudents,
+      _accessControlEnabled,
+      _accessControlVendor,
+      _accessControlBlockOnOverdue,
+      _graduationSkillPolicy,
+      _minSkillPctController.text,
+      requirementsBySport,
     ].join('|');
   }
 
@@ -794,8 +812,12 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                             ),
                           ),
 
-                          // Save button
-                          SliverToBoxAdapter(child: _buildSaveButton()),
+                          // Botão de salvar do topo removido (decisão do dono:
+                          // sem funções repetidas na mesma tela). A barra
+                          // fixa "Alteracoes nao salvas" (_buildUnsavedBar,
+                          // abaixo) já cobre Salvar como via única — agora
+                          // confiável para todo campo graças ao snapshot
+                          // corrigido em _snapshot().
 
                           // Bottom padding
                           const SliverToBoxAdapter(child: SizedBox(height: 100)),
@@ -902,7 +924,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             ),
           const Spacer(),
           IconButton(
-            onPressed: _loadSettings,
+            // Decisão do dono: sem funções repetidas na mesma tela — com edição
+            // pendente, a única via de recarregar/descartar é o botão "Descartar"
+            // da barra de alterações não salvas (_buildUnsavedBar).
+            onPressed: _isDirty ? null : _loadSettings,
             icon: const Icon(LucideIcons.refreshCw, size: 20),
             style: IconButton.styleFrom(
               backgroundColor: AppTheme.surface,
@@ -2481,46 +2506,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     }
   }
 
-  Widget _buildSaveButton() {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: ElevatedButton(
-        onPressed: _isSaving ? null : _saveSettings,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppTheme.textPrimary,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          disabledBackgroundColor: AppTheme.textPrimary.withValues(alpha: 0.5),
-        ),
-        child: _isSaving
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              )
-            : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(LucideIcons.save, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Salvar Configuracoes',
-                    style: AppTheme.bodyMedium.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-      ),
-    );
-  }
+  // _buildSaveButton() removido: duplicava o botão "Salvar" que já fica
+  // fixo em _buildUnsavedBar() sempre que há alterações pendentes — as duas
+  // vias apareciam simultaneamente na mesma tela (decisão do dono: sem
+  // funções repetidas na mesma tela para o mesmo dado).
 }
 
 /// Settings Card Widget

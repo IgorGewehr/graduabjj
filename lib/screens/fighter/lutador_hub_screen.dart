@@ -57,6 +57,21 @@ String _shortDatePt(DateTime d) {
   return d.year == DateTime.now().year ? s : '$s ${d.year}';
 }
 
+/// Gate puro do check-in diário sem-turma (extraído de dentro de
+/// `_CheckinButtonCardState.build` — decisão do dono: sem funções repetidas
+/// na mesma tela). Mesma condição de sempre, agora reusável: precisa de
+/// ≥1 modalidade sem-turma (GradeSystem.none) no aluno, com o master switch
+/// da academia ligado e o modo de check-in em 'button' (não 'qr'/'manual').
+bool checkinIsAvailable(
+  List<SportId> sports, {
+  required bool musculacaoEnabled,
+  required String mode,
+}) {
+  final hasScheduleless =
+      sports.any((s) => getSport(s).gradeSystem == GradeSystem.none);
+  return musculacaoEnabled && mode == 'button' && hasScheduleless;
+}
+
 String _nameInitials(String name) {
   final parts = name.trim().split(RegExp(r'\s+'));
   if (parts.isEmpty || parts.first.isEmpty) return '?';
@@ -127,6 +142,17 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
         streakInfo.currentWeeks == 0 &&
         streakInfo.recordWeeks == 0;
 
+    // O check-in diário (quando disponível) já É o convite ao 1º registro —
+    // mostrar o _FirstStepCard junto seria a mesma função duas vezes na
+    // mesma tela (decisão do dono: sem funções repetidas). `_CheckinButtonCard`
+    // continua a única via de ativação quando ativo.
+    final academySettings = ref.watch(academySettingsProvider).valueOrNull;
+    final checkinActive = checkinIsAvailable(
+      sports,
+      musculacaoEnabled: academySettings?.musculacaoEnabled ?? true,
+      mode: academySettings?.musculacaoCheckinMode ?? 'manual',
+    );
+
     return Scaffold(
       backgroundColor: _T.bone,
       body: SafeArea(
@@ -179,7 +205,12 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
                 _noAcademyCard(context),
               ],
             ] else if (isFirstStep) ...[
-              const _FirstStepCard(),
+              // Com check-in ativo, `_CheckinButtonCard` (acima) já é o
+              // convite ao 1º registro — sem ele por baixo pra não duplicar
+              // a mesma função (decisão do dono: sem funções repetidas na
+              // mesma tela). SizedBox + _FriendsSection ficam incondicionais
+              // pra não quebrar o espaçamento quando o card some.
+              if (!checkinActive) const _FirstStepCard(),
               const SizedBox(height: 22),
               _FriendsSection(),
             ] else ...[
@@ -628,7 +659,11 @@ class _CheckinButtonCardState extends ConsumerState<_CheckinButtonCard> {
     );
     final scheduleless = _scheduleless;
 
-    if (!musculacaoEnabled || mode != 'button' || scheduleless.isEmpty) {
+    // Gate extraído para `checkinIsAvailable` (reusado no hub pra decidir se
+    // o _FirstStepCard deve ceder o lugar a este card) — mesmo comportamento
+    // de antes, só que numa função pura compartilhada.
+    if (!checkinIsAvailable(widget.sports,
+        musculacaoEnabled: musculacaoEnabled, mode: mode)) {
       return const SizedBox.shrink();
     }
 
@@ -1671,14 +1706,17 @@ class _FriendsSection extends ConsumerWidget {
             const SizedBox(width: 8),
             Text('PARCEIROS', style: _eyebrow(_T.ink, 13)),
             const Spacer(),
-            Pressable(
-              onTap: () => context.go('/portal/cena'),
-              child: const Text('ver tudo',
-                  style: TextStyle(
-                      color: _T.smoke,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700)),
-            ),
+            // Sem parceiros, o card "VER PARCEIROS" abaixo já é a única via
+            // para /portal/cena — decisão do dono: sem funções repetidas na tela.
+            if (hasPartners)
+              Pressable(
+                onTap: () => context.go('/portal/cena'),
+                child: const Text('ver tudo',
+                    style: TextStyle(
+                        color: _T.smoke,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700)),
+              ),
           ],
         ),
         const SizedBox(height: 12),

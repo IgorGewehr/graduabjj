@@ -240,6 +240,9 @@ class _CenaScreenState extends ConsumerState<CenaScreen> {
                 children: [
                   const Icon(LucideIcons.users, size: 16, color: _C.ash),
                   const SizedBox(width: 10),
+                  // Botão "ADICIONAR" removido daqui: já existe no header
+                  // desta seção (linha ~204), sempre visível. Decisão do
+                  // dono: evitar 2 controles pra mesma ação na mesma tela.
                   const Expanded(
                     child: Text(
                       'Nenhum parceiro ainda.',
@@ -248,10 +251,6 @@ class _CenaScreenState extends ConsumerState<CenaScreen> {
                           fontSize: 13,
                           fontWeight: FontWeight.w600),
                     ),
-                  ),
-                  Pressable(
-                    onTap: _showAddFriend,
-                    child: Text('ADICIONAR', style: _eyebrow(_C.blood, 10)),
                   ),
                 ],
               ),

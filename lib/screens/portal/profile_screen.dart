@@ -108,8 +108,6 @@ class ProfileScreen extends ConsumerWidget {
                   // Quick Actions
                   _QuickActions(
                     onTimeline: () => context.go('/portal/linha-do-tempo'),
-                    onEdit: () =>
-                        _showEditPersonalDataSheet(context, ref, student),
                   ),
 
                   const SizedBox(height: 26),
@@ -849,35 +847,25 @@ class _WhiteCard extends StatelessWidget {
   }
 }
 
-/// Quick Actions — Timeline + Edit profile chips
+/// Quick Actions — Timeline chip.
+/// Chip 'EDITAR PERFIL' removido: duplicava o tile 'Dados Pessoais' em
+/// MEUS DADOS, que já abre _showEditPersonalDataSheet (decisão do dono:
+/// sem funções repetidas na mesma tela).
 class _QuickActions extends StatelessWidget {
   final VoidCallback onTimeline;
-  final VoidCallback onEdit;
 
-  const _QuickActions({required this.onTimeline, required this.onEdit});
+  const _QuickActions({required this.onTimeline});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _QuickActionChip(
-            icon: LucideIcons.history,
-            label: 'LINHA DO TEMPO',
-            onTap: onTimeline,
-            filled: false,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _QuickActionChip(
-            icon: LucideIcons.pencil,
-            label: 'EDITAR PERFIL',
-            onTap: onEdit,
-            filled: true,
-          ),
-        ),
-      ],
+    return SizedBox(
+      width: double.infinity,
+      child: _QuickActionChip(
+        icon: LucideIcons.history,
+        label: 'LINHA DO TEMPO',
+        onTap: onTimeline,
+        filled: false,
+      ),
     );
   }
 }
@@ -1915,12 +1903,9 @@ class _AcademiesSection extends ConsumerWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _SectionHeader(
-              title: 'MINHAS ACADEMIAS',
-              onEdit: hasMultiple
-                  ? () => context.push('/portal/academias')
-                  : null,
-            ),
+            // Sem onEdit: 'GERENCIAR ACADEMIAS' abaixo já é a via única para
+            // '/portal/academias' (decisão do dono: sem funções repetidas na mesma tela).
+            _SectionHeader(title: 'MINHAS ACADEMIAS'),
             const SizedBox(height: 10),
             Container(
               decoration: BoxDecoration(

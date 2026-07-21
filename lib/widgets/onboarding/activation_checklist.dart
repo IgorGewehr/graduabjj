@@ -214,6 +214,10 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
             : 'Faça a primeira chamada de treino',
         route: '/admin/chamada',
         done: hasAttendance,
+        // Sem 2ª via pra mesma rota: o card "Chamada" das Ações Rápidas,
+        // logo abaixo nesta tela, é SEMPRE visível e já cobre esse destino
+        // (decisão do dono: nada de botões duplicados pra mesma função).
+        navigable: false,
       ),
     ];
 
@@ -317,7 +321,13 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
                       for (final step in steps)
                         _ActivationStepTile(
                           step: step,
-                          onTap: () => context.go(step.route),
+                          // `navigable: false` (ver _ActivationStep) tira o
+                          // tap: o passo continua mostrando progresso, mas
+                          // não abre uma 2ª rota pro mesmo destino de um card
+                          // das Ações Rápidas já sempre visível na tela.
+                          onTap: step.navigable
+                              ? () => context.go(step.route)
+                              : null,
                           onDismiss: step.dismissible && !step.done
                               ? () => dismissStep(step.id)
                               : null,
@@ -365,6 +375,11 @@ class _ActivationStep {
   /// Pode ser dispensado pelo dono ("não vou usar") — passos opcionais.
   final bool dismissible;
 
+  /// Quando `false`, o tile não abre `route` ao tocar (decisão do dono: sem
+  /// funções repetidas na mesma tela) — usado só quando a mesma rota já tem
+  /// um card SEMPRE visível nas Ações Rápidas logo abaixo, no dashboard.
+  final bool navigable;
+
   const _ActivationStep({
     required this.id,
     required this.icon,
@@ -374,6 +389,7 @@ class _ActivationStep {
     required this.done,
     this.recommended = false,
     this.dismissible = false,
+    this.navigable = true,
   });
 }
 
@@ -382,7 +398,11 @@ class _ActivationStep {
 /// com o título riscado.
 class _ActivationStepTile extends StatelessWidget {
   final _ActivationStep step;
-  final VoidCallback onTap;
+
+  /// Nulo quando `!step.navigable`: o passo perde o toque (Pressable já é
+  /// no-op sem onTap) — sem afordance de uma 2ª via pra rota já coberta
+  /// pelas Ações Rápidas.
+  final VoidCallback? onTap;
 
   /// Quando não-nulo, o passo pode ser dispensado (mostra um "×" discreto).
   final VoidCallback? onDismiss;
@@ -469,8 +489,9 @@ class _ActivationStepTile extends StatelessWidget {
                 icon: const Icon(LucideIcons.x,
                     size: 16, color: AppTheme.textSecondary),
               ),
-            // Estado: check verde (feito) ou seta (pendente).
-            _TrailingIndicator(done: done),
+            // Estado: check verde (feito), seta (pendente e navegável) ou
+            // indicador neutro (pendente mas sem 2ª via — ver `navigable`).
+            _TrailingIndicator(done: done, navigable: step.navigable),
           ],
         ),
       ),
@@ -478,11 +499,14 @@ class _ActivationStepTile extends StatelessWidget {
   }
 }
 
-/// Indicador à direita do passo: medalha de concluído ou seta de "vá fazer".
+/// Indicador à direita do passo: medalha de concluído, seta de "vá fazer" ou
+/// (quando `!navigable`) um círculo neutro sem seta — o passo segue mostrando
+/// progresso, mas sem afordance de toque, pois já não abre rota nenhuma.
 class _TrailingIndicator extends StatelessWidget {
   final bool done;
+  final bool navigable;
 
-  const _TrailingIndicator({required this.done});
+  const _TrailingIndicator({required this.done, this.navigable = true});
 
   @override
   Widget build(BuildContext context) {
@@ -495,6 +519,18 @@ class _TrailingIndicator extends StatelessWidget {
           shape: BoxShape.circle,
         ),
         child: const Icon(LucideIcons.check, size: 16, color: Colors.white),
+      );
+    }
+    // Pendente sem 2ª via (navigable: false): mesmo círculo, sem seta —
+    // nada convida a tocar num destino já garantido pelas Ações Rápidas.
+    if (!navigable) {
+      return Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant,
+          shape: BoxShape.circle,
+        ),
       );
     }
     return Container(
