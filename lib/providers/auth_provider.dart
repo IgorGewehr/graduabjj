@@ -531,6 +531,16 @@ class AuthService {
       'abacatePayEnabled': false,
       'autoGraduationEnabled': false,
       'studentCheckinEnabled': true,
+      // Academias fitness/hybrid têm musculação (GradeSystem.none) entre suas
+      // modalidades — sem isto o modo de check-in nasce 'manual' (default do
+      // campo, ver SettingsService/AcademySettings) e o botão de check-in do
+      // aluno (lutador_hub_screen.dart `checkinIsAvailable`) fica invisível,
+      // tornando falsa a promessa "o check-in já está ativo" do último passo
+      // do wizard fitness (onboarding_wizard_screen.dart `_FitnessDoneScreen`).
+      // 'fight' puro NÃO grava isto — mantém o default 'manual' de sempre,
+      // comportamento legado intocado pra quem só treina luta.
+      if (profile == 'fitness' || profile == 'hybrid')
+        'musculacaoCheckinMode': 'button',
       // Business profile — drives copy/vocabulary (core/academy_vocab.dart).
       // Legacy academies (field absent) parse to 'fight' — zero behavior
       // change for them, see AcademyProfileExtension.fromString.

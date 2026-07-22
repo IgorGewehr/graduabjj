@@ -18,6 +18,7 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/join_request_providers.dart';
 import '../../providers/portal_providers.dart';
+import '../../services/analytics_service.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/academy_page_header.dart';
@@ -283,6 +284,15 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Master switch (mesmo campo que gateia o botão de check-in do próprio
+    // aluno em lutador_hub_screen.dart) — decide se a ação "Marcar presença
+    // de hoje" aparece nos cards abaixo. `select` evita rebuild da tela
+    // inteira quando outros campos de AcademySettings mudam.
+    final musculacaoEnabled = ref.watch(
+      academySettingsProvider.select(
+        (s) => s.valueOrNull?.musculacaoEnabled ?? true,
+      ),
+    );
     return Scaffold(
       backgroundColor: AppTheme.background,
       // ContentBounded: no-op no mobile; no desktop centraliza e limita a lista
@@ -338,7 +348,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                     )
                   : _filteredStudents.isEmpty
                   ? SliverFillRemaining(child: _buildEmptyState())
-                  : _buildStudentSliverList(),
+                  : _buildStudentSliverList(musculacaoEnabled),
 
               // Bottom padding
               const SliverToBoxAdapter(child: SizedBox(height: 100)),
@@ -677,7 +687,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     );
   }
 
-  Widget _buildStudentSliverList() {
+  Widget _buildStudentSliverList(bool musculacaoEnabled) {
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       sliver: SliverList(
@@ -686,6 +696,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           return _StudentCard(
             student: student,
             eligibility: _eligibilityByStudent[student.id],
+            musculacaoEnabled: musculacaoEnabled,
             onTap: () => context.go('/admin/alunos/${student.id}'),
           ).entrance(index: index);
         }, childCount: _filteredStudents.length),
@@ -823,12 +834,34 @@ class _StudentCard extends StatelessWidget {
   /// a progress bar (current/required) and an "Elegível" badge.
   final EligibilitySnapshotEntry? eligibility;
 
-  const _StudentCard({required this.student, this.onTap, this.eligibility});
+  /// Master switch da academia (AcademySettings.musculacaoEnabled) — parte
+  /// do gate da ação "Marcar presença de hoje" (a outra parte é o próprio
+  /// aluno ter ≥1 modalidade sem-faixa, calculado abaixo).
+  final bool musculacaoEnabled;
+
+  const _StudentCard({
+    required this.student,
+    this.onTap,
+    this.eligibility,
+    this.musculacaoEnabled = false,
+  });
+
+  /// Modalidades sem-faixa (GradeSystem.none — musculação/boxe/MMA) que este
+  /// aluno pratica. Espelha o gate do botão de check-in do próprio aluno em
+  /// lutador_hub_screen.dart (`checkinIsAvailable`), sem a exigência de
+  /// `musculacaoCheckinMode == 'button'`: a ação da recepção é justamente a
+  /// via alternativa pra quem NÃO usa o app, então vale em qualquer modo.
+  List<SportId> get _gradelessSports => student
+      .getSports()
+      .where((s) => getSport(s).gradeSystem == GradeSystem.none)
+      .toList(growable: false);
 
   @override
   Widget build(BuildContext context) {
     final showEligibility =
         eligibility != null && eligibility!.requiredClasses > 0;
+    final gradelessSports = _gradelessSports;
+    final showStaffCheckin = musculacaoEnabled && gradelessSports.isNotEmpty;
     return Pressable(
       onTap: onTap,
       child: Container(
@@ -910,6 +943,13 @@ class _StudentCard extends StatelessWidget {
               ),
             ),
 
+            if (showStaffCheckin) ...[
+              const SizedBox(width: 4),
+              _StaffCheckinAction(
+                student: student,
+                gradelessSports: gradelessSports,
+              ),
+            ],
             const SizedBox(width: 8),
             Icon(
               LucideIcons.chevronRight,
@@ -1147,6 +1187,144 @@ class _StudentCard extends StatelessWidget {
   bool _isLightGrade(String gradeId) {
     const lightGrades = {'white', 'yellow', 'orange'};
     return lightGrades.contains(gradeId.split('-').first);
+  }
+}
+
+/// Ação discreta da recepção: "Marcar presença de hoje" pra um aluno SEM app
+/// numa modalidade sem-turma (musculação/boxe/MMA). Só renderizada pelo
+/// _StudentCard quando o gate (musculacaoEnabled + ≥1 modalidade sem-faixa)
+/// passa. 1 modalidade → toque direto; ≥2 → mini-seletor num bottom sheet
+/// (mesma UX de escolha do botão de check-in do próprio aluno em
+/// lutador_hub_screen.dart `_CheckinButtonCard`).
+///
+/// A escrita (AttendanceService.markStaffScheduleLessPresence) usa o MESMO
+/// doc-id determinístico da Cloud Function `selfCheckin` — nunca duplica com
+/// um check-in que o aluno já tenha feito hoje pelo próprio app.
+class _StaffCheckinAction extends ConsumerStatefulWidget {
+  final Student student;
+  final List<SportId> gradelessSports;
+
+  const _StaffCheckinAction({
+    required this.student,
+    required this.gradelessSports,
+  });
+
+  @override
+  ConsumerState<_StaffCheckinAction> createState() =>
+      _StaffCheckinActionState();
+}
+
+class _StaffCheckinActionState extends ConsumerState<_StaffCheckinAction> {
+  bool _busy = false;
+
+  Future<void> _handleTap() async {
+    if (_busy) return;
+    final sports = widget.gradelessSports;
+    final chosen = sports.length == 1 ? sports.single : await _pickSport();
+    if (chosen != null) await _markPresence(chosen);
+  }
+
+  /// Mini-seletor quando o aluno pratica ≥2 modalidades sem-faixa.
+  Future<SportId?> _pickSport() {
+    final sports = widget.gradelessSports;
+    return showModalBottomSheet<SportId>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => SafeArea(
+        child: Container(
+          margin: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Text(
+                  'Presença de hoje — ${widget.student.fullName}',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              for (final s in sports)
+                ListTile(
+                  leading: Icon(getSport(s).icon, color: AppTheme.textPrimary),
+                  title: Text(getSport(s).label),
+                  onTap: () => Navigator.pop(sheetContext, s),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _markPresence(SportId sport) async {
+    setState(() => _busy = true);
+    try {
+      final user = await ref.read(currentUserProvider.future);
+      if (user == null) {
+        if (mounted) context.showError('Sessão inválida — entre novamente.');
+        return;
+      }
+      await AttendanceService(FirebaseService.academyId)
+          .markStaffScheduleLessPresence(
+        studentId: widget.student.id,
+        studentName: widget.student.fullName,
+        sport: sport.value,
+        className: getSport(sport).label,
+        verifiedBy: user.id,
+        verifiedByName: user.displayName,
+      );
+      unawaited(AnalyticsService.logCheckinScanned(kind: 'staff'));
+      if (!mounted) return;
+      context.showSuccess('Presença registrada: ${widget.student.fullName}');
+    } on AttendanceAlreadyMarkedException {
+      if (mounted) {
+        context.showError(
+          '${widget.student.fullName} já tem presença hoje nesta modalidade.',
+        );
+      }
+    } catch (_) {
+      if (mounted) context.showError('Erro ao marcar presença.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Marcar presença de hoje',
+      child: Pressable(
+        onTap: _busy ? null : _handleTap,
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: AppTheme.success.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          alignment: Alignment.center,
+          child: _busy
+              ? SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.success,
+                  ),
+                )
+              : Icon(LucideIcons.userCheck, size: 16, color: AppTheme.success),
+        ),
+      ),
+    );
   }
 }
 

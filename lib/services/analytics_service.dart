@@ -114,8 +114,10 @@ class AnalyticsService {
   static Future<void> logPushOpened(String actionUrl) =>
       _log('push_opened', {'action_url': actionUrl});
 
-  /// Check-in confirmado — QR de turma (`kind: 'qr'`) ou QR fixo da
-  /// musculação (`kind: 'musculacao'`).
+  /// Check-in confirmado — QR de turma (`kind: 'qr'`), QR fixo da musculação
+  /// (`kind: 'musculacao'`), botão sem-turma do próprio aluno (`kind:
+  /// 'button'`) ou a equipe marcando por ele, aluno sem app (`kind:
+  /// 'staff'` — students_list_screen.dart, modalidades sem-turma).
   static Future<void> logCheckinScanned({required String kind}) =>
       _log('checkin_scanned', {'kind': kind});
 

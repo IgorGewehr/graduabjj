@@ -60,6 +60,20 @@ class Attendance {
   }
 }
 
+/// Lançada por [AttendanceService.markStaffScheduleLessPresence] quando o
+/// aluno já tem presença registrada hoje naquela modalidade (pelo próprio
+/// app ou por outro membro da equipe) — o caller deve tratar como aviso
+/// ("já tem presença hoje"), nunca como erro genérico.
+class AttendanceAlreadyMarkedException implements Exception {
+  final String message;
+  const AttendanceAlreadyMarkedException([
+    this.message = 'Aluno já tem presença registrada hoje nesta modalidade.',
+  ]);
+
+  @override
+  String toString() => message;
+}
+
 /// Attendance Service - Multi-tenant attendance management
 class AttendanceService {
   final String academyId;
@@ -585,6 +599,82 @@ class AttendanceService {
 
     final doc = await attendanceRef.get();
     return Attendance.fromFirestore(doc);
+  }
+
+  // ============================================
+  // Mark STAFF presence for a schedule-less sport (musculação/boxe/MMA)
+  //
+  // A recepção usa isto pra registrar a presença de HOJE de um aluno que NÃO
+  // usa o app (ou não conseguiu se auto-registrar) numa modalidade sem-turma
+  // (GradeSystem.none — ver core/sports.dart). Espelha EXATAMENTE o doc-id
+  // determinístico e o shape gravados pela Cloud Function `selfCheckin`
+  // (functions/index.js `_selfCheckinCore`/`exports.selfCheckin`):
+  //   - musculação → docId `{studentId}_musculacao_{YYYYMMDD}` (retrocompat
+  //     com o dado legado, que é a maioria da base hoje)
+  //   - demais esportes → docId `{studentId}_checkin_{sport}_{YYYYMMDD}`
+  // Mesmo docId ⇒ NUNCA duplica com um self check-in que o aluno já tenha
+  // feito hoje pelo próprio app (ou com outro toque da equipe): a checagem
+  // de existência roda DENTRO da transação, então quem escrever primeiro
+  // ganha e o outro esbarra em [AttendanceAlreadyMarkedException] — mesma
+  // garantia de "set sem merge só se não existir" pedida, só que atômica
+  // (evita a janela de corrida de um get() + set() separados).
+  //
+  // `sport` é o id cru ('musculacao', 'boxing', 'mma', ...); `className` é
+  // responsabilidade do caller (ex.: `getSport(sportId).label` do catálogo
+  // Dart) — este service não depende do catálogo de esportes de propósito,
+  // mesma decisão de design de [markPresent]/[markManualPresence].
+  // ============================================
+  Future<void> markStaffScheduleLessPresence({
+    required String studentId,
+    required String studentName,
+    required String sport,
+    required String className,
+    required String verifiedBy,
+    required String verifiedByName,
+  }) async {
+    final now = DateTime.now();
+    final isMusculacao = sport == 'musculacao';
+    final y = now.year.toString().padLeft(4, '0');
+    final m = now.month.toString().padLeft(2, '0');
+    final d = now.day.toString().padLeft(2, '0');
+    final docId = isMusculacao
+        ? '${studentId}_musculacao_$y$m$d'
+        : '${studentId}_checkin_${sport}_$y$m$d';
+    final classId = isMusculacao ? 'musculacao' : 'checkin_$sport';
+
+    final attendanceRef = _attendanceRef.doc(docId);
+    final studentRef = _collections.student(studentId);
+
+    final payload = <String, dynamic>{
+      'studentId': studentId,
+      'studentName': studentName,
+      'classId': classId,
+      'className': className,
+      'date': Timestamp.fromDate(now),
+      'verifiedBy': verifiedBy,
+      'verifiedByName': verifiedByName,
+      'sport': sport,
+      // Distingue de 'self_checkin' (CF) nos relatórios/analytics — quem
+      // registrou foi a equipe, não o próprio aluno.
+      'source': 'staff_manual',
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+
+    await FirebaseService.firestore.runTransaction((tx) async {
+      final existing = await tx.get(attendanceRef);
+      if (existing.exists) {
+        throw const AttendanceAlreadyMarkedException();
+      }
+      tx.set(attendanceRef, payload);
+      tx.update(studentRef, {
+        'attendanceCount': FieldValue.increment(1),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+
+    // Milestone notification is best-effort and outside the transaction —
+    // mesmo padrão de markPresent/markManualPresence.
+    checkAttendanceMilestone(studentId, studentName, verifiedBy).ignore();
   }
 
   /// Promote the student if the academy opted into auto graduation AND
