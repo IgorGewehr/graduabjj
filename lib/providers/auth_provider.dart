@@ -541,6 +541,16 @@ class AuthService {
       // comportamento legado intocado pra quem só treina luta.
       if (profile == 'fitness' || profile == 'hybrid')
         'musculacaoCheckinMode': 'button',
+      // Fichas de treino personalizadas (WorkoutPlan: dias A/B/C, séries/reps/
+      // carga por aluno) e biblioteca de vídeos de exercício JÁ existem no app
+      // mas nascem desligadas — pra academia de musculação elas são o produto
+      // básico esperado da categoria (Tecnofit/EVO entregam por padrão). Liga
+      // na CRIAÇÃO de academias fitness/hybrid; 'fight' puro mantém o default
+      // OFF de sempre (professor de luta liga se quiser, zero mudança legada).
+      if (profile == 'fitness' || profile == 'hybrid') ...{
+        'workoutPlansEnabled': true,
+        'trainingVideosEnabled': true,
+      },
       // Business profile — drives copy/vocabulary (core/academy_vocab.dart).
       // Legacy academies (field absent) parse to 'fight' — zero behavior
       // change for them, see AcademyProfileExtension.fromString.
