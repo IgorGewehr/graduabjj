@@ -882,6 +882,20 @@ class BillingNotificationService {
         error: 'API de WhatsApp nao configurada',
       );
     }
+
+    if (useTemplates) {
+      return sendWhatsAppTemplate(
+        phone: phone,
+        studentName: studentName,
+        studentId: studentId,
+        financialId: financialId,
+        amount: amount,
+        dueDate: dueDate,
+        daysOverdue: daysOverdue,
+        stage: stage,
+        fallbackMessage: message,
+      );
+    }
     try {
       final response = await http.post(
         Uri.parse(_whatsappApiUrl),
