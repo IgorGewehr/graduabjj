@@ -2691,7 +2691,7 @@ class _AdminStudentDetailScreenState
                         context: dialogContext,
                         initialDate: selectedDate,
                         firstDate: DateTime(2000),
-                        lastDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
                         locale: const Locale('pt', 'BR'),
                       );
                       if (picked != null) {

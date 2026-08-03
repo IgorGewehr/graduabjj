@@ -619,18 +619,30 @@ class BillingNotificationSettings {
 // Billing Notification Service
 // ============================================
 class BillingNotificationService {
-  static const String _whatsappApiUrl =
-      String.fromEnvironment('WHATSAPP_API_URL', defaultValue: '');
-  static const String _emailApiUrl =
-      String.fromEnvironment('EMAIL_API_URL', defaultValue: '');
+  static const String _defaultApiKey =
+      'c3d85c618a412a93034bd9cf6fcb20536fbd54cc73385ba6b369846ff87db119';
+  static const String _whatsappApiUrl = String.fromEnvironment(
+    'WHATSAPP_API_URL',
+    defaultValue: 'https://notification.tensorroot.com/api/send-whatsapp',
+  );
+  static const String _emailApiUrl = String.fromEnvironment(
+    'EMAIL_API_URL',
+    defaultValue: 'https://notification.tensorroot.com/api/send-email',
+  );
   // Matches marcusjj split: WHATSAPP_API_KEY + EMAIL_API_KEY are independent.
   // NOTIFICATION_API_KEY remains as legacy fallback for older builds.
-  static const String _legacyApiKey =
-      String.fromEnvironment('NOTIFICATION_API_KEY', defaultValue: '');
-  static const String _whatsappApiKeyRaw =
-      String.fromEnvironment('WHATSAPP_API_KEY', defaultValue: '');
-  static const String _emailApiKeyRaw =
-      String.fromEnvironment('EMAIL_API_KEY', defaultValue: '');
+  static const String _legacyApiKey = String.fromEnvironment(
+    'NOTIFICATION_API_KEY',
+    defaultValue: _defaultApiKey,
+  );
+  static const String _whatsappApiKeyRaw = String.fromEnvironment(
+    'WHATSAPP_API_KEY',
+    defaultValue: _defaultApiKey,
+  );
+  static const String _emailApiKeyRaw = String.fromEnvironment(
+    'EMAIL_API_KEY',
+    defaultValue: _defaultApiKey,
+  );
   static String get _whatsappApiKey =>
       _whatsappApiKeyRaw.isNotEmpty ? _whatsappApiKeyRaw : _legacyApiKey;
   static String get _emailApiKey =>
@@ -853,11 +865,99 @@ class BillingNotificationService {
   }
 
   // ============================================
-  // Normalize phone for WhatsApp
+  // Normalize and validate contact info
   // ============================================
   String _normalizePhone(String phone) {
     final digits = phone.replaceAll(RegExp(r'\D'), '');
     return digits.startsWith('55') ? digits : '55$digits';
+  }
+
+  static bool _isValidPhone(String phone) {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    final local = digits.startsWith('55') && digits.length >= 12
+        ? digits.substring(2)
+        : digits;
+    if (local.length < 10 || local.length > 11) return false;
+    final ddd = int.tryParse(local.substring(0, 2)) ?? 0;
+    if (ddd < 11 || ddd > 99) return false;
+    if (RegExp(r'^(\d)\1+$').hasMatch(local)) return false;
+    if (local.contains('22223333') || local.contains('12345678')) return false;
+    return true;
+  }
+
+  static bool _isValidEmail(String email) {
+    final clean = email.trim();
+    if (clean.isEmpty) return false;
+    final emailRegex =
+        RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+    if (!emailRegex.hasMatch(clean)) return false;
+    final domain = clean.split('@').last.toLowerCase();
+    if (domain == 'email.com' ||
+        domain == 'teste.com' ||
+        domain == 'test.com' ||
+        domain == 'exemplo.com' ||
+        domain == 'example.com') {
+      return false;
+    }
+    return true;
+  }
+
+  NotificationResult _parseResponse({
+    required http.Response response,
+    required String studentName,
+    required String studentId,
+    required String defaultErrorMsg,
+  }) {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      try {
+        final data = jsonDecode(response.body);
+        if (data is Map<String, dynamic>) {
+          final isSuccess = data['success'] == true ||
+              data['sent'] == true ||
+              data['status'] == 'sent' ||
+              data['status'] == 'queued' ||
+              data['status'] == 'delivered';
+          final isExplicitFail = data['success'] == false ||
+              data['sent'] == false ||
+              data['status'] == 'failed' ||
+              data['skipped'] != null ||
+              data['error'] != null;
+
+          if (isExplicitFail && !isSuccess) {
+            final err = data['error']?.toString() ??
+                data['message']?.toString() ??
+                data['skipped']?.toString() ??
+                defaultErrorMsg;
+            return NotificationResult(
+              success: false,
+              studentName: studentName,
+              studentId: studentId,
+              error: err,
+            );
+          }
+        }
+      } catch (_) {}
+      return NotificationResult(
+        success: true,
+        studentName: studentName,
+        studentId: studentId,
+      );
+    } else {
+      String? errorDetail;
+      try {
+        final data = jsonDecode(response.body);
+        if (data is Map<String, dynamic>) {
+          errorDetail = data['error']?.toString() ?? data['message']?.toString();
+        }
+      } catch (_) {}
+
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: errorDetail ?? 'Erro do servidor (${response.statusCode})',
+      );
+    }
   }
 
   // ============================================
@@ -880,6 +980,15 @@ class BillingNotificationService {
         studentName: studentName,
         studentId: studentId,
         error: 'API de WhatsApp nao configurada',
+      );
+    }
+
+    if (!_isValidPhone(phone)) {
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: 'Numero de telefone com formato invalido ou ficticio',
       );
     }
 
@@ -922,16 +1031,12 @@ class BillingNotificationService {
         }),
       ).timeout(const Duration(seconds: 30));
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return NotificationResult(success: true, studentName: studentName, studentId: studentId);
-      } else {
-        return NotificationResult(
-          success: false,
-          studentName: studentName,
-          studentId: studentId,
-          error: 'Erro do servidor (${response.statusCode})',
-        );
-      }
+      return _parseResponse(
+        response: response,
+        studentName: studentName,
+        studentId: studentId,
+        defaultErrorMsg: 'Falha no envio da mensagem de WhatsApp',
+      );
     } on http.ClientException {
       return NotificationResult(
         success: false,
@@ -1003,6 +1108,15 @@ class BillingNotificationService {
       );
     }
 
+    if (!_isValidPhone(phone)) {
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: 'Numero de telefone com formato invalido ou ficticio',
+      );
+    }
+
     final hasPix = pixCode != null && pixCode.isNotEmpty;
     final templateName = templateNameForStage(stage, hasPix: hasPix);
 
@@ -1047,17 +1161,12 @@ class BillingNotificationService {
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 30));
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return NotificationResult(
-            success: true, studentName: studentName, studentId: studentId);
-      } else {
-        return NotificationResult(
-          success: false,
-          studentName: studentName,
-          studentId: studentId,
-          error: 'Erro do servidor (${response.statusCode})',
-        );
-      }
+      return _parseResponse(
+        response: response,
+        studentName: studentName,
+        studentId: studentId,
+        defaultErrorMsg: 'Falha no envio do template de WhatsApp',
+      );
     } on http.ClientException {
       return NotificationResult(
         success: false,
@@ -1101,6 +1210,16 @@ class BillingNotificationService {
         error: 'API de Email nao configurada',
       );
     }
+
+    if (!_isValidEmail(email)) {
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: 'Endereco de e-mail com formato invalido ou de teste',
+      );
+    }
+
     try {
       final response = await http.post(
         Uri.parse(_emailApiUrl),
@@ -1128,16 +1247,12 @@ class BillingNotificationService {
         }),
       ).timeout(const Duration(seconds: 30));
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return NotificationResult(success: true, studentName: studentName, studentId: studentId);
-      } else {
-        return NotificationResult(
-          success: false,
-          studentName: studentName,
-          studentId: studentId,
-          error: 'Erro do servidor (${response.statusCode})',
-        );
-      }
+      return _parseResponse(
+        response: response,
+        studentName: studentName,
+        studentId: studentId,
+        defaultErrorMsg: 'Falha no envio do e-mail',
+      );
     } on http.ClientException {
       return NotificationResult(
         success: false,

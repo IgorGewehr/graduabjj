@@ -626,7 +626,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                       label: 'Atrasados',
                       count: _overduePayments.length,
                       isSelected: _paymentFilter == 'overdue',
-                      color: AppTheme.error,
+                      color: _overduePayments.isEmpty ? null : AppTheme.error,
                       onTap: () => setState(() => _paymentFilter = 'overdue'),
                     ),
                     const SizedBox(width: 8),
@@ -646,13 +646,19 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         // Payments list
         Expanded(
           child: filteredPayments.isEmpty
-              ? PolishedEmptyState(
-                  icon: LucideIcons.receipt,
-                  title: 'Nenhum pagamento',
-                  subtitle: _paymentSearch.isNotEmpty
-                      ? 'Nenhum resultado para "$_paymentSearch"'
-                      : 'Não há pagamentos nesta categoria',
-                  accent: AppTheme.textSecondary,
+              ? SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: PolishedEmptyState(
+                      icon: LucideIcons.receipt,
+                      title: 'Nenhum pagamento',
+                      subtitle: _paymentSearch.isNotEmpty
+                          ? 'Nenhum resultado para "$_paymentSearch"'
+                          : 'Não há pagamentos nesta categoria',
+                      accent: AppTheme.textSecondary,
+                    ),
+                  ),
                 )
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),

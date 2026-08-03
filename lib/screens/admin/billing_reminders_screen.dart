@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../core/feedback_utils.dart';
 import '../../services/firebase_service.dart';
 import '../../services/billing_reminder_service.dart';
+import '../../services/payment_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/polish/polish.dart';
 
@@ -121,6 +122,11 @@ class _AdminBillingRemindersScreenState
       appBar: AppBar(
         title: const Text('Regua de Cobranca'),
         actions: [
+          IconButton(
+            onPressed: _showCreateChargeModal,
+            icon: const Icon(LucideIcons.plusCircle, size: 20),
+            tooltip: 'Nova Cobranca',
+          ),
           IconButton(
             onPressed: () => _showSettingsDialog(),
             icon: const Icon(LucideIcons.settings, size: 20),
@@ -641,12 +647,113 @@ class _AdminBillingRemindersScreenState
                   constraints: const BoxConstraints(),
                   padding: const EdgeInsets.all(8),
                 ),
+                // Mark as Paid (Dar Baixa)
+                IconButton(
+                  onPressed: () => _confirmMarkAsPaid(item),
+                  icon: const Icon(LucideIcons.checkCircle2, size: 20),
+                  color: AppTheme.success,
+                  tooltip: 'Dar Baixa (Marcar Pago)',
+                  constraints: const BoxConstraints(),
+                  padding: const EdgeInsets.all(8),
+                ),
+                // Delete Charge
+                IconButton(
+                  onPressed: () => _confirmDelete(item),
+                  icon: const Icon(LucideIcons.trash2, size: 20),
+                  color: AppTheme.error,
+                  tooltip: 'Excluir Cobranca',
+                  constraints: const BoxConstraints(),
+                  padding: const EdgeInsets.all(8),
+                ),
               ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _confirmMarkAsPaid(Map<String, dynamic> item) async {
+    final studentName = item['studentName'] as String? ?? 'Aluno';
+    final amount = (item['amount'] as num?)?.toDouble() ?? 0;
+    final financialId = item['id'] as String? ?? '';
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Dar Baixa na Cobranca'),
+        content: Text(
+          'Deseja marcar como PAGO o valor de R\$ ${amount.toStringAsFixed(2)} para $studentName?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirmar Baixa'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        final academyId = FirebaseService.academyId;
+        await PaymentService(academyId).markAsPaid(financialId);
+        if (mounted) {
+          FeedbackUtils.showSuccess(context, 'Cobranca quitada com sucesso!');
+          _loadData();
+        }
+      } catch (e) {
+        if (mounted) {
+          FeedbackUtils.showError(context, 'Erro ao dar baixa: $e');
+        }
+      }
+    }
+  }
+
+  Future<void> _confirmDelete(Map<String, dynamic> item) async {
+    final studentName = item['studentName'] as String? ?? 'Aluno';
+    final amount = (item['amount'] as num?)?.toDouble() ?? 0;
+    final financialId = item['id'] as String? ?? '';
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir Cobranca'),
+        content: Text(
+          'Deseja EXCLUIR permanentemente a cobranca de R\$ ${amount.toStringAsFixed(2)} para $studentName?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Excluir', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        final academyId = FirebaseService.academyId;
+        await PaymentService(academyId).delete(financialId);
+        if (mounted) {
+          FeedbackUtils.showSuccess(context, 'Cobranca excluida!');
+          _loadData();
+        }
+      } catch (e) {
+        if (mounted) {
+          FeedbackUtils.showError(context, 'Erro ao excluir: $e');
+        }
+      }
+    }
   }
 
   // ============================================
@@ -1733,13 +1840,17 @@ class _AdminBillingRemindersScreenState
                   const SizedBox(height: 8),
                   ...result.failures.map(
                     (f) => Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
+                      padding: const EdgeInsets.only(bottom: 6),
                       child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                            LucideIcons.xCircle,
-                            size: 14,
-                            color: AppTheme.error,
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Icon(
+                              LucideIcons.xCircle,
+                              size: 14,
+                              color: AppTheme.error,
+                            ),
                           ),
                           const SizedBox(width: 6),
                           Container(
@@ -1753,21 +1864,28 @@ class _AdminBillingRemindersScreenState
                             ),
                             child: Text(
                               f.type == 'whatsapp' ? 'WA' : 'Email',
-                              style: const TextStyle(fontSize: 9),
+                              style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w600),
                             ),
                           ),
                           const SizedBox(width: 6),
                           Expanded(
-                            child: Text(
-                              f.recipient,
-                              style: AppTheme.bodySmall,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          Text(
-                            f.error,
-                            style: AppTheme.labelSmall.copyWith(
-                              color: AppTheme.error,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  f.recipient,
+                                  style: AppTheme.bodySmall.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  f.error,
+                                  style: AppTheme.labelSmall.copyWith(
+                                    color: AppTheme.error,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
@@ -1787,6 +1905,331 @@ class _AdminBillingRemindersScreenState
               ),
             ),
           ],
+        );
+      },
+    );
+  }
+
+  // ============================================
+  // Create Charge Modal (Plano vs Cobranca Unica)
+  // ============================================
+  Future<void> _showCreateChargeModal() async {
+    final academyId = FirebaseService.academyId;
+
+    List<StudentContact> students = _studentContacts.values.toList();
+    if (students.isEmpty) {
+      try {
+        final loadedContacts = await _billingService.getStudentContacts();
+        students = loadedContacts.values.toList();
+      } catch (_) {}
+    }
+
+    if (students.isEmpty) {
+      if (mounted) {
+        FeedbackUtils.showError(
+          context,
+          'Nenhum aluno encontrado para criar cobranca.',
+        );
+      }
+      return;
+    }
+
+    String selectedStudentId = students.first.studentId;
+    String chargeType = 'monthly_tuition';
+    DateTime selectedDueDate = DateTime.now().subtract(const Duration(days: 3));
+
+    final amountController = TextEditingController(text: '100.00');
+    final descController = TextEditingController(text: 'Mensalidade do Plano');
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            final selectedStudent = students.firstWhere(
+              (s) => s.studentId == selectedStudentId,
+              orElse: () => students.first,
+            );
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(
+                            LucideIcons.plusCircle,
+                            color: AppTheme.primary,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Criar Nova Cobranca',
+                          style: AppTheme.titleLarge.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Student dropdown
+                    Text('Aluno *', style: AppTheme.labelMedium),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<String>(
+                      value: selectedStudentId,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                      items: students.map((s) {
+                        return DropdownMenuItem<String>(
+                          value: s.studentId,
+                          child: Text(
+                            s.studentName,
+                            style: AppTheme.bodyMedium,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          setSheetState(() => selectedStudentId = val);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Charge Type Selector
+                    Text('Tipo de Cobranca *', style: AppTheme.labelMedium),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Text('Plano do Aluno'),
+                            selected: chargeType == 'monthly_tuition',
+                            onSelected: (_) {
+                              setSheetState(() {
+                                chargeType = 'monthly_tuition';
+                                descController.text = 'Mensalidade do Plano';
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Text('Cobranca Unica'),
+                            selected: chargeType == 'custom_charge',
+                            onSelected: (_) {
+                              setSheetState(() {
+                                chargeType = 'custom_charge';
+                                descController.text = 'Cobranca Avulsa';
+                              });
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Description
+                    Text('Descricao / Referencia', style: AppTheme.labelMedium),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: descController,
+                      style: AppTheme.bodyMedium,
+                      decoration: InputDecoration(
+                        hintText: 'Ex: Mensalidade de Agosto, Aula Particular...',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Amount (R$)
+                    Text('Valor (R\$) *', style: AppTheme.labelMedium),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: amountController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      style: AppTheme.bodyMedium,
+                      decoration: InputDecoration(
+                        prefixText: 'R\$ ',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Due Date Picker
+                    Text('Data de Vencimento *', style: AppTheme.labelMedium),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: selectedDueDate,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
+                          locale: const Locale('pt', 'BR'),
+                        );
+                        if (picked != null) {
+                          setSheetState(() => selectedDueDate = picked);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 14,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: AppTheme.divider),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.calendar, size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              DateFormat('dd/MM/yyyy').format(selectedDueDate),
+                              style: AppTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Submit button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        onPressed: () async {
+                          final parsedAmount = double.tryParse(
+                            amountController.text.replaceAll(',', '.'),
+                          );
+                          if (parsedAmount == null || parsedAmount <= 0) {
+                            FeedbackUtils.showError(
+                              ctx,
+                              'Informe um valor valido maior que zero.',
+                            );
+                            return;
+                          }
+
+                          try {
+                            final now = DateTime.now();
+                            final todayStart = DateTime(now.year, now.month, now.day);
+                            final dueStart = DateTime(
+                              selectedDueDate.year,
+                              selectedDueDate.month,
+                              selectedDueDate.day,
+                            );
+
+                            final isOverdue = dueStart.isBefore(todayStart);
+                            final statusStr = isOverdue ? 'overdue' : 'pending';
+
+                            final refMonth =
+                                '${selectedDueDate.year}-${selectedDueDate.month.toString().padLeft(2, '0')}';
+
+                            await FirebaseFirestore.instance
+                                .collection('academies')
+                                .doc(academyId)
+                                .collection('financials')
+                                .add({
+                              'academyId': academyId,
+                              'studentId': selectedStudent.studentId,
+                              'studentName': selectedStudent.studentName,
+                              'amount': parsedAmount,
+                              'value': parsedAmount,
+                              'dueDate': Timestamp.fromDate(selectedDueDate),
+                              'status': statusStr,
+                              'type': chargeType,
+                              'description': descController.text.trim().isNotEmpty
+                                  ? descController.text.trim()
+                                  : (chargeType == 'monthly_tuition'
+                                      ? 'Mensalidade do Plano'
+                                      : 'Cobranca Avulsa'),
+                              'referenceMonth': refMonth,
+                              'createdAt': Timestamp.fromDate(now),
+                            });
+
+                            if (ctx.mounted) {
+                              Navigator.pop(ctx);
+                            }
+                            if (mounted) {
+                              FeedbackUtils.showSuccess(
+                                context,
+                                'Cobranca criada com sucesso!',
+                              );
+                              _loadData();
+                            }
+                          } catch (e) {
+                            if (ctx.mounted) {
+                              FeedbackUtils.showError(
+                                ctx,
+                                'Erro ao criar cobranca: $e',
+                              );
+                            }
+                          }
+                        },
+                        child: Text(
+                          'Criar Cobranca',
+                          style: AppTheme.titleSmall.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -1969,29 +2412,51 @@ class _AdminBillingRemindersScreenState
                         ),
                         const SizedBox(height: 12),
 
-                        // WhatsApp template
-                        Text(
-                          'WhatsApp - $stageKey',
-                          style: AppTheme.labelMedium,
-                        ),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          initialValue:
-                              waTemplates[stageKey] ??
-                              BillingNotificationService
-                                  .defaultWhatsAppTemplates[stageKey] ??
-                              '',
-                          maxLines: 3,
-                          style: const TextStyle(fontSize: 13),
-                          decoration: InputDecoration(
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
+                        // WhatsApp official template info (read-only)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.success.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: AppTheme.success.withValues(alpha: 0.2),
                             ),
-                            contentPadding: const EdgeInsets.all(10),
                           ),
-                          onChanged: (v) {
-                            waTemplates[stageKey] = v;
-                          },
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    LucideIcons.checkCircle,
+                                    size: 14,
+                                    color: AppTheme.success,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'WhatsApp - Modelo Oficial Meta ($stageKey)',
+                                      style: AppTheme.labelSmall.copyWith(
+                                        color: AppTheme.success,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                BillingNotificationService
+                                        .defaultWhatsAppTemplates[stageKey] ??
+                                    '',
+                                style: AppTheme.bodySmall.copyWith(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 12),
 
@@ -2002,6 +2467,9 @@ class _AdminBillingRemindersScreenState
                         ),
                         const SizedBox(height: 6),
                         TextFormField(
+                          key: ValueKey(
+                            'email_subj_${stageKey}_${emailSubjectTemplates[stageKey]}',
+                          ),
                           initialValue:
                               emailSubjectTemplates[stageKey] ??
                               BillingNotificationService
@@ -2030,6 +2498,9 @@ class _AdminBillingRemindersScreenState
                         ),
                         const SizedBox(height: 6),
                         TextFormField(
+                          key: ValueKey(
+                            'email_body_${stageKey}_${emailBodyTemplates[stageKey]}',
+                          ),
                           initialValue:
                               emailBodyTemplates[stageKey] ??
                               BillingNotificationService
