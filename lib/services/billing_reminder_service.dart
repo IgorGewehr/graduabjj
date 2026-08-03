@@ -652,7 +652,7 @@ class BillingNotificationService {
   static const String _templateLang =
       String.fromEnvironment('WHATSAPP_TEMPLATE_LANG', defaultValue: 'pt_BR');
   static const bool _useTemplatesEnv =
-      bool.fromEnvironment('WHATSAPP_USE_TEMPLATES', defaultValue: false);
+      bool.fromEnvironment('WHATSAPP_USE_TEMPLATES', defaultValue: true);
 
   bool get hasWhatsAppApi => _whatsappApiUrl.isNotEmpty;
   bool get hasEmailApi => _emailApiUrl.isNotEmpty;
