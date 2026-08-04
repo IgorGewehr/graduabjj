@@ -52,9 +52,9 @@ class RegisterScreen extends StatelessWidget {
                     // Logo
                     Center(
                       child: Image.asset(
-                        'assets/images/bjjeasy_logo.png',
-                        width: 88,
-                        height: 88,
+                        'assets/images/mydojo_logo.png',
+                        width: 96,
+                        height: 96,
                       ),
                     ).animate().fadeIn(duration: 300.ms).scale(
                           begin: const Offset(0.85, 0.85),

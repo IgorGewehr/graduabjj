@@ -121,7 +121,7 @@ class AssessmentPdfService {
           _section('Objetivo e observações', context),
           pw.SizedBox(height: 18),
           pw.Text(
-            'Gerado pelo BJJEasy em ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}.',
+            'Gerado pelo MyDojo em ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}.',
             style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey500),
           ),
         ],

@@ -537,15 +537,15 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   Widget _brandMark() {
     return Center(
       child: Container(
-        width: 84,
-        height: 84,
+        width: 96,
+        height: 96,
         decoration: BoxDecoration(
-          color: _C.ink,
+          color: _C.bone,
           borderRadius: BorderRadius.circular(20),
         ),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(8),
         child: Image.asset(
-          'assets/images/bjjeasy_logo.png',
+          'assets/images/mydojo_logo.png',
           fit: BoxFit.contain,
         ),
       ),

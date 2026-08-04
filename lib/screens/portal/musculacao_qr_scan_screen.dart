@@ -149,7 +149,7 @@ class _MusculacaoQrScanScreenState
         MobileScanner(
           controller: _controller!,
           onDetect: _handle,
-          errorBuilder: (context, error) => _CameraErrorView(
+          errorBuilder: (context, error, child) => _CameraErrorView(
             error: error,
             onRetry: () {
               _controller?.start();

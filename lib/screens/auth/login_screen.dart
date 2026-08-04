@@ -176,9 +176,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   // Logo da marca
                   Center(
                     child: Image.asset(
-                      'assets/images/bjjeasy_logo.png',
-                      width: 132,
-                      height: 132,
+                      'assets/images/mydojo_logo.png',
+                      width: 140,
+                      height: 140,
                     ),
                   ),
 

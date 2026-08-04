@@ -383,7 +383,7 @@ class _Header extends StatelessWidget {
     if (pastDue) {
       title = 'Não conseguimos renovar sua assinatura';
       subtitle =
-          'Houve um problema na cobrança recorrente. Atualize seu pagamento abaixo para manter o BJJEasy ativo na sua academia.';
+          'Houve um problema na cobrança recorrente. Atualize seu pagamento abaixo para manter o MyDojo ativo na sua academia.';
     } else if (isTrialing) {
       title = 'Continue gerenciando sua academia sem interrupções';
       subtitle =
@@ -391,7 +391,7 @@ class _Header extends StatelessWidget {
     } else {
       title = 'Período de avaliação encerrado';
       subtitle =
-          'Assine para reativar o acesso a todos os recursos do BJJEasy. Seus dados continuam guardados.';
+          'Assine para reativar o acesso a todos os recursos do MyDojo. Seus dados continuam guardados.';
     }
 
     return Column(
@@ -399,8 +399,8 @@ class _Header extends StatelessWidget {
       children: [
         // Logo
         Image.asset(
-          'assets/images/bjjeasy_logo.png',
-          height: 72,
+          'assets/images/mydojo_logo.png',
+          height: 80,
         ),
         const SizedBox(height: 20),
 
