@@ -2359,6 +2359,23 @@ class _AdminBillingRemindersScreenState
               );
             }
 
+            // If Plano do Aluno is selected, enforce the plan's fixed due day
+            if (chargeType == 'monthly_tuition' && selectedPlan != null) {
+              final targetDay = selectedPlan.getStudentDueDay(selectedStudentId);
+              final maxDays = DateUtils.getDaysInMonth(
+                selectedDueDate.year,
+                selectedDueDate.month,
+              );
+              final validDay = targetDay > maxDays ? maxDays : targetDay;
+              if (selectedDueDate.day != validDay) {
+                selectedDueDate = DateTime(
+                  selectedDueDate.year,
+                  selectedDueDate.month,
+                  validDay,
+                );
+              }
+            }
+
             return Padding(
               padding: EdgeInsets.only(
                 left: 20,
@@ -2429,6 +2446,19 @@ class _AdminBillingRemindersScreenState
                               final planVal =
                                   selectedPlan.getStudentValue(selectedStudentId);
                               amountController.text = planVal.toStringAsFixed(2);
+                              final targetDay =
+                                  selectedPlan.getStudentDueDay(selectedStudentId);
+                              final maxDays = DateUtils.getDaysInMonth(
+                                selectedDueDate.year,
+                                selectedDueDate.month,
+                              );
+                              final validDay =
+                                  targetDay > maxDays ? maxDays : targetDay;
+                              selectedDueDate = DateTime(
+                                selectedDueDate.year,
+                                selectedDueDate.month,
+                                validDay,
+                              );
                             }
                           });
                         }
@@ -2456,6 +2486,20 @@ class _AdminBillingRemindersScreenState
                                   );
                                   amountController.text =
                                       planVal.toStringAsFixed(2);
+                                  final targetDay = selectedPlan.getStudentDueDay(
+                                    selectedStudentId,
+                                  );
+                                  final maxDays = DateUtils.getDaysInMonth(
+                                    selectedDueDate.year,
+                                    selectedDueDate.month,
+                                  );
+                                  final validDay =
+                                      targetDay > maxDays ? maxDays : targetDay;
+                                  selectedDueDate = DateTime(
+                                    selectedDueDate.year,
+                                    selectedDueDate.month,
+                                    validDay,
+                                  );
                                 } else {
                                   descController.text = 'Mensalidade do Plano';
                                 }
@@ -2512,10 +2556,11 @@ class _AdminBillingRemindersScreenState
                           ),
                           items: plans.map((p) {
                             final val = p.getStudentValue(selectedStudentId);
+                            final due = p.getStudentDueDay(selectedStudentId);
                             return DropdownMenuItem<String>(
                               value: p.id,
                               child: Text(
-                                '${p.name} — R\$ ${val.toStringAsFixed(2)}/mês',
+                                '${p.name} — R\$ ${val.toStringAsFixed(2)}/mês (Venc. dia $due)',
                                 style: AppTheme.bodyMedium,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -2532,6 +2577,19 @@ class _AdminBillingRemindersScreenState
                                 amountController.text =
                                     planVal.toStringAsFixed(2);
                                 descController.text = 'Mensalidade - ${plan.name}';
+                                final targetDay =
+                                    plan.getStudentDueDay(selectedStudentId);
+                                final maxDays = DateUtils.getDaysInMonth(
+                                  selectedDueDate.year,
+                                  selectedDueDate.month,
+                                );
+                                final validDay =
+                                    targetDay > maxDays ? maxDays : targetDay;
+                                selectedDueDate = DateTime(
+                                  selectedDueDate.year,
+                                  selectedDueDate.month,
+                                  validDay,
+                                );
                               });
                             }
                           },
@@ -2583,10 +2641,20 @@ class _AdminBillingRemindersScreenState
                     const SizedBox(height: 14),
 
                     // Due Date Picker
-                    Text('Data de Vencimento *', style: AppTheme.labelMedium),
+                    Text(
+                      chargeType == 'monthly_tuition' && selectedPlan != null
+                          ? 'Data de Vencimento (Dia ${selectedPlan.getStudentDueDay(selectedStudentId)} fixo pelo plano) *'
+                          : 'Data de Vencimento *',
+                      style: AppTheme.labelMedium,
+                    ),
                     const SizedBox(height: 6),
                     InkWell(
                       onTap: () async {
+                        final planDueDay = chargeType == 'monthly_tuition' &&
+                                selectedPlan != null
+                            ? selectedPlan.getStudentDueDay(selectedStudentId)
+                            : null;
+
                         final picked = await showDatePicker(
                           context: ctx,
                           initialDate: selectedDueDate,
@@ -2594,6 +2662,18 @@ class _AdminBillingRemindersScreenState
                           lastDate: DateTime.now().add(
                             const Duration(days: 365 * 5),
                           ),
+                          selectableDayPredicate: planDueDay != null
+                              ? (DateTime day) {
+                                  final maxDays = DateUtils.getDaysInMonth(
+                                    day.year,
+                                    day.month,
+                                  );
+                                  final validDay = planDueDay > maxDays
+                                      ? maxDays
+                                      : planDueDay;
+                                  return day.day == validDay;
+                                }
+                              : null,
                           locale: const Locale('pt', 'BR'),
                         );
                         if (picked != null) {
