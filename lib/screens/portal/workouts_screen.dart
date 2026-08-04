@@ -13,6 +13,7 @@ import '../../models/workout_plan.dart';
 import '../../providers/providers.dart';
 import '../../services/services.dart';
 import '../../widgets/common/sport_chip.dart';
+import '../../widgets/feature_disabled_state.dart';
 import '../../widgets/polish/polish.dart';
 import 'exercise_progress_screen.dart';
 
@@ -60,6 +61,27 @@ class _WorkoutsScreenState extends ConsumerState<WorkoutsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Defense in depth: mesmo acessível por deep link / navegação obsoleta,
+    // os Treinos ficam escondidos quando a academia desligou a funcionalidade
+    // (espelha a visibilidade no menu, que usa workoutPlansEnabled ?? false).
+    final workoutsEnabled = ref.watch(
+      academySettingsProvider
+          .select((s) => s.valueOrNull?.workoutPlansEnabled ?? false),
+    );
+    if (!workoutsEnabled) {
+      return Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: const Text('Treinos'),
+          backgroundColor: AppTheme.surface,
+        ),
+        body: const FeatureDisabledState(
+          icon: LucideIcons.dumbbell,
+          title: 'Treinos indisponíveis',
+          subtitle: 'Sua academia não está usando os Planos de treino.',
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(

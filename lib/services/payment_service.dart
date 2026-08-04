@@ -1,7 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'fns.dart';
 
 import 'firebase_service.dart';
+import 'mercado_pago_service.dart';
 import 'notification_dispatcher.dart';
 import 'plan_service.dart';
 import 'student_service.dart';
@@ -168,10 +169,13 @@ class Payment {
   final String? pixCode;
   final String? pixQrCode;
   final String? planId;
-  final String type; // 'monthly_tuition' | 'avulsa'
+  final String type; // 'monthly_tuition' | 'avulsa' | 'private_lesson'
   /// Snapshot of the plan/charge payment-method policy at generation time.
   /// Absent on legacy docs → [PaymentMethodPolicy.both].
   final PaymentMethodPolicy paymentMethodPolicy;
+  /// Aula particular (type == 'private_lesson'): true depois que o backend
+  /// concedeu a presença ao aluno (no settle do pagamento ou no grant manual).
+  final bool attendanceGranted;
   final DateTime createdAt;
 
   Payment({
@@ -193,6 +197,7 @@ class Payment {
     this.planId,
     this.type = 'monthly_tuition',
     this.paymentMethodPolicy = PaymentMethodPolicy.both,
+    this.attendanceGranted = false,
     required this.createdAt,
   });
 
@@ -226,12 +231,23 @@ class Payment {
       type: data['type'] ?? 'monthly_tuition',
       paymentMethodPolicy:
           PaymentMethodPolicyExtension.fromString(data['paymentMethodPolicy']),
+      attendanceGranted: data['attendanceGranted'] == true,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
 
   // Computed properties
   bool get isPaid => status == PaymentStatus.paid;
+
+  /// Aula particular 1:1 (type 'private_lesson') — cobrança avulsa que concede
+  /// uma presença ao aluno quando paga, sem plano nem turma.
+  bool get isPrivateLesson => type == 'private_lesson';
+
+  /// Cobrança indevida de assinatura (lote 1: type 'subscription_overcharge',
+  /// status 'paid', needsRefund) — dinheiro a DEVOLVER, nunca receita. Toda
+  /// soma/contagem de receita deve pular estes docs; listagens os exibem com
+  /// destaque 'Reembolso pendente'.
+  bool get isOvercharge => type == 'subscription_overcharge';
   bool get isOverdue =>
       status != PaymentStatus.paid &&
       status != PaymentStatus.cancelled &&
@@ -314,6 +330,8 @@ class PaymentService {
             }
             break;
           case PaymentStatus.paid:
+            // Cobrança indevida a reembolsar (needsRefund) não infla o "pago".
+            if (p.isOvercharge) break;
             paidCount++;
             paidTotal += p.value;
             break;
@@ -378,6 +396,8 @@ class PaymentService {
           }
           break;
         case PaymentStatus.paid:
+          // Cobrança indevida a reembolsar (needsRefund) não infla o "pago".
+          if (p.isOvercharge) break;
           paidCount++;
           paidTotal += p.value;
           break;
@@ -513,7 +533,16 @@ class PaymentService {
     String type = 'monthly_tuition',
     PaymentMethodPolicy paymentMethodPolicy = PaymentMethodPolicy.both,
     bool sendNotification = true,
+    // Aula particular (type == 'private_lesson'): metadados da aula que o
+    // backend usa para conceder a presença ao liquidar a cobrança. Ignorados
+    // para os demais tipos.
+    DateTime? lessonDate,
+    double? lessonWeight,
+    String? lessonSport,
+    String? instructorId,
+    String? instructorName,
   }) async {
+    final isPrivateLesson = type == 'private_lesson';
     final docRef = await _paymentsRef.add({
       'academyId': academyId,
       'studentId': studentId,
@@ -529,13 +558,23 @@ class PaymentService {
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
       'createdBy': createdBy,
+      if (isPrivateLesson) ...{
+        'lessonDate': Timestamp.fromDate(lessonDate ?? dueDate),
+        'lessonWeight': lessonWeight ?? 1.0,
+        'lessonSport': lessonSport ?? 'bjj',
+        'instructorId': instructorId,
+        'instructorName': instructorName,
+        // O backend vira true ao conceder a presença (grantPrivateLessonAttendance).
+        'attendanceGranted': false,
+      },
     });
 
     final doc = await docRef.get();
     final payment = Payment.fromFirestore(doc);
 
     // Send notification to student if they have a linked account
-    if (sendNotification && type == 'monthly_tuition') {
+    if (sendNotification &&
+        (type == 'monthly_tuition' || isPrivateLesson)) {
       try {
         final student = await _studentService.getById(studentId);
         // Route to the responsible adult (kids) when set, else the student's
@@ -556,6 +595,27 @@ class PaymentService {
     }
 
     return payment;
+  }
+
+  /// Concede manualmente a presença de uma aula particular (caminho offline:
+  /// dinheiro em mãos, cortesia, ou confirmação de que a aula aconteceu).
+  /// Chama a CF `markPrivateLessonGiven` (gated p/ admin/professor), que roda o
+  /// MESMO grant idempotente do webhook — conceder manual e depois receber o
+  /// pagamento MP nunca duplica a presença. Quando [markPaidCash] é true, marca
+  /// a cobrança como paga (method 'cash') antes de conceder.
+  Future<void> markPrivateLessonGiven({
+    required String financialId,
+    bool markPaidCash = false,
+    String? staffName,
+  }) async {
+    await Fns.functions
+        .httpsCallable('markPrivateLessonGiven')
+        .call({
+      'academyId': academyId,
+      'financialId': financialId,
+      'markPaidCash': markPaidCash,
+      if (staffName != null) 'staffName': staffName,
+    });
   }
 
   // ============================================
@@ -599,6 +659,13 @@ class PaymentService {
       // (canonical field, read by the Payment model). The pre-read above still
       // holds the prior gateway/charge id for the PIX cancellation below.
       'paymentGateway': 'manual',
+      // Auditoria MP (double-charge silencioso): apaga o gatewayPaymentId do PIX
+      // original. Se o cancelMpPix abaixo falhar (best-effort) e a família pagar
+      // o PIX ainda em aberto depois, o webhook NÃO pode achar o doc 'paid' com
+      // o MESMO charge id e tratar como no-op idempotente — sem o id, o settle
+      // (server_functions.js:5783/5793) cai no caminho de duplicidade/conciliação
+      // e alerta o admin para reembolsar, em vez de creditar 2x em silêncio.
+      'gatewayPaymentId': FieldValue.delete(),
       'paymentDate': Timestamp.fromDate(paidAt),
       // Kill the live PIX on the doc (mirrors mpMktSettle): an admin marking
       // the charge paid offline must invalidate the already-sent code.
@@ -614,7 +681,7 @@ class PaymentService {
         gatewayPaymentId.isNotEmpty &&
         paymentGateway == 'mercadopago') {
       try {
-        await FirebaseFunctions.instance.httpsCallable('cancelMpPix').call({
+        await Fns.functions.httpsCallable('cancelMpPix').call({
           'academyId': academyId,
           'paymentId': gatewayPaymentId,
         });
@@ -630,9 +697,46 @@ class PaymentService {
   // Cancel Payment
   // ============================================
   Future<Payment> cancel(String id) async {
-    return update(id, {
+    // Auditoria MP (cobrança fantasma): cancelar NÃO pode deixar o PIX vivo
+    // pagável — senão a família paga uma cobrança que o admin deu por cancelada.
+    // Espelha markAsPaid: pré-lê o gatewayPaymentId ANTES de apagar os campos
+    // pix, invalida o PIX no doc e cancela o PIX no MP (best-effort).
+    // (Assinatura recorrente é cancelada por ação própria — UI de assinatura —,
+    // não por cancelar uma cobrança avulsa do mês.)
+    String? gatewayPaymentId;
+    String? paymentGateway;
+    try {
+      final snap = await _paymentsRef.doc(id).get();
+      final data = snap.data() as Map<String, dynamic>?;
+      gatewayPaymentId = data?['gatewayPaymentId'] as String?;
+      paymentGateway = data?['paymentGateway'] as String?;
+    } catch (_) {
+      // non-fatal: segue o cancel mesmo assim.
+    }
+
+    final payment = await update(id, {
       'status': PaymentStatus.cancelled.value,
+      'gatewayPaymentId': FieldValue.delete(),
+      'pixCode': FieldValue.delete(),
+      'pixQrCode': FieldValue.delete(),
+      'pixTicketUrl': FieldValue.delete(),
+      'pixExpiresAt': FieldValue.delete(),
     });
+
+    if (gatewayPaymentId != null &&
+        gatewayPaymentId.isNotEmpty &&
+        paymentGateway == 'mercadopago') {
+      try {
+        await Fns.functions.httpsCallable('cancelMpPix').call({
+          'academyId': academyId,
+          'paymentId': gatewayPaymentId,
+        });
+      } catch (e) {
+        print('[PaymentService] cancelMpPix on cancel failed (non-fatal): $e');
+      }
+    }
+
+    return payment;
   }
 
   // ============================================
@@ -955,6 +1059,10 @@ class PaymentService {
         continue;
       }
 
+      // Cobrança indevida a reembolsar (needsRefund) — nunca soma como
+      // receita nem entra no esperado/taxa de cobrança.
+      if (p.isOvercharge) continue;
+
       // Only count active payments (pending, overdue, paid) in expected
       totalExpected += p.value;
 
@@ -984,11 +1092,19 @@ class PaymentService {
   // ============================================
   // Get WhatsApp Reminder Link
   // ============================================
+  /// [pixCode]/[ticketUrl] are optional — when present (MP conectado e PIX
+  /// gerado com sucesso), o lembrete manual ganha o mesmo copia-e-cola/link
+  /// que o canal automático de cobrança já anexa (ver
+  /// [generateReminderPix] e BillingNotificationService.injectPaymentInfo).
+  /// Sem eles (default), a mensagem sai IDÊNTICA à de antes — assinatura
+  /// compatível com todo caller existente.
   String getWhatsAppReminderLink({
     required String phone,
     required String studentName,
     required double amount,
     required DateTime dueDate,
+    String? pixCode,
+    String? ticketUrl,
   }) {
     final formattedPhone = phone.replaceAll(RegExp(r'[^\d]'), '');
     final phoneWithCountry = formattedPhone.startsWith('55')
@@ -999,14 +1115,52 @@ class PaymentService {
         '${dueDate.day.toString().padLeft(2, '0')}/${dueDate.month.toString().padLeft(2, '0')}/${dueDate.year}';
     final formattedAmount = 'R\$ ${amount.toStringAsFixed(2)}';
 
+    final hasPix = pixCode != null && pixCode.isNotEmpty;
+    final pixBlock = hasPix
+        ? 'Pague agora pelo PIX (copia e cola):\n$pixCode\n\n'
+            '${(ticketUrl != null && ticketUrl.isNotEmpty) ? 'Ou acesse: $ticketUrl\n\n' : ''}'
+        : '';
+
     final message = Uri.encodeComponent(
       'Olá! Este é um lembrete sobre a mensalidade de $studentName.\n\n'
       'Valor: $formattedAmount\n'
       'Vencimento: $formattedDate\n\n'
+      '$pixBlock'
       'Por favor, entre em contato caso tenha alguma dúvida.',
     );
 
     return 'https://wa.me/$phoneWithCountry?text=$message';
+  }
+
+  // ============================================
+  // Best-effort PIX for the manual WhatsApp reminder
+  // ============================================
+  /// Mirrors BillingNotificationService.ensureValidPixForFinancial (o canal
+  /// de cobrança automático) para o lembrete manual desta tela. NUNCA lança —
+  /// qualquer falha (MP desconectado, erro de rede, CF) retorna vazio e o
+  /// lembrete manual segue sem link, como antes.
+  Future<({String pixCode, String ticketUrl})> generateReminderPix({
+    required String financialId,
+    required String studentId,
+    required String studentName,
+    required double amount,
+    String? cpf,
+  }) async {
+    try {
+      final mp = MercadoPagoService(academyId);
+      if (!await mp.isEnabled()) return (pixCode: '', ticketUrl: '');
+      final link = await mp.createPixPayment(
+        amount: amount,
+        financialId: financialId,
+        studentId: studentId,
+        studentName: studentName,
+        cpf: cpf,
+      );
+      if (link == null) return (pixCode: '', ticketUrl: '');
+      return (pixCode: link.pixCode, ticketUrl: link.ticketUrl ?? '');
+    } catch (_) {
+      return (pixCode: '', ticketUrl: '');
+    }
   }
 }
 

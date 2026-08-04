@@ -6,7 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
+
+import '../../core/platform_support.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:go_router/go_router.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
@@ -19,6 +22,8 @@ import '../../core/navigation/nav_catalog.dart';
 import '../../core/formatters.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
+import '../../core/access_control/turnstile_registry.dart';
+import '../../models/academy.dart' show AcademyProfileExtension;
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
@@ -54,6 +59,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
   // Form controllers
   final _nameController = TextEditingController();
+  // Nome de exibição do professor/admin (globalUser.displayName). É o nome que
+  // aparece nas presenças (verifiedByName) e na Jornada do aluno.
+  final _displayNameController = TextEditingController();
   final _sloganController = TextEditingController();
   final _cnpjController = TextEditingController();
   final _emailController = TextEditingController();
@@ -68,12 +76,15 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _storeMinAmountController = TextEditingController();
 
   PixKeyType? _pixKeyType;
-  bool _abacatePayEnabled = false;
   bool _asaasEnabled = false;
   bool _mpConnected = false;
   // Backend-set flag: MP auth repeatedly failed; admin must reconnect even
   // though mpConnected may still be true.
   bool _mpNeedsReauth = false;
+  // Backend-set: assinaturas recorrentes órfãs cobrando cartões numa conta MP
+  // não mais conectada (troca de conta / disconnect com token revogado).
+  bool _mpHasOrphanPreapprovals = false;
+  int _mpOrphanCount = 0;
   bool _mpBusy = false;
   bool _storeEnabled = false;
   bool _storePublished = false;
@@ -84,6 +95,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _workoutPlansEnabled = false;
   bool _trainingVideosEnabled = false;
   bool _physicalEvolutionEnabled = false;
+
+  // Tipo de academia ('fight' | 'fitness' | 'hybrid') — vocabulário/casca,
+  // ver core/academy_vocab.dart. Normalizado (nunca lixo) via
+  // AcademyProfileExtension.fromString.
+  String _academyProfile = 'fight';
 
   // Reserva de aula (A1)
   bool _bookingEnabled = false;
@@ -108,6 +124,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   // Musculação check-in (schedule-less)
   bool _musculacaoEnabled = true; // master on/off for the whole feature
   String _musculacaoCheckinMode = 'manual'; // 'manual' | 'qr' | 'button'
+
+  // Controle de acesso (catraca) — config em academies/{id}.accessControl
+  bool _accessControlEnabled = false;
+  String _accessControlVendor = '';
+  bool _accessControlBlockOnOverdue = false;
   final Map<int, ({String open, String close})> _operatingHours = {};
 
   // Muay Thai graduation ladder ('cbmt' | 'cbmtt')
@@ -147,6 +168,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     // Text edits should surface the "unsaved changes" bar like toggles do.
     for (final c in <TextEditingController>[
       _nameController,
+      _displayNameController,
       _sloganController,
       _cnpjController,
       _emailController,
@@ -160,6 +182,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _storeWelcomeController,
       _storeMinAmountController,
       _autoGraduationAttendancesController,
+      _minSkillPctController,
     ]) {
       c.addListener(_onFieldChanged);
     }
@@ -174,8 +197,20 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           ..sort((a, b) => a.key.compareTo(b.key)))
         .map((e) => '${e.key}:${e.value.open}-${e.value.close}')
         .join(',');
+    final requirementsBySport = (_graduationRequirementsBySport.entries
+            .toList()
+          ..sort((a, b) => a.key.compareTo(b.key)))
+        .map((e) {
+          final grades = (e.value.entries.toList()
+                ..sort((a, b) => a.key.compareTo(b.key)))
+              .map((g) => '${g.key}:${g.value}')
+              .join(',');
+          return '${e.key}[$grades]';
+        })
+        .join(';');
     return [
       _nameController.text,
+      _displayNameController.text,
       _sloganController.text,
       _cnpjController.text,
       _emailController.text,
@@ -190,7 +225,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _storeMinAmountController.text,
       _autoGraduationAttendancesController.text,
       _pixKeyType?.value ?? '',
-      _abacatePayEnabled,
       _asaasEnabled,
       _storeEnabled,
       _storePublished,
@@ -203,12 +237,19 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _physicalEvolutionEnabled,
       _musculacaoEnabled,
       _musculacaoCheckinMode,
+      _academyProfile,
       hours,
       _muaythaiGradeSystem,
       _autoGraduationEnabled,
       _useClassWeights,
       _graduationMode,
       _graduationProgressVisibleToStudents,
+      _accessControlEnabled,
+      _accessControlVendor,
+      _accessControlBlockOnOverdue,
+      _graduationSkillPolicy,
+      _minSkillPctController.text,
+      requirementsBySport,
     ].join('|');
   }
 
@@ -226,6 +267,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _displayNameController.dispose();
     _sloganController.dispose();
     _cnpjController.dispose();
     _emailController.dispose();
@@ -251,6 +293,12 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       final service = SettingsService(FirebaseService.academyId);
       final settings = await service.getAcademySettings();
 
+      // Nome de exibição do professor/admin (root /users/{uid}.displayName).
+      final globalUser = await ref.read(globalUserProvider.future);
+      if (globalUser != null) {
+        _displayNameController.text = globalUser.displayName;
+      }
+
       if (settings != null) {
         setState(() {
           _settings = settings;
@@ -269,10 +317,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _storeMinAmountController.text =
               settings.storeMinOrderAmount?.toStringAsFixed(2) ?? '';
           _pixKeyType = settings.pixKeyType;
-          _abacatePayEnabled = settings.abacatePayEnabled;
           _asaasEnabled = settings.asaasEnabled;
           _mpConnected = settings.mpConnected;
           _mpNeedsReauth = settings.mpNeedsReauth;
+          _mpHasOrphanPreapprovals = settings.mpHasOrphanPreapprovals;
+          _mpOrphanCount = settings.mpOrphanPreapprovalCount;
           _storeEnabled = settings.storeEnabled;
           _storePublished = settings.storePublished;
           _storeCreditCardEnabled = settings.storeCreditCardEnabled;
@@ -290,6 +339,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _physicalEvolutionEnabled = settings.physicalEvolutionEnabled;
           _musculacaoEnabled = settings.musculacaoEnabled;
           _musculacaoCheckinMode = settings.musculacaoCheckinMode;
+          _academyProfile =
+              AcademyProfileExtension.fromString(settings.profile).value;
+          _accessControlEnabled = settings.accessControlEnabled;
+          _accessControlVendor = settings.accessControlVendor;
+          _accessControlBlockOnOverdue = settings.accessControlBlockOnOverdue;
           _operatingHours
             ..clear()
             ..addAll(settings.operatingHours.byDay);
@@ -503,12 +557,17 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
               ? double.tryParse(_storeMinAmountController.text)
               : null,
         ),
-        service.toggleAbacatePay(_abacatePayEnabled),
         service.toggleAsaas(_asaasEnabled),
         service.toggleStudentCheckin(_studentCheckinEnabled),
         service.updateJournalVisibility(_journalVisibleToStudents),
         service.updateRankingVisibility(_rankingVisibleToStudents),
         service.updateMusculacaoEnabled(_musculacaoEnabled),
+        service.updateAcademyProfile(_academyProfile),
+        service.updateAccessControl(
+          enabled: _accessControlEnabled,
+          vendor: _accessControlVendor.isEmpty ? null : _accessControlVendor,
+          blockOnOverdue: _accessControlBlockOnOverdue,
+        ),
         service.updateMusculacaoCheckin(
           mode: _musculacaoCheckinMode,
           operatingHours: OperatingHours(Map.of(_operatingHours)),
@@ -524,6 +583,13 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           minSkillPct: int.tryParse(_minSkillPctController.text.trim()),
         ),
         service.updateUseClassWeights(_useClassWeights),
+        // Nome de exibição do professor/admin (root /users/{uid}). É o nome que
+        // aparece nas presenças (verifiedByName) e na Jornada do aluno. Só grava
+        // quando preenchido, para nunca apagar o nome com um campo vazio.
+        if (_displayNameController.text.trim().isNotEmpty)
+          ref.read(authServiceProvider).updateGlobalProfile(
+                displayName: _displayNameController.text.trim(),
+              ),
       ];
 
       var savedOffline = false;
@@ -538,6 +604,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       ref.invalidate(academySettingsProvider);
       ref.invalidate(academyNameProvider);
       ref.invalidate(pixInfoProvider);
+      ref.invalidate(globalUserProvider);
 
       if (mounted) {
         setState(() {
@@ -630,8 +697,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
       if (pickedFile == null) return;
 
-      // Crop to 1:1 aspect ratio
-      final croppedFile = await ImageCropper().cropImage(
+      // Crop to 1:1 aspect ratio. No desktop (sem image_cropper) usa a imagem
+      // original sem recortar.
+      final croppedFile = !PlatformSupport.canCropImage
+          ? CroppedFile(pickedFile.path)
+          : await ImageCropper().cropImage(
         sourcePath: pickedFile.path,
         aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
         compressQuality: 85,
@@ -742,8 +812,12 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                             ),
                           ),
 
-                          // Save button
-                          SliverToBoxAdapter(child: _buildSaveButton()),
+                          // Botão de salvar do topo removido (decisão do dono:
+                          // sem funções repetidas na mesma tela). A barra
+                          // fixa "Alteracoes nao salvas" (_buildUnsavedBar,
+                          // abaixo) já cobre Salvar como via única — agora
+                          // confiável para todo campo graças ao snapshot
+                          // corrigido em _snapshot().
 
                           // Bottom padding
                           const SliverToBoxAdapter(child: SizedBox(height: 100)),
@@ -850,7 +924,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             ),
           const Spacer(),
           IconButton(
-            onPressed: _loadSettings,
+            // Decisão do dono: sem funções repetidas na mesma tela — com edição
+            // pendente, a única via de recarregar/descartar é o botão "Descartar"
+            // da barra de alterações não salvas (_buildUnsavedBar).
+            onPressed: _isDirty ? null : _loadSettings,
             icon: const Icon(LucideIcons.refreshCw, size: 20),
             style: IconButton.styleFrom(
               backgroundColor: AppTheme.surface,
@@ -1014,6 +1091,23 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 ),
                 const SizedBox(height: 16),
                 _ModernTextField(
+                  controller: _displayNameController,
+                  label: 'Nome do professor',
+                  hint: 'Ex: Professor Carlos',
+                  icon: LucideIcons.userCheck,
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Esse e o nome que aparece nas presencas e na Jornada do aluno.',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _ModernTextField(
                   controller: _sloganController,
                   label: 'Frase / Slogan',
                   hint: 'Ex: Transformando vidas atraves do Jiu-Jitsu',
@@ -1021,6 +1115,19 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                   maxLines: 2,
                 ),
               ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Tipo de academia — vocabulário (lutador/aluno, tatame/academia)
+          // e modalidade padrão. Discreto: não é um feature toggle, é "casca".
+          _SettingsCard(
+            title: 'Tipo de Academia',
+            icon: LucideIcons.layoutGrid,
+            child: _AcademyProfileSelector(
+              value: _academyProfile,
+              onChanged: (v) => setState(() => _academyProfile = v),
             ),
           ),
 
@@ -1173,25 +1280,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           // Mercado Pago (recebimentos do admin via PIX, direto na conta dele)
           _buildMercadoPagoCard(),
-
-          // AbacatePay legado — só enquanto a academia não conectou o MP.
-          if (!_mpConnected) ...[
-            const SizedBox(height: 16),
-            _SettingsCard(
-              title: 'AbacatePay (legado)',
-              icon: LucideIcons.plug,
-              child: _ModernSwitch(
-                title: 'AbacatePay',
-                subtitle: 'Cobranca via PIX (sera substituido pelo Mercado Pago)',
-                value: _abacatePayEnabled,
-                onChanged: (value) {
-                  setState(() => _abacatePayEnabled = value);
-                },
-                icon: LucideIcons.zap,
-                iconColor: Colors.green,
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -1213,6 +1301,53 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 16),
+          // Preapprovals órfãos: assinaturas recorrentes que ficaram cobrando
+          // cartões de alunos numa conta MP não mais conectada. Sem este alerta
+          // o admin nunca saberia (a notificação por proxy/push pode falhar).
+          if (_mpHasOrphanPreapprovals) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.error.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.error.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(LucideIcons.alertOctagon,
+                      size: 18, color: AppTheme.error),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _mpOrphanCount > 0
+                              ? 'Assinaturas orfas ($_mpOrphanCount)'
+                              : 'Assinaturas orfas',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.error,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Ha assinaturas recorrentes ainda cobrando cartoes de '
+                          'alunos numa conta do Mercado Pago que nao esta mais '
+                          'conectada. Reconecte essa conta para gerencia-las ou '
+                          'cancele-as no painel do Mercado Pago.',
+                          style: AppTheme.labelSmall
+                              .copyWith(color: AppTheme.error),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           // Reauth required: the connection went stale (token revoked/expired).
           // Surface a clear warning + "Reconectar" CTA even while mpConnected is
           // still true, so payments don't keep silently failing.
@@ -1291,7 +1426,40 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 ),
               ],
             )
-          else
+          else ...[
+            // Sem MP conectado o professor não recebe nada pelo app — deixe
+            // isso explícito para que ninguém pense que está cobrando à toa.
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.warning.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: AppTheme.warning.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(LucideIcons.alertTriangle,
+                      size: 18, color: AppTheme.warning),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Sem o Mercado Pago conectado, o professor NAO recebe '
+                      'pagamentos pelo app: os alunos nao conseguem pagar '
+                      'mensalidades nem pedidos da loja por aqui. Conecte sua '
+                      'conta para comecar a receber.',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.warning,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -1306,6 +1474,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 label: Text(_mpBusy ? 'Conectando...' : 'Conectar Mercado Pago'),
               ),
             ),
+          ],
         ],
       ),
     );
@@ -1324,7 +1493,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       setState(() {
         _mpConnected = true;
         _mpNeedsReauth = false;
-        _abacatePayEnabled = false;
         _asaasEnabled = false;
       });
     }
@@ -1336,7 +1504,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       builder: (c) => AlertDialog(
         title: const Text('Desconectar Mercado Pago'),
         content: const Text(
-          'Os alunos nao poderao mais pagar via Mercado Pago ate reconectar. Continuar?',
+          'Atencao: ao desconectar, TODAS as assinaturas recorrentes ativas dos '
+          'alunos serao canceladas e NAO voltam sozinhas ao reconectar — cada '
+          'aluno precisara assinar de novo. Ate la, os alunos nao poderao pagar '
+          'via Mercado Pago.\n\nDeseja continuar?',
         ),
         actions: [
           TextButton(
@@ -1344,6 +1515,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             child: const Text('Cancelar'),
           ),
           TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
             onPressed: () => Navigator.pop(c, true),
             child: const Text('Desconectar'),
           ),
@@ -1842,6 +2014,75 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
           const SizedBox(height: 16),
 
+          // Controle de Acesso (catraca)
+          _SettingsCard(
+            title: 'Controle de Acesso (Catraca)',
+            icon: LucideIcons.scanFace,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ModernSwitch(
+                  title: 'Habilitar controle de acesso',
+                  subtitle:
+                      'Integra catracas/totem de acesso (check-in automatico). '
+                      'Quando desligado, nada aparece para a academia.',
+                  value: _accessControlEnabled,
+                  onChanged: (value) =>
+                      setState(() => _accessControlEnabled = value),
+                  icon: LucideIcons.scanFace,
+                  iconColor: AppTheme.primary,
+                ),
+                if (_accessControlEnabled) ...[
+                  const Divider(height: 24),
+                  Text(
+                    'Marca/modelo de catraca usada (dica de configuracao; cada '
+                    'catraca cadastrada define o seu proprio fabricante).',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _TurnstileVendorSelector(
+                    value: _accessControlVendor,
+                    onChanged: (v) => setState(() => _accessControlVendor = v),
+                  ),
+                  const Divider(height: 24),
+                  _ModernSwitch(
+                    title: 'Bloquear inadimplentes no portao',
+                    subtitle:
+                        'A catraca nega o giro de quem esta com financeiro '
+                        'vencido. Desligado por padrao — ligar a catraca nao '
+                        'bloqueia ninguem sozinho.',
+                    value: _accessControlBlockOnOverdue,
+                    onChanged: (value) =>
+                        setState(() => _accessControlBlockOnOverdue = value),
+                    icon: LucideIcons.shieldAlert,
+                    iconColor: AppTheme.error,
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () => context.go('/admin/catracas'),
+                        icon: const Icon(LucideIcons.scanFace, size: 18),
+                        label: const Text('Gerenciar catracas'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => context.go('/kiosk'),
+                        icon: const Icon(LucideIcons.monitor, size: 18),
+                        label: const Text('Abrir totem (Kiosk)'),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // Muay Thai graduation ladder
           _SettingsCard(
             title: 'Graduacao do Muay Thai',
@@ -2265,46 +2506,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     }
   }
 
-  Widget _buildSaveButton() {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: ElevatedButton(
-        onPressed: _isSaving ? null : _saveSettings,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppTheme.textPrimary,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          disabledBackgroundColor: AppTheme.textPrimary.withValues(alpha: 0.5),
-        ),
-        child: _isSaving
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              )
-            : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(LucideIcons.save, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Salvar Configuracoes',
-                    style: AppTheme.bodyMedium.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-      ),
-    );
-  }
+  // _buildSaveButton() removido: duplicava o botão "Salvar" que já fica
+  // fixo em _buildUnsavedBar() sempre que há alterações pendentes — as duas
+  // vias apareciam simultaneamente na mesma tela (decisão do dono: sem
+  // funções repetidas na mesma tela para o mesmo dado).
 }
 
 /// Settings Card Widget
@@ -2756,6 +2961,77 @@ class _GraduationModeSelector extends StatelessWidget {
 
 /// Picks which Muay Thai prajied ladder the academy uses. 'cbmt' is the
 /// blue-based CBMT/CMTB system; 'cbmtt' is the CBMTT traditional (white→gold).
+/// Seletor de marca/modelo de catraca — lê de [kTurnstileVendors] (registro
+/// único). Adicionar um fabricante novo é UMA entrada lá; este seletor se
+/// atualiza sozinho (nada muda aqui).
+class _TurnstileVendorSelector extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+  const _TurnstileVendorSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final v in kTurnstileVendors)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: InkWell(
+              onTap: () => onChanged(v.id),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: value == v.id ? AppTheme.primary : AppTheme.border,
+                    width: value == v.id ? 2 : 1,
+                  ),
+                  color: value == v.id
+                      ? AppTheme.primary.withValues(alpha: 0.06)
+                      : null,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      value == v.id
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      color: value == v.id
+                          ? AppTheme.primary
+                          : AppTheme.textSecondary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            v.label,
+                            style: AppTheme.bodyMedium
+                                .copyWith(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            v.integration,
+                            style: AppTheme.labelSmall
+                                .copyWith(color: AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _MuaythaiGradeSystemSelector extends StatelessWidget {
   final String value;
   final ValueChanged<String> onChanged;
@@ -2964,6 +3240,52 @@ class _MusculacaoCheckinModeSelector extends StatelessWidget {
           icon: Icons.touch_app,
           selected: value == 'button',
           onTap: () => onChanged('button'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Selector for the academy's business profile ('fight' | 'fitness' |
+/// 'hybrid'). Drives copy/vocabulary (core/academy_vocab.dart) and the
+/// default modality offered to new academies — editable here so an academy
+/// that grows into a hybrid gym (or the other way around) can update it.
+class _AcademyProfileSelector extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _AcademyProfileSelector({
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _ModeCard(
+          title: 'Artes Marciais',
+          subtitle: 'Faixas, graus e graduação',
+          icon: LucideIcons.swords,
+          selected: value == 'fight',
+          onTap: () => onChanged('fight'),
+        ),
+        const SizedBox(height: 8),
+        _ModeCard(
+          title: 'Musculação & Fitness',
+          subtitle: 'Check-in, sem faixas',
+          icon: LucideIcons.dumbbell,
+          selected: value == 'fitness',
+          onTap: () => onChanged('fitness'),
+        ),
+        const SizedBox(height: 8),
+        _ModeCard(
+          title: 'Ambos',
+          subtitle: 'Artes marciais e musculação',
+          icon: LucideIcons.layers,
+          selected: value == 'hybrid',
+          onTap: () => onChanged('hybrid'),
         ),
       ],
     );

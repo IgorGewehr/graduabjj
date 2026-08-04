@@ -14,12 +14,13 @@ import '../../widgets/competitions/photo_upload_sheet.dart';
 import '../../widgets/loading_button.dart';
 import '../../widgets/polish/polish.dart';
 
-/// Position display config
+/// Position display config. Ícones MATERIAL (sempre renderizam — emoji e alguns
+/// glifos do lucide saíam como "?" no device). Cor do ícone fica neutra (ink).
 const _positionConfig = {
-  'gold': {'label': 'Ouro', 'icon': '🥇', 'color': 0xFFFFD700},
-  'silver': {'label': 'Prata', 'icon': '🥈', 'color': 0xFFC0C0C0},
-  'bronze': {'label': 'Bronze', 'icon': '🥉', 'color': 0xFFCD7F32},
-  'participant': {'label': 'Participante', 'icon': '🎖️', 'color': 0xFF666666},
+  'gold': {'label': 'Ouro', 'icon': Icons.workspace_premium, 'color': 0xFF0A0A0A},
+  'silver': {'label': 'Prata', 'icon': Icons.workspace_premium, 'color': 0xFF0A0A0A},
+  'bronze': {'label': 'Bronze', 'icon': Icons.workspace_premium, 'color': 0xFF0A0A0A},
+  'participant': {'label': 'Participante', 'icon': Icons.military_tech, 'color': 0xFF6E6E68},
 };
 
 /// Competition Detail Screen - Shows results + gallery for a specific competition
@@ -64,9 +65,31 @@ class _CompetitionDetailScreenState
     super.dispose();
   }
 
+  /// Resolves the academy context with a fallback chain. In an admin-only
+  /// session `selectedAcademyIdProvider` is never bootstrapped (AdminShell
+  /// doesn't watch it), so without this fallback admins hit "Academia não
+  /// selecionada" when opening a competition. Fall back to the authenticated
+  /// user's academy and finally the FirebaseService default — same pattern
+  /// used in student_detail_screen.dart.
+  String _resolveAcademyId() =>
+      ref.read(selectedAcademyIdProvider) ??
+      ref.read(currentUserProvider).valueOrNull?.academyId ??
+      FirebaseService.academyId;
+
+  /// Whether the current user may manage (add/edit/delete) results and team
+  /// results on this competition. `widget.isAdmin` is the caller's intent
+  /// (admin context), but an instructor opening the screen with the
+  /// `competitions:create` extra permission should also get management powers.
+  bool get _canManageResults =>
+      widget.isAdmin ||
+      (ref.read(currentUserProvider).valueOrNull?.hasPermission(
+            'competitions:create',
+          ) ??
+          false);
+
   Future<void> _loadData() async {
-    final academyId = ref.read(selectedAcademyIdProvider);
-    if (academyId == null) {
+    final academyId = _resolveAcademyId();
+    if (academyId.isEmpty) {
       setState(() {
         _error = 'Academia nao selecionada';
         _isLoading = false;
@@ -116,7 +139,10 @@ class _CompetitionDetailScreenState
   Widget build(BuildContext context) {
     final studentAsync = ref.watch(currentStudentProvider);
     final student = studentAsync.valueOrNull;
-    final academyId = ref.watch(selectedAcademyIdProvider);
+    // Keep a watch so portal users who switch academies trigger a rebuild,
+    // but fall back to the resolved id so admins (no selectedAcademyId) still
+    // get a non-null academy for the gallery tab.
+    final academyId = ref.watch(selectedAcademyIdProvider) ?? _resolveAcademyId();
 
     return Scaffold(
       appBar: AppBar(
@@ -400,8 +426,8 @@ class _CompetitionDetailScreenState
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Team Result Card (admin can edit, students only see)
-          if (widget.isAdmin || _competition!.teamPosition != null)
+          // Team Result Card (managers can edit, students only see)
+          if (_canManageResults || _competition!.teamPosition != null)
             _buildTeamResultCard(),
 
           // My Results Card (supports multiple) - only for students
@@ -445,8 +471,8 @@ class _CompetitionDetailScreenState
       },
     };
 
-    // Admin without team result: show register button
-    if (position == null && widget.isAdmin) {
+    // Manager without team result: show register button
+    if (position == null && _canManageResults) {
       return Container(
         margin: const EdgeInsets.only(bottom: 16),
         child: OutlinedButton(
@@ -465,7 +491,7 @@ class _CompetitionDetailScreenState
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text('🏆', style: TextStyle(fontSize: 20)),
+              const Icon(Icons.emoji_events_outlined, size: 20),
               const SizedBox(width: 8),
               Text(
                 'Registrar Resultado da Equipe',
@@ -497,7 +523,7 @@ class _CompetitionDetailScreenState
       ),
       child: Row(
         children: [
-          const Text('🏆', style: TextStyle(fontSize: 36)),
+          const Icon(Icons.emoji_events, size: 34),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -531,7 +557,7 @@ class _CompetitionDetailScreenState
               ],
             ),
           ),
-          if (widget.isAdmin) ...[
+          if (_canManageResults) ...[
             IconButton(
               onPressed: _showTeamResultDialog,
               icon: Icon(LucideIcons.edit, size: 18, color: textColor),
@@ -578,9 +604,9 @@ class _CompetitionDetailScreenState
               Text(
                 myResults.length > 1 ? 'MEUS RESULTADOS' : 'MEU RESULTADO',
                 style: AppTheme.labelSmall.copyWith(
-                  color: AppTheme.textSecondary,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.5,
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
                 ),
               ),
               TextButton.icon(
@@ -611,9 +637,10 @@ class _CompetitionDetailScreenState
                 ),
                 child: Row(
                   children: [
-                    Text(
-                      pos['icon'] as String,
-                      style: const TextStyle(fontSize: 36),
+                    Icon(
+                      pos['icon'] as IconData,
+                      size: 30,
+                      color: Color(pos['color'] as int),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -665,11 +692,15 @@ class _CompetitionDetailScreenState
                       icon: const Icon(LucideIcons.edit, size: 18),
                       color: AppTheme.textSecondary,
                     ),
-                    IconButton(
-                      onPressed: () => _deleteResult(result),
-                      icon: const Icon(LucideIcons.trash2, size: 18),
-                      color: Colors.red.shade400,
-                    ),
+                    // O firestore.rules nega self-delete de resultado ao aluno;
+                    // só exibir o botão de excluir para quem pode gerenciar
+                    // (admin/instrutor com permissao), evitando erro de permissao.
+                    if (_canManageResults)
+                      IconButton(
+                        onPressed: () => _deleteResult(result),
+                        icon: const Icon(LucideIcons.trash2, size: 18),
+                        color: Colors.red.shade400,
+                      ),
                   ],
                 ),
               );
@@ -693,7 +724,7 @@ class _CompetitionDetailScreenState
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
-                      LucideIcons.medal,
+                      Icons.workspace_premium,
                       size: 18,
                       color: AppTheme.textSecondary,
                     ),
@@ -736,13 +767,13 @@ class _CompetitionDetailScreenState
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  widget.isAdmin ? 'Resultados' : 'Todos os Resultados',
+                  _canManageResults ? 'Resultados' : 'Todos os Resultados',
                   style: AppTheme.titleSmall.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
-              if (widget.isAdmin)
+              if (_canManageResults)
                 TextButton.icon(
                   onPressed: _enrollments.isEmpty
                       ? null
@@ -806,9 +837,10 @@ class _CompetitionDetailScreenState
                 ),
                 child: Row(
                   children: [
-                    Text(
-                      pos['icon'] as String,
-                      style: const TextStyle(fontSize: 22),
+                    Icon(
+                      pos['icon'] as IconData,
+                      size: 20,
+                      color: Color(pos['color'] as int),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -863,7 +895,7 @@ class _CompetitionDetailScreenState
                         ],
                       ),
                     ),
-                    if (widget.isAdmin) ...[
+                    if (_canManageResults) ...[
                       IconButton(
                         onPressed: () => _showResultDialog(
                           studentId: result.studentId,
@@ -906,7 +938,14 @@ class _CompetitionDetailScreenState
       return const Center(child: Text('Academia nao selecionada'));
     }
 
-    final isEnrolled = _enrollments.any((e) => e.studentId == student?.id);
+    // Tratar resultado como participação: quem tem resultado registrado mas
+    // nunca formalizou a inscrição (ou se inscreveu depois do término) também
+    // pode participar da galeria.
+    final studentId = student?.id;
+    final canParticipate =
+        studentId != null &&
+        (_enrollments.any((e) => e.studentId == studentId) ||
+            _results.any((r) => r.studentId == studentId));
     final enrolledStudents = _enrollments
         .map((e) => EnrolledStudent(id: e.studentId, name: e.studentName))
         .toList();
@@ -918,7 +957,7 @@ class _CompetitionDetailScreenState
         competitionName: _competition?.name ?? '',
         studentId: student?.id,
         studentName: student?.fullName,
-        isEnrolled: isEnrolled,
+        isEnrolled: canParticipate,
         isAdmin: widget.isAdmin,
         enrolledStudents: enrolledStudents,
       ),
@@ -929,8 +968,8 @@ class _CompetitionDetailScreenState
   // Self Enrollment
   // ============================================
   Future<void> _selfEnroll(Student student) async {
-    final academyId = ref.read(selectedAcademyIdProvider);
-    if (academyId == null || _competition == null) return;
+    final academyId = _resolveAcademyId();
+    if (academyId.isEmpty || _competition == null) return;
 
     HapticFeedback.selectionClick();
     setState(() => _isEnrolling = true);
@@ -979,8 +1018,8 @@ class _CompetitionDetailScreenState
   }
 
   Future<void> _cancelEnrollment(String studentId) async {
-    final academyId = ref.read(selectedAcademyIdProvider);
-    if (academyId == null || _competition == null) return;
+    final academyId = _resolveAcademyId();
+    if (academyId.isEmpty || _competition == null) return;
 
     final myEnrollment = _enrollments
         .where((e) => e.studentId == studentId)
@@ -1084,21 +1123,24 @@ class _CompetitionDetailScreenState
                     spacing: 8,
                     children: [
                       ChoiceChip(
-                        label: const Text('🥇 Campeao'),
+                        avatar: const Icon(Icons.workspace_premium, size: 16),
+                        label: const Text('Campeao'),
                         selected: teamPosition == 'gold',
                         onSelected: (_) =>
                             setSheetState(() => teamPosition = 'gold'),
                         selectedColor: const Color(0xFFFEF3C7),
                       ),
                       ChoiceChip(
-                        label: const Text('🥈 Vice'),
+                        avatar: const Icon(Icons.workspace_premium, size: 16),
+                        label: const Text('Vice'),
                         selected: teamPosition == 'silver',
                         onSelected: (_) =>
                             setSheetState(() => teamPosition = 'silver'),
                         selectedColor: const Color(0xFFF3F4F6),
                       ),
                       ChoiceChip(
-                        label: const Text('🥉 3o Lugar'),
+                        avatar: const Icon(Icons.military_tech, size: 16),
+                        label: const Text('3o Lugar'),
                         selected: teamPosition == 'bronze',
                         onSelected: (_) =>
                             setSheetState(() => teamPosition = 'bronze'),
@@ -1121,8 +1163,8 @@ class _CompetitionDetailScreenState
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () async {
-                        final academyId = ref.read(selectedAcademyIdProvider);
-                        if (academyId == null || _competition == null) return;
+                        final academyId = _resolveAcademyId();
+                        if (academyId.isEmpty || _competition == null) return;
 
                         final competitionService = CompetitionService(
                           academyId,
@@ -1204,8 +1246,8 @@ class _CompetitionDetailScreenState
 
     if (confirmed != true) return;
 
-    final academyId = ref.read(selectedAcademyIdProvider);
-    if (academyId == null || _competition == null) return;
+    final academyId = _resolveAcademyId();
+    if (academyId.isEmpty || _competition == null) return;
 
     final competitionService = CompetitionService(academyId);
     try {
@@ -1347,6 +1389,14 @@ class _CompetitionDetailScreenState
     String divisionType = existingResult?.divisionType ?? 'weight';
     String notes = existingResult?.notes ?? '';
 
+    // Controllers hoistados para fora do build/StatefulBuilder: instanciados
+    // uma vez por abertura do sheet e dispostos no whenComplete, evitando
+    // recriacao a cada rebuild (que reseta o cursor) e vazamento.
+    final weightController = TextEditingController(text: weightCategory);
+    final notesController = TextEditingController(text: notes);
+    // Trava de duplo-toque no botao Salvar.
+    bool isSaving = false;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1403,9 +1453,12 @@ class _CompetitionDetailScreenState
                     children: _positionConfig.entries.map((entry) {
                       final isSelected = position == entry.key;
                       return ChoiceChip(
-                        label: Text(
-                          '${entry.value['icon']} ${entry.value['label']}',
+                        avatar: Icon(
+                          entry.value['icon'] as IconData,
+                          size: 16,
+                          color: Color(entry.value['color'] as int),
                         ),
+                        label: Text(entry.value['label'] as String),
                         selected: isSelected,
                         onSelected: (_) {
                           setSheetState(() => position = entry.key);
@@ -1484,17 +1537,19 @@ class _CompetitionDetailScreenState
                   ),
                   const SizedBox(height: 16),
 
-                  // Weight category
-                  TextField(
-                    decoration: const InputDecoration(
-                      labelText: 'Categoria de Peso',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+                  // Weight category (oculto em divisao "Absoluto", que nao tem peso)
+                  if (divisionType != 'absolute') ...[
+                    TextField(
+                      decoration: const InputDecoration(
+                        labelText: 'Categoria de Peso',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      controller: weightController,
+                      onChanged: (v) => weightCategory = v,
                     ),
-                    controller: TextEditingController(text: weightCategory),
-                    onChanged: (v) => weightCategory = v,
-                  ),
-                  const SizedBox(height: 12),
+                    const SizedBox(height: 12),
+                  ],
 
                   // Notes
                   TextField(
@@ -1503,7 +1558,7 @@ class _CompetitionDetailScreenState
                       border: OutlineInputBorder(),
                       isDense: true,
                     ),
-                    controller: TextEditingController(text: notes),
+                    controller: notesController,
                     onChanged: (v) => notes = v,
                     maxLines: 2,
                   ),
@@ -1513,19 +1568,35 @@ class _CompetitionDetailScreenState
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: weightCategory.isEmpty
+                      // So exige categoria de peso na divisao "Peso"; em
+                      // "Absoluto" nao ha peso, entao a validacao e dispensada.
+                      onPressed:
+                          isSaving ||
+                              (divisionType == 'weight' &&
+                                  weightCategory.isEmpty)
                           ? null
-                          : () => _saveResult(
-                              studentId: studentId,
-                              studentName: studentName,
-                              position: position,
-                              ageCategory: ageCategory,
-                              weightCategory: weightCategory,
-                              modality: modality,
-                              divisionType: divisionType,
-                              notes: notes.isNotEmpty ? notes : null,
-                              existingResult: existingResult,
-                            ),
+                          : () async {
+                              setSheetState(() => isSaving = true);
+                              try {
+                                await _saveResult(
+                                  studentId: studentId,
+                                  studentName: studentName,
+                                  position: position,
+                                  ageCategory: ageCategory,
+                                  weightCategory: divisionType == 'absolute'
+                                      ? ''
+                                      : weightCategory,
+                                  modality: modality,
+                                  divisionType: divisionType,
+                                  notes: notes.isNotEmpty ? notes : null,
+                                  existingResult: existingResult,
+                                );
+                              } finally {
+                                if (ctx.mounted) {
+                                  setSheetState(() => isSaving = false);
+                                }
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.textPrimary,
                         foregroundColor: Colors.white,
@@ -1534,11 +1605,22 @@ class _CompetitionDetailScreenState
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: Text(
-                        existingResult != null
-                            ? 'Atualizar Resultado'
-                            : 'Salvar Resultado',
-                      ),
+                      child: isSaving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
+                              ),
+                            )
+                          : Text(
+                              existingResult != null
+                                  ? 'Atualizar Resultado'
+                                  : 'Salvar Resultado',
+                            ),
                     ),
                   ),
                 ],
@@ -1547,7 +1629,10 @@ class _CompetitionDetailScreenState
           );
         },
       ),
-    );
+    ).whenComplete(() {
+      weightController.dispose();
+      notesController.dispose();
+    });
   }
 
   Future<void> _deleteResult(CompetitionResult result) async {
@@ -1572,8 +1657,8 @@ class _CompetitionDetailScreenState
 
     if (confirmed != true) return;
 
-    final academyId = ref.read(selectedAcademyIdProvider);
-    if (academyId == null) return;
+    final academyId = _resolveAcademyId();
+    if (academyId.isEmpty) return;
 
     final competitionService = CompetitionService(academyId);
 
@@ -1611,8 +1696,8 @@ class _CompetitionDetailScreenState
     String? notes,
     CompetitionResult? existingResult,
   }) async {
-    final academyId = ref.read(selectedAcademyIdProvider);
-    if (academyId == null || _competition == null) return;
+    final academyId = _resolveAcademyId();
+    if (academyId.isEmpty || _competition == null) return;
 
     final competitionService = CompetitionService(academyId);
 
@@ -1639,6 +1724,7 @@ class _CompetitionDetailScreenState
           divisionType: divisionType,
           notes: notes,
           date: _competition!.date,
+          createdBy: ref.read(currentUserProvider).valueOrNull?.id,
         );
 
         // Create achievement
@@ -1701,9 +1787,19 @@ class _CompetitionDetailScreenState
       }
     } catch (e) {
       if (mounted) {
+        final raw = e.toString().toLowerCase();
+        final isDuplicate =
+            raw.contains('already-exists') ||
+            raw.contains('já existe') ||
+            raw.contains('ja existe') ||
+            raw.contains('duplicad');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao salvar resultado: $e'),
+            content: Text(
+              isDuplicate
+                  ? 'Este resultado já foi registrado.'
+                  : 'Erro ao salvar resultado: $e',
+            ),
             backgroundColor: Colors.red,
           ),
         );

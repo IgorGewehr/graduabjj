@@ -110,7 +110,11 @@ service firebase.storage {
     match /academies/{academyId}/competitions/{competitionId}/photos/{photoId} {
       allow read: if true;
       allow write: if authed() && belongs(academyId) && isImage() && sizeUnderMb(10);
-      allow delete: if isStaff(academyId) || authed();
+      // SECURITY (auditoria competições): era `|| authed()` — qualquer usuário
+      // autenticado (inclusive de OUTRA academia) apagava foto de qualquer um,
+      // contornando o Firestore (que exige staff OU createdBy==uid). Agora só
+      // staff ou um MEMBRO da própria academia (espelha o belongs do write).
+      allow delete: if isStaff(academyId) || belongs(academyId);
     }
 
     // Academy logo (graduabjj) — admin only.

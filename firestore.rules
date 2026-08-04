@@ -41,6 +41,18 @@ service cloud.firestore {
       );
     }
 
+    // Associação ARQUIVADA: o aluno saiu/foi transferido desta academia. Ele
+    // MANTÉM o id em academyIds (leitura do histórico continua via
+    // belongsToAcademy), mas NÃO pode mais ESCREVER (nova presença, check-in,
+    // bump de contador, editar a própria ficha) — é somente-leitura.
+    function isArchivedMember(academyId) {
+      let mapping = getUserAcademyMapping();
+      return mapping.keys().hasAll(['academyDetails']) &&
+        mapping.academyDetails.keys().hasAll([academyId]) &&
+        mapping.academyDetails[academyId].keys().hasAll(['status']) &&
+        mapping.academyDetails[academyId].status == 'archived';
+    }
+
     // Check if user is admin of the academy
     // Sources: userAcademyMapping.academyDetails (primary) > academyUser doc (fallback)
     function isAcademyAdmin(academyId) {
@@ -180,6 +192,52 @@ service cloud.firestore {
       return amount is number && amount > 0;
     }
 
+    // ============================================================================
+    // SUBSCRIPTION GATE (audit finding C) — DESIGN ONLY, *** DISABLED ***
+    // ============================================================================
+    // GOAL: when an academy's subscription lapses (not paid, no courtesy override,
+    // trial expired), staff should be blocked from WRITING new data (read stays
+    // open so they can see/export their history; the app already shows a paywall).
+    //
+    // The subscription block lives at academies/{academyId}.subscription and is
+    // written ONLY by the payment webhook via the Admin SDK (see the academies
+    // update rule, which forbids clients from touching `subscription`). Shape
+    // (from lib/models/academy.dart AcademySubscription.toMap):
+    //   subscription.paidUntil    : Timestamp | null   (paid access valid until)
+    //   subscription.freeOverride : bool               (manual courtesy access)
+    //   subscription.trialEndsAt  : Timestamp | null   (explicit trial end)
+    // Trial anchor in the app is academy.createdAt + trialDays; rules can't read
+    // AppConstants.trialDays, so the gate below relies on the persisted
+    // trialEndsAt only (acceptable: a lapsed academy has trialEndsAt in the past).
+    //
+    // *** DO NOT ENABLE WITHOUT A BACKFILL/AUDIT PASS. *** Wrongly enabling this
+    // could instantly lock out paying academies whose `subscription.paidUntil`
+    // (or freeOverride/trialEndsAt) isn't correctly populated in prod. This MUST
+    // be reviewed and data-verified before turning on. See needsReview.
+    //
+    // function hasActiveSubscription(academyId) {
+    //   let sub = get(/databases/$(database)/documents/academies/$(academyId)).data.get('subscription', {});
+    //   return sub.get('freeOverride', false) == true
+    //       || (sub.get('paidUntil', null) != null && sub.paidUntil > request.time)
+    //       || (sub.get('trialEndsAt', null) != null && sub.trialEndsAt > request.time);
+    // }
+    //
+    // WHEN ENABLING, AND it into the STAFF WRITE rules below (NOT into reads, and
+    // NOT into student self-service writes). Exact targets:
+    //   - classes        write   -> && hasActiveSubscription(academyId)
+    //   - attendance     write   -> && hasActiveSubscription(academyId)
+    //   - plans          write   -> && hasActiveSubscription(academyId)
+    //   - financials     create  -> && hasActiveSubscription(academyId)
+    //   - storeProducts  create/update -> && hasActiveSubscription(academyId)
+    //   - storeOrders    update  -> && hasActiveSubscription(academyId)
+    //   - competitions   create/update/delete -> && hasActiveSubscription(academyId)
+    //   - competitionResults create/update/delete (staff branch only) -> && hasActiveSubscription(academyId)
+    //   - beltProgressions write -> && hasActiveSubscription(academyId)
+    //   - students       create/update (staff branches) -> && hasActiveSubscription(academyId)
+    // Leave student-owned writes (self check-in, own orders/enrollments, workout
+    // logs) UNGATED so a paid-up academy's lapse doesn't break student UX mid-cycle.
+    // ============================================================================
+
     // ============================================
     // Root Users Collection
     // ============================================
@@ -198,7 +256,12 @@ service cloud.firestore {
                       (request.resource.data.role == 'admin' && request.resource.data.isActive == true)
                     );
 
-      // Users can update non-sensitive fields
+      // Users can update non-sensitive fields.
+      // Inclui notificationPrefs {social, training, academy} — opt-out de push
+      // do PRÓPRIO dono (campo ausente = true; billing não é desligável e por
+      // isso não entra no mapa). pushMeta {weekKey, count} (cap semanal de
+      // pushes) é mantido pelas CFs via Admin SDK; outro usuário nunca escreve
+      // aqui (uid == userId), e o dono forjar o próprio contador só afeta a si.
       allow update: if isAuthenticated() && request.auth.uid == userId
                     && !request.resource.data.diff(resource.data).affectedKeys()
                         .hasAny(['role', 'academyId']);
@@ -211,6 +274,126 @@ service cloud.firestore {
         // User can manage their own tokens
         allow read, write: if isAuthenticated() && request.auth.uid == userId;
       }
+
+      // ============================================
+      // B2C lutador — Diário de Rolagem (training logs) + rolls.
+      // Dado PESSOAL do lutador (nasce da pessoa, não da academia). O dono
+      // cria/lê/edita os próprios; agregados derivados ficam em /stats (CF-only).
+      // ============================================
+      match /training_logs/{logId} {
+        allow read: if isAuthenticated() && request.auth.uid == userId;
+        allow create, update, delete:
+          if isAuthenticated() && request.auth.uid == userId;
+      }
+      match /rolls/{rollId} {
+        allow read: if isAuthenticated() && request.auth.uid == userId;
+        allow create, update, delete:
+          if isAuthenticated() && request.auth.uid == userId;
+      }
+      // Agregados materializados (streak/horas/marcos) — só a Cloud Function
+      // (Admin SDK) escreve; o dono apenas lê.
+      match /stats/{statId} {
+        allow read: if isAuthenticated() && request.auth.uid == userId;
+        allow write: if false;
+      }
+    }
+
+    // ============================================
+    // B2C lutador — Espelho público PERSON-LEVEL (fighterProfiles) e de academia
+    // (academyProfiles). ADITIVO: NÃO substitui academies/{id}/publicProfiles
+    // (mantido p/ ranking intra-academia). PII-free, escrito SÓ por Cloud Function
+    // (Admin SDK) via allowlist única. Leitura: pública se discoverable, ou o dono.
+    // ============================================
+    match /fighterProfiles/{userId} {
+      // Perfil PÚBLICO PII-free do lutador (nome, faixa, stats) — qualquer
+      // logado lê (descoberta + amigos cross-academy). O DONO escreve o próprio
+      // espelho (client-side mirror; v1 do sistema de amigos).
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Grafo de amizade (seguir). Doc-id = "{followerUid}_{targetUid}".
+    match /follows/{followId} {
+      allow read: if isAuthenticated()
+                  && (resource.data.followerUid == request.auth.uid
+                      || resource.data.targetUid == request.auth.uid);
+      allow create: if isAuthenticated()
+                    && request.resource.data.followerUid == request.auth.uid
+                    && request.resource.data.followerUid
+                       != request.resource.data.targetUid;
+      allow delete: if isAuthenticated()
+                    && resource.data.followerUid == request.auth.uid;
+    }
+    match /academyProfiles/{academyId} {
+      allow read: if true; // perfil público da academia (PII-free)
+      allow write: if false; // só Admin SDK/CF
+    }
+
+    // ============================================
+    // Feed Social — feedPosts (materializado pelo dono) e likes.
+    // ============================================
+
+    // feedPosts/{postId}: coleção top-level materializada pelo próprio autor
+    // (v1, owner-driven). O postId é DETERMINÍSTICO por marco — ver FeedPost.dart.
+    //
+    // Invariantes de segurança:
+    //  - create: só o próprio autor, com hiddenByAuthor==false gravado (filtro
+    //    server-side depende deste campo presente em todo doc).
+    //  - update: só o autor, e SÓ os campos hiddenByAuthor/hiddenAt (ocultar).
+    //    A regra usa hasOnly para impedir qualquer outro campo — incluindo likeCount,
+    //    que é mantido por CF onLikeWrite (v2) e não forjável pelo cliente.
+    //  - delete: nunca (post determinístico ressurgiria no próximo mirror()).
+    //
+    // Quando CF-produz (v2): trocar create para `if false` (Admin SDK dispensa regra).
+    match /feedPosts/{postId} {
+      allow read: if isAuthenticated();
+
+      allow create: if isAuthenticated()
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.hiddenByAuthor == false
+        // academyId (se presente) tem que ser UMA das academias do autor —
+        // senão qualquer um injetaria post no feed ACADEMIA de terceiros.
+        && (request.resource.data.academyId == null
+            || request.resource.data.academyId in getUserAcademyMapping().academyIds);
+
+      allow update: if isAuthenticated() && (
+        // 1) O AUTOR oculta o próprio post (hiddenByAuthor/hiddenAt).
+        (resource.data.authorUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['hiddenByAuthor', 'hiddenAt']))
+        ||
+        // 2) MODERAÇÃO: o STAFF (admin/professor) da academia do post pode
+        //    ocultar/reexibir (hiddenByStaff) e editar o texto (staffHeadline).
+        //    Restrito aos campos de moderação — não pode forjar likeCount, autor
+        //    ou payload. academyId precisa existir e ser a academia do staff.
+        (resource.data.academyId != null
+          && isAcademyStaff(resource.data.academyId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['hiddenByStaff', 'hiddenByStaffAt', 'staffHeadline']))
+      );
+
+      allow delete: if false;
+    }
+
+    // likes/{postId}_{likerUid}: reusa 1:1 o molde de follows.
+    // Doc-id composto → anti-spam (1 like por par). Self-like bloqueado
+    // client-side (FeedPostsService.like) e aqui (likerUid != authorUid).
+    match /likes/{likeId} {
+      allow read: if isAuthenticated();
+
+      allow create: if isAuthenticated()
+        && request.resource.data.likerUid == request.auth.uid
+        && request.resource.data.likerUid != request.resource.data.authorUid
+        && likeId == request.resource.data.postId + '_' + request.resource.data.likerUid;
+
+      // Idempotência: like() usa .set() — um re-like no mesmo doc é update.
+      // Só o próprio liker, e likerUid imutável (não vira like de outro).
+      allow update: if isAuthenticated()
+        && resource.data.likerUid == request.auth.uid
+        && request.resource.data.likerUid == resource.data.likerUid;
+
+      allow delete: if isAuthenticated()
+        && resource.data.likerUid == request.auth.uid;
     }
 
     // ============================================
@@ -236,11 +419,22 @@ service cloud.firestore {
                        && exists(/databases/$(database)/documents/academies/$(request.resource.data.academyIds[0]))
                        && get(/databases/$(database)/documents/academies/$(request.resource.data.academyIds[0])).data.ownerId == request.auth.uid)
                       ||
-                      // Pattern 3: Single-academy student via link code
+                      // Pattern 3: Single-academy student via link code.
+                      // SECURITY: the asserted studentId must reference an UNCLAIMED
+                      // student record (linkedUserId null, or already this caller), so
+                      // a user cannot self-declare membership against an arbitrary or
+                      // already-linked studentId to read PII / hijack the record. The
+                      // legit client writes this mapping BEFORE stamping
+                      // students/{id}.linkedUserId, so the record is still orphan here.
                       (request.resource.data.academyIds.size() == 1
                        && request.resource.data.primaryAcademyId == request.resource.data.academyIds[0]
                        && request.resource.data.keys().hasAll(['academyDetails'])
-                       && request.resource.data.academyDetails[request.resource.data.academyIds[0]].role == 'student')
+                       && request.resource.data.academyDetails[request.resource.data.academyIds[0]].role == 'student'
+                       && exists(/databases/$(database)/documents/academies/$(request.resource.data.academyIds[0])/students/$(request.resource.data.academyDetails[request.resource.data.academyIds[0]].studentId))
+                       && (
+                         get(/databases/$(database)/documents/academies/$(request.resource.data.academyIds[0])/students/$(request.resource.data.academyDetails[request.resource.data.academyIds[0]].studentId)).data.get('linkedUserId', null) == null
+                         || get(/databases/$(database)/documents/academies/$(request.resource.data.academyIds[0])/students/$(request.resource.data.academyDetails[request.resource.data.academyIds[0]].studentId)).data.get('linkedUserId', null) == request.auth.uid
+                       ))
                     );
 
       // SECURITY: Role elevation cannot happen via client write. Update patterns:
@@ -266,11 +460,18 @@ service cloud.firestore {
                       (request.resource.data.academyDetails.size() < resource.data.academyDetails.size()
                        && resource.data.academyDetails.keys().hasAll(request.resource.data.academyDetails.keys()))
                       ||
-                      // Path C: first student join from an empty mapping (role must be 'student')
+                      // Path C: first student join from an empty mapping (role 'student').
+                      // SECURITY: same UNCLAIMED-student binding as create Pattern 3 —
+                      // the asserted studentId must reference an orphan (or own) record.
                       (resource.data.academyDetails.size() == 0
                        && request.resource.data.academyIds.size() == 1
                        && request.resource.data.academyDetails.size() == 1
-                       && request.resource.data.academyDetails[request.resource.data.academyIds[0]].role == 'student')
+                       && request.resource.data.academyDetails[request.resource.data.academyIds[0]].role == 'student'
+                       && exists(/databases/$(database)/documents/academies/$(request.resource.data.academyIds[0])/students/$(request.resource.data.academyDetails[request.resource.data.academyIds[0]].studentId))
+                       && (
+                         get(/databases/$(database)/documents/academies/$(request.resource.data.academyIds[0])/students/$(request.resource.data.academyDetails[request.resource.data.academyIds[0]].studentId)).data.get('linkedUserId', null) == null
+                         || get(/databases/$(database)/documents/academies/$(request.resource.data.academyIds[0])/students/$(request.resource.data.academyDetails[request.resource.data.academyIds[0]].studentId)).data.get('linkedUserId', null) == request.auth.uid
+                       ))
                       ||
                       // Path D: owner promoting their own freshly-created academy to admin
                       (resource.data.academyDetails.size() == 0
@@ -296,6 +497,11 @@ service cloud.firestore {
       // Owner or admin can update academy settings.
       // `subscription` is server-only (written by the payment webhook via the
       // Admin SDK) so a client can't self-grant access (paidUntil/freeOverride).
+      // REVERTIDO (deploy com app ANTIGO vivo): `mpConnected` fica FORA das chaves
+      // bloqueadas. O settings_screen do app antigo salva o doc de configurações
+      // inteiro (set merge) e um mpConnected divergente entraria em affectedKeys,
+      // bloqueando TODO o save de configurações. Re-endurecer (mpConnected
+      // server-only) só DEPOIS que o app novo estiver publicado na Apple.
       allow update: if (isAcademyOwner(academyId) || isAcademyAdmin(academyId))
                     && !request.resource.data.diff(resource.data).affectedKeys()
                         .hasAny(['ownerId', 'createdAt', 'subscription']);
@@ -318,14 +524,30 @@ service cloud.firestore {
         // Users can read their own document
         allow read: if isAuthenticated() && request.auth.uid == userId;
 
-        // Allow user to create their own document:
-        // - Admin during academy creation (role == 'admin')
-        // - Student during account linking (must already belong to academy via mapping)
+        // Allow user to create their own document, gated on a VERIFIABLE fact —
+        // never a client-asserted role/studentId:
+        // - Admin: caller must OWN the academy (academies/{id}.ownerId == self).
+        //   The academy-creation flow writes academies/{id} (ownerId=self) BEFORE
+        //   this doc, so the legit owner passes; a stranger cannot self-insert as
+        //   admin of someone else's academy (privilege-escalation / takeover).
+        // - Student: caller must already belong (mapping) AND the studentId must
+        //   match the studentId recorded in their OWN mapping for this academy, so
+        //   this doc cannot inject an arbitrary studentId into the fallback branch
+        //   of isOwnStudent() and hijack another student's record.
         allow create: if isAuthenticated()
                       && request.auth.uid == userId
                       && (
-                        request.resource.data.role == 'admin' ||
-                        (belongsToAcademy(academyId) && request.resource.data.role == 'student')
+                        (request.resource.data.role == 'admin'
+                         && exists(/databases/$(database)/documents/academies/$(academyId))
+                         && get(/databases/$(database)/documents/academies/$(academyId)).data.ownerId == request.auth.uid)
+                        ||
+                        (request.resource.data.role == 'student'
+                         && belongsToAcademy(academyId)
+                         && (
+                           !('studentId' in request.resource.data)
+                           || (getUserAcademyMapping().academyDetails.keys().hasAll([academyId])
+                               && request.resource.data.studentId == getUserAcademyMapping().academyDetails[academyId].studentId)
+                         ))
                       );
 
         // Staff can update users (except sensitive fields)
@@ -354,9 +576,12 @@ service cloud.firestore {
         allow read: if belongsToAcademy(academyId)
                     && resource.data.get('responsibleUserId', null) == request.auth.uid;
 
-        // Public read of opted-in profiles (public fighter profile / public site).
-        // Gated by the per-student isProfilePublic flag (default false).
-        allow read: if resource.data.isProfilePublic == true;
+        // PRIVACIDADE (auditoria de perfil): REMOVIDO o read público do doc bruto
+        // do aluno (`isProfilePublic == true`). Ele expunha TODA a PII (nome, CPF,
+        // telefone, nascimento, etc.) a QUALQUER um, anulando o design do espelho.
+        // O acesso público agora é SÓ via academies/{id}/publicProfiles/{id}
+        // (espelho sem PII, sincronizado por CF), que o app e o ranking já leem.
+        // Membros/staff/dono continuam lendo o doc completo pelas regras acima.
 
         // Staff can create/delete students
         allow create, delete: if isAcademyStaff(academyId);
@@ -371,23 +596,46 @@ service cloud.firestore {
         // Monitors can update students (except financial and sensitive fields).
         // responsibleUserId/* gate the kids->adult payer access, so only staff
         // (admins) may set them — never a monitor (a student-level role).
+        // `retention` (radar de churn: lastAttendanceDate/weeklyBuckets/riskScore)
+        // é mantido SÓ pela CF via Admin SDK, e statusChangedAt/statusChangeReason
+        // acompanham transições de `status` (já bloqueado p/ monitor) — nenhum
+        // deles pode ser forjado por um papel de nível aluno. Os branches de
+        // self-update do aluno abaixo usam whitelist (hasOnly) e portanto já
+        // NÃO alcançam esses campos.
         allow update: if isMonitor(academyId)
                       && !request.resource.data.diff(resource.data).affectedKeys()
                           .hasAny(['tuitionValue', 'tuitionDay', 'planId',
                                    'currentBelt', 'currentStripes', 'status',
                                    'beltHistory', 'createdAt', 'createdBy',
                                    'responsibleUserId', 'responsibleStudentId',
-                                   'responsibleName']);
+                                   'responsibleName',
+                                   'retention', 'statusChangedAt', 'statusChangeReason']);
 
         // Students can update only personal info (including photoUrl and registration linking fields) or soft-delete their own record
         allow update: if isOwnStudent(academyId, studentId)
+                      && !isArchivedMember(academyId)
                       && (
                         // Normal update of personal info
-                        request.resource.data.diff(resource.data).affectedKeys()
+                        (request.resource.data.diff(resource.data).affectedKeys()
                           .hasOnly(['photoUrl', 'updatedAt', 'linkedUserId', 'email', 'cpf', 'phone',
                                     'nickname', 'birthDate', 'rg', 'weight',
                                     'address', 'bloodType', 'allergies', 'healthNotes',
-                                    'emergencyContact', 'isProfilePublic'])
+                                    'emergencyContact', 'isProfilePublic',
+                                    // Athlete-managed modalities: the student may set which
+                                    // sports they train (`sports`) and their primary one
+                                    // (`primarySport`). The VERIFIED grade ceiling lives in
+                                    // `sportData` (staff/promotion-only, NOT listed here), so
+                                    // self-declared sports get no ceiling while academy-seeded
+                                    // sports stay capped by self_graduation_guard.js.
+                                    'sports', 'primarySport'])
+                         // SECURITY: linkedUserId may only be CLAIMED on an orphan
+                         // record (or re-affirmed by the same user) — never re-pointed
+                         // away from an already-linked account.
+                         && (
+                           !request.resource.data.diff(resource.data).affectedKeys().hasAny(['linkedUserId'])
+                           || resource.data.get('linkedUserId', null) == null
+                           || resource.data.get('linkedUserId', null) == request.auth.uid
+                         ))
                         ||
                         // Soft delete during account deletion
                         (request.resource.data.diff(resource.data).affectedKeys()
@@ -404,6 +652,7 @@ service cloud.firestore {
         // prove the student scanned a live QR; this matches both apps' current
         // design. A server-validated QR Cloud Function would harden it further.
         allow update: if isOwnStudent(academyId, studentId)
+                      && !isArchivedMember(academyId)
                       && request.resource.data.diff(resource.data).affectedKeys()
                           .hasOnly(['attendanceCount', 'updatedAt'])
                       && request.resource.data.attendanceCount is number
@@ -414,6 +663,42 @@ service cloud.firestore {
         match /timeline/{eventId} {
           allow read: if isStaffOrMonitor(academyId) || isOwnStudent(academyId, studentId);
           allow write: if isAcademyStaff(academyId);
+        }
+
+        // ============================================
+        // Self-declared graduations (JORNADA multi-esporte, F2b)
+        // ============================================
+        // O aluno registra a SUA propria progressao auto-declarada (ex.: faixa
+        // ganha em outra academia / esporte sem federacao). NAO e o TETO
+        // verificado: o aluno NUNCA escreve em beltProgressions (:1097-1103),
+        // que continua server/staff-authoritative. Estas entradas sao sempre
+        // source=="self" e o campo `source` e IMUTAVEL no update.
+        match /selfGraduations/{gradId} {
+          allow read: if isAuthenticated();
+          allow create: if isOwnStudentRecord(academyId, studentId)
+                        && request.resource.data.source == 'self';
+          allow update: if isOwnStudentRecord(academyId, studentId)
+                        && request.resource.data.source == resource.data.source
+                        && resource.data.source == 'self';
+          allow delete: if isOwnStudentRecord(academyId, studentId)
+                        && resource.data.source == 'self';
+        }
+
+        // ============================================
+        // Self-declared competitions (JORNADA multi-esporte, F2b)
+        // ============================================
+        // Resultados de competicao auto-declarados pelo aluno. Mesmo contrato
+        // das selfGraduations: source=="self" obrigatorio e imutavel. NAO
+        // alimenta beltProgressions nem o TETO verificado.
+        match /selfCompetitions/{compId} {
+          allow read: if isAuthenticated();
+          allow create: if isOwnStudentRecord(academyId, studentId)
+                        && request.resource.data.source == 'self';
+          allow update: if isOwnStudentRecord(academyId, studentId)
+                        && request.resource.data.source == resource.data.source
+                        && resource.data.source == 'self';
+          allow delete: if isOwnStudentRecord(academyId, studentId)
+                        && resource.data.source == 'self';
         }
       }
 
@@ -450,8 +735,15 @@ service cloud.firestore {
         // Students can read their own attendance
         allow read: if isOwnStudentRecord(academyId, resource.data.studentId);
 
-        // Staff and monitors can create/update/delete attendance
-        allow write: if isStaffOrMonitor(academyId);
+        // GRANULAR PERMISSION (audit finding): admins and monitors always take
+        // attendance; legacy instructors need the grantable 'attendance:take'
+        // permission. This still permits a manual presence write with an arbitrary
+        // classId (e.g. 'aula_particular') by an admin/monitor — the rule gates on
+        // the WRITER's role, not on the classId — so the aula-particular feature is
+        // unaffected. The student self-check-in branch below is independent.
+        allow write: if isAcademyAdmin(academyId)
+                     || isMonitor(academyId)
+                     || (isAcademyInstructor(academyId) && hasExtraPermission(academyId, 'attendance:take'));
 
         // QR self-check-in: an authenticated student creates their OWN
         // attendance doc (paired with the +1 attendanceCount bump on their
@@ -464,6 +756,7 @@ service cloud.firestore {
         // rewrite or remove attendance history.
         allow create: if isAuthenticated()
           && isOwnStudentRecord(academyId, request.resource.data.studentId)
+          && !isArchivedMember(academyId)
           && request.resource.data.verifiedBy == request.auth.uid
           && (
                // Skip the roster check if the class doc is missing (deleted /
@@ -496,10 +789,12 @@ service cloud.firestore {
         // Students create their own pending check-in.
         allow create: if belongsToAcademy(academyId)
                       && isOwnStudentRecord(academyId, request.resource.data.studentId)
+                      && !isArchivedMember(academyId)
                       && request.resource.data.status == 'pending';
 
         // Students can cancel their own check-in.
-        allow delete: if isOwnStudentRecord(academyId, resource.data.studentId);
+        allow delete: if isOwnStudentRecord(academyId, resource.data.studentId)
+                      && !isArchivedMember(academyId);
       }
 
       // ============================================
@@ -527,7 +822,11 @@ service cloud.firestore {
         // Staff can delete codes
         allow delete: if isAcademyStaff(academyId);
 
-        // Allow marking as used during redemption (authenticated users only)
+        // App ANTIGO (em produção, pré-aprovação Apple) ainda marca usedAt
+        // client-side no cadastro com código de instrutor — manter o update
+        // permitido (restrito a usedAt/usedBy[/Name] do próprio usuário). Re-
+        // endurecer para server-only (DoS de queima cross-academy) só DEPOIS que
+        // o app novo (que usa a CF redeemInstructorCode) estiver publicado.
         allow update: if isAuthenticated()
                       && request.resource.data.diff(resource.data).affectedKeys()
                           .hasOnly(['usedAt', 'usedBy', 'usedByName'])
@@ -549,14 +848,32 @@ service cloud.firestore {
         // Users can query via collectionGroup to find their code across all academies
         allow read: if resource.data.usedAt == null;
 
-        // Staff and monitors can create/delete codes
+        // Staff and monitors can create/delete codes.
         allow write: if isStaffOrMonitor(academyId);
 
-        // Allow marking as used during account linking (authenticated users only)
+        // App ANTIGO (em produção) marca usedAt client-side no cadastro com
+        // código de aluno (LinkCodeService.markAsUsed) — manter permitido
+        // (restrito a usedAt/usedBy do próprio usuário). Re-endurecer para
+        // server-only (DoS de queima cross-academy) só DEPOIS que o app novo
+        // (que usa a CF joinAcademy) estiver publicado na Apple.
         allow update: if isAuthenticated()
                       && request.resource.data.diff(resource.data).affectedKeys()
                           .hasOnly(['usedAt', 'usedBy'])
                       && request.resource.data.usedBy == request.auth.uid;
+      }
+
+      // ============================================
+      // Join Requests Subcollection (self-onboarding)
+      // ============================================
+      // O aluno se cadastra com o código ÚNICO da academia e cria uma
+      // SOLICITAÇÃO pendente. TODAS as escritas passam por Cloud Function
+      // (submitJoinRequest / decideJoinRequest / cancelJoinRequest via Admin
+      // SDK) — o cliente nunca escreve direto. Leitura: staff (para a lista de
+      // "Solicitações") e o próprio solicitante (defesa em profundidade).
+      match /joinRequests/{requestUid} {
+        allow read: if isAcademyStaff(academyId)
+                    || (isAuthenticated() && request.auth.uid == requestUid);
+        allow write: if false;
       }
 
       // ============================================
@@ -572,26 +889,46 @@ service cloud.firestore {
         // Responsible adult can read their dependents' financials (kids -> adult)
         allow read: if isResponsibleForStudent(academyId, resource.data.studentId);
 
-        // Staff can create financials
-        allow create: if isAcademyStaff(academyId)
+        // GRANULAR PERMISSION (audit finding): admins always create; instructors
+        // need the grantable 'financial:create' permission. Update/delete remain
+        // ADMIN-ONLY below (no grantable edit/delete exists, so escalation via an
+        // instructor grant is impossible).
+        allow create: if (isAcademyAdmin(academyId)
+                          || (isAcademyInstructor(academyId) && hasExtraPermission(academyId, 'financial:create')))
                       && request.resource.data.academyId == academyId
                       && isPositiveAmount(request.resource.data.amount);
 
         // Staff can update financials, but:
         //  - Cannot touch payment-gateway audit fields
-        //  - Cannot mutate financial fields of an already-paid record (audit integrity)
+        //  - TERMINAL-STATE IMMUTABILITY (audit finding E): once a record reaches a
+        //    SETTLED-MONEY terminal status (paid/refunded/chargeback), its status,
+        //    amount and payment fields are FROZEN. This stops the app's "Marcar como
+        //    pago" button from reverting a refunded/chargeback doc back to 'paid'.
+        //    Legitimate pending->paid transitions are unaffected (resource.data.status
+        //    is still 'pending' at that point). 'cancelled' is intentionally NOT
+        //    frozen here: it is an UNPAID administrative state with a documented
+        //    re-activation path (PaymentService.reactivate -> cancelled => pending/
+        //    overdue); freezing it would break that staff workflow. The server
+        //    (Admin SDK) bypasses these rules and remains the only writer that can
+        //    move money between settled states (e.g. paid -> refunded via a webhook).
         allow update: if isAcademyStaff(academyId)
                       && !request.resource.data.diff(resource.data).affectedKeys()
                           .hasAny(['paidViaAbacatePay', 'abacatePayTransactionId'])
                       && !(
-                        resource.data.status == 'paid'
+                        (resource.data.status == 'paid'
+                         || resource.data.status == 'refunded'
+                         || resource.data.status == 'chargeback')
                         && request.resource.data.diff(resource.data).affectedKeys()
                             .hasAny(['status', 'amount', 'paymentDate', 'paidAt', 'method'])
                       );
 
-        // Staff can delete unpaid financials only
+        // Staff can delete only records that have not settled money (a
+        // paid/refunded/chargeback record is permanent history). An unpaid
+        // 'cancelled' charge stays deletable, matching the pre-audit behaviour.
         allow delete: if isAcademyStaff(academyId)
-                      && resource.data.status != 'paid';
+                      && resource.data.status != 'paid'
+                      && resource.data.status != 'refunded'
+                      && resource.data.status != 'chargeback';
       }
 
       // ============================================
@@ -667,18 +1004,47 @@ service cloud.firestore {
                     && isOwnStudentRecord(academyId, resource.data.studentId);
 
         // Students can create orders for themselves (via mapping or academy user doc)
+        // FIELD-WHITELIST NA CRIACAO (auditoria MP, achado low): o cliente NAO pode
+        // semear campos de pagamento/auditoria no pedido recem-criado. Sem isso, o
+        // reuse-guard do PIX (createMpOrderPixPayment) leria pixCode/gatewayPaymentId/
+        // pixAmount/pixExpiresAt plantados e devolveria um QR forjado (auto-sabotagem
+        // do checkout). Proibimos esses campos por nome — abordagem retrocompativel
+        // com o app antigo, que so grava os campos legitimos do pedido.
         allow create: if belongsToAcademy(academyId)
                       && isOwnStudentRecord(academyId, request.resource.data.studentId)
                       && request.resource.data.academyId == academyId
                       && request.resource.data.status == 'pending_payment'
-                      && isPositiveAmount(request.resource.data.total);
+                      && isPositiveAmount(request.resource.data.total)
+                      && !request.resource.data.keys().hasAny([
+                           'gatewayPaymentId', 'externalPaymentId',
+                           'abacatePayTransactionId', 'pixCode', 'pixAmount',
+                           'pixExpiresAt', 'stockSettled', 'paidAt'
+                         ]);
 
-        // Staff can update order status (except payment fields)
+        // Staff can update order status as it moves through fulfillment
+        // (pending_payment -> paid -> preparing -> ready -> delivered), but:
+        //  - Payment/audit fields are always frozen on the client.
+        //  - TERMINAL-STATE IMMUTABILITY (audit finding E): once an order is in a
+        //    terminal/closed status (delivered/cancelled, plus refunded/chargeback
+        //    should they ever appear), its `status` is FROZEN — a closed order can
+        //    no longer be re-opened or flipped to another status from the client.
+        //    The legitimate forward fulfillment flow stays open because those
+        //    intermediate states are not terminal. Server (Admin SDK) bypasses
+        //    these rules and can still record refunds/chargebacks.
         allow update: if isAcademyStaff(academyId)
                       && !request.resource.data.diff(resource.data).affectedKeys()
-                          .hasAny(['abacatePayTransactionId', 'paidAt', 'total', 'items']);
+                          .hasAny(['abacatePayTransactionId', 'paidAt', 'total', 'items'])
+                      && !(
+                        (resource.data.status == 'delivered'
+                         || resource.data.status == 'cancelled'
+                         || resource.data.status == 'refunded'
+                         || resource.data.status == 'chargeback')
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                            .hasAny(['status'])
+                      );
 
-        // Staff can cancel unpaid orders
+        // Staff can cancel unpaid orders only (a paid/fulfilled/closed order is
+        // permanent history and cannot be hard-deleted from the client).
         allow delete: if isAcademyStaff(academyId)
                       && resource.data.status == 'pending_payment';
       }
@@ -691,6 +1057,26 @@ service cloud.firestore {
         // academy members read everything; staff manage.
         allow read: if (resource.data.isPublished == true) || belongsToAcademy(academyId);
         allow write: if isAcademyStaff(academyId);
+      }
+
+      // ============================================
+      // Controle de acesso (catraca) — Arquitetura C (push-cloud)
+      // accessEvents/deviceRateLimits são escritos SÓ pela Cloud Function
+      // ingestAccessEvent (o Admin SDK ignora estas rules). O cliente (kiosk/
+      // totem, rodando como conta staff da academia) apenas LÊ os eventos.
+      // devices guarda o segredo HMAC → admin-only (nunca exposto a aluno).
+      // ============================================
+      match /accessEvents/{eventId} {
+        allow read: if isAcademyStaff(academyId);
+        allow write: if false; // só a Cloud Function (Admin SDK)
+      }
+      match /devices/{deviceId} {
+        // Config da catraca (vendor, secret HMAC, userMap). O secret é sensível
+        // → restrito ao admin.
+        allow read, write: if isAcademyAdmin(academyId);
+      }
+      match /deviceRateLimits/{rlId} {
+        allow read, write: if false; // só a Cloud Function (Admin SDK)
       }
 
       // ============================================
@@ -721,8 +1107,12 @@ service cloud.firestore {
         allow read: if belongsToAcademy(academyId);
         // Public read: team competition schedule (public site)
         allow read: if true;
-        allow create, delete: if isAcademyStaff(academyId);
-        allow update: if isAcademyStaff(academyId);
+        // GRANULAR PERMISSION (audit finding): admins always manage competitions;
+        // legacy instructors need the grantable 'competitions:create' permission.
+        allow create, delete: if isAcademyAdmin(academyId)
+                              || (isAcademyInstructor(academyId) && hasExtraPermission(academyId, 'competitions:create'));
+        allow update: if isAcademyAdmin(academyId)
+                      || (isAcademyInstructor(academyId) && hasExtraPermission(academyId, 'competitions:create'));
 
         // Students can update only enrolledStudentIds (self-enroll/unenroll from legacy array)
         allow update: if belongsToAcademy(academyId)
@@ -759,12 +1149,18 @@ service cloud.firestore {
         allow read: if belongsToAcademy(academyId);
         // Public read: medals/results are public team info (public site)
         allow read: if true;
-        // Admin can manage all results; students can create/update their own
-        allow create: if isAcademyStaff(academyId) ||
-          (belongsToAcademy(academyId) && isOwnStudentRecord(academyId, request.resource.data.studentId));
-        allow update: if isAcademyStaff(academyId) ||
-          (belongsToAcademy(academyId) && isOwnStudentRecord(academyId, resource.data.studentId));
-        allow delete: if isAcademyStaff(academyId);
+        // GRANULAR PERMISSION (audit finding): admins manage all results; legacy
+        // instructors need the grantable 'competitions:create' permission. The
+        // self-record allowance (a student creating/updating their OWN result) is
+        // preserved unchanged.
+        allow create: if isAcademyAdmin(academyId)
+          || (isAcademyInstructor(academyId) && hasExtraPermission(academyId, 'competitions:create'))
+          || (belongsToAcademy(academyId) && isOwnStudentRecord(academyId, request.resource.data.studentId));
+        allow update: if isAcademyAdmin(academyId)
+          || (isAcademyInstructor(academyId) && hasExtraPermission(academyId, 'competitions:create'))
+          || (belongsToAcademy(academyId) && isOwnStudentRecord(academyId, resource.data.studentId));
+        allow delete: if isAcademyAdmin(academyId)
+          || (isAcademyInstructor(academyId) && hasExtraPermission(academyId, 'competitions:create'));
       }
 
       // ============================================
@@ -1011,6 +1407,39 @@ service cloud.firestore {
 
         // No updates or deletes from client
         allow update, delete: if false;
+      }
+
+      // ============================================
+      // Retenção — snapshots diários agregados (radar de churn)
+      // ============================================
+      // Dado INTERNO de retenção (contagens de risco, churn consumado do mês,
+      // taxa de recuperação pós-contato), escrito SÓ pela CF computeRetentionDaily
+      // via Admin SDK — 1 doc/dia/academia (id = YYYY-MM-DD). INVISÍVEL ao aluno:
+      // riskScore/retention nunca são expostos nem espelhados em publicProfiles/
+      // fighterProfiles (LGPD + não estigmatizar).
+      match /retentionSnapshots/{snapId} {
+        allow read: if isAcademyStaff(academyId);
+        allow write: if false; // só CF/Admin SDK
+      }
+
+      // ============================================
+      // Retenção — registro de contatos de reengajamento
+      // ============================================
+      // Staff registra o contato feito com o aluno em risco (whatsapp/push/
+      // phone/inperson); o job diário fecha o outcome (pending -> recovered)
+      // via Admin SDK. Como o billingContactLog: nunca visível ao aluno.
+      match /retentionContacts/{contactId} {
+        allow read: if isAcademyStaff(academyId);
+
+        // No create, byUid tem que ser o próprio autor (rastreabilidade de
+        // quem contatou — não forjável em nome de outro staff).
+        allow create: if isAcademyStaff(academyId)
+                      && request.resource.data.byUid == request.auth.uid;
+
+        // Staff edita (note/outcome) e remove; byUid é imutável no update.
+        allow update: if isAcademyStaff(academyId)
+                      && request.resource.data.byUid == resource.data.byUid;
+        allow delete: if isAcademyStaff(academyId);
       }
 
       // ============================================

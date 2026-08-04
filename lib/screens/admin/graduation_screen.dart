@@ -472,10 +472,37 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
     final sportId = SportId.fromString(studentData['sportId'] as String? ?? 'bjj');
     final studentId = studentData['id'] as String;
     final studentName = studentData['fullName'] as String;
+    // Auditoria (graduation-ui): categoria (kids/adult) e variante do Muay Thai
+    // precisam acompanhar a promoção, senão a escada usada vira sempre a do BJJ
+    // adulto. category pode não vir no mapa (legado) → cai em 'adult' (mesmo
+    // default do service).
+    final category = (studentData['category'] as String?) ?? 'adult';
+    final muaythaiVariant = sportId == SportId.muaythai
+        ? resolveMuaythaiVariant(currentBelt)
+        : null;
+    // Esportes sem faixa (boxe, MMA, musculação = GradeSystem.none) não têm
+    // escada — não há promoção de faixa/grau a oferecer.
+    final hasGradeSystem = getSport(sportId).gradeSystem != GradeSystem.none;
+    // Teto de graus REAL da faixa atual neste esporte (era hardcoded em 4, o que
+    // quebrava Muay Thai/Judô = 0 graus e a faixa preta de BJJ/Karatê = 6/10).
+    final maxStripesForCurrent =
+        getGradeDefinition(sportId, currentBelt)?.maxStripes ?? 0;
 
-    bool isStripePromotion = eligibility.nextStripes != null && eligibility.nextStripes! > 0;
-    String? selectedBelt = eligibility.nextBelt;
-    int selectedStripes = eligibility.nextStripes ?? 0;
+    // Promoção de grau só é válida se a faixa atual aceita graus; senão a sheet
+    // já abre no modo "faixa" (evita default inconsistente p/ Muay Thai/Judô).
+    bool isStripePromotion = maxStripesForCurrent > 0 &&
+        eligibility.nextStripes != null &&
+        eligibility.nextStripes! > 0;
+    String? selectedBelt = isStripePromotion
+        ? (eligibility.nextBelt ?? currentBelt)
+        : (eligibility.nextBelt ??
+            _getNextBelt(
+              currentBelt,
+              sportId: sportId,
+              category: category,
+              muaythaiVariant: muaythaiVariant,
+            ));
+    int selectedStripes = isStripePromotion ? (eligibility.nextStripes ?? 0) : 0;
     final notesController = TextEditingController();
 
     showModalBottomSheet(
@@ -568,7 +595,7 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                                 style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
                               ),
                               Text(
-                                'Atual: ${_getBeltLabel(currentBelt)} ${currentStripes > 0 ? "• $currentStripes grau(s)" : ""}',
+                                'Atual: ${_getBeltLabel(currentBelt, sportId: sportId)} ${currentStripes > 0 ? "• $currentStripes grau(s)" : ""}',
                                 style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
                               ),
                             ],
@@ -579,6 +606,9 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                   ),
                   const SizedBox(height: 20),
 
+                  // Auditoria: esportes sem faixa (boxe/MMA/musculação) não têm
+                  // escada de graduação — não oferece promoção de faixa/grau.
+                  if (hasGradeSystem) ...[
                   // Promotion type
                   Text(
                     'Tipo de graduacao',
@@ -590,9 +620,15 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                   const SizedBox(height: 12),
                   Row(
                     children: [
+                      // Auditoria: só mostra o seletor de "Grau" quando a faixa
+                      // atual realmente suporta graus (maxStripes > 0). Muay Thai
+                      // e Judô (maxStripes:0) progridem só por faixa/cor.
+                      if (maxStripesForCurrent > 0) ...[
                       Expanded(
                         child: GestureDetector(
-                          onTap: currentStripes < 4
+                          // Teto de graus derivado da definição da faixa, não mais
+                          // hardcoded em 4.
+                          onTap: currentStripes < maxStripesForCurrent
                               ? () {
                                   setSheetState(() {
                                     isStripePromotion = true;
@@ -639,12 +675,20 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                         ),
                       ),
                       const SizedBox(width: 12),
+                      ],
                       Expanded(
                         child: GestureDetector(
                           onTap: () {
                             setSheetState(() {
                               isStripePromotion = false;
-                              selectedBelt = _getNextBelt(currentBelt);
+                              // Auditoria: próxima faixa pela escada DO ESPORTE
+                              // (sportId/category/variante), não mais a do BJJ.
+                              selectedBelt = _getNextBelt(
+                                currentBelt,
+                                sportId: sportId,
+                                category: category,
+                                muaythaiVariant: muaythaiVariant,
+                              );
                               selectedStripes = 0;
                             });
                           },
@@ -704,8 +748,8 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                         Expanded(
                           child: Text(
                             isStripePromotion
-                                ? '$selectedStripes° grau na faixa ${_getBeltLabel(selectedBelt!)}'
-                                : 'Faixa ${_getBeltLabel(selectedBelt!)}',
+                                ? '$selectedStripes° grau na faixa ${_getBeltLabel(selectedBelt!, sportId: sportId)}'
+                                : 'Faixa ${_getBeltLabel(selectedBelt!, sportId: sportId)}',
                             style: AppTheme.bodyMedium.copyWith(
                               fontWeight: FontWeight.w600,
                               color: AppTheme.success,
@@ -716,6 +760,32 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
+                  ] else ...[
+                    // Modalidade sem graduação por faixa.
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceVariant,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppTheme.divider),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(LucideIcons.info,
+                              color: AppTheme.textSecondary, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Esta modalidade não possui graduação por faixa.',
+                              style: AppTheme.bodySmall
+                                  .copyWith(color: AppTheme.textSecondary),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
 
                   // Notes
                   Text(
@@ -764,8 +834,21 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: ElevatedButton(
-                          onPressed: () async {
+                        child: Builder(builder: (context) {
+                          // Auditoria: bloqueia promoção no-op. Para "faixa",
+                          // a nova faixa precisa ser diferente da atual (escada
+                          // pode não ter próxima). Para "grau", precisa subir.
+                          // Sem sistema de faixa, nada a graduar.
+                          final isNoBeltChange = selectedBelt == currentBelt;
+                          final canPromote = hasGradeSystem &&
+                              selectedBelt != null &&
+                              (isStripePromotion
+                                  ? selectedStripes > currentStripes
+                                  : !isNoBeltChange);
+                          return ElevatedButton(
+                          onPressed: !canPromote
+                              ? null
+                              : () async {
                             Navigator.pop(sheetContext);
                             await _promoteStudent(
                               studentId: studentId,
@@ -791,7 +874,8 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
                               const Text('Graduar'),
                             ],
                           ),
-                        ),
+                        );
+                        }),
                       ),
                     ],
                   ),
@@ -850,12 +934,21 @@ class _AdminGraduationScreenState extends ConsumerState<AdminGraduationScreen> {
     }
   }
 
-  String _getNextBelt(String currentBelt, {SportId sportId = SportId.bjj}) {
+  String _getNextBelt(
+    String currentBelt, {
+    SportId sportId = SportId.bjj,
+    String category = 'adult',
+    String? muaythaiVariant,
+  }) {
+    // Auditoria: respeita a escada do esporte + categoria (kids/adult) e a
+    // variante do Muay Thai; antes ignorava tudo e usava a do BJJ adulto.
     final grades = getGradesForSport(
       sportId,
-      muaythaiVariant: sportId == SportId.muaythai
-          ? resolveMuaythaiVariant(currentBelt)
-          : null,
+      category: category,
+      muaythaiVariant: muaythaiVariant ??
+          (sportId == SportId.muaythai
+              ? resolveMuaythaiVariant(currentBelt)
+              : null),
     );
     final gradeIds = grades.map((g) => g.id).toList();
     final index = gradeIds.indexOf(currentBelt);

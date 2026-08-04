@@ -90,10 +90,13 @@ class AcademyEvent {
       description: data['description'] as String? ?? '',
       coverUrl: data['coverUrl'] as String?,
       coverStoragePath: data['coverStoragePath'] as String?,
-      startDate: (data['startDate'] as Timestamp).toDate(),
-      endDate: data['endDate'] != null
-          ? (data['endDate'] as Timestamp).toDate()
-          : null,
+      // Resiliência (auditoria jornal): um doc malformado (startDate ausente ou
+      // de tipo errado) NÃO pode derrubar o parse de TODO o feed. Fallback para
+      // createdAt e, em último caso, agora — em vez de `as Timestamp` cru.
+      startDate: (data['startDate'] as Timestamp?)?.toDate() ??
+          (data['createdAt'] as Timestamp?)?.toDate() ??
+          DateTime.now(),
+      endDate: (data['endDate'] as Timestamp?)?.toDate(),
       location: data['location'] as String?,
       ctaUrl: data['ctaUrl'] as String?,
       ctaLabel: data['ctaLabel'] as String?,

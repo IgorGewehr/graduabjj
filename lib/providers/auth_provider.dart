@@ -1,7 +1,8 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import '../core/constants.dart';
 import '../models/user.dart';
@@ -144,14 +145,26 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
 
   // Step 3: Get academy-specific user data
   final academyDetails = mapping.academyDetails?[academyId];
-  final userDoc = await firestore
-      .collection('academies')
-      .doc(academyId)
-      .collection('users')
-      .doc(firebaseUser.uid)
-      .get();
+  // RESILIÊNCIA (hotfix tela-branca pós-login): o read do doc academy-user pode
+  // falhar (permissão transitória, índice ausente, parse de doc recém-criado
+  // pelo CF joinAcademy). NÃO rebaixar o usuário a "grátis" por isso — a mapping
+  // já carrega academyId + role + studentId + extraPermissions. Em erro, cai no
+  // fallback abaixo (monta o AppUser a partir da mapping) em vez de mandar um
+  // membro de academia para um portal vazio (que aparece como tela branca).
+  DocumentSnapshot<Map<String, dynamic>>? userDoc;
+  try {
+    userDoc = await firestore
+        .collection('academies')
+        .doc(academyId)
+        .collection('users')
+        .doc(firebaseUser.uid)
+        .get();
+  } catch (e) {
+    print('[AUTH] academy-user read failed; using mapping fallback: $e');
+    userDoc = null;
+  }
 
-  if (userDoc.exists) {
+  if (userDoc != null && userDoc.exists) {
     final userData = userDoc.data()!;
     print(
       '[AUTH] Found user in academy subcollection: role=${userData['role']}',
@@ -177,13 +190,16 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
     );
   }
 
-  // Fallback: user is linked to academy but doesn't have academy user document yet
-  print('[AUTH] Creating academy user document...');
+  // Fallback: doc ausente OU read falhou acima — monta a partir da mapping (que
+  // já carrega role/studentId/extraPermissions), preservando o contexto de
+  // academia em vez de cair como usuário "grátis" (home vazio = tela branca).
+  print('[AUTH] academy-user doc unavailable; building user from mapping');
   return AppUser.fromGlobalAndAcademy(
     globalUser: globalUser,
     academyId: academyId,
     role: academyDetails?.role ?? UserRole.student,
     studentId: academyDetails?.studentId,
+    extraPermissions: academyDetails?.extraPermissions ?? const [],
   );
 });
 
@@ -247,8 +263,13 @@ class AuthService {
 
   /// Sign out
   Future<void> signOut() async {
-    // Remove FCM token before signing out
-    await pushNotificationService.onUserLogout();
+    // Remove FCM token before signing out. Best-effort: NENHUMA falha de
+    // limpeza de push pode impedir/atrasar o logout do usuário.
+    try {
+      await pushNotificationService.onUserLogout();
+    } catch (e) {
+      debugPrint('[auth] push cleanup on signOut failed: $e');
+    }
     await _auth.signOut();
   }
 
@@ -283,59 +304,34 @@ class AuthService {
 
   /// Delete user account and all associated data
   /// This is required by Google Play Store policy
+  /// Exclusão de conta (App Store / Play Store). Faz a limpeza + a exclusão da
+  /// conta do Firebase Auth NO SERVIDOR (Cloud Function `deleteMyAccount`, Admin
+  /// SDK). Isso evita o `requires-recent-login` que o `user.delete()` client-side
+  /// disparava quando a sessão não era "recente" — o fluxo antes falhava sem
+  /// reautenticação (motivo provável da rejeição da Apple). Depois só encerra a
+  /// sessão local (a conta Auth já não existe mais).
   Future<void> deleteAccount() async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('Usuario nao autenticado');
 
-    final uid = user.uid;
+    try {
+      // Best-effort: remove o token de push antes de apagar tudo.
+      await pushNotificationService.onUserLogout();
+    } catch (_) {/* não bloqueia a exclusão */}
 
     try {
-      // 1. Remove FCM token
-      await pushNotificationService.onUserLogout();
-
-      // 2. Get user's academy mappings to delete related data
-      final mapping = await globalUserService.getUserAcademyMapping(uid);
-
-      // 3. Delete student records and academy user docs from each academy
-      if (mapping != null) {
-        for (final academyId in mapping.academyIds) {
-          final academyDetail = mapping.academyDetails?[academyId];
-          if (academyDetail?.studentId != null) {
-            // Mark student as deleted (soft delete for academy records)
-            await _firestore
-                .collection('academies/$academyId/students')
-                .doc(academyDetail!.studentId)
-                .update({
-                  'status': 'deleted',
-                  'deletedAt': FieldValue.serverTimestamp(),
-                  'deletedByUser': true,
-                });
-          }
-          // Remove academy-scoped user document
-          await _firestore
-              .collection('academies/$academyId/users')
-              .doc(uid)
-              .delete();
-        }
-      }
-
-      // 4. Delete userAcademyMapping
-      await _firestore.collection('userAcademyMapping').doc(uid).delete();
-
-      // 5. Delete global user document
-      await _firestore.collection('users').doc(uid).delete();
-
-      // 6. Delete Firebase Auth user (must be last)
-      await user.delete();
-    } catch (e) {
-      // If requires recent login, throw specific error
-      if (e.toString().contains('requires-recent-login')) {
-        throw Exception(
-          'Por seguranca, faca login novamente antes de excluir sua conta',
-        );
-      }
-      rethrow;
+      await FirebaseFunctions.instance.httpsCallable('deleteMyAccount').call();
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception(
+        e.message ?? 'Não foi possível excluir a conta. Tente novamente.',
+      );
     }
+
+    // A conta do Auth foi apagada no servidor — encerra a sessão local para o
+    // listener de auth redirecionar ao login.
+    try {
+      await _auth.signOut();
+    } catch (_) {/* o usuário do Auth já não existe */}
   }
 
   /// Get global user document
@@ -474,6 +470,19 @@ class AuthService {
     required String academyName,
     String? documentType,
     String? documentNumber,
+    // Business profile ('fight' | 'fitness' | 'hybrid') chosen in the "Que
+    // tipo de academia?" step — see AcademyProfile in models/academy.dart.
+    // Defaults to 'fight' to preserve the app's original-only behavior for
+    // any caller that doesn't pass it.
+    String profile = 'fight',
+    // Modalidades escolhidas nos chips do wizard (create_academy_screen.dart)
+    // quando profile é 'fight'/'hybrid' — ex.: ['bjj', 'muaythai']. Vira
+    // `academy.sports` + `primarySport` (1ª da lista). `null`/vazio cai no
+    // fallback ['bjj'] — mesma semântica de [Academy.effectiveSports] e do
+    // espelho server-side em `functions/index.js` `decideJoinRequest`
+    // (ANTI_HIDRA achado nº1: retrocompat com academias antigas sem o campo).
+    // Ignorado quando profile == 'fitness' (musculação automática abaixo).
+    List<String>? sports,
   }) async {
     // Step 1: Create Firebase Auth user
     final credential = await _auth.createUserWithEmailAndPassword(
@@ -496,6 +505,15 @@ class AuthService {
     final academyRef = _firestore.collection('academies').doc();
     final academyId = academyRef.id;
 
+    // Modalidades efetivas da academia nova. 'fitness' é sempre musculação
+    // (automático, sem seletor); 'fight'/'hybrid' usam os chips escolhidos no
+    // wizard, com fallback ['bjj'] caso o caller não informe nada (retrocompat
+    // — mesmo fallback de [Academy.effectiveSports]/`decideJoinRequest`).
+    final resolvedSports = profile == 'fitness'
+        ? const ['musculacao']
+        : (sports != null && sports.isNotEmpty ? sports : const ['bjj']);
+    final resolvedPrimarySport = resolvedSports.first;
+
     final academyData = <String, dynamic>{
       'name': academyName,
       'ownerId': credential.user!.uid,
@@ -513,6 +531,41 @@ class AuthService {
       'abacatePayEnabled': false,
       'autoGraduationEnabled': false,
       'studentCheckinEnabled': true,
+      // Academias fitness/hybrid têm musculação (GradeSystem.none) entre suas
+      // modalidades — sem isto o modo de check-in nasce 'manual' (default do
+      // campo, ver SettingsService/AcademySettings) e o botão de check-in do
+      // aluno (lutador_hub_screen.dart `checkinIsAvailable`) fica invisível,
+      // tornando falsa a promessa "o check-in já está ativo" do último passo
+      // do wizard fitness (onboarding_wizard_screen.dart `_FitnessDoneScreen`).
+      // 'fight' puro NÃO grava isto — mantém o default 'manual' de sempre,
+      // comportamento legado intocado pra quem só treina luta.
+      if (profile == 'fitness' || profile == 'hybrid')
+        'musculacaoCheckinMode': 'button',
+      // Fichas de treino personalizadas (WorkoutPlan: dias A/B/C, séries/reps/
+      // carga por aluno) e biblioteca de vídeos de exercício JÁ existem no app
+      // mas nascem desligadas — pra academia de musculação elas são o produto
+      // básico esperado da categoria (Tecnofit/EVO entregam por padrão). Liga
+      // na CRIAÇÃO de academias fitness/hybrid; 'fight' puro mantém o default
+      // OFF de sempre (professor de luta liga se quiser, zero mudança legada).
+      if (profile == 'fitness' || profile == 'hybrid') ...{
+        'workoutPlansEnabled': true,
+        'trainingVideosEnabled': true,
+      },
+      // Business profile — drives copy/vocabulary (core/academy_vocab.dart).
+      // Legacy academies (field absent) parse to 'fight' — zero behavior
+      // change for them, see AcademyProfileExtension.fromString.
+      'profile': profile,
+      // Fitness-only academies default to musculação, which has no
+      // belt/grade system (GradeSystem.none in core/sports.dart) — "sem
+      // faixas em lugar nenhum" falls out of the existing multimodal system
+      // automatically, no special-casing needed elsewhere. Fight/hybrid write
+      // whatever the wizard's sport chips selected (resolvedSports above).
+      // ANTI_HIDRA achado nº1: antes desta mudança, academias fight/hybrid
+      // nunca gravavam `sports`, o que fazia toda ficha nova nascer 'bjj' via
+      // hardcode em `decideJoinRequest` — agora a academia declara sua própria
+      // modalidade e o servidor lê daqui (com o mesmo fallback ['bjj']).
+      'sports': resolvedSports,
+      'primarySport': resolvedPrimarySport,
     };
 
     // Add document info if provided
@@ -551,17 +604,24 @@ class AuthService {
     return credential;
   }
 
-  /// Create account with link code (registers and links to student in one step)
-  /// CRITICAL: academyId must be passed explicitly (from link code validation)
-  /// to ensure multi-tenant correctness during registration
+  /// Create an account from a student link code and join the academy.
+  ///
+  /// The academy join runs entirely through the `joinAcademy` Cloud Function:
+  /// the server resolves academyId + studentId from the [code], writes the
+  /// userAcademyMapping + academy-user doc, marks the code used, and CLAIMS the
+  /// orphan student record (stamping linkedUserId + the optional [cpf]/[phone])
+  /// — all atomically with the Admin SDK and its orphan-claim guard.
+  ///
+  /// This replaces the previous client-side writes (mapping/academyUser/student)
+  /// that bypassed the server guard and allowed an attacker to hijack another
+  /// student's record (account-takeover hardening). The UI/flow is unchanged.
   Future<UserCredential> createAccountWithLinkCode(
     String email,
     String password,
     String displayName,
-    String studentId,
-    String academyId, // Must be passed from validated link code
-    String? cpf, { // Optional CPF to save with student
-    String? phone, // Optional WhatsApp phone to save with student
+    String code, { // 6-char link code; server derives academyId + studentId
+    String? cpf, // Optional CPF to stamp on the claimed student record
+    String? phone, // Optional WhatsApp phone to stamp on the claimed record
   }) async {
     // Create Firebase Auth account
     final credential = await _auth.createUserWithEmailAndPassword(
@@ -572,83 +632,23 @@ class AuthService {
     // Update display name in Firebase Auth
     await credential.user?.updateDisplayName(displayName);
 
-    // Create global user document
+    // Create global user document (also pre-creates the empty academy mapping
+    // that the Cloud Function populates).
     await globalUserService.createGlobalUser(
       userId: credential.user!.uid,
       email: email,
       displayName: displayName,
-      accountType: AccountType.linked, // Already linked to academy
+      accountType: AccountType.linked,
     );
 
-    // Link user to academy
-    await globalUserService.linkUserToAcademy(
-      userId: credential.user!.uid,
-      academyId: academyId,
-      studentId: studentId,
-      role: UserRole.student,
-    );
+    // Secure server-side join: mapping + academy-user doc + orphan student claim
+    // (incl. cpf/phone) + mark-code-used, all atomic. Returns the academyId.
+    final academyId = await teamService.joinAcademy(code, cpf: cpf, phone: phone);
 
-    // Create academy user document
-    await globalUserService.upsertAcademyUser(
-      academyId: academyId,
-      userId: credential.user!.uid,
-      data: {
-        'studentId': studentId,
-        'role': 'student',
-        'email': email,
-        'displayName': displayName,
-        'approvedAt': DateTime.now(),
-        'status': 'active',
-      },
-    );
-
-    // Register FCM token for push notifications
+    // Register FCM token + subscribe to the academy topic for push.
     await pushNotificationService.onUserLogin();
-
-    // Subscribe to academy push notifications topic
-    await pushNotificationService.subscribeToTopic('academy_$academyId');
-
-    // Update student document with linkedUserId and CPF (with retry logic)
-    // This MUST complete before returning to avoid race conditions on first login
-    bool studentUpdated = false;
-    for (int attempt = 0; attempt < 3 && !studentUpdated; attempt++) {
-      try {
-        final updateData = <String, dynamic>{
-          'linkedUserId': credential.user!.uid,
-          'email': email,
-          'updatedAt': FieldValue.serverTimestamp(),
-        };
-
-        // Only add CPF if provided
-        if (cpf != null && cpf.isNotEmpty) {
-          updateData['cpf'] = cpf;
-        }
-
-        // Only add phone if provided
-        if (phone != null && phone.isNotEmpty) {
-          updateData['phone'] = phone;
-        }
-
-        await _firestore
-            .collection('academies')
-            .doc(academyId)
-            .collection('students')
-            .doc(studentId)
-            .update(updateData);
-
-        studentUpdated = true;
-      } catch (e) {
-        debugPrint('Student update attempt ${attempt + 1} failed: $e');
-        if (attempt < 2) {
-          await Future.delayed(Duration(milliseconds: 500));
-        } else {
-          // Account is fully functional (Auth + Firestore docs created).
-          // Only the student.linkedUserId is missing — log and continue so
-          // the user can still sign in. Throwing here would leave a valid
-          // Auth user with no way to re-register (email-already-in-use).
-          debugPrint('CRITICAL: Failed to update student after 3 attempts');
-        }
-      }
+    if (academyId.isNotEmpty) {
+      await pushNotificationService.subscribeToTopic('academy_$academyId');
     }
 
     return credential;

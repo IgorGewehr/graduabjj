@@ -4,6 +4,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import '../core/constants.dart';
+import 'fns.dart';
 
 /// Payment Link Response
 class PaymentLink {
@@ -40,17 +41,46 @@ class CardPaymentResult {
   final String? transactionId;
   final String? message;
 
+  // Auditoria MP: a CF createMpCardPayment retorna status/statusDetail/threeDsUrl
+  // (server_functions.js:4211-4218). Antes eram descartados aqui, então o
+  // desafio 3DS nunca era aberto e um pagamento 'in_process'/'pending' aparecia
+  // como recusado, levando o aluno a um retry que duplica a cobrança pendente.
+  /// Status bruto do MP: 'approved', 'in_process', 'pending', 'rejected', etc.
+  final String? status;
+
+  /// Detalhe do status do MP (status_detail), ex.: 'pending_challenge'.
+  final String? statusDetail;
+
+  /// URL do desafio 3DS (three_ds_info.external_resource_url) quando o emissor
+  /// exige autenticação; a UI deve abrir esta URL em vez de exibir erro.
+  final String? threeDsUrl;
+
   CardPaymentResult({
     required this.success,
     this.transactionId,
     this.message,
+    this.status,
+    this.statusDetail,
+    this.threeDsUrl,
   });
 
+  /// true quando o MP ainda não confirmou (in_process/pending): NÃO é recusa.
+  /// A UI deve mostrar 'aguardando confirmação' e bloquear novo submit para a
+  /// mesma cobrança, evitando cobrança pendente duplicada (auditoria MP).
+  bool get isPending => status == 'in_process' || status == 'pending';
+
+  /// true quando há um desafio 3DS a ser concluído pelo aluno.
+  bool get requiresThreeDs => threeDsUrl != null && threeDsUrl!.isNotEmpty;
+
   factory CardPaymentResult.fromMap(Map<String, dynamic> map) {
+    final threeDs = map['threeDsUrl'] as String?;
     return CardPaymentResult(
       success: map['success'] ?? false,
       transactionId: map['transactionId'],
       message: map['message'],
+      status: map['status'] as String?,
+      statusDetail: map['statusDetail'] as String?,
+      threeDsUrl: (threeDs != null && threeDs.isNotEmpty) ? threeDs : null,
     );
   }
 }
@@ -110,7 +140,7 @@ class WithdrawalResult {
 /// Handles payment operations via Firebase Cloud Functions
 class AbacatePayService {
   final String academyId;
-  final FirebaseFunctions _functions = FirebaseFunctions.instance;
+  final CallableClient _functions = Fns.functions;
 
   AbacatePayService(this.academyId);
 

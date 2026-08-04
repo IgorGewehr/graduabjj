@@ -6,9 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
+
+import '../../core/platform_support.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
+import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../services/services.dart';
 import '../../services/store_service.dart';
@@ -54,7 +57,9 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
           ref.invalidate(productsProvider);
           ref.invalidate(storeStatsProvider);
         },
-        child: CustomScrollView(
+        child: ContentBounded(
+          maxWidth: kContentMaxWidthList,
+          child: CustomScrollView(
           slivers: [
             // Header
             SliverToBoxAdapter(
@@ -305,6 +310,7 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
             const SliverToBoxAdapter(child: SizedBox(height: 100)),
           ],
         ),
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showProductForm(),
@@ -341,6 +347,9 @@ class _AdminStoreScreenState extends ConsumerState<AdminStoreScreen>
               stockQuantity: data['stockQuantity'],
               sizes: data['sizes'],
               colors: data['colors'],
+              paymentMethodPolicy: PaymentMethodPolicyExtension.fromString(
+                data['paymentMethodPolicy'] as String?,
+              ),
             );
           }
           ref.invalidate(productsProvider);
@@ -886,6 +895,7 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
 
   StoreProductCategory _category = StoreProductCategory.other;
   StoreStockType _stockType = StoreStockType.inStock;
+  PaymentMethodPolicy _paymentMethodPolicy = PaymentMethodPolicy.both;
   bool _isLoading = false;
   bool _isUploadingImage = false;
   List<String> _imageUrls = [];
@@ -913,6 +923,7 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
     if (widget.product != null) {
       _category = widget.product!.category;
       _stockType = widget.product!.stockType;
+      _paymentMethodPolicy = widget.product!.paymentMethodPolicy;
       _imageUrls = List<String>.from(widget.product!.imageUrls);
     }
   }
@@ -929,8 +940,11 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
 
       if (pickedFile == null) return;
 
-      // Crop to 1:1 aspect ratio
-      final croppedFile = await ImageCropper().cropImage(
+      // Crop to 1:1 aspect ratio. No desktop (sem image_cropper) usa a imagem
+      // original sem recortar.
+      final croppedFile = !PlatformSupport.canCropImage
+          ? CroppedFile(pickedFile.path)
+          : await ImageCropper().cropImage(
         sourcePath: pickedFile.path,
         aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
         compressQuality: 85,
@@ -1031,6 +1045,7 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
         'sizes': sizes.isEmpty ? null : sizes,
         'colors': colors.isEmpty ? null : colors,
         'images': _imageUrls,
+        'paymentMethodPolicy': _paymentMethodPolicy.value,
       };
 
       await widget.onSave(data);
@@ -1295,6 +1310,13 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
                         }).toList(),
                       ),
                       const SizedBox(height: 16),
+                      // Payment method policy (PIX / Cartão / Ambos)
+                      _StorePaymentMethodPolicySelector(
+                        selected: _paymentMethodPolicy,
+                        onChanged: (p) =>
+                            setState(() => _paymentMethodPolicy = p),
+                      ),
+                      const SizedBox(height: 16),
                       // Stock Quantity
                       if (_stockType == StoreStockType.inStock)
                         _ModernTextField(
@@ -1412,6 +1434,45 @@ class _ModernTextField extends StatelessWidget {
             ),
             contentPadding: const EdgeInsets.all(16),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Picker for the accepted payment methods of a store product (PIX e Cartão /
+/// Somente PIX / Somente Cartão). Reuses the canonical [PaymentMethodPolicy]
+/// enum (`payment_service.dart`). Lives in the store lane — a self-contained
+/// duplicate of the financial-screen selector so the loja never depends on
+/// `financial_screen.dart`. The snapshot is taken onto the order at checkout
+/// and re-enforced server-side.
+class _StorePaymentMethodPolicySelector extends StatelessWidget {
+  final PaymentMethodPolicy selected;
+  final ValueChanged<PaymentMethodPolicy> onChanged;
+
+  const _StorePaymentMethodPolicySelector({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Formas de pagamento aceitas', style: AppTheme.labelMedium),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: PaymentMethodPolicy.values.map((policy) {
+            return ChoiceChip(
+              label: Text(policy.label),
+              selected: selected == policy,
+              onSelected: (isSelected) {
+                if (isSelected) onChanged(policy);
+              },
+            );
+          }).toList(),
         ),
       ],
     );

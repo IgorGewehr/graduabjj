@@ -1,0 +1,81 @@
+name: Build Windows (.exe)
+
+# Gera o executável Windows do GraduaBJJ (app de balcão / desktop) sem precisar
+# de um PC Windows na mão: o runner windows-latest do GitHub compila e publica o
+# artefato pronto pra baixar e rodar em qualquer Windows 10/11 x64.
+#
+# Como usar:
+#  1. Aba "Actions" do repositório → workflow "Build Windows (.exe)".
+#  2. Botão "Run workflow" (branch b2c) → aguarde ~10-20 min.
+#  3. Baixe o artefato "graduabjj-windows" (zip) → extraia → rode graduabjj.exe.
+#     Mantenha graduabjj.exe JUNTO das DLLs e da pasta data/ (não mova só o .exe).
+#
+# Também roda automaticamente a cada push na b2c que toque em código/pubspec.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [b2c]
+    paths:
+      - 'lib/**'
+      - 'windows/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/windows.yml'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    env:
+      # O Firebase C++ SDK (baixado no build p/ cloud_firestore/auth no Windows)
+      # ainda declara cmake_minimum_required < 3.5, que o CMake 4.x do runner
+      # removeu — quebra o configure com "Compatibility with CMake < 3.5 has
+      # been removed". Esta env var (equivalente a -DCMAKE_POLICY_VERSION_MINIMUM)
+      # faz o CMake tratar as políticas antigas como 3.5 e seguir o build.
+      CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          # Pinado à versão de dev (evita surpresa de canal/SDK). Bumpe junto com
+          # a máquina de desenvolvimento quando atualizar o Flutter.
+          flutter-version: '3.41.5'
+          channel: stable
+          cache: true
+
+      - name: Habilitar Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: Analisar (não bloqueante)
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        continue-on-error: true
+
+      - name: Build Windows (release)
+        run: flutter build windows --release
+
+      - name: Empacotar Release
+        shell: pwsh
+        run: |
+          $rel = "build/windows/x64/runner/Release"
+          if (!(Test-Path $rel)) {
+            # Fallback p/ layout antigo (sem sub-pasta x64).
+            $rel = "build/windows/runner/Release"
+          }
+          Write-Host "Empacotando $rel"
+          Compress-Archive -Path "$rel/*" -DestinationPath "graduabjj-windows.zip" -Force
+
+      - name: Upload do artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: graduabjj-windows
+          path: graduabjj-windows.zip
+          if-no-files-found: error
+          retention-days: 30

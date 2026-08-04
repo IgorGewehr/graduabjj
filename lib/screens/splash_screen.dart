@@ -17,9 +17,9 @@ class SplashScreen extends StatelessWidget {
           children: [
             // Logo - same as login screen
             Image.asset(
-              'assets/images/bjjeasy_logo.png',
-              width: 150,
-              height: 150,
+              'assets/images/mydojo_logo.png',
+              width: 160,
+              height: 160,
             )
                 .animate()
                 .fadeIn(duration: 400.ms)

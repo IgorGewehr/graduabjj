@@ -16,6 +16,7 @@ import '../../services/asaas_payment_service.dart';
 import '../../services/firebase_service.dart';
 import '../../services/mercado_pago_service.dart';
 import '../../services/payment/payment_gateway_resolver.dart';
+import '../../services/payment_service.dart' show PaymentMethodPolicy;
 import '../../services/store_service.dart';
 import '../../widgets/payment/payment_method_sheet.dart';
 import '../../widgets/payment/payment_target.dart';
@@ -67,9 +68,15 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
   }
 
   Future<void> _resolveGateway() async {
-    final resolved = await ref
-        .read(paymentGatewayProvider(FirebaseService.academyId).future);
-    if (mounted) setState(() => _gateway = resolved);
+    try {
+      final resolved = await ref
+          .read(paymentGatewayProvider(FirebaseService.academyId).future);
+      if (mounted) setState(() => _gateway = resolved);
+    } catch (_) {
+      // Falha transitória ao resolver: fica null e o Confirmar re-resolve
+      // (com await) antes de decidir pular o sheet — nunca degrada para
+      // 'sem gateway' silenciosamente.
+    }
   }
 
   // --- Confirm -----------------------------------------------------------
@@ -129,10 +136,51 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
   /// no gateway is connected, the order still exists as pending and the student
   /// is told to arrange payment with the academy.
   Future<void> _openPaymentSheet(StoreOrder order) async {
-    final gateway = _gateway;
+    var gateway = _gateway;
     final currentUser = ref.read(currentUserProvider).valueOrNull;
 
-    if (gateway == null || !gateway.pixEnabled || currentUser == null) {
+    // Resolução do initState ainda não concluiu (ou falhou): AGUARDA aqui em
+    // vez de pular o pagamento silenciosamente — o pedido já existe e o aluno
+    // precisa ver as opções de PIX/cartão.
+    if (gateway == null) {
+      try {
+        // Invalida antes: um erro de rede no initState fica cacheado no
+        // FutureProvider; sem isso o retry releria o mesmo erro.
+        ref.invalidate(paymentGatewayProvider(FirebaseService.academyId));
+        gateway = await ref
+            .read(paymentGatewayProvider(FirebaseService.academyId).future);
+        // Atribuição direta (sem capturar `gateway` em closure) para manter a
+        // promoção de não-nulo até o uso no PaymentMethodSheet.
+        _gateway = gateway;
+        if (mounted) setState(() {});
+      } catch (_) {
+        gateway = null;
+      }
+      if (!mounted) return;
+    }
+
+    if (gateway == null) {
+      // Falha ao resolver mesmo após retry: o pedido segue pendente e pode
+      // ser pago pela lista de pedidos.
+      context.showWarning(
+          'Não foi possível carregar o pagamento online. Conclua o pagamento '
+          'em "Meus pedidos" ou combine com a academia.');
+      _goToOrders();
+      return;
+    }
+
+    // Promoção não atravessa closures para locais reatribuídos — fixa o valor
+    // não-nulo num final para uso no builder do sheet.
+    final resolvedGateway = gateway;
+
+    // Resolução CONCLUÍDA sem gateway conectado: avisa antes de navegar (em
+    // vez de despejar o aluno na lista sem explicação).
+    if (!resolvedGateway.pixEnabled || currentUser == null) {
+      if (resolvedGateway == PaymentGateway.none) {
+        context.showWarning(
+            'Pagamento online não configurado — combine o pagamento '
+            'diretamente com a academia.');
+      }
       _goToOrders();
       return;
     }
@@ -145,6 +193,19 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
     final storeCreditCardEnabled = settings?.storeCreditCardEnabled ?? false;
     final description = _orderDescription(order);
 
+    // Gate the offered methods by the order's policy snapshot AND the academy
+    // card flag. If nothing is payable (e.g. card_only while the academy has
+    // card disabled), explain it instead of opening an unusable sheet.
+    final availability = StoreCheckoutMethodAvailability.from(
+      policy: order.paymentMethodPolicy,
+      storeCreditCardEnabled: storeCreditCardEnabled,
+    );
+    if (!availability.hasPayableMethod) {
+      context.showWarning(_blockedReason(order.paymentMethodPolicy));
+      _goToOrders();
+      return;
+    }
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -156,9 +217,12 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
           description: description,
           studentId: currentUser.studentId ?? '',
           studentName: currentUser.displayName,
+          paymentMethodPolicy: order.paymentMethodPolicy,
         ),
-        gateway: gateway,
-        storeCreditCardEnabled: storeCreditCardEnabled,
+        gateway: resolvedGateway,
+        // Card is offered only when the order policy allows it AND the academy
+        // enabled store card. PIX is gated inside the sheet by the same policy.
+        storeCreditCardEnabled: availability.creditCard,
         createPix: (cpf) => _createOrderPix(order, cpf: cpf),
         onSettled: _onPaymentSettled,
       ),
@@ -167,6 +231,18 @@ class _StoreCheckoutScreenState extends ConsumerState<StoreCheckoutScreen> {
     // Whether the student paid now or chose to pay later, the order already
     // exists — land them on the orders list so they can track/pay it.
     _goToOrders();
+  }
+
+  /// Human reason shown when an order has no payable method (so the buyer is
+  /// never dropped into a dead-end sheet). The order still exists as pending —
+  /// payment can be arranged with the academy.
+  String _blockedReason(PaymentMethodPolicy policy) {
+    if (policy == PaymentMethodPolicy.cardOnly) {
+      return 'Este pedido aceita apenas cartao, mas o pagamento com cartao '
+          'nao esta habilitado. Combine o pagamento com a academia.';
+    }
+    return 'Nenhum metodo de pagamento disponivel para este pedido. '
+        'Combine o pagamento com a academia.';
   }
 
   /// Short order label used by the payment sheets (matches `store_orders_screen`).

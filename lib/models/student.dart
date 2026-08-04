@@ -3,7 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../core/sports.dart';
 
 /// Student Status
-enum StudentStatus { active, injured, inactive, suspended }
+/// `transferred` = aluno que SAIU da academia (foi para outra ou deixou de
+/// treinar). É um estado terminal/ex-aluno: some do roster ativo, mas a ficha e
+/// todo o histórico (presenças/financeiro) permanecem na academia para consulta.
+enum StudentStatus { active, injured, inactive, suspended, transferred }
 
 extension StudentStatusExtension on StudentStatus {
   String get value {
@@ -16,6 +19,8 @@ extension StudentStatusExtension on StudentStatus {
         return 'inactive';
       case StudentStatus.suspended:
         return 'suspended';
+      case StudentStatus.transferred:
+        return 'transferred';
     }
   }
 
@@ -29,8 +34,14 @@ extension StudentStatusExtension on StudentStatus {
         return 'Inativo';
       case StudentStatus.suspended:
         return 'Suspenso';
+      case StudentStatus.transferred:
+        return 'Transferido';
     }
   }
+
+  /// Ex-aluno: saiu da academia (vai para a aba "Ex-alunos", não no roster ativo).
+  bool get isFormer =>
+      this == StudentStatus.transferred || this == StudentStatus.inactive;
 
   static StudentStatus fromString(String value) {
     switch (value) {
@@ -42,6 +53,8 @@ extension StudentStatusExtension on StudentStatus {
         return StudentStatus.inactive;
       case 'suspended':
         return StudentStatus.suspended;
+      case 'transferred':
+        return StudentStatus.transferred;
       default:
         return StudentStatus.active;
     }
@@ -248,6 +261,113 @@ class BeltHistoryEntry {
   }
 }
 
+/// Dados de retenção e engajamento — gravados exclusivamente pelas Cloud Functions
+/// (onAttendanceWrite + computeRetentionDaily). O cliente NUNCA escreve este mapa:
+/// nem via toFirestore() nem via updates diretos.
+///
+/// Invariante de privacidade: riskScore/riskLevel NUNCA são espelhados em
+/// publicProfiles ou fighterProfiles — dado interno da academia (LGPD).
+class StudentRetention {
+  final DateTime? lastAttendanceDate;
+  final int attendanceLast7d;
+  final int attendanceLast30d;
+
+  /// Buckets semanais ISO (chave 'YYYY-Www', ex.: '2026-W27').
+  /// Semanas ISO começam na segunda-feira. Poda automática: ~9 semanas pela CF.
+  final Map<String, int> weeklyBuckets;
+
+  final int? riskScore;
+
+  /// 'low' | 'medium' | 'high' | 'critical'
+  final String? riskLevel;
+  final DateTime? riskComputedAt;
+
+  /// Flag anti-"blue belt blues" (§3.3/§6.3 da pesquisa de retenção), gravada
+  /// pela CF diária: faixa-azul de BJJ como esporte principal, 6–30 meses na
+  /// faixa (medido pela promoção registrada em beltProgressions) e tendência
+  /// de frequência caindo. A CF grava SEMPRE true/false explícito — aqui o
+  /// default false só cobre docs ainda não recomputados (backfill pendente).
+  final bool bluesRisk;
+
+  const StudentRetention({
+    this.lastAttendanceDate,
+    this.attendanceLast7d = 0,
+    this.attendanceLast30d = 0,
+    this.weeklyBuckets = const {},
+    this.riskScore,
+    this.riskLevel,
+    this.riskComputedAt,
+    this.bluesRisk = false,
+  });
+
+  factory StudentRetention.fromMap(Map<String, dynamic> map) {
+    // Parse tolerante de weeklyBuckets — ignora chaves/valores malformados.
+    final rawBuckets = map['weeklyBuckets'];
+    final buckets = <String, int>{};
+    if (rawBuckets is Map) {
+      rawBuckets.forEach((k, v) {
+        final val = (v as num?)?.toInt();
+        if (val != null && k is String) buckets[k] = val;
+      });
+    }
+    return StudentRetention(
+      lastAttendanceDate: (map['lastAttendanceDate'] as Timestamp?)?.toDate(),
+      attendanceLast7d: (map['attendanceLast7d'] as num?)?.toInt() ?? 0,
+      attendanceLast30d: (map['attendanceLast30d'] as num?)?.toInt() ?? 0,
+      weeklyBuckets: Map.unmodifiable(buckets),
+      riskScore: (map['riskScore'] as num?)?.toInt(),
+      riskLevel: map['riskLevel'] as String?,
+      riskComputedAt: (map['riskComputedAt'] as Timestamp?)?.toDate(),
+      bluesRisk: map['bluesRisk'] == true,
+    );
+  }
+}
+
+/// Meta técnica de curto prazo do aluno — definida pelo PROFESSOR (protocolo
+/// anti-"blue belt blues", §6.3 da pesquisa: metas de habilidade de 4-6
+/// semanas são a arma nº 1 contra a estagnação da faixa-azul).
+///
+/// Escrita staff-only: a UI de staff grava o campo `activeGoal` direto via
+/// update() no doc do aluno; o cliente-aluno apenas lê. Por isso o campo
+/// NUNCA entra em [Student.toFirestore].
+class StudentGoal {
+  /// Texto da meta (ex.: "Finalizar 3x da guarda fechada até o camp").
+  final String text;
+
+  /// Prazo opcional da meta.
+  final DateTime? until;
+
+  /// Nome de quem definiu (denormalizado para exibição no app do aluno).
+  final String? setByName;
+
+  /// Quando a meta foi definida.
+  final DateTime? setAt;
+
+  const StudentGoal({
+    required this.text,
+    this.until,
+    this.setByName,
+    this.setAt,
+  });
+
+  /// Parse tolerante: null para mapa ausente/malformado ou meta sem texto —
+  /// meta vazia é o mesmo que meta nenhuma (empty-state invisível).
+  static StudentGoal? fromMap(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    final rawText = map['text'];
+    final text = rawText is String ? rawText.trim() : '';
+    if (text.isEmpty) return null;
+    final rawUntil = map['until'];
+    final rawSetAt = map['setAt'];
+    return StudentGoal(
+      text: text,
+      until: rawUntil is Timestamp ? rawUntil.toDate() : null,
+      setByName: map['setByName'] is String ? map['setByName'] as String : null,
+      setAt: rawSetAt is Timestamp ? rawSetAt.toDate() : null,
+    );
+  }
+}
+
 /// Student Model
 class Student {
   final String id;
@@ -339,6 +459,17 @@ class Student {
   final DateTime updatedAt;
   final String? createdBy;
 
+  // Retenção (leitura — gravado exclusivamente pelas Cloud Functions)
+  final StudentRetention? retention;
+
+  // Meta técnica ativa (leitura no app do aluno — só o staff escreve; ver
+  // StudentGoal). Fica FORA do toFirestore pelo mesmo motivo do retention.
+  final StudentGoal? activeGoal;
+
+  // Histórico de mudança de status (gravado pelo cliente a cada transição real)
+  final DateTime? statusChangedAt;
+  final String? statusChangeReason;
+
   Student({
     required this.id,
     required this.fullName,
@@ -379,7 +510,9 @@ class Student {
     this.sportsList,
     this.sportData,
     this.primarySport,
-    this.isProfilePublic = false,
+    // Público por PADRÃO (app social): perfil externo/web visível a menos que o
+    // aluno desmarque. Dentro da academia é sempre visível (gate removido).
+    this.isProfilePublic = true,
     this.linkedUserId,
     this.responsibleUserId,
     this.responsibleStudentId,
@@ -388,6 +521,10 @@ class Student {
     required this.createdAt,
     required this.updatedAt,
     this.createdBy,
+    this.retention,
+    this.activeGoal,
+    this.statusChangedAt,
+    this.statusChangeReason,
   });
 
   factory Student.fromFirestore(DocumentSnapshot doc) {
@@ -414,7 +551,9 @@ class Student {
           ? (data['jiujitsuStartDate'] as Timestamp).toDate()
           : null,
       currentBelt: data['currentBelt'] ?? 'white',
-      currentStripes: data['currentStripes'] ?? 0,
+      // num?.toInt(): um doc legado com stripes salvo como double quebrava o
+      // parse inteiro do Student (some o aluno da lista).
+      currentStripes: (data['currentStripes'] as num?)?.toInt() ?? 0,
       category: StudentCategoryExtension.fromString(data['category'] ?? 'adult'),
       teamId: data['teamId'],
       weight: data['weight']?.toDouble(),
@@ -449,7 +588,7 @@ class Student {
           ? Map<String, dynamic>.from(data['sportData'])
           : null,
       primarySport: data['primarySport'],
-      isProfilePublic: data['isProfilePublic'] ?? false,
+      isProfilePublic: data['isProfilePublic'] ?? true,
       linkedUserId: data['linkedUserId'],
       responsibleUserId: data['responsibleUserId'],
       responsibleStudentId: data['responsibleStudentId'],
@@ -458,6 +597,20 @@ class Student {
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       createdBy: data['createdBy'],
+      // Parse tolerante: mapa ausente → null (aluno sem dados de retenção ainda)
+      retention: data['retention'] is Map
+          ? StudentRetention.fromMap(
+              Map<String, dynamic>.from(data['retention'] as Map),
+            )
+          : null,
+      // Meta técnica anti-blues (staff-only write; parse tolerante → null)
+      activeGoal: data['activeGoal'] is Map
+          ? StudentGoal.fromMap(
+              Map<String, dynamic>.from(data['activeGoal'] as Map),
+            )
+          : null,
+      statusChangedAt: (data['statusChangedAt'] as Timestamp?)?.toDate(),
+      statusChangeReason: data['statusChangeReason'] as String?,
     );
   }
 
@@ -513,11 +666,23 @@ class Student {
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(DateTime.now()),
       'createdBy': createdBy,
+      // NUNCA escritos por aqui (escrita fora do cliente-aluno):
+      // `retention` é exclusivo das Cloud Functions e `activeGoal` é gravado
+      // pela UI de staff direto via update() — incluí-los sobrescreveria os
+      // dados do servidor em qualquer save comum da ficha.
     };
   }
 
   // Computed properties
-  String get displayName => nickname ?? fullName.split(' ').first;
+  String get displayName {
+    // Range-safe: nunca retorna vazio. Os call sites de avatar fazem
+    // displayName[0]; um nickname '' (não null) ou fullName vazio causava
+    // RangeError e derrubava listas de alunos/chamada inteiras.
+    final nick = nickname?.trim() ?? '';
+    if (nick.isNotEmpty) return nick;
+    final first = fullName.trim().split(' ').first;
+    return first.isNotEmpty ? first : 'Aluno';
+  }
 
   int get totalAttendanceCount =>
       (initialAttendanceCount ?? 0) + (attendanceCount ?? 0);
@@ -579,8 +744,55 @@ class Student {
     if (data == null) return null;
     return (
       currentGrade: data['currentGrade'] as String? ?? 'white',
-      currentStripes: data['currentStripes'] as int? ?? 0,
+      currentStripes: (data['currentStripes'] as num?)?.toInt() ?? 0,
     );
+  }
+
+  // ============================================
+  // Helpers de Retenção
+  // ============================================
+
+  /// Dias desde a última presença registrada pela CF.
+  /// Retorna null se o aluno nunca treinou ou os dados de retenção ainda não
+  /// foram populados (backfill pendente).
+  int? get daysSinceLastAttendance {
+    if (retention?.lastAttendanceDate == null) return null;
+    return DateTime.now()
+        .difference(retention!.lastAttendanceDate!)
+        .inDays;
+  }
+
+  /// Retorna os 8 buckets semanais ISO mais recentes em ordem CRONOLÓGICA
+  /// (índice 0 = semana mais antiga; índice 7 = semana de [now]).
+  ///
+  /// Chaves ausentes no mapa de retenção valem 0.
+  /// Formato de chave: 'YYYY-Www' (semana ISO, segunda-feira = início).
+  /// Usado pela mini-strip de frequência na ficha do aluno.
+  List<int> last8WeeksBuckets(DateTime now) {
+    if (retention == null) return List.filled(8, 0);
+    return [
+      for (int i = 7; i >= 0; i--)
+        retention!.weeklyBuckets[_isoWeekKey(
+              now.subtract(Duration(days: 7 * i)),
+            )] ??
+            0,
+    ];
+  }
+
+  /// Calcula a chave de semana ISO ('YYYY-Www') para [date].
+  /// Semanas ISO começam na segunda-feira (ISO 8601).
+  ///
+  /// Algoritmo: a quinta-feira de cada semana determina o ano ISO e o número
+  /// da semana — mesmo formato gerado pelo backend Node.js.
+  static String _isoWeekKey(DateTime date) {
+    // weekday: 1 = segunda ... 7 = domingo
+    final thursday = date.add(Duration(days: 4 - date.weekday));
+    final isoYear = thursday.year;
+    final jan1 = DateTime(isoYear, 1, 1);
+    // dayOfYear é 0-based a partir de jan1
+    final dayOfYear = thursday.difference(jan1).inDays;
+    final weekNum = dayOfYear ~/ 7 + 1;
+    return '$isoYear-W${weekNum.toString().padLeft(2, '0')}';
   }
 
   Student copyWith({
@@ -632,6 +844,10 @@ class Student {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? createdBy,
+    StudentRetention? retention,
+    StudentGoal? activeGoal,
+    DateTime? statusChangedAt,
+    String? statusChangeReason,
   }) {
     return Student(
       id: id ?? this.id,
@@ -684,6 +900,10 @@ class Student {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       createdBy: createdBy ?? this.createdBy,
+      retention: retention ?? this.retention,
+      activeGoal: activeGoal ?? this.activeGoal,
+      statusChangedAt: statusChangedAt ?? this.statusChangedAt,
+      statusChangeReason: statusChangeReason ?? this.statusChangeReason,
     );
   }
 }

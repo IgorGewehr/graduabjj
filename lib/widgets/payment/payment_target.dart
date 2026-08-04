@@ -74,6 +74,7 @@ class PaymentTarget {
     required String description,
     required String studentId,
     required String studentName,
+    PaymentMethodPolicy paymentMethodPolicy = PaymentMethodPolicy.both,
   }) {
     return PaymentTarget._(
       kind: PaymentTargetKind.order,
@@ -82,6 +83,7 @@ class PaymentTarget {
       description: description,
       studentId: studentId,
       studentName: studentName,
+      paymentMethodPolicy: paymentMethodPolicy,
     );
   }
 

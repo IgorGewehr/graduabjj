@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../core/platform_support.dart';
 import '../../core/theme.dart';
+import '../../services/analytics_service.dart';
 import '../../services/musculacao_checkin_service.dart';
 import '../../widgets/polish/polish.dart';
 
@@ -23,10 +25,14 @@ class MusculacaoQrScanScreen extends ConsumerStatefulWidget {
 class _MusculacaoQrScanScreenState
     extends ConsumerState<MusculacaoQrScanScreen>
     with SingleTickerProviderStateMixin {
-  final MobileScannerController _controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.normal,
-    facing: CameraFacing.back,
-  );
+  // Sem câmera no desktop (mobile_scanner): controller nulo → build mostra
+  // fallback.
+  final MobileScannerController? _controller = PlatformSupport.canScanCamera
+      ? MobileScannerController(
+          detectionSpeed: DetectionSpeed.normal,
+          facing: CameraFacing.back,
+        )
+      : null;
 
   late final AnimationController _scanLineController;
 
@@ -46,7 +52,7 @@ class _MusculacaoQrScanScreenState
   @override
   void dispose() {
     _scanLineController.dispose();
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -73,7 +79,7 @@ class _MusculacaoQrScanScreenState
 
     try {
       await MusculacaoCheckinService().checkIn(academyId: academyId);
-      await _controller.stop();
+      await _controller?.stop();
       if (!mounted) return;
       setState(() {
         _success = true;
@@ -81,6 +87,8 @@ class _MusculacaoQrScanScreenState
       });
       // Genuine win: musculação check-in confirmed.
       Celebration.confetti(context);
+      // Analytics (jul/2026): check-in do QR fixo da musculação confirmado.
+      AnalyticsService.logCheckinScanned(kind: 'musculacao');
     } on MusculacaoCheckinException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -107,6 +115,21 @@ class _MusculacaoQrScanScreenState
 
   @override
   Widget build(BuildContext context) {
+    if (_controller == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Check-in')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(32),
+            child: Text(
+              'A leitura de QR usa a câmera do celular. No computador, use a '
+              'catraca/leitor da academia.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: Colors.black,
       extendBodyBehindAppBar: true,
@@ -124,12 +147,12 @@ class _MusculacaoQrScanScreenState
     return Stack(
       children: [
         MobileScanner(
-          controller: _controller,
+          controller: _controller!,
           onDetect: _handle,
-          errorBuilder: (context, error) => _CameraErrorView(
+          errorBuilder: (context, error, child) => _CameraErrorView(
             error: error,
             onRetry: () {
-              _controller.start();
+              _controller?.start();
             },
           ),
         ),

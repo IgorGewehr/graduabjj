@@ -48,9 +48,17 @@ final rankingServiceProvider = Provider<RankingService?>((ref) {
 
 /// Attendance ranking for a category (Geral / Adulto / Kids) over a period,
 /// optionally scoped to a single modality ([sport] = SportId.value; null = all).
-final classRankingProvider = FutureProvider.family<List<RankingEntry>,
-    ({RankingCategory category, RankingPeriod period, String? sport})>(
-        (ref, args) async {
+final classRankingProvider = FutureProvider.family<
+    List<RankingEntry>,
+    ({
+      RankingCategory category,
+      RankingPeriod period,
+      String? sport,
+      // Janela do período CUSTOM (epoch millis). Ambos null nos presets. Entram
+      // na chave da family para o ranking ser cacheado por intervalo.
+      int? startMillis,
+      int? endMillis,
+    })>((ref, args) async {
   final currentUser = await ref.watch(currentUserProvider.future);
   if (currentUser?.academyId == null) return const [];
   final classes = await ref.watch(classesProvider.future);
@@ -59,6 +67,12 @@ final classRankingProvider = FutureProvider.family<List<RankingEntry>,
     classIds: classIds,
     period: args.period,
     sport: args.sport,
+    customStart: args.startMillis != null
+        ? DateTime.fromMillisecondsSinceEpoch(args.startMillis!)
+        : null,
+    customEnd: args.endMillis != null
+        ? DateTime.fromMillisecondsSinceEpoch(args.endMillis!)
+        : null,
   );
 });
 
@@ -92,22 +106,27 @@ final publicStudentProfileProvider = FutureProvider.family<
   // student doc, so a member viewing a peer never hits sensitive data. If the
   // mirror is missing (legacy/not-yet-synced student), the profile is not
   // available → return null.
-  final student =
-      await StudentService(args.academyId).getPublicProfile(args.studentId);
+  final svc = StudentService(args.academyId);
+  // O id pode ser um studentId (strip/ranking) OU um AUTH uid (ex.: autor de um
+  // post do feed). Tenta como studentId; se não achar, resolve pelo linkedUserId
+  // no espelho. Assim colega de mesma academia SEMPRE abre — independe de uid.
+  var student = await svc.getPublicProfile(args.studentId);
+  student ??= await svc.getPublicProfileByUid(args.studentId);
   if (student == null) return null;
+  final sid = student.id; // studentId REAL para as subcoleções
 
   final achievements = await AchievementService(args.academyId)
-      .getPublic(args.studentId)
+      .getPublic(sid)
       .catchError((_) => <Achievement>[]);
 
   final competitionResults = await CompetitionService(args.academyId)
-      .getResultsForStudent(args.studentId)
+      .getResultsForStudent(sid)
       .catchError((_) => <CompetitionResult>[]);
 
   final photos = await CompetitionPhotoService()
       .getPhotosByStudent(
         academyId: args.academyId,
-        studentId: args.studentId,
+        studentId: sid,
       )
       .catchError((_) => <CompetitionPhoto>[]);
 

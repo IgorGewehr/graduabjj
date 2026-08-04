@@ -6,8 +6,12 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/billing_provider.dart';
 import '../../services/services.dart';
+import '../../widgets/common/billing_automation_banner.dart';
 import '../../widgets/polish/polish.dart';
+import '../../widgets/onboarding/activation_checklist.dart';
+import 'widgets/dashboard_radar_sections.dart';
 
 /// Admin Dashboard Screen - Matching webapp design
 class AdminDashboardScreen extends ConsumerStatefulWidget {
@@ -19,14 +23,10 @@ class AdminDashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
-  Map<String, dynamic>? _studentStats;
   List<dynamic>? _overduePayments;
   Map<String, dynamic>? _monthlySummary;
   bool _isLoading = true;
-
-  // Stats carousel
-  final PageController _statsPageController = PageController(viewportFraction: 0.85);
-  int _currentStatsPage = 0;
+  bool _loadError = false;
 
   @override
   void initState() {
@@ -34,20 +34,18 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     _loadDashboardData();
   }
 
-  @override
-  void dispose() {
-    _statsPageController.dispose();
-    super.dispose();
-  }
-
   Future<void> _loadDashboardData() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _loadError = false;
+    });
 
     try {
       final academyId = FirebaseService.academyId;
 
+      // "Alunos Ativos" saiu do dashboard (era stat card duplicado/não
+      // acionável) → getDashboardStats() não é mais consumido aqui.
       final results = await Future.wait([
-        StudentService(academyId).getDashboardStats(),
         PaymentService(academyId).getOverdue(),
         PaymentService(academyId).getMonthlySummary(
           DateFormat('yyyy-MM').format(DateTime.now()),
@@ -55,13 +53,18 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
       ]);
 
       setState(() {
-        _studentStats = results[0] as Map<String, dynamic>;
-        _overduePayments = results[1] as List<dynamic>;
-        _monthlySummary = results[2] as Map<String, dynamic>;
+        _overduePayments = results[0] as List<dynamic>;
+        _monthlySummary = results[1] as Map<String, dynamic>;
         _isLoading = false;
+        _loadError = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
+      // Não engolir o erro silenciosamente: sem isso, uma falha de fetch
+      // vira "tudo zero", indistinguível de uma academia nova/vazia.
+      setState(() {
+        _isLoading = false;
+        _loadError = true;
+      });
     }
   }
 
@@ -76,15 +79,15 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     final now = DateTime.now();
     final weekdays = [
       'Segunda-feira',
-      'Terca-feira',
+      'Terça-feira',
       'Quarta-feira',
       'Quinta-feira',
       'Sexta-feira',
-      'Sabado',
+      'Sábado',
       'Domingo'
     ];
     final months = [
-      'Janeiro', 'Fevereiro', 'Marco', 'Abril', 'Maio', 'Junho',
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
       'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
     ];
 
@@ -92,23 +95,40 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     final day = now.day;
     final month = months[now.month - 1];
 
-    return '$weekday, $day De $month';
+    return '$weekday, $day de $month';
   }
 
   String _formatCurrency(double value) {
     return NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(value);
   }
 
+  /// Staff sem `financial:view` (ex.: instrutor/monitor) NÃO pode ver o
+  /// financeiro da academia no dashboard. Admin tem a permissão por padrão.
+  bool get _canSeeFinancial =>
+      ref
+          .read(currentUserProvider)
+          .valueOrNull
+          ?.hasPermission('financial:view') ??
+      false;
+
   @override
   Widget build(BuildContext context) {
     final currentUser = ref.watch(currentUserProvider);
     final userName =
         currentUser.valueOrNull?.displayName.split(' ').first ?? 'Admin';
+    // Fatia 4 (SPEC_ONBOARDING_2026-07.md §1.4): banner de automação de
+    // cobrança, gated por !whatsappEnabled — some sozinho assim que a
+    // cobrança é ativada (mesmo provider do checklist acima).
+    final billingStatus = ref.watch(billingAutomationStatusProvider).valueOrNull;
+    final showBillingBanner =
+        billingStatus != null && !billingStatus.whatsappEnabled;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: _isLoading
           ? _buildLoadingState()
+          : _loadError
+          ? _buildErrorState()
           : RefreshIndicator(
               onRefresh: _loadDashboardData,
               child: SingleChildScrollView(
@@ -119,29 +139,104 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     // Welcome Header
                     _buildWelcomeHeader(userName).fadeInQuick(),
 
+                    // Checklist de ativação "Comece por aqui" — derivado do
+                    // estado real da academia; some sozinho quando 100% pronto.
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(20, 4, 20, 0),
+                      child: ActivationChecklist(),
+                    ),
+
+                    // Banner de automação de cobrança (Fatia 4) — mesmo
+                    // componente 1:1 da tela Cobrança (billing_reminders_screen
+                    // .dart); só aparece enquanto a automação estiver
+                    // desligada. CTA primário "Chamada" das quick actions
+                    // abaixo PERMANECE intocado — decisão explícita da spec.
+                    if (showBillingBanner) const BillingAutomationBanner(),
+
+                    const SizedBox(height: 16),
+
                     // Quick Actions
                     _buildQuickActions().entrance(index: 0),
 
                     const SizedBox(height: 24),
 
-                    // Stats Carousel
-                    _buildStatsCarousel().entrance(index: 1),
+                    // ── RADAR DO DIA (§6) — ordem por valor de DECISÃO ──
+                    // Card HOJE (aulas do dia) REMOVIDO por decisão do dono
+                    // (21/07): o professor SABE a grade das próprias turmas —
+                    // o card só repetia o que ele já sabe, e a chamada 1-tap
+                    // continua no botão "Chamada" das ações rápidas acima.
+                    // RADAR: quem está esfriando + taxa de recuperação.
+                    // (ENGAJAMENTO saiu por decisão do dono: não é métrica
+                    // importante no dia a dia do professor.)
+                    const DashboardRadarCard().entrance(index: 1),
 
                     const SizedBox(height: 24),
 
-                    // Monthly Financial Card
-                    _buildMonthlyFinancialCard().entrance(index: 2),
+                    // Stat cards "Alunos Ativos" / "Receita do Mês" REMOVIDOS
+                    // (feedback do dono, 21/07): Receita duplicava o card
+                    // "Mensalidades" abaixo (mesmo valor); Alunos Ativos não
+                    // era acionável (aba Alunos já mostra o total/ativos).
+                    // Zero perda: "de X total" já aparece no header da aba
+                    // Alunos; "N pagamentos" já aparece na linha "Recebido"
+                    // do card Mensalidades.
 
-                    const SizedBox(height: 24),
-
-                    // Alerts Section
-                    _buildAlertsSection().entrance(index: 3),
+                    // 4. FINANCEIRO condensado (mantém tudo) — só para staff
+                    // com financial:view.
+                    if (_canSeeFinancial) ...[
+                      _buildMonthlyFinancialCard().entrance(index: 5),
+                      const SizedBox(height: 24),
+                      _buildAlertsSection().entrance(index: 6),
+                    ],
 
                     const SizedBox(height: 100),
                   ],
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              LucideIcons.alertTriangle,
+              size: 48,
+              color: AppTheme.warning,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Não foi possível carregar o painel',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Verifique sua conexão e tente novamente. '
+              'Os números abaixo podem estar incompletos enquanto há falha.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _loadDashboardData,
+              icon: const Icon(LucideIcons.refreshCw, size: 18),
+              label: const Text('Tentar novamente'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -196,24 +291,40 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   }
 
   Widget _buildWelcomeHeader(String userName) {
+    final isAdmin = ref.read(currentUserProvider).valueOrNull?.isAdmin ?? false;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Text(
-            '${_getGreeting()}, $userName!',
-            style: AppTheme.headlineMedium.copyWith(
-              fontWeight: FontWeight.w700,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_getGreeting()}, $userName!',
+                  style: AppTheme.headlineMedium.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _getFormattedDate(),
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            _getFormattedDate(),
-            style: AppTheme.bodyMedium.copyWith(
-              color: AppTheme.textSecondary,
+          // "Avisar todos" (§4) — broadcast push da academia. Só admin: a
+          // callable valida adminUserId server-side.
+          if (isAdmin)
+            IconButton(
+              onPressed: () =>
+                  showBroadcastDialog(context, FirebaseService.academyId),
+              icon: const Icon(LucideIcons.megaphone, size: 20),
+              tooltip: 'Avisar todos',
             ),
-          ),
         ],
       ),
     );
@@ -243,95 +354,20 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
               onTap: () => context.go('/admin/alunos/novo'),
             ),
           ),
-          const SizedBox(width: 12),
-          // Financeiro
-          Expanded(
-            child: _QuickActionCard(
-              icon: LucideIcons.dollarSign,
-              label: 'Financeiro',
-              isPrimary: false,
-              onTap: () => context.go('/admin/financeiro'),
+          if (_canSeeFinancial) ...[
+            const SizedBox(width: 12),
+            // Financeiro
+            Expanded(
+              child: _QuickActionCard(
+                icon: LucideIcons.dollarSign,
+                label: 'Financeiro',
+                isPrimary: false,
+                onTap: () => context.go('/admin/financeiro'),
+              ),
             ),
-          ),
+          ],
         ],
       ),
-    );
-  }
-
-  Widget _buildStatsCarousel() {
-    final stats = _studentStats ?? {};
-    final byStatus = stats['byStatus'] as Map<String, dynamic>? ?? {};
-    final summary = _monthlySummary ?? {};
-
-    final totalActive = byStatus['active'] ?? 0;
-    final totalStudents = stats['total'] ?? 0;
-    final monthlyRevenue = (summary['paid']?['value'] ?? 0).toDouble();
-    final paidCount = summary['paid']?['count'] ?? 0;
-
-    return Column(
-      children: [
-        SizedBox(
-          height: 100,
-          child: PageView.builder(
-            controller: _statsPageController,
-            onPageChanged: (page) {
-              setState(() => _currentStatsPage = page);
-            },
-            itemCount: 2,
-            itemBuilder: (context, index) {
-              final cards = [
-                // Alunos Ativos
-                _StatsCarouselCard(
-                  icon: LucideIcons.users,
-                  label: 'Alunos Ativos',
-                  value: totalActive.toString(),
-                  countUpValue: totalActive is num
-                      ? totalActive.toInt()
-                      : int.tryParse('$totalActive') ?? 0,
-                  subtitle: 'de $totalStudents total',
-                  onTap: () => context.go('/admin/alunos'),
-                ),
-                // Receita do Mes
-                _StatsCarouselCard(
-                  icon: LucideIcons.dollarSign,
-                  iconBgColor: AppTheme.successLight,
-                  iconColor: AppTheme.success,
-                  label: 'Receita do Mes',
-                  value: _formatCurrency(monthlyRevenue),
-                  subtitle: '$paidCount pagamentos',
-                  onTap: () => context.go('/admin/financeiro'),
-                ),
-              ];
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: cards[index],
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 12),
-        // Dot indicators
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(
-            2,
-            (index) {
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                width: _currentStatsPage == index ? 20 : 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _currentStatsPage == index
-                      ? AppTheme.textPrimary
-                      : AppTheme.divider,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
     );
   }
 
@@ -347,6 +383,63 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
     final percentPaid =
         totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0.0;
+
+    // Mês sem NENHUMA cobrança gerada: o card preto "R$ 0,00 · 0%" parecia o
+    // app quebrado (feedback do dono). Empty-state honesto + atalho.
+    final nothingThisMonth = totalExpected <= 0 &&
+        (paidCount as int) == 0 &&
+        (pendingCount as int) == 0 &&
+        (overdueCount as int) == 0;
+    if (nothingThisMonth) {
+      const months = [
+        'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+        'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'
+      ];
+      final month = months[DateTime.now().month - 1];
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.divider),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Mensalidades',
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Nenhuma cobrança gerada em $month ainda.',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () => context.go('/admin/financeiro'),
+                child: Text(
+                  'Ir ao Financeiro →',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -546,98 +639,6 @@ class _QuickActionCard extends StatelessWidget {
 }
 
 /// Stats Carousel Card
-class _StatsCarouselCard extends StatelessWidget {
-  final IconData icon;
-  final Color? iconBgColor;
-  final Color? iconColor;
-  final String label;
-  final String value;
-
-  /// When provided, the value renders as an animated count-up to this number
-  /// instead of the static [value] string.
-  final int? countUpValue;
-  final String subtitle;
-  final VoidCallback? onTap;
-
-  const _StatsCarouselCard({
-    required this.icon,
-    this.iconBgColor,
-    this.iconColor,
-    required this.label,
-    required this.value,
-    this.countUpValue,
-    required this.subtitle,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Pressable(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.divider),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: iconBgColor ?? AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                icon,
-                color: iconColor ?? AppTheme.textPrimary,
-                size: 22,
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    label,
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  countUpValue != null
-                      ? AnimatedCountUp(
-                          value: countUpValue!,
-                          style: AppTheme.headlineSmall.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        )
-                      : Text(
-                          value,
-                          style: AppTheme.headlineSmall.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                  Text(
-                    subtitle,
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// Financial Breakdown Row
 class _FinancialBreakdownRow extends StatelessWidget {
   final IconData icon;

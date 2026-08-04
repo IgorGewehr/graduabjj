@@ -1,6 +1,12 @@
 # Plano de Implementação — Graduação Pedagógica (B1→B4)
 
-> Status: planejamento. Itens **B1–B4** do `docs/roadmap-modalidades.md`. Branch de
+> **Status (2026-07): IMPLEMENTADO em produção** — `lib/models/syllabus_technique.dart`,
+> `lib/models/skill_progress.dart`, `lib/services/syllabus_service.dart`,
+> `lib/screens/admin/student_syllabus_tab.dart`,
+> `lib/screens/admin/syllabus_screen.dart`. Mantido como especificação de
+> referência do que foi construído.
+>
+> Itens **B1–B4** do `docs/roadmap-modalidades.md`. Branch de
 > trabalho: `feat/evolucao-modulos` (mesma da avaliação física) ou uma nova
 > `feat/graduacao-pedagogica` _(decisão #0)_.
 >

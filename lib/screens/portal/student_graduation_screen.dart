@@ -177,7 +177,7 @@ class _GraduationBodyState extends ConsumerState<_GraduationBody> {
     if (_loading) {
       return ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [PolishSkeleton.list(count: 5)],
+        children: [PolishSkeleton.list(count: 5, scrollable: false)],
       );
     }
     final techniques = _gradeTechniques;

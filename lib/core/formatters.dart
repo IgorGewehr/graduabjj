@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// Visual masks for documents and phones.
@@ -9,6 +10,12 @@ import 'package:flutter/services.dart';
 /// [CpfCnpjInputFormatter] to mask while typing.
 
 String onlyDigits(String? s) => (s ?? '').replaceAll(RegExp(r'\D'), '');
+
+/// `TimeOfDay` → zero-padded `HH:mm` (24h), the wire format class schedules
+/// are stored as. Was copy-pasted identically in classes_screen.dart and
+/// quick_create_class_form.dart — consolidated here so the two never drift.
+String formatTimeOfDay(TimeOfDay t) =>
+    '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
 /// 11-digit CPF → `000.000.000-00`; 14-digit CNPJ → `00.000.000/0000-00`.
 /// Any other length is returned unchanged (partial / unknown values).

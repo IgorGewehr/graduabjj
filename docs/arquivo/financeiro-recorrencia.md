@@ -1,5 +1,11 @@
 <!-- Gerado por .claude/workflows/financeiro-recorrencia-architecture.js -->
 
+> **Arquivado (2026-07):** este era o blueprint PRÉ-implementação da assinatura
+> recorrente (MP Preapproval). **Já foi implementado** — `server_functions.js`
+> tem o fluxo completo (`POST /preapproval`, `auto_recurring`, os 4 crons
+> `scheduledSubscriptionTermGuard/Reconcile/Dunning/CardExpiryWarning`). Para o
+> contrato vivo do que foi construído, ver `docs/recorrencia-mp-contract.md` e
+> `docs/PAGAMENTOS_MP.md`. Mantido aqui só como registro do design original.
 
 ## ✅ Decisões do dono (travadas)
 - **1ª cobrança da assinatura:** valor **cheio no dia da assinatura**, depois mensal no mesmo dia.

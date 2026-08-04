@@ -528,6 +528,159 @@ class BillingReminderService {
         .doc('billingReminders')
         .set(data, SetOptions(merge: true));
   }
+
+  // ============================================
+  // Get / Save Auto-Tuition-Generation Toggle
+  // ============================================
+  // AUDITORIA: doc DIFERENTE de billingReminders acima — o cron
+  // `scheduledMonthlyTuitionGeneration` (server_functions.js) lê
+  // `academies/{id}/settings/billing` campo `autoTuitionEnabled`, não
+  // `settings/billingReminders`. Seguro por padrão (false): sem essa flag
+  // ligada, o cron não gera nenhuma mensalidade pra academia.
+  Future<bool> getAutoTuitionEnabled() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('academies')
+          .doc(academyId)
+          .collection('settings')
+          .doc('billing')
+          .get();
+      if (!doc.exists) return false;
+      return doc.data()?['autoTuitionEnabled'] as bool? ?? false;
+    } catch (_) {
+      // Nunca throwa: falha de leitura -> trata como desligado (seguro).
+      return false;
+    }
+  }
+
+  Future<void> setAutoTuitionEnabled(bool enabled) async {
+    await FirebaseFirestore.instance
+        .collection('academies')
+        .doc(academyId)
+        .collection('settings')
+        .doc('billing')
+        .set({
+      'autoTuitionEnabled': enabled,
+      'updatedAt': Timestamp.fromDate(DateTime.now()),
+    }, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Cobrança-teste no WhatsApp do dono
+  // (SPEC_ONBOARDING_2026-07.md §0.3 / Fatia 6)
+  // ============================================
+  /// Cria um financial SINTÉTICO (`status:'test'`, sem `referenceMonth`) e
+  /// envia a mensagem de cobrança de exemplo pro WhatsApp informado — deixa o
+  /// dono ver a mensagem real chegando no próprio celular antes de ativar a
+  /// automação de verdade. Funciona independente do estado do toggle
+  /// `whatsappEnabled` (a API de WhatsApp em si só depende de estar
+  /// configurada — `BillingNotificationService.hasWhatsAppApi`).
+  ///
+  /// Por que é seguro (zero contaminação de dados financeiros):
+  ///  - `getOverdueWithStages`/`getCollectionStats` (acima) só incluem
+  ///    `status=='overdue'||'pending'` por comparação de STRING — 'test'
+  ///    nunca entra.
+  ///  - `PaymentService.getByMonth`/`generateMonthlyTuitions` filtram por
+  ///    `referenceMonth` exato — este doc nunca grava esse campo.
+  ///  - AUDITORIA (achado desta implementação, não coberto pela spec):
+  ///    `PaymentService.getOverdue()`/`getPending()`/`getSummary()` NÃO olham
+  ///    o campo `status` cru — eles fazem `Payment.fromFirestore` (que
+  ///    desconhece 'test' e cai no default 'pending' via
+  ///    `PaymentStatusExtension.fromString`) e depois computam
+  ///    `Payment.isOverdue` a partir de `dueDate`. Por isso o `dueDate` do
+  ///    doc de teste é gravado ~10 anos no futuro: `isOverdue` fica sempre
+  ///    `false`, então mesmo esses getters (getOverdue() É usado hoje no
+  ///    Dashboard) nunca classificam o registro de teste como
+  ///    vencido/pendente de verdade. `getPending()`/`getSummary()` estão sem
+  ///    nenhum call site no app hoje (grep confirmado) — mitigação defensiva
+  ///    para o caso de ganharem um no futuro.
+  ///  - `sendWhatsApp` não faz nenhum lookup server-side do
+  ///    financialId/studentId (são só metadados soltos no payload pro proxy
+  ///    de notificação) — um id sintético é seguro de usar.
+  Future<TestBillingResult> sendTestBillingWhatsApp({
+    required String academyName,
+    required String phone,
+    required double amount,
+  }) async {
+    const testStudentId = 'test-owner-preview';
+    const testStudentName = 'Aluno (exemplo)';
+    try {
+      final docRef = await _financialsRef.add({
+        'academyId': academyId,
+        'studentId': testStudentId,
+        'studentName': testStudentName,
+        'amount': amount,
+        'type': 'test',
+        'status': 'test',
+        // Bem no futuro — nunca soma como vencido/pendente em nenhuma tela
+        // (ver nota de auditoria acima).
+        'dueDate': Timestamp.fromDate(
+          DateTime.now().add(const Duration(days: 3650)),
+        ),
+        'description': 'Cobrança de teste (preview do dono)',
+        'createdAt': Timestamp.fromDate(DateTime.now()),
+      });
+
+      final notificationService = BillingNotificationService(
+        academyId: academyId,
+        academyName: academyName,
+      );
+
+      // PIX best-effort — mesma degradação graciosa de produção
+      // (ensureValidPixForFinancial nunca lança: MP off/erro -> string vazia).
+      final pix = await notificationService.ensureValidPixForFinancial(
+        academyId: academyId,
+        financialId: docRef.id,
+        amount: amount,
+        studentId: testStudentId,
+        studentName: testStudentName,
+      );
+      final hasPix = pix.pixCode.isNotEmpty;
+
+      final message = notificationService.applyMessageTemplate(
+        BillingNotificationService.defaultWhatsAppTemplates['D+1']!,
+        testStudentName,
+        amount,
+        DateTime.now(),
+        1,
+        pixCode: hasPix ? pix.pixCode : null,
+        ticketUrl: hasPix ? pix.ticketUrl : null,
+      );
+
+      final result = await notificationService.sendWhatsApp(
+        phone: phone,
+        studentName: testStudentName,
+        studentId: testStudentId,
+        financialId: docRef.id,
+        amount: amount,
+        dueDate: DateTime.now(),
+        daysOverdue: 1,
+        stage: BillingStage.d1,
+        message: message,
+      );
+
+      return TestBillingResult(
+        success: result.success,
+        hasPix: hasPix,
+        error: result.error,
+      );
+    } catch (e) {
+      return TestBillingResult(success: false, hasPix: false, error: '$e');
+    }
+  }
+}
+
+/// Resultado do envio de cobrança-teste (Fatia 6).
+class TestBillingResult {
+  final bool success;
+  final bool hasPix;
+  final String? error;
+
+  const TestBillingResult({
+    required this.success,
+    required this.hasPix,
+    this.error,
+  });
 }
 
 // ============================================
@@ -564,8 +717,16 @@ class StudentContact {
   String? get effectiveEmail =>
       category == 'kids' ? guardianEmail : email;
 
-  String? get effectiveCpf =>
-      category == 'kids' ? guardianCpf : cpf;
+  /// CPF do PAGADOR pro PIX do Mercado Pago (que exige um CPF válido).
+  /// Kids: prefere o CPF do RESPONSÁVEL (pagador correto de um menor); se o
+  /// responsável não tiver CPF cadastrado, cai no CPF PRÓPRIO do aluno — o MP
+  /// só precisa de um CPF válido pra identificar o pagador. Sem NENHUM CPF, o
+  /// PIX não é gerado e a cobrança sai sem o link.
+  String? get effectiveCpf {
+    String? nz(String? s) => (s != null && s.trim().isNotEmpty) ? s : null;
+    if (category == 'kids') return nz(guardianCpf) ?? nz(cpf);
+    return nz(cpf);
+  }
 }
 
 // ============================================
@@ -1283,6 +1444,17 @@ class BillingNotificationService {
     final results = <NotificationResult>[];
     int sent = 0, failed = 0, skipped = 0;
 
+    // AUDITORIA (idempotency): unifica o dedup por estágio com o cron
+    // server-side. O envio em massa pelo app antes NÃO lia nem gravava
+    // lastReminderStage, duplicando a cobrança com o cron e permitindo
+    // reenvio ilimitado do mesmo estágio. Agora lê o lastReminderStage atual
+    // de cada financial direto do Firestore e só envia/conta um estágio que
+    // ainda não foi coberto, gravando o marcador após o envio.
+    final financialsRef = FirebaseFirestore.instance
+        .collection('academies')
+        .doc(academyId)
+        .collection('financials');
+
     for (final item in financials) {
       final studentId = item['studentId'] as String? ?? '';
       final contact = contacts[studentId];
@@ -1298,6 +1470,27 @@ class BillingNotificationService {
       final dueDate = item['dueDate'] as DateTime;
       final daysOverdue = item['daysOverdue'] as int? ?? 0;
       final financialId = item['id'] as String? ?? '';
+
+      // AUDITORIA (idempotency): mesmo critério do cron (server_functions.js
+      // sendBillingReminderWhatsApp) — se o estágio atual já foi enviado
+      // (lastReminderStage == stage), pula sem reenviar. Em caso de falha de
+      // leitura, é conservador e NÃO pula (prefere enviar a perder a cobrança,
+      // já que sendWhatsApp em si é o ponto de envio). Itens sem id não têm
+      // como deduplicar, então seguem o fluxo normal.
+      String? lastReminderStage;
+      if (financialId.isNotEmpty) {
+        try {
+          final snap = await financialsRef.doc(financialId).get();
+          final data = snap.data();
+          lastReminderStage = data?['lastReminderStage'] as String?;
+        } catch (_) {
+          lastReminderStage = null;
+        }
+      }
+      if (lastReminderStage == stage.value) {
+        skipped++;
+        continue;
+      }
 
       final msg = customMessage ??
           generateWhatsAppMessage(
@@ -1323,6 +1516,19 @@ class BillingNotificationService {
       results.add(result);
       if (result.success) {
         sent++;
+        // AUDITORIA (idempotency): grava o marcador de dedup só quando o envio
+        // de fato ocorreu, idêntico ao cron, para que o mesmo estágio não seja
+        // reenviado nem pelo app nem pelo cron no mesmo período.
+        if (financialId.isNotEmpty) {
+          try {
+            await financialsRef.doc(financialId).update({
+              'lastReminderStage': stage.value,
+              'lastReminderAt': Timestamp.fromDate(DateTime.now()),
+            });
+          } catch (_) {
+            // best-effort: marcador de dedup é não-crítico.
+          }
+        }
       } else {
         failed++;
       }

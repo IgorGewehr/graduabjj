@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+
+import '../../services/fns.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,21 +13,27 @@ import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
 import '../../core/formatters.dart';
 import '../../core/number_format.dart';
+import '../../core/brand_tokens.dart';
 import '../../core/theme.dart';
 import '../../models/physical_assessment.dart';
 import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/providers.dart';
+import '../../models/feed_post.dart';
 import '../../services/belt_progression_service.dart';
+import '../../services/feed_posts_service.dart';
 import '../../services/services.dart';
+import '../../services/team_service.dart';
 import '../../widgets/common/animated_belt.dart';
 import '../../widgets/common/belt_badge.dart';
 import '../../widgets/common/profile_photo_picker.dart';
 import '../../widgets/common/sport_chip.dart';
 import '../../widgets/polish/polish.dart';
+import '../../widgets/shared/week_strip.dart';
 import 'physical_assessment_form_screen.dart';
 import 'student_syllabus_tab.dart';
 import 'student_cartel_tab.dart';
+import 'widgets/technical_goal_dialog.dart';
 
 /// Admin Student Detail Screen - View and manage student
 class AdminStudentDetailScreen extends ConsumerStatefulWidget {
@@ -302,82 +310,129 @@ class _AdminStudentDetailScreenState
   }
 
   Widget _buildSliverAppBar() {
+    // Gate AppBar/menu actions by permission (admin passa em tudo via
+    // hasPermission, mas mantemos isAdmin explícito por clareza).
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    final canEdit = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('students:edit'));
+    final canPromote = currentUser != null &&
+        (currentUser.isAdmin ||
+            currentUser.hasPermission('graduation:manage'));
+    final canManage = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('students:manage'));
+    final canDelete = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('students:delete'));
+
+    final menuItems = <PopupMenuEntry<String>>[
+      // Meta técnica (anti-blues §6.3): morava como 3º ícone no AppBar e
+      // brigava com o nome centralizado — vive melhor no menu.
+      if (canEdit)
+        const PopupMenuItem(
+          value: 'goal',
+          child: Row(
+            children: [
+              Icon(LucideIcons.target),
+              SizedBox(width: 8),
+              Text('Meta técnica'),
+            ],
+          ),
+        ),
+      if (canPromote)
+        const PopupMenuItem(
+          value: 'promote',
+          child: Row(
+            children: [
+              Icon(Icons.military_tech),
+              SizedBox(width: 8),
+              Text('Graduar'),
+            ],
+          ),
+        ),
+      if (canManage)
+        PopupMenuItem(
+          value: 'toggle_status',
+          child: Row(
+            children: [
+              Icon(
+                _student!.status == StudentStatus.active
+                    ? Icons.person_off
+                    : Icons.person,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _student!.status == StudentStatus.active
+                    ? 'Desativar'
+                    : 'Ativar',
+              ),
+            ],
+          ),
+        ),
+      // Only show if student doesn't have a linked account
+      if (canManage && _student!.linkedUserId == null)
+        const PopupMenuItem(
+          value: 'generate_code',
+          child: Row(
+            children: [
+              Icon(LucideIcons.link),
+              SizedBox(width: 8),
+              Text('Gerar Codigo de Acesso'),
+            ],
+          ),
+        ),
+      // Transferir (saiu da academia) — só para quem ainda não saiu.
+      if (canManage && _student!.status != StudentStatus.transferred)
+        const PopupMenuItem(
+          value: 'transfer',
+          child: Row(
+            children: [
+              Icon(LucideIcons.logOut),
+              SizedBox(width: 8),
+              Text('Marcar como transferido'),
+            ],
+          ),
+        ),
+      if (canDelete)
+        const PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_forever, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Apagar definitivamente',
+                  style: TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
+    ];
+
     return SliverAppBar(
       expandedHeight: 200,
       pinned: true,
       actions: [
-        IconButton(
-          icon: const Icon(Icons.edit),
-          onPressed: () async {
-            final result = await context.push(
-              '/admin/alunos/${widget.studentId}/editar',
-            );
-            if (result == true && mounted) {
-              _loadData();
-            }
-          },
-        ),
-        PopupMenuButton<String>(
-          onSelected: (value) {
-            if (value == 'promote') _showPromoteDialog();
-            if (value == 'toggle_status') _toggleStatus();
-            if (value == 'generate_code') _generateLinkCode();
-            if (value == 'delete') _showHardDeleteConfirmation();
-          },
-          itemBuilder: (context) => [
-            const PopupMenuItem(
-              value: 'promote',
-              child: Row(
-                children: [
-                  Icon(Icons.military_tech),
-                  SizedBox(width: 8),
-                  Text('Graduar'),
-                ],
-              ),
-            ),
-            PopupMenuItem(
-              value: 'toggle_status',
-              child: Row(
-                children: [
-                  Icon(
-                    _student!.status == StudentStatus.active
-                        ? Icons.person_off
-                        : Icons.person,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _student!.status == StudentStatus.active
-                        ? 'Desativar'
-                        : 'Ativar',
-                  ),
-                ],
-              ),
-            ),
-            // Only show if student doesn't have a linked account
-            if (_student!.linkedUserId == null)
-              const PopupMenuItem(
-                value: 'generate_code',
-                child: Row(
-                  children: [
-                    Icon(LucideIcons.link),
-                    SizedBox(width: 8),
-                    Text('Gerar Codigo de Acesso'),
-                  ],
-                ),
-              ),
-            const PopupMenuItem(
-              value: 'delete',
-              child: Row(
-                children: [
-                  Icon(Icons.delete_forever, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('Apagar definitivamente',
-                      style: TextStyle(color: Colors.red)),
-                ],
-              ),
-            ),
-          ],
-        ),
+        if (canEdit)
+          IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () async {
+              final result = await context.push(
+                '/admin/alunos/${widget.studentId}/editar',
+              );
+              if (result == true && mounted) {
+                _loadData();
+              }
+            },
+          ),
+        if (menuItems.isNotEmpty)
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'goal') _showGoalDialog();
+              if (value == 'promote') _showPromoteDialog();
+              if (value == 'toggle_status') _toggleStatus();
+              if (value == 'generate_code') _generateLinkCode();
+              if (value == 'transfer') _showTransferDialog();
+              if (value == 'delete') _showHardDeleteConfirmation();
+            },
+            itemBuilder: (context) => menuItems,
+          ),
       ],
       flexibleSpace: FlexibleSpaceBar(
         background: Container(
@@ -441,11 +496,19 @@ class _AdminStudentDetailScreenState
                             // opens. Uses the student's primary-sport grade.
                             _buildAnimatedBeltHero(),
                             const SizedBox(height: 8),
-                            Row(
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
                                 _buildBeltBadge(),
-                                const SizedBox(width: 8),
                                 _buildStatusBadge(),
+                                // Última presença: UM chip compacto — o
+                                // detalhe (strip 8 semanas + risco) vive na
+                                // aba Info, onde tem espaço de sobra.
+                                if (_student!.status == StudentStatus.active &&
+                                    _student!.retention != null)
+                                  _buildPresencePill(),
                               ],
                             ),
                           ],
@@ -457,6 +520,270 @@ class _AdminStudentDetailScreenState
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// Chip compacto de última presença sobre o header colorido (pill branca
+  /// translúcida, mesmo molde do _buildBeltBadge). Verde ≤7d, âmbar ≤14d,
+  /// blood >14d.
+  Widget _buildPresencePill() {
+    final days = _student!.daysSinceLastAttendance;
+    final Color color;
+    final String label;
+    if (days == null) {
+      color = AppTheme.textSecondary;
+      label = 'Sem presenças';
+    } else if (days <= 7) {
+      color = AppTheme.success;
+      label = days == 0 ? 'Treinou hoje' : 'Última presença há ${days}d';
+    } else if (days <= 14) {
+      color = AppTheme.warning;
+      label = 'Última presença há ${days}d';
+    } else {
+      color = Brand.blood;
+      label = 'Última presença há ${days}d';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Card "Frequência" da aba Info: strip das 8 semanas + risco/blues quando
+  /// houver — o detalhe de retenção que NÃO cabia no header (overflow).
+  Widget _buildFrequencyCard() {
+    final r = _student!.retention;
+    if (r == null || _student!.status != StudentStatus.active) {
+      return const SizedBox.shrink();
+    }
+    final riskLevel = r.riskLevel;
+    final showRisk = riskLevel == 'high' || riskLevel == 'critical';
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Frequência · 8 semanas',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${r.attendanceLast30d} presenças nos últimos 30 dias',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (showRisk || r.bluesRisk) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showRisk)
+                        Container(
+                          margin: const EdgeInsets.only(right: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Brand.blood.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            riskLevel == 'critical'
+                                ? 'RISCO CRÍTICO'
+                                : 'RISCO ALTO',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.4,
+                              color: Brand.blood,
+                            ),
+                          ),
+                        ),
+                      if (r.bluesRisk)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.info.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'BLUES',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.4,
+                              color: AppTheme.info,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          WeekStrip(
+            buckets: _student!.last8WeeksBuckets(DateTime.now()),
+            height: 26,
+            barWidth: 7,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Abre o dialog de meta técnica — o MESMO usado pelo playbook blues do
+  /// radar de retenção. Staff-only (o botão já é gateado por permissão).
+  Future<void> _showGoalDialog() async {
+    final staff = ref.read(currentUserProvider).valueOrNull;
+    final result = await showTechnicalGoalDialog(
+      context,
+      studentId: _student!.id,
+      studentName: _student!.fullName,
+      current: _student!.activeGoal,
+      staffName: staff?.displayName ?? 'Professor',
+    );
+    if (result != null && mounted) _loadData();
+  }
+
+  /// Concluir = remover o campo (meta cumprida sai da ficha e do hub do aluno).
+  Future<void> _completeGoal() async {
+    try {
+      await StudentService(FirebaseService.academyId)
+          .update(_student!.id, {'activeGoal': FieldValue.delete()});
+      if (!mounted) return;
+      context.showSuccess('Meta concluída 👊');
+      _loadData();
+    } catch (_) {
+      if (mounted) context.showError('Não deu pra concluir a meta');
+    }
+  }
+
+  /// Card da meta técnica ativa na aba Info — só existe quando há meta
+  /// (empty-state invisível; definição pelo ícone de alvo no AppBar).
+  Widget _buildActiveGoalCard(StudentGoal goal) {
+    final metaParts = <String>[
+      if (goal.setByName != null && goal.setByName!.isNotEmpty)
+        'por ${goal.setByName}',
+      if (goal.until != null)
+        'até ${DateFormat('dd/MM/yyyy').format(goal.until!)}',
+    ];
+    return Card(
+      elevation: 1,
+      shadowColor: Colors.black.withValues(alpha: 0.05),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: AppTheme.beltBlue,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Meta técnica ativa',
+                    style: AppTheme.titleMedium.copyWith(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                const Icon(
+                  LucideIcons.target,
+                  size: 18,
+                  color: AppTheme.beltBlue,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              goal.text,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                height: 1.3,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              [...metaParts, 'o aluno vê como missão no app'].join(' · '),
+              style: AppTheme.bodySmall.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _showGoalDialog,
+                    icon: const Icon(LucideIcons.pencil, size: 15),
+                    label: const Text('Editar'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.success,
+                    ),
+                    onPressed: _completeGoal,
+                    icon: const Icon(LucideIcons.check, size: 15),
+                    label: const Text('Concluir'),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -966,6 +1293,12 @@ class _AdminStudentDetailScreenState
             const SizedBox(height: 4),
           ],
 
+          // Meta técnica ativa (§6.3 arma 1) — invisível sem meta definida.
+          if (_student!.activeGoal != null) ...[
+            _buildActiveGoalCard(_student!.activeGoal!).entrance(),
+            const SizedBox(height: 16),
+          ],
+
           // Quick stats
           Row(
             children: [
@@ -1001,6 +1334,10 @@ class _AdminStudentDetailScreenState
               ),
             ],
           ).entrance(),
+
+          // Frequência (retenção): strip de 8 semanas + risco/blues — o
+          // detalhe que saiu do header (não cabia) e vive melhor aqui.
+          _buildFrequencyCard().entrance(index: 1),
           const SizedBox(height: 24),
 
           // Personal info
@@ -1473,12 +1810,26 @@ class _AdminStudentDetailScreenState
   }
 
   Widget _buildAttendanceTab() {
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    // Presence-only professors (extra permission 'attendance:take') and admins
+    // can grant a manual presence. This is decoupled from any charge.
+    final canTakeAttendance = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('attendance:take'));
+
     if (_attendances.isEmpty) {
-      return const PolishedEmptyState(
-        icon: LucideIcons.clipboardX,
-        title: 'Nenhuma presença registrada',
-        subtitle:
-            'As presenças do aluno aparecerão aqui assim que forem registradas',
+      return Column(
+        children: [
+          if (canTakeAttendance) _buildAddPresenceButton(),
+          Expanded(
+            child: PolishedEmptyState(
+              icon: LucideIcons.clipboardX,
+              title: 'Nenhuma presença registrada',
+              subtitle: canTakeAttendance
+                  ? 'Toque em "Adicionar presença" para registrar uma presença manual.'
+                  : 'As presenças do aluno aparecerão aqui assim que forem registradas',
+            ),
+          ),
+        ],
       );
     }
 
@@ -1502,6 +1853,7 @@ class _AdminStudentDetailScreenState
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (canTakeAttendance) _buildAddPresenceButton(),
         if (showSportFilter) _buildAttendanceSportFilter(sports),
         if (grouped.isEmpty)
           const Padding(
@@ -1596,17 +1948,264 @@ class _AdminStudentDetailScreenState
     );
   }
 
+  /// Full-width "Adicionar presença" button shown at the top of the attendance
+  /// tab. Visible only to admins / professors with the 'attendance:take' extra
+  /// permission. Registers a manual presence WITHOUT creating any charge.
+  Widget _buildAddPresenceButton() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: _showAddPresenceDialog,
+          icon: const Icon(LucideIcons.plus, size: 16),
+          label: const Text('Adicionar presença'),
+        ),
+      ),
+    );
+  }
+
+  /// Registers a MANUAL presence for the student — no charge is created. Lets a
+  /// professor confirm the student trained (extra session, make-up, courtesy).
+  /// Uses [AttendanceService.markManualPresence], which allows multiple
+  /// presences on the same day (non-colliding doc id).
+  void _showAddPresenceDialog() {
+    DateTime selectedDate = DateTime.now();
+    final noteController = TextEditingController();
+    final sports = _student?.getSports() ?? [SportId.bjj];
+    SportId sport = _student?.getPrimarySport() ?? SportId.bjj;
+    final parentContext = context;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Adicionar presença'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Registra uma presença manual para o aluno, sem gerar '
+                      'cobrança.',
+                      style: AppTheme.bodySmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Data',
+                      style: AppTheme.bodySmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: selectedDate,
+                          firstDate: DateTime.now()
+                              .subtract(const Duration(days: 365)),
+                          lastDate: DateTime.now(),
+                        );
+                        if (picked != null) {
+                          setDialogState(() => selectedDate = picked);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: AppTheme.divider),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.calendar,
+                                size: 16, color: AppTheme.textSecondary),
+                            const SizedBox(width: 8),
+                            Text(
+                              DateFormat('dd/MM/yyyy').format(selectedDate),
+                              style: AppTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (sports.length > 1) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        'Esporte',
+                        style: AppTheme.bodySmall
+                            .copyWith(color: AppTheme.textSecondary),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: sports.map((s) {
+                          return ChoiceChip(
+                            label: Text(getSport(s).label),
+                            selected: sport == s,
+                            onSelected: (_) =>
+                                setDialogState(() => sport = s),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: noteController,
+                      decoration: const InputDecoration(
+                        labelText: 'Observação (opcional)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    Navigator.of(dialogContext).pop();
+                    final currentUser =
+                        ref.read(currentUserProvider).valueOrNull;
+                    final note = noteController.text.trim();
+                    try {
+                      await AttendanceService(FirebaseService.academyId)
+                          .markManualPresence(
+                        studentId: widget.studentId,
+                        studentName: _student?.fullName ?? '',
+                        verifiedBy: currentUser?.id ?? '',
+                        verifiedByName: currentUser?.displayName ?? '',
+                        date: selectedDate,
+                        sport: sport.value,
+                        note: note.isEmpty ? null : note,
+                      );
+                    } catch (e) {
+                      if (parentContext.mounted) {
+                        parentContext.showError('Erro ao registrar presença');
+                      }
+                      return;
+                    }
+                    if (parentContext.mounted) {
+                      parentContext.showSuccess('Presença registrada');
+                    }
+                    _loadData();
+                  },
+                  child: const Text('Registrar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Marca uma cobrança (avulsa/mensalidade) como PAGA em dinheiro. Reusa
+  /// PaymentService.markAsPaid, que já cancela best-effort um PIX MP em aberto
+  /// (anti double-charge) e congela o estado. Essencial para avulsas, que não
+  /// têm outra tela onde marcar pago.
+  Future<void> _markChargePaidCash(Payment payment) async {
+    if (!_ensurePermission('financial:create')) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Marcar como pago?'),
+        content: Text(
+          '"${payment.description ?? 'Cobrança'}" (R\$ ${payment.value.toStringAsFixed(2)}) '
+          'será registrada como paga em dinheiro. Um PIX em aberto, se houver, '
+          'é cancelado.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Marcar pago')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await PaymentService(FirebaseService.academyId)
+          .markAsPaid(payment.id, method: PaymentMethod.cash);
+      if (mounted) {
+        context.showSuccess('Cobrança marcada como paga.');
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) context.showError('Erro: $e');
+    }
+  }
+
+  /// Cancela uma cobrança pendente/vencida (avulsa/mensalidade).
+  Future<void> _cancelCharge(Payment payment) async {
+    if (!_ensurePermission('financial:create')) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Cancelar cobrança?'),
+        content: Text(
+          '"${payment.description ?? 'Cobrança'}" será cancelada e não será mais '
+          'cobrada do aluno.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Voltar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Cancelar cobrança'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await PaymentService(FirebaseService.academyId).cancel(payment.id);
+      if (mounted) {
+        context.showSuccess('Cobrança cancelada.');
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) context.showError('Erro: $e');
+    }
+  }
+
   Widget _buildFinancialTab() {
-    final mensalidades = _payments.where((p) => p.type != 'avulsa').toList();
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    // Creating charges (avulsa / aula particular) requires the
+    // 'financial:create' extra permission (admins always allowed). A
+    // presence-only professor can still grant presences from the attendance
+    // tab, but never opens a charge dialog from here.
+    final canCreateCharge = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('financial:create'));
+
+    final aulasParticulares =
+        _payments.where((p) => p.isPrivateLesson).toList();
+    final mensalidades = _payments
+        .where((p) => p.type != 'avulsa' && !p.isPrivateLesson)
+        .toList();
     final avulsas = _payments.where((p) => p.type == 'avulsa').toList();
 
     if (_payments.isEmpty && _storeOrders.isEmpty && _studentPlans.isEmpty) {
       return PolishedEmptyState(
         icon: LucideIcons.dollarSign,
         title: 'Nenhum pagamento registrado',
-        subtitle: 'Crie uma cobrança avulsa para começar.',
-        actionLabel: 'Cobrança Avulsa',
-        onAction: _showAvulsaPaymentDialog,
+        subtitle: canCreateCharge
+            ? 'Crie uma cobrança avulsa para começar.'
+            : 'As cobranças do aluno aparecerão aqui.',
+        actionLabel: canCreateCharge ? 'Cobrança Avulsa' : null,
+        onAction: canCreateCharge ? _showAvulsaPaymentDialog : null,
       );
     }
 
@@ -1654,14 +2253,17 @@ class _AdminStudentDetailScreenState
                           ),
                         ),
                       ),
-                      GestureDetector(
-                        onTap: () => _showCustomValueDialog(plan),
-                        child: const Icon(
-                          LucideIcons.pencil,
-                          size: 18,
-                          color: AppTheme.textSecondary,
+                      // Editar valor custom / dia de vencimento é admin-only
+                      // (a regra de Firestore também é admin-only).
+                      if (currentUser?.isAdmin == true)
+                        GestureDetector(
+                          onTap: () => _showCustomValueDialog(plan),
+                          child: const Icon(
+                            LucideIcons.pencil,
+                            size: 18,
+                            color: AppTheme.textSecondary,
+                          ),
                         ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -1763,23 +2365,25 @@ class _AdminStudentDetailScreenState
               ),
             ),
             const Spacer(),
-            GestureDetector(
-              onTap: _showAvulsaPaymentDialog,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(LucideIcons.plus, size: 14, color: AppTheme.primary),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Adicionar',
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.primary,
-                      fontWeight: FontWeight.w600,
+            if (canCreateCharge)
+              GestureDetector(
+                onTap: _showAvulsaPaymentDialog,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(LucideIcons.plus,
+                        size: 14, color: AppTheme.primary),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Adicionar',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
           ],
         ),
         const SizedBox(height: 8),
@@ -1792,7 +2396,64 @@ class _AdminStudentDetailScreenState
             ),
           )
         else ...[
-          ...avulsas.map((payment) => _PaymentCard(payment: payment)),
+          ...avulsas.map((payment) => _PaymentCard(
+                payment: payment,
+                onMarkPaid: canCreateCharge
+                    ? () => _markChargePaidCash(payment)
+                    : null,
+                onCancel:
+                    canCreateCharge ? () => _cancelCharge(payment) : null,
+              )),
+          const SizedBox(height: 16),
+        ],
+        // Private lessons (aula particular) — cobrança avulsa que concede uma
+        // presença ao aluno quando paga, sem plano nem turma.
+        Row(
+          children: [
+            Text(
+              'AULAS PARTICULARES',
+              style: AppTheme.labelSmall.copyWith(
+                color: AppTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const Spacer(),
+            if (canCreateCharge)
+              GestureDetector(
+                onTap: _showPrivateLessonDialog,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(LucideIcons.plus,
+                        size: 14, color: AppTheme.primary),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Aula Particular',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (aulasParticulares.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Text(
+              'Nenhuma aula particular',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+          )
+        else ...[
+          ...aulasParticulares.map((payment) => _PrivateLessonCard(
+                payment: payment,
+                onGrantPresence: () => _grantPrivateLessonPresence(payment),
+              )),
           const SizedBox(height: 16),
         ],
         // Tuition payments
@@ -1806,7 +2467,14 @@ class _AdminStudentDetailScreenState
             ),
           ),
           const SizedBox(height: 8),
-          ...mensalidades.map((payment) => _PaymentCard(payment: payment)),
+          ...mensalidades.map((payment) => _PaymentCard(
+                payment: payment,
+                onMarkPaid: canCreateCharge
+                    ? () => _markChargePaidCash(payment)
+                    : null,
+                onCancel:
+                    canCreateCharge ? () => _cancelCharge(payment) : null,
+              )),
         ],
         // Store orders
         if (_storeOrders.isNotEmpty) ...[
@@ -1972,7 +2640,276 @@ class _AdminStudentDetailScreenState
     );
   }
 
+  /// Cria uma cobrança de AULA PARTICULAR (type 'private_lesson'): cobrança
+  /// avulsa que, ao ser paga (PIX/cartão via MP) — ou marcada como dada
+  /// manualmente — concede UMA presença ao aluno, sem plano nem turma.
+  void _showPrivateLessonDialog() {
+    final valueController = TextEditingController();
+    final descController = TextEditingController(text: 'Aula particular');
+    DateTime lessonDate = DateTime.now();
+    PaymentMethodPolicy policy = PaymentMethodPolicy.both;
+    double weight = 1;
+    final sports = _student?.getSports() ?? [SportId.bjj];
+    SportId sport = _student?.getPrimarySport() ?? SportId.bjj;
+    final parentContext = context;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Nova Aula Particular'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: descController,
+                      decoration: const InputDecoration(
+                        labelText: 'Descrição',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: valueController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Valor',
+                        prefixText: 'R\$ ',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Data da aula',
+                      style: AppTheme.bodySmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: lessonDate,
+                          firstDate: DateTime.now()
+                              .subtract(const Duration(days: 365)),
+                          lastDate:
+                              DateTime.now().add(const Duration(days: 730)),
+                        );
+                        if (picked != null) {
+                          setDialogState(() => lessonDate = picked);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: AppTheme.divider),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.calendar,
+                                size: 16, color: AppTheme.textSecondary),
+                            const SizedBox(width: 8),
+                            Text(
+                              DateFormat('dd/MM/yyyy').format(lessonDate),
+                              style: AppTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // Peso da presença (graduação/streak). Padrão 1; alguns
+                    // professores contam a particular em dobro.
+                    Row(
+                      children: [
+                        Text(
+                          'Conta como',
+                          style: AppTheme.bodySmall
+                              .copyWith(color: AppTheme.textSecondary),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(LucideIcons.minus, size: 18),
+                          onPressed: weight > 1
+                              ? () => setDialogState(() => weight -= 1)
+                              : null,
+                        ),
+                        Text(
+                          '${weight.toInt()} presença${weight > 1 ? 's' : ''}',
+                          style: AppTheme.bodyMedium
+                              .copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        IconButton(
+                          icon: const Icon(LucideIcons.plus, size: 18),
+                          onPressed: weight < 5
+                              ? () => setDialogState(() => weight += 1)
+                              : null,
+                        ),
+                      ],
+                    ),
+                    if (sports.length > 1) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Esporte',
+                        style: AppTheme.bodySmall
+                            .copyWith(color: AppTheme.textSecondary),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: sports.map((s) {
+                          return ChoiceChip(
+                            label: Text(getSport(s).label),
+                            selected: sport == s,
+                            onSelected: (_) =>
+                                setDialogState(() => sport = s),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    Text(
+                      'Formas de pagamento',
+                      style: AppTheme.bodySmall
+                          .copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: PaymentMethodPolicy.values.map((p) {
+                        return ChoiceChip(
+                          label: Text(p.label),
+                          selected: policy == p,
+                          onSelected: (_) =>
+                              setDialogState(() => policy = p),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final value = double.tryParse(
+                      valueController.text.replaceAll(',', '.'),
+                    );
+                    if (value == null || value <= 0) return;
+                    final desc = descController.text.trim().isEmpty
+                        ? 'Aula particular'
+                        : descController.text.trim();
+                    Navigator.of(dialogContext).pop();
+
+                    final currentUser =
+                        ref.read(currentUserProvider).valueOrNull;
+                    try {
+                      await PaymentService(FirebaseService.academyId).create(
+                        studentId: widget.studentId,
+                        studentName: _student?.fullName ?? '',
+                        value: value,
+                        dueDate: lessonDate,
+                        description: desc,
+                        type: 'private_lesson',
+                        planId: null,
+                        paymentMethodPolicy: policy,
+                        sendNotification: true,
+                        createdBy: currentUser?.id,
+                        lessonDate: lessonDate,
+                        lessonWeight: weight,
+                        lessonSport: sport.value,
+                        instructorId: currentUser?.id,
+                        instructorName: currentUser?.displayName,
+                      );
+                    } catch (e) {
+                      if (parentContext.mounted) {
+                        parentContext.showError('Erro ao criar aula particular');
+                      }
+                      return;
+                    }
+                    if (parentContext.mounted) {
+                      parentContext.showSuccess('Aula particular criada');
+                    }
+                    _loadData();
+                  },
+                  child: const Text('Criar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Concede manualmente a presença de uma aula particular (cash/cortesia ou
+  /// confirmação de que a aula aconteceu). Chama a CF idempotente — conceder
+  /// aqui e depois receber o pagamento MP nunca duplica a presença.
+  Future<void> _grantPrivateLessonPresence(Payment payment) async {
+    final isPaid = payment.isPaid;
+    // null = cancelar; false = conceder sem marcar pago; true = marcar pago
+    // (dinheiro) e conceder.
+    final markCash = await showDialog<bool?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Conceder presença'),
+        content: Text(isPaid
+            ? 'Confirmar a presença desta aula particular para '
+                '${_student?.fullName ?? 'o aluno'}?'
+            : 'A cobrança ainda não foi paga. Como deseja conceder a presença?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          if (!isPaid)
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cortesia'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(!isPaid),
+            child: Text(isPaid ? 'Conceder' : 'Pago em dinheiro'),
+          ),
+        ],
+      ),
+    );
+    if (markCash == null) return;
+
+    final staffName = ref.read(currentUserProvider).valueOrNull?.displayName;
+    try {
+      await PaymentService(FirebaseService.academyId).markPrivateLessonGiven(
+        financialId: payment.id,
+        markPaidCash: markCash,
+        staffName: staffName,
+      );
+    } catch (e) {
+      if (mounted) context.showError('Erro ao conceder presença');
+      return;
+    }
+    if (mounted) context.showSuccess('Presença concedida');
+    _loadData();
+  }
+
   void _showCustomValueDialog(Plan plan) {
+    // Admin-only (alinhado à regra de Firestore).
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser?.isAdmin != true) {
+      if (mounted) {
+        context.showError('Você não tem permissão para esta ação.');
+      }
+      return;
+    }
     final studentValue = plan.getStudentValue(widget.studentId);
     final controller = TextEditingController(
       text: studentValue.toStringAsFixed(2),
@@ -2285,7 +3222,7 @@ class _AdminStudentDetailScreenState
   Future<void> _recomputeMilestones() async {
     final parentContext = context;
     try {
-      final result = await FirebaseFunctions.instance
+      final result = await Fns.functions
           .httpsCallable('recomputeStudentMilestones')
           .call({
         'academyId': FirebaseService.academyId,
@@ -3576,16 +4513,27 @@ class _AdminStudentDetailScreenState
 
   Widget _buildHistoryTab() {
     final allHistory = <_HistoryItem>[];
+    // Correção de histórico (pedido do produto): professor pode REMOVER um
+    // evento errado — grau dado sem querer, resultado lançado errado. Some da
+    // ficha E da Jornada do aluno (que lê estas mesmas coleções).
+    final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    final canFixHistory = currentUser != null &&
+        (currentUser.isAdmin ||
+            currentUser.hasPermission('graduation:manage'));
 
     // Add progressions
     for (final p in _progressions) {
       allHistory.add(
         _HistoryItem(
           date: p.promotionDate,
-          title: p.isBeltChange ? 'Faixa ${p.newBelt}' : 'Grau ${p.newStripes}',
+          title: p.isBeltChange
+              ? 'Faixa ${getGradeLabel(p.getSport(), p.newBelt)}'
+              : '${p.newStripes}º grau • ${getGradeLabel(p.getSport(), p.newBelt)}',
           subtitle: p.notes,
           icon: Icons.military_tech,
           color: getGradeColor(p.getSport(), p.newBelt),
+          onDelete: canFixHistory ? () => _deleteProgression(p) : null,
+          progression: canFixHistory ? p : null,
         ),
       );
     }
@@ -3599,6 +4547,7 @@ class _AdminStudentDetailScreenState
           subtitle: a.description,
           icon: Icons.emoji_events,
           color: Colors.amber,
+          onDelete: canFixHistory ? () => _deleteAchievement(a) : null,
         ),
       );
     }
@@ -3639,13 +4588,252 @@ class _AdminStudentDetailScreenState
                 ),
               ],
             ),
+            trailing: item.onDelete == null
+                ? null
+                : IconButton(
+                    icon: Icon(
+                        item.progression != null
+                            ? LucideIcons.pencil
+                            : LucideIcons.trash2,
+                        size: 18,
+                        color: AppTheme.textSecondary),
+                    tooltip: item.progression != null
+                        ? 'Corrigir / reverter graduação'
+                        : 'Remover registro',
+                    onPressed: () => _confirmHistoryDelete(item),
+                  ),
           ),
         ).entrance(index: index);
       },
     );
   }
 
+  Future<void> _confirmHistoryDelete(_HistoryItem item) async {
+    // Graduações têm fluxo próprio: além de remover do histórico, o professor
+    // pode REVERTER a faixa (desfazer o grau/faixa dado sem querer).
+    if (item.progression != null) {
+      await _showProgressionCorrectionSheet(item.progression!);
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover registro?'),
+        content: Text(
+          '"${item.title}" será removido do histórico do aluno e da Jornada '
+          'dele no app.\n\nIsso NÃO altera a faixa/grau atual — corrige só o '
+          'histórico (ex.: grau dado sem querer).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await item.onDelete!();
+      if (mounted) {
+        context.showSuccess('Registro removido.');
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) context.showError('Não foi possível remover: $e');
+    }
+  }
+
+  Future<void> _deleteProgression(BeltProgression p) async {
+    await BeltProgressionService(FirebaseService.academyId)
+        .deleteProgression(p.id);
+    await _hideProgressionFeedPost(p);
+  }
+
+  /// Best-effort: oculta o post materializado do feed (id determinístico) —
+  /// uma graduação removida/revertida não pode continuar celebrada na Galera.
+  Future<void> _hideProgressionFeedPost(BeltProgression p) async {
+    final uid = _student?.linkedUserId;
+    if (uid != null && uid.isNotEmpty) {
+      try {
+        await feedPostsService.staffSetHidden(
+          FeedPost.gradId(uid, p.promotionDate, p.newBelt, p.newStripes),
+          true,
+        );
+      } catch (_) {/* post pode nem existir */}
+    }
+  }
+
+  String _gradeStamp(SportId sport, String belt, int stripes) {
+    final label = getGradeLabel(sport, belt);
+    return stripes > 0 ? '$label • $stripesº grau' : label;
+  }
+
+  /// Correção de graduação (pedido do produto): o professor graduou sem querer
+  /// (ex.: infantil que foi parar na azul) e precisa DESFAZER. Oferece:
+  ///  • Reverter faixa — volta o aluno ao estado anterior e apaga o registro.
+  ///  • Remover só do histórico — mantém a faixa atual, limpa o registro errado.
+  /// Reverter só é oferecido quando esta progressão ainda reflete a faixa atual.
+  Future<void> _showProgressionCorrectionSheet(BeltProgression p) async {
+    if (!_ensurePermission('graduation:manage')) return;
+    final sport = p.getSport();
+    final grade = _student?.getGrade(sport);
+    final isCurrentStanding = grade != null &&
+        grade.currentGrade == p.newBelt &&
+        grade.currentStripes == p.newStripes;
+    final prevStamp = _gradeStamp(sport, p.previousBelt, p.previousStripes);
+    final newStamp = _gradeStamp(sport, p.newBelt, p.newStripes);
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('Corrigir graduação',
+                  style: AppTheme.titleLarge
+                      .copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text(
+                p.isBeltChange
+                    ? 'Registro: $prevStamp → $newStamp'
+                    : 'Registro: $newStamp',
+                style:
+                    AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+              ),
+              const SizedBox(height: 16),
+              if (isCurrentStanding) ...[
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(LucideIcons.undo2, color: AppTheme.warning),
+                  title: const Text('Reverter faixa'),
+                  subtitle: Text('Volta o aluno para $prevStamp e apaga este '
+                      'registro.'),
+                  onTap: () => Navigator.pop(ctx, 'revert'),
+                ),
+                const Divider(height: 8),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading:
+                      Icon(LucideIcons.trash2, color: AppTheme.textSecondary),
+                  title: const Text('Remover só do histórico'),
+                  subtitle: Text('Mantém a faixa atual ($newStamp); apaga só o '
+                      'registro.'),
+                  onTap: () => Navigator.pop(ctx, 'history'),
+                ),
+              ] else ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.infoLight,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(LucideIcons.info, size: 16, color: AppTheme.info),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'A faixa atual do aluno não é mais esta (ele foi '
+                          'graduado depois). Dá para remover este registro '
+                          'antigo do histórico.',
+                          style: AppTheme.bodySmall
+                              .copyWith(color: AppTheme.textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading:
+                      Icon(LucideIcons.trash2, color: AppTheme.textSecondary),
+                  title: const Text('Remover do histórico'),
+                  onTap: () => Navigator.pop(ctx, 'history'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (action == null || !mounted) return;
+    try {
+      if (action == 'revert') {
+        final reverted = await BeltProgressionService(FirebaseService.academyId)
+            .undoProgression(p);
+        await _hideProgressionFeedPost(p);
+        if (mounted) {
+          context.showSuccess(reverted
+              ? 'Graduação desfeita. Aluno voltou para $prevStamp.'
+              : 'Registro removido. A faixa atual não foi alterada.');
+          _loadData();
+        }
+      } else if (action == 'history') {
+        await _deleteProgression(p);
+        if (mounted) {
+          context.showSuccess('Registro removido do histórico.');
+          _loadData();
+        }
+      }
+    } catch (e) {
+      if (mounted) context.showError('Não foi possível: $e');
+    }
+  }
+
+  Future<void> _deleteAchievement(Achievement a) async {
+    await AchievementService(FirebaseService.academyId).delete(a.id);
+    final uid = _student?.linkedUserId;
+    final name = a.competitionName ?? a.title;
+    if (uid != null && uid.isNotEmpty && name.trim().isNotEmpty) {
+      try {
+        await feedPostsService.staffSetHidden(
+          FeedPost.compId(uid, a.date, name),
+          true,
+        );
+      } catch (_) {/* post pode nem existir */}
+    }
+  }
+
+  /// Defesa em profundidade: confirma a permissão antes de executar a ação,
+  /// mesmo que o item de menu já tenha sido gateado na UI.
+  bool _ensurePermission(String permission) {
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    final allowed = currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission(permission));
+    if (!allowed && mounted) {
+      context.showError('Você não tem permissão para esta ação.');
+    }
+    return allowed;
+  }
+
   void _showPromoteDialog() {
+    if (!_ensurePermission('graduation:manage')) return;
     final sports = _student!.getSports();
     SportId selectedSport = _student!.getPrimarySport();
     bool isStripe = true;
@@ -3688,6 +4876,24 @@ class _AdminStudentDetailScreenState
                     ),
                   ),
                 ],
+                if (!hasGrades) ...[
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Icon(Icons.info_outline,
+                          size: 18, color: AppTheme.textSecondary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'A modalidade ${getSport(selectedSport).label} '
+                          'não possui sistema de graduação.',
+                          style: AppTheme.bodySmall
+                              .copyWith(color: AppTheme.textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 if (hasGrades) ...[
                   const SizedBox(height: 8),
                   Text(
@@ -3707,6 +4913,63 @@ class _AdminStudentDetailScreenState
                     },
                   ),
                 ],
+                // Preview do RESULTADO antes de confirmar — o professor via só
+                // "Confirmar" e graduava às cegas. Mostra a faixa/grau alvo (já
+                // pela escada correta da categoria).
+                if (hasGrades) ...[
+                  const SizedBox(height: 16),
+                  Builder(builder: (context) {
+                    final bool asStripe = isStripe && hasStripes;
+                    final nextGrade =
+                        asStripe ? currentGrade : _getNextGrade(selectedSport, currentGrade);
+                    final maxStripes =
+                        getGradeDefinition(selectedSport, currentGrade)?.maxStripes ?? 0;
+                    final atStripeCap = asStripe && currentStripes >= maxStripes;
+                    final atBeltCap = !asStripe && nextGrade == currentGrade;
+                    final blocked = atStripeCap || atBeltCap;
+                    final label = asStripe
+                        ? '${currentStripes + 1}º grau • ${getGradeLabel(selectedSport, currentGrade)}'
+                        : 'Faixa ${getGradeLabel(selectedSport, nextGrade)}';
+                    return Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: (blocked ? AppTheme.error : AppTheme.success)
+                            .withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: (blocked ? AppTheme.error : AppTheme.success)
+                                .withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            blocked
+                                ? LucideIcons.alertTriangle
+                                : LucideIcons.arrowRight,
+                            size: 16,
+                            color: blocked ? AppTheme.error : AppTheme.success,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              blocked
+                                  ? (atStripeCap
+                                      ? 'Já está no máximo de graus — troque para "Faixa".'
+                                      : 'Já é a última faixa da modalidade.')
+                                  : label,
+                              style: AppTheme.bodySmall.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color:
+                                    blocked ? AppTheme.error : AppTheme.success,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
               ],
             ),
             actions: [
@@ -3714,8 +4977,21 @@ class _AdminStudentDetailScreenState
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Cancelar'),
               ),
-              FilledButton(
-                onPressed: () async {
+              Builder(builder: (context) {
+              // Bloqueia confirmar quando não há o que graduar: sem sistema de
+              // faixa, no teto de graus, ou já na última faixa (evita gravar
+              // uma "graduação" no-op que ainda soltava confete + registro).
+              final bool asStripe = isStripe && hasStripes;
+              final maxStripes =
+                  getGradeDefinition(selectedSport, currentGrade)?.maxStripes ?? 0;
+              final atStripeCap = asStripe && currentStripes >= maxStripes;
+              final atBeltCap =
+                  !asStripe && _getNextGrade(selectedSport, currentGrade) == currentGrade;
+              final canConfirm = hasGrades && !atStripeCap && !atBeltCap;
+              return FilledButton(
+                onPressed: !canConfirm
+                    ? null
+                    : () async {
                   try {
                     final service = BeltProgressionService(
                       FirebaseService.academyId,
@@ -3760,7 +5036,8 @@ class _AdminStudentDetailScreenState
                   }
                 },
                 child: const Text('Confirmar'),
-              ),
+              );
+              }),
             ],
           );
         },
@@ -3769,8 +5046,12 @@ class _AdminStudentDetailScreenState
   }
 
   String _getNextGrade(SportId sportId, String current) {
+    // Escada correta por CATEGORIA (kids/adult): sem isso, um aluno infantil
+    // (ex.: branca → cinza) era promovido pela escada ADULTA (branca → azul),
+    // pulando para uma faixa que nem existe no infantil.
     final grades = getGradesForSport(
       sportId,
+      category: _student?.category.value ?? 'adult',
       muaythaiVariant:
           sportId == SportId.muaythai ? resolveMuaythaiVariant(current) : null,
     );
@@ -3782,6 +5063,7 @@ class _AdminStudentDetailScreenState
   }
 
   void _toggleStatus() async {
+    if (!_ensurePermission('students:manage')) return;
     try {
       final service = StudentService(FirebaseService.academyId);
       final newStatus = _student!.status == StudentStatus.active
@@ -3805,9 +5087,80 @@ class _AdminStudentDetailScreenState
     }
   }
 
+  /// Marca o aluno como TRANSFERIDO (saiu da academia). A ficha e todo o
+  /// histórico (presenças/financeiro) permanecem para consulta — o aluno só sai
+  /// do roster ativo (vai para "Ex-alunos"). Reusa o CF transferStudent.
+  Future<void> _showTransferDialog() async {
+    if (!_ensurePermission('students:manage')) return;
+    final noteController = TextEditingController();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Marcar como transferido'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${_student!.fullName} sairá do quadro de alunos ativos. O '
+              'histórico de presenças e financeiro CONTINUA disponível para '
+              'consulta na aba "Ex-alunos".',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: noteController,
+              decoration: const InputDecoration(
+                labelText: 'Para onde foi? (opcional)',
+                hintText: 'Ex.: mudou de cidade / outra academia',
+              ),
+              maxLength: 120,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppTheme.info),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    final note = noteController.text.trim();
+    noteController.dispose();
+    if (confirm != true) return;
+    try {
+      await teamService.transferStudent(
+        academyId: FirebaseService.academyId,
+        studentId: _student!.id,
+        note: note.isEmpty ? null : note,
+      );
+      // Registrar mudança de status no doc do aluno (a CF não escreve estes campos).
+      // Falha silenciosa: não bloqueia o fluxo de transferência.
+      try {
+        await StudentService(FirebaseService.academyId).update(_student!.id, {
+          'statusChangedAt': FieldValue.serverTimestamp(),
+          'statusChangeReason': 'transferred',
+        });
+      } catch (_) {}
+      if (mounted) {
+        context.showSuccess('Aluno marcado como transferido.');
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) context.showError('Erro ao transferir: $e');
+    }
+  }
+
   /// Exclusão PERMANENTE (hard delete) com cascata. Para apenas desativar o
   /// aluno (reversível), use a opção "Desativar" do menu (_toggleStatus).
   void _showHardDeleteConfirmation() async {
+    if (!_ensurePermission('students:delete')) return;
     final hasLinkedAccount = _student!.linkedUserId != null;
 
     final firstConfirm = await showDialog<bool>(
@@ -3885,6 +5238,7 @@ class _AdminStudentDetailScreenState
   }
 
   Future<void> _generateLinkCode() async {
+    if (!_ensurePermission('students:manage')) return;
     try {
       final linkCodeService = LinkCodeService(FirebaseService.academyId);
       final linkCode = await linkCodeService.generate(
@@ -4113,8 +5467,14 @@ class _InfoRow extends StatelessWidget {
 /// Payment Card Widget
 class _PaymentCard extends StatelessWidget {
   final Payment payment;
+  // Ações opcionais (marcar pago em dinheiro / cancelar). Sem elas o card é
+  // somente-leitura. Essencial para cobranças AVULSAS, que não aparecem na tela
+  // de Financeiro (sem referenceMonth) — antes ficavam presas em "pendente"
+  // pra sempre e disparavam cobrança automática mesmo já pagas em dinheiro.
+  final VoidCallback? onMarkPaid;
+  final VoidCallback? onCancel;
 
-  const _PaymentCard({required this.payment});
+  const _PaymentCard({required this.payment, this.onMarkPaid, this.onCancel});
 
   @override
   Widget build(BuildContext context) {
@@ -4124,6 +5484,12 @@ class _PaymentCard extends StatelessWidget {
       PaymentStatus.overdue: Colors.red,
       PaymentStatus.cancelled: Colors.grey,
     };
+    // Só cobranças NÃO terminais (pendente/vencida) e não-reembolso podem ser
+    // marcadas/canceladas. Pago/cancelado são estados finais.
+    final canAct = (onMarkPaid != null || onCancel != null) &&
+        !payment.isOvercharge &&
+        payment.status != PaymentStatus.paid &&
+        payment.status != PaymentStatus.cancelled;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -4145,33 +5511,204 @@ class _PaymentCard extends StatelessWidget {
                 'Pago em: ${DateFormat('dd/MM/yyyy').format(payment.paidAt!)}',
                 style: const TextStyle(color: Colors.green),
               ),
-          ],
-        ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              'R\$ ${payment.value.toStringAsFixed(2)}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            const SizedBox(height: 2),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: statusColors[payment.status]?.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                payment.status.label,
+            // Cobrança indevida de assinatura — dinheiro a devolver, não
+            // receita; destacada para o professor não confundir com 'Pago'.
+            if (payment.isOvercharge)
+              const Text(
+                'Reembolso pendente',
                 style: TextStyle(
-                  fontSize: 9,
-                  color: statusColors[payment.status],
-                  fontWeight: FontWeight.w500,
+                  color: Colors.orange,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
+          ],
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  'R\$ ${payment.value.toStringAsFixed(2)}',
+                  style:
+                      const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 2),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: statusColors[payment.status]?.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    payment.status.label,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: statusColors[payment.status],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
             ),
+            if (canAct)
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20),
+                tooltip: 'Gerenciar cobrança',
+                onSelected: (v) {
+                  if (v == 'paid') onMarkPaid?.call();
+                  if (v == 'cancel') onCancel?.call();
+                },
+                itemBuilder: (_) => [
+                  if (onMarkPaid != null)
+                    const PopupMenuItem(
+                      value: 'paid',
+                      child: Row(children: [
+                        Icon(Icons.check_circle_outline,
+                            size: 18, color: Colors.green),
+                        SizedBox(width: 10),
+                        Text('Marcar como pago (dinheiro)'),
+                      ]),
+                    ),
+                  if (onCancel != null)
+                    const PopupMenuItem(
+                      value: 'cancel',
+                      child: Row(children: [
+                        Icon(Icons.cancel_outlined,
+                            size: 18, color: Colors.red),
+                        SizedBox(width: 10),
+                        Text('Cancelar cobrança'),
+                      ]),
+                    ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Card de aula particular: cobrança avulsa que concede presença ao aluno.
+/// Mostra o status de pagamento + o status da presença (concedida ✓ ou um
+/// botão "Conceder presença" para o caminho manual/cash/cortesia).
+class _PrivateLessonCard extends StatelessWidget {
+  final Payment payment;
+  final VoidCallback onGrantPresence;
+
+  const _PrivateLessonCard({
+    required this.payment,
+    required this.onGrantPresence,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColors = {
+      PaymentStatus.pending: Colors.orange,
+      PaymentStatus.paid: Colors.green,
+      PaymentStatus.overdue: Colors.red,
+      PaymentStatus.cancelled: Colors.grey,
+    };
+    final granted = payment.attendanceGranted;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor:
+                      AppTheme.primary.withValues(alpha: 0.15),
+                  child: const Icon(LucideIcons.userCheck,
+                      size: 18, color: AppTheme.primary),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        payment.description ?? 'Aula particular',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        'Aula: ${DateFormat('dd/MM/yyyy').format(payment.dueDate)}',
+                        style: AppTheme.bodySmall
+                            .copyWith(color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      'R\$ ${payment.value.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    const SizedBox(height: 2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: statusColors[payment.status]
+                            ?.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        payment.status.label,
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: statusColors[payment.status],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Status da presença.
+            if (granted)
+              Row(
+                children: [
+                  const Icon(LucideIcons.check,
+                      size: 14, color: Colors.green),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Presença concedida',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: Colors.green,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              )
+            else
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: onGrantPresence,
+                  icon: const Icon(LucideIcons.userCheck, size: 16),
+                  label: const Text('Conceder presença'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 4),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -4187,12 +5724,21 @@ class _HistoryItem {
   final IconData icon;
   final Color color;
 
+  /// Remoção do registro (correção de erro) — null = sem ação.
+  final Future<void> Function()? onDelete;
+
+  /// Quando o item é uma graduação, carrega a progressão para permitir
+  /// REVERTER a faixa (desfazer) além de só remover do histórico.
+  final BeltProgression? progression;
+
   _HistoryItem({
     required this.date,
     required this.title,
     this.subtitle,
     required this.icon,
     required this.color,
+    this.onDelete,
+    this.progression,
   });
 }
 

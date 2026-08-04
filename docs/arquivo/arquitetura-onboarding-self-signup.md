@@ -1,3 +1,12 @@
+> **Arquivado (2026-07):** este design (2026-06-04) propunha descoberta por
+> cidade (`academyDirectory`) + `joinRequests` por uid + CFs
+> `requestToJoinAcademy`/`acceptJoinRequest`. **Não é o que foi construído.** O
+> sistema que efetivamente foi implementado e deployado (jul/2026) é mais
+> simples: um **código único por academia** (6 alfanumérico) que o aluno usa
+> para se auto-cadastrar, com aprovação do professor via `submitJoinRequest`/
+> `decideJoinRequest` (zero uso de `academyDirectory` no código). Mantido como
+> registro do design alternativo que foi descartado.
+
 # Arquitetura — Onboarding self-signup + pedido de entrada + aprovação do professor
 
 > Plano gerado por workflow de arquitetura (read-only). Feature 100% aditiva; coexiste com o fluxo de código atual.

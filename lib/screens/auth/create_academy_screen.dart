@@ -7,8 +7,31 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/theme.dart';
+import '../../core/brand_tokens.dart';
+import '../../core/sports.dart';
+import '../../models/academy.dart';
 import '../../providers/auth_provider.dart';
+
+// =============================================================================
+// Padrão visual FIGHTER (mesmo do hub do Lutador / Galera). Bone + ink + um
+// único acento vermelho. Cards/inputs brancos, foco vermelho, CTAs ink/sangue
+// ALL-CAPS. SÓ apresentação — toda a lógica de criação de academia é a original.
+// =============================================================================
+class _C {
+  _C._();
+  static const bone = Color(0xFFF4F3EF);
+  static const card = Color(0xFFFFFFFF);
+  static const ink = Color(0xFF0A0A0A);
+  static const blood = Brand.blood;
+  static const smoke = Color(0xFF6E6E68);
+  static const ash = Color(0xFF9A9A93);
+  static const List<FontFeature> tab = [FontFeature.tabularFigures()];
+  static final hairline = ink.withValues(alpha: 0.10);
+  static final fieldFill = ink.withValues(alpha: 0.04);
+}
+
+TextStyle _eyebrow(Color c, double s) => TextStyle(
+    color: c, fontSize: s, fontWeight: FontWeight.w800, letterSpacing: 1.4);
 
 /// Document type for registration
 enum _DocumentType { cpf, cnpj }
@@ -39,6 +62,32 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   final _academyNameController = TextEditingController();
   final _documentController = TextEditingController();
   _DocumentType _documentType = _DocumentType.cpf;
+  // "Que tipo de academia?" — obrigatório, nenhum selecionado por padrão
+  // (ver CONTEXTO ESTRATÉGICO: app generalista, não só artes marciais).
+  AcademyProfile? _academyProfile;
+
+  // Modalidades escolhidas quando o perfil é Artes Marciais/Ambos (chips
+  // logo abaixo do seletor de perfil). Pré-seleciona BJJ pra quem só clica
+  // "continuar" sem mexer — mas o chip é editável (ANTI_HIDRA achado nº1:
+  // antes disso toda academia nascia com sports:['bjj'] hardcoded, mesmo
+  // Judô/Muay Thai/Karatê). Fitness não usa isto: musculação é automática
+  // (ver createAcademyAccount em auth_provider.dart).
+  final Set<SportId> _selectedSports = {SportId.bjj};
+
+  void _toggleSport(SportId id) {
+    setState(() {
+      if (_selectedSports.contains(id)) {
+        // Nunca deixa a seleção zerar — sempre precisa sobrar 1 modalidade
+        // pra virar primarySport.
+        if (_selectedSports.length > 1) {
+          _selectedSports.remove(id);
+        }
+      } else {
+        _selectedSports.add(id);
+      }
+      _errorMessage = null;
+    });
+  }
 
   // General state
   bool _isLoading = false;
@@ -68,7 +117,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   // ============================================
   // Document Formatting & Validation
   // ============================================
-  
+
   /// Format CPF: 000.000.000-00
   String _formatCpf(String value) {
     final digits = value.replaceAll(RegExp(r'\D'), '');
@@ -160,9 +209,9 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
           ? 'Informe o CPF do responsável'
           : 'Informe o CNPJ da academia';
     }
-    
+
     final digits = value.replaceAll(RegExp(r'\D'), '');
-    
+
     if (_documentType == _DocumentType.cpf) {
       if (digits.length != 11) return 'CPF deve ter 11 dígitos';
       if (!_validateCpf(value)) return 'CPF inválido';
@@ -170,7 +219,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
       if (digits.length != 14) return 'CNPJ deve ter 14 dígitos';
       if (!_validateCnpj(value)) return 'CNPJ inválido';
     }
-    
+
     return null;
   }
 
@@ -196,6 +245,13 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
       }
     } else if (_currentStep == 1) {
       if (!(_academyFormKey.currentState?.validate() ?? false)) return;
+
+      if (_academyProfile == null) {
+        setState(() {
+          _errorMessage = 'Escolha o tipo da sua academia para continuar.';
+        });
+        return;
+      }
 
       if (!_acceptedTerms) {
         setState(() {
@@ -226,6 +282,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
       final documentDigits = _documentController.text.replaceAll(RegExp(r'\D'), '');
 
+      final resolvedProfile = _academyProfile ?? AcademyProfile.fight;
       final authService = ref.read(authServiceProvider);
       await authService.createAcademyAccount(
         email: _emailController.text.trim(),
@@ -234,6 +291,12 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         academyName: _academyNameController.text.trim(),
         documentType: _documentType == _DocumentType.cpf ? 'cpf' : 'cnpj',
         documentNumber: documentDigits,
+        profile: resolvedProfile.value,
+        // Só relevante pra fight/hybrid — fitness ignora e usa musculação
+        // automaticamente (ver createAcademyAccount).
+        sports: resolvedProfile == AcademyProfile.fitness
+            ? null
+            : _selectedSports.map((s) => s.value).toList(),
       );
 
       // All Firestore documents are created. Force Riverpod to reload user data.
@@ -299,18 +362,71 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   }
 
   // ============================================
+  // Fighter field decoration (apresentação)
+  // ============================================
+  InputDecoration _dec({
+    required String label,
+    String? hint,
+    required IconData prefix,
+    Widget? suffix,
+  }) {
+    OutlineInputBorder line(Color c, double w) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: c, width: w),
+        );
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      prefixIcon: Icon(prefix, size: 20, color: _C.smoke),
+      suffixIcon: suffix,
+      filled: true,
+      fillColor: _C.fieldFill,
+      labelStyle: const TextStyle(
+          color: _C.smoke, fontSize: 14, fontWeight: FontWeight.w600),
+      floatingLabelStyle: const TextStyle(
+          color: _C.blood, fontSize: 13, fontWeight: FontWeight.w800),
+      hintStyle: const TextStyle(
+          color: _C.ash, fontSize: 14, fontWeight: FontWeight.w500),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      border: line(Colors.transparent, 0),
+      enabledBorder: line(_C.hairline, 1),
+      focusedBorder: line(_C.blood, 1.5),
+      errorBorder: line(_C.blood.withValues(alpha: 0.6), 1),
+      focusedErrorBorder: line(_C.blood, 1.5),
+      errorStyle: const TextStyle(
+          color: _C.blood, fontSize: 12, fontWeight: FontWeight.w600),
+    );
+  }
+
+  ButtonStyle _ctaStyle(Color bg) => ElevatedButton.styleFrom(
+        backgroundColor: bg,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        disabledBackgroundColor: bg.withValues(alpha: 0.45),
+        disabledForegroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14)),
+        textStyle: const TextStyle(
+            fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: 1.0),
+      );
+
+  // ============================================
   // Build Methods
   // ============================================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: _C.bone,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        foregroundColor: _C.ink,
         leading: _currentStep == 2
             ? null
             : IconButton(
-                icon: const Icon(LucideIcons.arrowLeft),
+                icon: const Icon(LucideIcons.arrowLeft, color: _C.ink),
                 onPressed: () {
                   if (_currentStep > 0 && _currentStep < 2) {
                     _goToStep(_currentStep - 1);
@@ -350,7 +466,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   }
 
   Widget _buildStepIndicator() {
-    final steps = ['Seus Dados', 'Academia', 'Pronto!'];
+    final steps = ['SEUS DADOS', 'ACADEMIA', 'PRONTO'];
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(
@@ -358,6 +474,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         children: List.generate(steps.length, (index) {
           final isCompleted = index < _currentStep;
           final isCurrent = index == _currentStep;
+          final filled = isCompleted || isCurrent;
           return Row(
             children: [
               Column(
@@ -367,7 +484,12 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                     height: 32,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: (isCompleted || isCurrent) ? AppTheme.primary : AppTheme.divider,
+                      color: isCurrent
+                          ? _C.blood
+                          : (isCompleted ? _C.ink : Colors.transparent),
+                      border: filled
+                          ? null
+                          : Border.all(color: _C.hairline, width: 1.5),
                     ),
                     child: Center(
                       child: isCompleted
@@ -376,19 +498,21 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                               '${index + 1}',
                               style: TextStyle(
                                 fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: isCurrent ? Colors.white : AppTheme.textDisabled,
+                                fontWeight: FontWeight.w900,
+                                fontFeatures: _C.tab,
+                                color: isCurrent ? Colors.white : _C.ash,
                               ),
                             ),
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   Text(
                     steps[index],
                     style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400,
-                      color: (isCompleted || isCurrent) ? AppTheme.textPrimary : AppTheme.textDisabled,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
+                      color: filled ? _C.ink : _C.ash,
                     ),
                   ),
                 ],
@@ -397,8 +521,8 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                 Container(
                   width: 32,
                   height: 2,
-                  margin: const EdgeInsets.only(bottom: 16, left: 8, right: 8),
-                  color: isCompleted ? AppTheme.primary : AppTheme.divider,
+                  margin: const EdgeInsets.only(bottom: 18, left: 8, right: 8),
+                  color: isCompleted ? _C.ink : _C.hairline,
                 ),
             ],
           );
@@ -406,6 +530,51 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
       ),
     ).animate().fadeIn(duration: 300.ms);
   }
+
+  // ============================================
+  // Brand mark (logo estilizada sobre placa ink)
+  // ============================================
+  Widget _brandMark() {
+    return Center(
+      child: Container(
+        width: 96,
+        height: 96,
+        decoration: BoxDecoration(
+          color: _C.bone,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        padding: const EdgeInsets.all(8),
+        child: Image.asset(
+          'assets/images/mydojo_logo.png',
+          fit: BoxFit.contain,
+        ),
+      ),
+    ).animate().scale(
+        begin: const Offset(0.8, 0.8), duration: 400.ms, curve: Curves.easeOut);
+  }
+
+  Widget _heroTitle(String text) => Text(
+        text.toUpperCase(),
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: _C.ink,
+          fontSize: 26,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.5,
+          height: 1.05,
+        ),
+      ).animate().fadeIn(duration: 300.ms);
+
+  Widget _heroSub(String text) => Text(
+        text,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: _C.smoke,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          height: 1.4,
+        ),
+      ).animate().fadeIn(delay: 100.ms);
 
   // ============================================
   // Step 1 - Professor Data
@@ -418,30 +587,15 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Logo instead of icon
-            Center(
-              child: Image.asset(
-                'assets/images/bjjeasy_logo.png',
-                width: 80,
-                height: 80,
-              ),
-            ).animate().scale(begin: const Offset(0.8, 0.8), duration: 400.ms, curve: Curves.easeOut),
+            _brandMark(),
 
             const SizedBox(height: 20),
 
-            Text(
-              'Seus Dados',
-              style: AppTheme.displaySmall,
-              textAlign: TextAlign.center,
-            ).animate().fadeIn(duration: 300.ms),
+            _heroTitle('Seus Dados'),
 
             const SizedBox(height: 8),
 
-            Text(
-              'Crie sua conta de professor/administrador',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-              textAlign: TextAlign.center,
-            ).animate().fadeIn(delay: 100.ms),
+            _heroSub('Crie sua conta de professor/administrador'),
 
             const SizedBox(height: 32),
 
@@ -456,10 +610,12 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               keyboardType: TextInputType.name,
               textInputAction: TextInputAction.next,
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Nome completo',
-                hintText: 'Seu nome',
-                prefixIcon: Icon(LucideIcons.user, size: 20),
+              style: const TextStyle(
+                  color: _C.ink, fontSize: 15, fontWeight: FontWeight.w600),
+              decoration: _dec(
+                label: 'Nome completo',
+                hint: 'Seu nome',
+                prefix: LucideIcons.user,
               ),
               validator: (value) {
                 if (value == null || value.isEmpty) return 'Informe seu nome';
@@ -475,10 +631,12 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
-                labelText: 'Email',
-                hintText: 'seu@email.com',
-                prefixIcon: Icon(LucideIcons.mail, size: 20),
+              style: const TextStyle(
+                  color: _C.ink, fontSize: 15, fontWeight: FontWeight.w600),
+              decoration: _dec(
+                label: 'Email',
+                hint: 'seu@email.com',
+                prefix: LucideIcons.mail,
               ),
               validator: (value) {
                 if (value == null || value.isEmpty) return 'Informe seu email';
@@ -494,14 +652,17 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               controller: _passwordController,
               obscureText: _obscurePassword,
               textInputAction: TextInputAction.next,
-              decoration: InputDecoration(
-                labelText: 'Senha',
-                hintText: 'Mínimo 6 caracteres',
-                prefixIcon: const Icon(LucideIcons.lock, size: 20),
-                suffixIcon: IconButton(
+              style: const TextStyle(
+                  color: _C.ink, fontSize: 15, fontWeight: FontWeight.w600),
+              decoration: _dec(
+                label: 'Senha',
+                hint: 'Mínimo 6 caracteres',
+                prefix: LucideIcons.lock,
+                suffix: IconButton(
                   icon: Icon(
                     _obscurePassword ? LucideIcons.eyeOff : LucideIcons.eye,
                     size: 20,
+                    color: _C.smoke,
                   ),
                   onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                 ),
@@ -521,14 +682,17 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               obscureText: _obscureConfirmPassword,
               textInputAction: TextInputAction.done,
               onFieldSubmitted: (_) => _handleNext(),
-              decoration: InputDecoration(
-                labelText: 'Confirmar senha',
-                hintText: 'Repita a senha',
-                prefixIcon: const Icon(LucideIcons.lock, size: 20),
-                suffixIcon: IconButton(
+              style: const TextStyle(
+                  color: _C.ink, fontSize: 15, fontWeight: FontWeight.w600),
+              decoration: _dec(
+                label: 'Confirmar senha',
+                hint: 'Repita a senha',
+                prefix: LucideIcons.lock,
+                suffix: IconButton(
                   icon: Icon(
                     _obscureConfirmPassword ? LucideIcons.eyeOff : LucideIcons.eye,
                     size: 20,
+                    color: _C.smoke,
                   ),
                   onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
                 ),
@@ -544,15 +708,16 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
             // Next button
             SizedBox(
-              height: 52,
+              height: 54,
               child: ElevatedButton(
                 onPressed: _handleNext,
-                child: Row(
+                style: _ctaStyle(_C.ink),
+                child: const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text('Continuar'),
-                    const SizedBox(width: 8),
-                    const Icon(LucideIcons.arrowRight, size: 18),
+                    Text('CONTINUAR'),
+                    SizedBox(width: 8),
+                    Icon(LucideIcons.arrowRight, size: 18),
                   ],
                 ),
               ),
@@ -564,13 +729,26 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
+                const Text(
                   'Já tem uma conta? ',
-                  style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+                  style: TextStyle(
+                      color: _C.smoke,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600),
                 ),
                 TextButton(
                   onPressed: () => context.go('/login'),
-                  child: const Text('Entrar'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: _C.blood,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    minimumSize: const Size(0, 0),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('ENTRAR',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.8)),
                 ),
               ],
             ).animate().fadeIn(delay: 700.ms),
@@ -591,30 +769,15 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Logo instead of icon
-            Center(
-              child: Image.asset(
-                'assets/images/bjjeasy_logo.png',
-                width: 80,
-                height: 80,
-              ),
-            ).animate().scale(begin: const Offset(0.8, 0.8), duration: 400.ms, curve: Curves.easeOut),
+            _brandMark(),
 
             const SizedBox(height: 20),
 
-            Text(
-              'Dados da Academia',
-              style: AppTheme.displaySmall,
-              textAlign: TextAlign.center,
-            ).animate().fadeIn(duration: 300.ms),
+            _heroTitle('Dados da Academia'),
 
             const SizedBox(height: 8),
 
-            Text(
-              'Configure sua academia de Jiu-Jitsu',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
-              textAlign: TextAlign.center,
-            ).animate().fadeIn(delay: 100.ms),
+            _heroSub('Configure sua academia de Jiu-Jitsu'),
 
             const SizedBox(height: 32),
 
@@ -629,10 +792,12 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               keyboardType: TextInputType.text,
               textInputAction: TextInputAction.next,
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Nome da Academia',
-                hintText: 'Ex: Team Alpha Jiu-Jitsu',
-                prefixIcon: Icon(LucideIcons.graduationCap, size: 20),
+              style: const TextStyle(
+                  color: _C.ink, fontSize: 15, fontWeight: FontWeight.w600),
+              decoration: _dec(
+                label: 'Nome da Academia',
+                hint: 'Ex: Team Alpha Jiu-Jitsu',
+                prefix: LucideIcons.graduationCap,
               ),
               validator: (value) {
                 if (value == null || value.isEmpty) return 'Informe o nome da academia';
@@ -643,13 +808,98 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
             const SizedBox(height: 24),
 
+            // Que tipo de academia? — obrigatório, define vocabulário
+            // (lutador/aluno, tatame/academia) e, se Fitness, a modalidade
+            // padrão (musculação, sem faixas).
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'QUE TIPO DE ACADEMIA?',
+                style: _eyebrow(_C.smoke, 11),
+              ),
+            ).animate().fadeIn(delay: 220.ms),
+
+            const SizedBox(height: 10),
+
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _DocumentTypeCard(
+                  icon: LucideIcons.swords,
+                  title: 'Artes Marciais',
+                  subtitle: 'Faixas, graus e graduação',
+                  selected: _academyProfile == AcademyProfile.fight,
+                  onTap: () => setState(() {
+                    _academyProfile = AcademyProfile.fight;
+                    _errorMessage = null;
+                  }),
+                ),
+                const SizedBox(height: 10),
+                _DocumentTypeCard(
+                  icon: LucideIcons.dumbbell,
+                  title: 'Musculação & Fitness',
+                  subtitle: 'Check-in, sem faixas',
+                  selected: _academyProfile == AcademyProfile.fitness,
+                  onTap: () => setState(() {
+                    _academyProfile = AcademyProfile.fitness;
+                    _errorMessage = null;
+                  }),
+                ),
+                const SizedBox(height: 10),
+                _DocumentTypeCard(
+                  icon: LucideIcons.layers,
+                  title: 'Ambos',
+                  subtitle: 'Artes marciais e musculação',
+                  selected: _academyProfile == AcademyProfile.hybrid,
+                  onTap: () => setState(() {
+                    _academyProfile = AcademyProfile.hybrid;
+                    _errorMessage = null;
+                  }),
+                ),
+              ],
+            ).animate().fadeIn(delay: 260.ms),
+
+            // Seletor de modalidades — só aparece pra Artes Marciais/Ambos.
+            // Fitness segue sem seletor (musculação automática). Pré-marca
+            // BJJ, mas o professor pode desmarcar/trocar/adicionar livremente.
+            if (_academyProfile == AcademyProfile.fight ||
+                _academyProfile == AcademyProfile.hybrid) ...[
+              const SizedBox(height: 24),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'QUAIS MODALIDADES?',
+                  style: _eyebrow(_C.smoke, 11),
+                ),
+              ).animate().fadeIn(delay: 280.ms),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: sportOptions.map((id) {
+                  final def = getSport(id);
+                  return _SportChip(
+                    icon: def.icon,
+                    label: def.label,
+                    selected: _selectedSports.contains(id),
+                    onTap: () => _toggleSport(id),
+                  );
+                }).toList(),
+              ).animate().fadeIn(delay: 300.ms),
+            ],
+
+            const SizedBox(height: 24),
+
             // Document type toggle
-            Text(
-              'Documento do responsável',
-              style: AppTheme.labelLarge.copyWith(color: AppTheme.textSecondary),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'DOCUMENTO DO RESPONSÁVEL',
+                style: _eyebrow(_C.smoke, 11),
+              ),
             ).animate().fadeIn(delay: 250.ms),
-            
-            const SizedBox(height: 8),
+
+            const SizedBox(height: 10),
 
             Row(
               children: [
@@ -692,15 +942,20 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               controller: _documentController,
               keyboardType: TextInputType.number,
               textInputAction: TextInputAction.done,
+              style: const TextStyle(
+                  color: _C.ink,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: _C.tab),
               inputFormatters: [
                 FilteringTextInputFormatter.allow(RegExp(r'[\d.\-/]')),
                 LengthLimitingTextInputFormatter(_documentType == _DocumentType.cpf ? 14 : 18),
               ],
               onChanged: _onDocumentChanged,
-              decoration: InputDecoration(
-                labelText: _documentType == _DocumentType.cpf ? 'CPF' : 'CNPJ',
-                hintText: _documentType == _DocumentType.cpf ? '000.000.000-00' : '00.000.000/0000-00',
-                prefixIcon: const Icon(LucideIcons.fileText, size: 20),
+              decoration: _dec(
+                label: _documentType == _DocumentType.cpf ? 'CPF' : 'CNPJ',
+                hint: _documentType == _DocumentType.cpf ? '000.000.000-00' : '00.000.000/0000-00',
+                prefix: LucideIcons.fileText,
               ),
               validator: _validateDocument,
             ).animate().fadeIn(delay: 350.ms).slideX(begin: -0.1),
@@ -718,16 +973,26 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               dense: true,
               contentPadding: EdgeInsets.zero,
               controlAffinity: ListTileControlAffinity.leading,
+              activeColor: _C.blood,
+              checkColor: Colors.white,
+              side: BorderSide(color: _C.hairline, width: 1.5),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(5)),
               title: RichText(
                 text: TextSpan(
-                  style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _C.smoke),
                   children: [
                     const TextSpan(text: 'Aceito os '),
                     TextSpan(
                       text: 'Termos e Condições de Serviço',
-                      style: TextStyle(
-                        color: Theme.of(context).primaryColor,
+                      style: const TextStyle(
+                        color: _C.blood,
+                        fontWeight: FontWeight.w800,
                         decoration: TextDecoration.underline,
+                        decorationColor: _C.blood,
                       ),
                       recognizer: TapGestureRecognizer()..onTap = _openTermsUrl,
                     ),
@@ -740,9 +1005,10 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
             // Create button
             SizedBox(
-              height: 52,
+              height: 54,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _handleNext,
+                style: _ctaStyle(_C.blood),
                 child: _isLoading
                     ? const SizedBox(
                         width: 20,
@@ -752,7 +1018,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                         ),
                       )
-                    : const Text('Criar Academia'),
+                    : const Text('CRIAR ACADEMIA'),
               ),
             ).animate().fadeIn(delay: 500.ms).slideY(begin: 0.1),
           ],
@@ -769,38 +1035,31 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
       padding: const EdgeInsets.all(24),
       child: Column(
         children: [
-          const SizedBox(height: 40),
+          const SizedBox(height: 48),
 
-          // Success icon
+          // Success mark (placa ink + acento sangue)
           Container(
             width: 88,
             height: 88,
             decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: const LinearGradient(
-                colors: [Color(0xFF43E97B), Color(0xFF38F9D7)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF43E97B).withValues(alpha: 0.3),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
-                ),
-              ],
+              color: _C.ink,
+              borderRadius: BorderRadius.circular(22),
             ),
-            child: const Icon(LucideIcons.checkCircle, size: 44, color: Colors.white),
+            child: const Icon(LucideIcons.check, size: 44, color: _C.blood),
           )
               .animate()
-              .scale(begin: const Offset(0, 0), duration: 600.ms, curve: Curves.elasticOut)
-              .rotate(begin: -0.5, duration: 600.ms),
+              .scale(begin: const Offset(0, 0), duration: 600.ms, curve: Curves.elasticOut),
 
           const SizedBox(height: 28),
 
           Text(
-            'Academia criada com sucesso!',
-            style: AppTheme.displaySmall.copyWith(color: AppTheme.success),
+            'ACADEMIA CRIADA',
+            style: const TextStyle(
+              color: _C.ink,
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.5,
+            ),
             textAlign: TextAlign.center,
           ).animate().fadeIn(delay: 300.ms).slideY(begin: 0.2),
 
@@ -809,12 +1068,17 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
           RichText(
             textAlign: TextAlign.center,
             text: TextSpan(
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: const TextStyle(
+                  color: _C.smoke,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  height: 1.4),
               children: [
                 const TextSpan(text: 'Sua academia '),
                 TextSpan(
                   text: _academyNameController.text,
-                  style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textPrimary),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w900, color: _C.ink),
                 ),
                 const TextSpan(text: ' está pronta para uso.'),
               ],
@@ -825,15 +1089,20 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
           // Info box
           Container(
+            width: double.infinity,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: AppTheme.successLight,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.success.withValues(alpha: 0.2)),
+              color: _C.card,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _C.hairline, width: 1),
             ),
-            child: Text(
+            child: const Text(
               'Você já pode acessar o painel e começar a cadastrar seus alunos.',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+              style: TextStyle(
+                  color: _C.smoke,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  height: 1.4),
               textAlign: TextAlign.center,
             ),
           ).animate().fadeIn(delay: 500.ms).slideY(begin: 0.1),
@@ -842,7 +1111,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
           // Access button - go straight to /admin if already authenticated.
           SizedBox(
-            height: 52,
+            height: 54,
             width: double.infinity,
             child: ElevatedButton(
               onPressed: () {
@@ -851,12 +1120,13 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                     && userAsync.value?.academyId != null;
                 context.go(isAdminReady ? '/admin' : '/login');
               },
-              child: Row(
+              style: _ctaStyle(_C.ink),
+              child: const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(LucideIcons.logIn, size: 18),
-                  const SizedBox(width: 8),
-                  const Text('Acessar Painel'),
+                  Icon(LucideIcons.logIn, size: 18),
+                  SizedBox(width: 8),
+                  Text('ACESSAR PAINEL'),
                 ],
               ),
             ),
@@ -866,7 +1136,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
           Text(
             'Use suas credenciais para acessar',
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.textDisabled),
+            style: _eyebrow(_C.ash, 10),
             textAlign: TextAlign.center,
           ).animate().fadeIn(delay: 700.ms),
         ],
@@ -881,21 +1151,85 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.errorLight,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.error.withValues(alpha: 0.3)),
+        color: _C.blood.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _C.blood.withValues(alpha: 0.30)),
       ),
       child: Row(
         children: [
-          const Icon(LucideIcons.alertCircle, color: AppTheme.error, size: 20),
+          const Icon(LucideIcons.alertCircle, color: _C.blood, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
               _errorMessage!,
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.error),
+              style: const TextStyle(
+                  color: _C.blood,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  height: 1.35),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Chip minimalista de modalidade — multi-select, mesma paleta ink/blood/bone
+/// do resto do wizard, mas em formato de pílula (várias por linha) em vez do
+/// cartão largo do [_DocumentTypeCard], já que aqui há até 9 opções.
+class _SportChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _SportChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? _C.blood.withValues(alpha: 0.08) : _C.card,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected ? _C.blood : _C.hairline,
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 15, color: selected ? _C.blood : _C.smoke),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: selected ? _C.blood : _C.ink,
+                ),
+              ),
+              if (selected) ...[
+                const SizedBox(width: 6),
+                const Icon(LucideIcons.check, size: 13, color: _C.blood),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -918,7 +1252,6 @@ class _DocumentTypeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = AppTheme.primary;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -929,12 +1262,10 @@ class _DocumentTypeCard extends StatelessWidget {
           curve: Curves.easeOut,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           decoration: BoxDecoration(
-            color: selected
-                ? primary.withValues(alpha: 0.08)
-                : AppTheme.surface,
+            color: _C.card,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: selected ? primary : AppTheme.divider,
+              color: selected ? _C.blood : _C.hairline,
               width: selected ? 1.5 : 1,
             ),
           ),
@@ -945,14 +1276,14 @@ class _DocumentTypeCard extends StatelessWidget {
                 height: 36,
                 decoration: BoxDecoration(
                   color: selected
-                      ? primary.withValues(alpha: 0.15)
-                      : AppTheme.surfaceVariant,
+                      ? _C.blood.withValues(alpha: 0.10)
+                      : _C.fieldFill,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
                   icon,
                   size: 18,
-                  color: selected ? primary : AppTheme.textSecondary,
+                  color: selected ? _C.blood : _C.smoke,
                 ),
               ),
               const SizedBox(width: 10),
@@ -963,17 +1294,21 @@ class _DocumentTypeCard extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: AppTheme.titleSmall.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: selected ? primary : AppTheme.textPrimary,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.5,
+                        color: selected ? _C.blood : _C.ink,
                         height: 1.1,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: AppTheme.labelSmall.copyWith(
-                        color: AppTheme.textSecondary,
+                      style: const TextStyle(
+                        color: _C.smoke,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
                         height: 1.1,
                       ),
                       maxLines: 1,
@@ -985,10 +1320,10 @@ class _DocumentTypeCard extends StatelessWidget {
               AnimatedScale(
                 duration: const Duration(milliseconds: 180),
                 scale: selected ? 1 : 0,
-                child: Icon(
+                child: const Icon(
                   LucideIcons.checkCircle2,
                   size: 18,
-                  color: primary,
+                  color: _C.blood,
                 ),
               ),
             ],

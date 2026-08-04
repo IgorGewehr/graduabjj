@@ -17,15 +17,9 @@ class DefaultFirebaseOptions {
       case TargetPlatform.iOS:
         return ios;
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return macos;
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows;
       case TargetPlatform.linux:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for linux - '
@@ -54,7 +48,6 @@ class DefaultFirebaseOptions {
     projectId: 'arpjj-76350',
     storageBucket: 'arpjj-76350.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyAM4oihQ7eJ6gTuV5jzlXE8opn7d-1qeew',
     appId: '1:880937749202:ios:649a91755c6f6236eb3b0b',
@@ -62,5 +55,22 @@ class DefaultFirebaseOptions {
     projectId: 'arpjj-76350',
     storageBucket: 'arpjj-76350.firebasestorage.app',
     iosBundleId: 'com.tensorroot.graduabjj',
+  );
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyAM4oihQ7eJ6gTuV5jzlXE8opn7d-1qeew',
+    appId: '1:880937749202:ios:649a91755c6f6236eb3b0b',
+    messagingSenderId: '880937749202',
+    projectId: 'arpjj-76350',
+    storageBucket: 'arpjj-76350.firebasestorage.app',
+    iosBundleId: 'com.tensorroot.graduabjj',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyCdJ2SjOsyirbS0s5QQUDOhHV_KLHNRzgI',
+    appId: '1:880937749202:web:acba9ea9e18f4dbfeb3b0b',
+    messagingSenderId: '880937749202',
+    projectId: 'arpjj-76350',
+    authDomain: 'arpjj-76350.firebaseapp.com',
+    storageBucket: 'arpjj-76350.firebasestorage.app',
   );
 }

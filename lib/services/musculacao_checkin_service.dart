@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:cloud_functions/cloud_functions.dart';
 
+import 'fns.dart';
+
 import 'firebase_service.dart';
 
 /// Payload written to the fixed musculação QR shown at the reception desk.
@@ -44,18 +46,26 @@ class MusculacaoCheckinException implements Exception {
 /// Firestore rules). All validation — membership, mode, operating hours,
 /// active status and one-per-day dedup — happens server-side.
 class MusculacaoCheckinService {
-  final FirebaseFunctions _functions;
+  final CallableClient _functions;
 
-  MusculacaoCheckinService({FirebaseFunctions? functions})
-      : _functions = functions ?? FirebaseFunctions.instance;
+  MusculacaoCheckinService({CallableClient? functions})
+      : _functions = functions ?? Fns.functions;
 
-  /// Records a musculação check-in for the current student in [academyId]
-  /// (defaults to the active academy). Throws [MusculacaoCheckinException]
-  /// with a user-facing message on any rejection.
-  Future<void> checkIn({String? academyId}) async {
+  /// Records a self check-in for the current student in [academyId] (defaults
+  /// to the active academy), for [sport] (defaults server-side to
+  /// 'musculacao' when omitted — total backward compat with every existing
+  /// caller). Since jul/2026 the `selfCheckin` function also accepts the
+  /// other schedule-less modalities (boxing/mma — see SELF_CHECKIN_SPORTS in
+  /// functions/index.js), so a caller can pass e.g. `sport: 'boxing'` to
+  /// check the student into that modality instead. Throws
+  /// [MusculacaoCheckinException] with a user-facing message on any rejection.
+  Future<void> checkIn({String? academyId, String? sport}) async {
     final id = academyId ?? FirebaseService.academyId;
     try {
-      await _functions.httpsCallable('selfCheckin').call({'academyId': id});
+      await _functions.httpsCallable('selfCheckin').call({
+        'academyId': id,
+        if (sport != null) 'sport': sport,
+      });
     } on FirebaseFunctionsException catch (e) {
       throw MusculacaoCheckinException(
         e.message ?? 'Não foi possível registrar o check-in.',

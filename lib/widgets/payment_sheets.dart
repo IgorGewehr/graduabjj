@@ -18,6 +18,8 @@ import '../services/firebase_service.dart';
 import '../services/abacate_pay_service.dart';
 import '../services/asaas_payment_service.dart';
 import '../services/mercado_pago_service.dart';
+import '../services/subscription_service.dart';
+import '../services/payment/payment_gateway_resolver.dart';
 
 // ============================================
 // Modern PIX Payment Bottom Sheet
@@ -1304,6 +1306,13 @@ class CardPaymentSheet extends StatefulWidget {
   final String? subscriptionPlanId;
   final String studentId;
   final String studentName;
+
+  /// The connected gateway already resolved by the caller
+  /// ([paymentGatewayProvider] / `PaymentGatewayResolver` — single source of
+  /// truth). The sheet NEVER re-resolves it here: a transient Firestore read
+  /// failure must surface as a retryable error, never silently fall back to
+  /// another card gateway (Asaas/AbacatePay receive the raw card data).
+  final PaymentGateway gateway;
   final VoidCallback? onPaymentSuccess;
   final VoidCallback? onClose;
 
@@ -1316,6 +1325,7 @@ class CardPaymentSheet extends StatefulWidget {
     this.subscriptionPlanId,
     required this.studentId,
     required this.studentName,
+    required this.gateway,
     this.onPaymentSuccess,
     this.onClose,
   });
@@ -1338,6 +1348,12 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
   String? _errorMessage;
   String _cardBrand = '';
   int _installments = 1;
+
+  // Auditoria MP: pagamento em cartao pode voltar 'in_process'/'pending' (NAO e
+  // recusa). Quando isso ocorre travamos novo submit para a mesma cobranca,
+  // evitando que o aluno re-tente e gere uma 2a cobranca pendente duplicada.
+  bool _paymentPending = false;
+  String? _pendingMessage;
 
   @override
   void dispose() {
@@ -1456,6 +1472,9 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
   }
 
   Future<void> _handlePayment() async {
+    // Auditoria MP: cobranca ja em analise/3DS pendente — nao reenviar, para
+    // nao gerar uma 2a cobranca pendente para a mesma fatura.
+    if (_paymentPending) return;
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -1476,19 +1495,37 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
         cpf: _cpfController.text,
       );
 
-      // Gateway precedence: Mercado Pago (connected) > Asaas > AbacatePay.
+      // Gateway resolvido pelo caller (paymentGatewayProvider). NUNCA
+      // re-resolver aqui: uma falha transitória de leitura faria o fluxo cair
+      // num gateway de cartão errado (Asaas/AbacatePay recebem o cartão cru).
+      final gateway = widget.gateway;
       final mp = MercadoPagoService(academyId);
-      final asaasService = AsaasPaymentService(academyId);
-      final useMp = await mp.isEnabled();
-      final isAsaas = !useMp && await asaasService.isEnabled();
+      final useMp = gateway == PaymentGateway.mercadoPago;
+      final isAsaas = gateway == PaymentGateway.asaas;
+      final isAbacate = gateway == PaymentGateway.abacatePay;
 
       CardPaymentResult result;
       // Recurring subscription (MP only): tokenize once, then MP auto-charges
       // the card monthly. No installments — it's a monthly preapproval.
       if (widget.isSubscription) {
         if (!useMp) {
+          if (!mounted) return;
           setState(() => _errorMessage =
               'Assinatura recorrente requer o Mercado Pago conectado.');
+          return;
+        }
+        // Guarda de duplicação: re-checa no servidor se já existe assinatura
+        // viva (pending/authorized/paused) deste plano para o aluno antes de
+        // criar o preapproval — cobre o retry pós-timeout. O backend tem a
+        // mesma guarda (failed-precondition); aqui é defesa em profundidade.
+        final hasLive = await SubscriptionService(academyId).hasLiveSubscription(
+          studentId: widget.studentId,
+          planId: widget.subscriptionPlanId!,
+        );
+        if (hasLive) {
+          if (!mounted) return;
+          setState(() => _errorMessage =
+              'Já existe uma assinatura ativa deste plano para este aluno.');
           return;
         }
         final sub = await mp.createSubscription(
@@ -1497,7 +1534,14 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
           studentName: widget.studentName,
           cardData: cardData,
         );
-        result = CardPaymentResult(success: sub.success, message: sub.message);
+        // Auditoria MP: propaga o status do preapproval. Uma assinatura 'pending'
+        // (emissor ainda não autorizou) NÃO pode aparecer como sucesso verde —
+        // com o status, cai no tratamento de isPending abaixo ("em análise").
+        result = CardPaymentResult(
+          success: sub.success,
+          message: sub.message,
+          status: sub.status,
+        );
       } else if (widget.orderId != null) {
         if (useMp) {
           result = await mp.createStoreOrderCardPayment(
@@ -1510,7 +1554,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             installments: _installments,
           );
         } else if (isAsaas) {
-          result = await asaasService.createStoreOrderCardPayment(
+          result = await AsaasPaymentService(academyId).createStoreOrderCardPayment(
             amount: widget.amount,
             orderId: widget.orderId!,
             studentId: widget.studentId,
@@ -1518,7 +1562,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             cardData: cardData,
             description: widget.description,
           );
-        } else {
+        } else if (isAbacate) {
           result = await AbacatePayService(academyId).createStoreOrderCardPayment(
             amount: widget.amount,
             orderId: widget.orderId!,
@@ -1527,6 +1571,13 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             cardData: cardData,
             description: widget.description,
           );
+        } else {
+          // PaymentGateway.none: nenhum gateway de cartão conectado — nunca
+          // tentar cobrar. Erro retryable em vez de fallback silencioso.
+          if (!mounted) return;
+          setState(() => _errorMessage =
+              'Pagamento com cartao indisponivel no momento. Tente novamente.');
+          return;
         }
       } else if (widget.financialId != null) {
         if (useMp) {
@@ -1540,7 +1591,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             installments: _installments,
           );
         } else if (isAsaas) {
-          result = await asaasService.createCardPayment(
+          result = await AsaasPaymentService(academyId).createCardPayment(
             amount: widget.amount,
             financialId: widget.financialId!,
             studentId: widget.studentId,
@@ -1548,7 +1599,7 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             cardData: cardData,
             description: widget.description,
           );
-        } else {
+        } else if (isAbacate) {
           result = await AbacatePayService(academyId).createCardPayment(
             amount: widget.amount,
             financialId: widget.financialId!,
@@ -1557,9 +1608,48 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
             cardData: cardData,
             description: widget.description,
           );
+        } else {
+          if (!mounted) return;
+          setState(() => _errorMessage =
+              'Pagamento com cartao indisponivel no momento. Tente novamente.');
+          return;
         }
       } else {
         throw Exception('Order ID or Financial ID is required');
+      }
+
+      // Auditoria MP: o emissor pode exigir desafio 3DS (three_ds_info). Antes
+      // a UI tratava isso como recusa e o aluno re-tentava, duplicando a
+      // cobranca. Agora abrimos a URL do desafio e travamos novo submit; a
+      // confirmacao chega via webhook (mpMktHandleReversal/settle no backend).
+      if (result.requiresThreeDs) {
+        final uri = Uri.tryParse(result.threeDsUrl!);
+        if (uri != null) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+        if (!mounted) return;
+        setState(() {
+          _paymentPending = true;
+          _errorMessage = null;
+          _pendingMessage =
+              'Confirme a autenticacao do seu banco para concluir o pagamento. Apos aprovar, a confirmacao chega automaticamente.';
+        });
+        return;
+      }
+
+      // Auditoria MP: status 'in_process'/'pending' NAO e recusa. Mostramos
+      // "em analise" e bloqueamos novo submit para a mesma cobranca, evitando
+      // que um retry cunhe uma 2a cobranca pendente (cobranca paga aparecendo
+      // como falha era o vetor de cobranca duplicada).
+      if (result.isPending) {
+        if (!mounted) return;
+        setState(() {
+          _paymentPending = true;
+          _errorMessage = null;
+          _pendingMessage = result.message ??
+              'Pagamento em analise. Aguarde a confirmacao; nao tente cobrar novamente.';
+        });
+        return;
       }
 
       if (result.success) {
@@ -1583,12 +1673,14 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
           widget.onPaymentSuccess?.call();
         }
       } else {
+        if (!mounted) return;
         setState(() {
           _errorMessage =
               result.message ?? 'Pagamento nao aprovado. Verifique os dados do cartao e tente novamente.';
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = _friendlyCardError(e);
       });
@@ -1708,6 +1800,32 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                 ),
                 const SizedBox(height: 24),
 
+                // Auditoria MP: aviso de pagamento em analise / 3DS pendente.
+                // NAO e erro — informa o aluno e o submit fica travado.
+                if (_pendingMessage != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(LucideIcons.clock, color: AppTheme.primary, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _pendingMessage!,
+                            style: AppTheme.bodySmall.copyWith(color: AppTheme.primary),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+
                 // Error Message
                 if (_errorMessage != null) ...[
                   Container(
@@ -1823,7 +1941,9 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: _isLoading ? null : _handlePayment,
+                    // Auditoria MP: trava o botao quando ja ha cobranca em
+                    // analise/3DS pendente, impedindo retry que duplica cobranca.
+                    onPressed: (_isLoading || _paymentPending) ? null : _handlePayment,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
@@ -1844,11 +1964,13 @@ class _CardPaymentSheetState extends State<CardPaymentSheet> {
                             ),
                           )
                         : Text(
-                            _errorMessage != null
-                                ? 'Tentar novamente'
-                                : (widget.isSubscription
-                                    ? 'Assinar'
-                                    : 'Pagar Agora'),
+                            _paymentPending
+                                ? 'Aguardando confirmacao...'
+                                : (_errorMessage != null
+                                    ? 'Tentar novamente'
+                                    : (widget.isSubscription
+                                        ? 'Assinar'
+                                        : 'Pagar Agora')),
                             style: const TextStyle(
                               fontWeight: FontWeight.w600,
                               fontSize: 16,

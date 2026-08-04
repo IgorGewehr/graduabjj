@@ -11,6 +11,7 @@ import 'core/navigator_key.dart';
 import 'core/navigation/nav_catalog.dart';
 import 'providers/auth_provider.dart';
 import 'services/push_notification_service.dart';
+import 'services/analytics_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/auth/link_code_screen.dart';
@@ -18,6 +19,10 @@ import 'screens/auth/instructor_code_screen.dart';
 import 'screens/auth/create_academy_screen.dart';
 import 'screens/portal/portal_shell.dart';
 import 'screens/portal/home_screen.dart';
+import 'screens/fighter/lutador_hub_screen.dart';
+import 'screens/fighter/cena_screen.dart';
+import 'screens/fighter/academia_hub_screen.dart';
+import 'screens/fighter/diario_screen.dart';
 import 'screens/portal/event_detail_screen.dart';
 import 'screens/portal/jornal_screen.dart';
 import 'screens/portal/ranking_screen.dart';
@@ -28,6 +33,8 @@ import 'screens/portal/competition_detail_screen.dart';
 import 'screens/portal/schedule_screen.dart';
 import 'screens/portal/qr_scan_screen.dart';
 import 'screens/portal/musculacao_qr_scan_screen.dart';
+import 'screens/admin/admin_social_screen.dart';
+import 'screens/admin/join_requests_screen.dart';
 import 'screens/admin/musculacao_admin_screen.dart';
 import 'screens/portal/workouts_screen.dart';
 import 'screens/admin/workout_plans_screen.dart';
@@ -52,6 +59,8 @@ import 'screens/portal/cart_screen.dart';
 import 'screens/portal/store_checkout_screen.dart';
 import 'screens/portal/store_orders_screen.dart';
 import 'screens/admin/store_orders_admin_screen.dart';
+import 'screens/admin/devices_screen.dart';
+import 'screens/admin/subscriptions_screen.dart';
 // Academy management screens
 import 'screens/portal/academies_screen.dart';
 import 'screens/portal/add_academy_screen.dart';
@@ -61,9 +70,14 @@ import 'screens/portal/monitor_students_screen.dart';
 import 'screens/portal/monitor_student_detail_screen.dart';
 import 'screens/portal/monitor_student_form_screen.dart';
 import 'screens/portal/public_profile_screen.dart';
+import 'screens/portal/notification_prefs_screen.dart';
 import 'providers/portal_providers.dart';
+import 'providers/onboarding_providers.dart';
 import 'screens/splash_screen.dart';
 import 'screens/paywall_screen.dart';
+import 'screens/kiosk/kiosk_screen.dart';
+import 'widgets/onboarding/onboarding_gate.dart';
+import 'widgets/onboarding/billing_activation_step.dart';
 import 'widgets/common/back_button_handler.dart';
 // Admin screens
 import 'screens/admin/admin_screens.dart';
@@ -207,6 +221,11 @@ class GraduaBJJApp extends ConsumerWidget {
               child!,
               if (isCreatingAccount)
                 _AccountCreationOverlay(studentName: studentName),
+              // Onboarding de boas-vindas — dispara o carrossel certo por papel
+              // no 1º acesso e some ao concluir (persistido por usuário). Acima
+              // do router p/ sobreviver a rebuilds; abaixo do overlay de criação
+              // de conta (que tem prioridade via isCreatingAccount).
+              const OnboardingGate(),
             ],
           ),
         );
@@ -435,20 +454,86 @@ class _OverlayProgressStep extends StatelessWidget {
 /// glitch. Reset on logout so the next session re-gates from scratch.
 bool _sessionLanded = false;
 
+/// TAREFA 1 (jul/2026) — token FCM em toda abertura autenticada.
+///
+/// Diagnóstico em prod: o token só era salvo nos fluxos EXPLÍCITOS de
+/// login/criação de conta (auth_provider.dart chama
+/// `pushNotificationService.onUserLogin()` dentro de signInWithEmail/
+/// createAccount/etc). Um app reaberto com sessão JÁ autenticada (restore/
+/// silent-login do FirebaseAuth — o caso mais comum no dia a dia: o usuário
+/// mata e reabre o app) nunca passava por nenhum desses métodos, e por isso
+/// só ~19% dos usuários tinham fcmTokens salvos.
+///
+/// Guard "1x por sessão de processo": o `redirect` do GoRouter roda a CADA
+/// navegação depois que a sessão "pousa" (`_sessionLanded=true`), não só
+/// quando o refreshListenable dispara — sem este latch, cada troca de aba
+/// geraria um novo write no Firestore. Reseta junto com `_sessionLanded`
+/// quando o bootstrap volta a `unauthenticated` (logout), pra a PRÓXIMA
+/// sessão sincronizar de novo.
+bool _pushTokenSyncedThisSession = false;
+
 /// Router Provider
 final routerProvider = Provider<GoRouter>((ref) {
   // Watch the coarse bootstrap status (auth + user + academy settings + linked
   // student). This is the single source of truth for "is the session ready to
   // render its shell without a follow-up loading flicker".
-  final bootstrap = ref.watch(appBootstrapProvider);
-  final currentUser = ref.watch(currentUserProvider);
-  final isCreatingAccount = ref.watch(isCreatingAccountProvider);
+  // BUG CRÍTICO (corrigido): antes este provider fazia `ref.watch` do bootstrap
+  // e do currentUser → a CADA reload transitório (ex.: abrir o Perfil dispara um
+  // re-fetch do student/user) o provider RECRIAVA o GoRouter inteiro, que volta
+  // ao `initialLocation: '/'` → o aluno era jogado pro /portal (Lutador) no 1º
+  // clique. Agora o router é criado UMA vez e um refreshListenable re-roda só o
+  // redirect quando bootstrap/user/criação mudam (sem recriar/resetar).
+  final refresh = ValueNotifier<int>(0);
+  // BUG CRÍTICO #2 (crash no LOGOUT, corrigido): bumpar o notifier SINCRONAMENTE
+  // dentro do callback de ref.listen roda o redirect do GoRouter re-entrante,
+  // no MEIO do flush do ProviderScheduler — o redirect faz ref.read de providers
+  // dirty e muta o _HashMap interno de dependências enquanto o Riverpod o itera
+  // → ConcurrentModificationError na RAIZ da árvore (UncontrolledProviderScope)
+  // → app irrecuperável. Fix: coalescer os 3 listeners num único bump ADIADO
+  // para o event-loop (Future(), não microtask), depois do flush terminar.
+  var refreshScheduled = false;
+  var disposed = false;
+  void scheduleRefresh() {
+    if (refreshScheduled || disposed) return;
+    refreshScheduled = true;
+    Future(() {
+      refreshScheduled = false;
+      if (!disposed) refresh.value++;
+    });
+  }
+
+  ref.listen(appBootstrapProvider, (_, _) => scheduleRefresh());
+  ref.listen(currentUserProvider, (_, _) => scheduleRefresh());
+  ref.listen(isCreatingAccountProvider, (_, _) => scheduleRefresh());
+  // Fatia 7 (SPEC_ONBOARDING_2026-07.md §0.1): o gate do wizard depende de
+  // providers (turmas/alunos/presença) que resolvem DEPOIS do bootstrap —
+  // sem este listener, uma academia genuinamente vazia podia "perder a
+  // janela" do redirect se esses dados ainda estivessem carregando no
+  // instante exato do pouso (ver [wizardGateStatusProvider] e o uso de
+  // `state.matchedLocation == '/admin'` abaixo).
+  ref.listen(wizardGateStatusProvider, (_, _) => scheduleRefresh());
+  ref.onDispose(() {
+    disposed = true;
+    refresh.dispose();
+  });
 
   return GoRouter(
     navigatorKey: navigatorKey,
     initialLocation: '/',
     debugLogDiagnostics: true,
+    refreshListenable: refresh,
+    // Analytics (jul/2026): screen_view automático a cada navegação — null
+    // fora de Android/iOS (ver AnalyticsService._enabled), então isto é um
+    // no-op no build desktop. Nenhuma rota daqui seta `name:`, então o
+    // GoRouter usa o TEMPLATE do path como screen_name (ex. '/portal/profile/
+    // :id'), que é agregável e não vaza o id dinâmico no valor do evento.
+    observers: [
+      if (AnalyticsService.observer != null) AnalyticsService.observer!,
+    ],
     redirect: (context, state) {
+      final bootstrap = ref.read(appBootstrapProvider);
+      final currentUser = ref.read(currentUserProvider);
+      final isCreatingAccount = ref.read(isCreatingAccountProvider);
       final isLoggingIn = state.matchedLocation == '/login';
       final isRegistering = state.matchedLocation == '/register';
       final isLinkCode = state.matchedLocation == '/link-code';
@@ -470,6 +555,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Not logged in: reset the landing latch and route to the auth flow.
       if (bootstrap == AppBootstrapStatus.unauthenticated) {
         _sessionLanded = false;
+        // TAREFA 1: rearma o guard do token pra próxima sessão poder
+        // sincronizar de novo (ex.: logout de um usuário e login de outro
+        // sem reiniciar o processo).
+        _pushTokenSyncedThisSession = false;
         if (isAuthRoute) return null;
         return '/login';
       }
@@ -481,6 +570,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (bootstrap == AppBootstrapStatus.loading) {
         print('[ROUTER] Bootstrap loading...');
         if (_sessionLanded) return null;
+        // Já numa rota pós-login (portal/admin)? FICA — não rebate pro splash
+        // só porque o bootstrap re-resolveu transitoriamente. Sem isso, abrir o
+        // Perfil (ou trocar de aba) podia bouncar /portal/perfil → / → /portal.
+        final loc = state.matchedLocation;
+        if (loc.startsWith('/portal') || loc.startsWith('/admin')) return null;
         return isSplash ? null : '/';
       }
 
@@ -499,6 +593,10 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // If ready and sitting on an auth/splash page, redirect based on role.
       if (isAuthRoute || isSplash) {
+        // Um usuário logado pode pousar EXPLICITAMENTE em /link-code para
+        // vincular a conta (ex.: aluno sem ficha vindo do onboarding). Não
+        // rebater para o portal — senão o CTA "Inserir código" morre na chegada.
+        if (isLinkCode && user != null) return null;
         if (user != null) {
           // Admins always go to AdminShell.
           if (user.isAdmin) {
@@ -513,9 +611,18 @@ final routerProvider = Provider<GoRouter>((ref) {
             final hasFinancial = user.hasPermission('financial:view') ||
                 user.hasPermission('financial:create');
 
-            // Instructor who was a student AND has no financial perm →
-            // send to the monitor/chamada portal experience.
-            if (hasStudentId && !hasFinancial) {
+            // Some management permissions only have UI inside AdminShell
+            // (e.g. the Campeonatos / Graduação screens). A student-instructor
+            // holding one of those must reach /admin — /portal has no
+            // competition-creation or graduation-management surface.
+            final hasAdminOnlyManagement =
+                user.hasPermission('competitions:create') ||
+                user.hasPermission('graduation:manage');
+
+            // Instructor who was a student AND has no financial perm AND no
+            // admin-only management perm → send to the monitor/chamada portal
+            // experience.
+            if (hasStudentId && !hasFinancial && !hasAdminOnlyManagement) {
               print('[ROUTER] Redirecting student-instructor (no financial) to /portal');
               return '/portal';
             }
@@ -530,10 +637,73 @@ final routerProvider = Provider<GoRouter>((ref) {
         return '/portal';
       }
 
+      // Kiosk/catraca: rota fullscreen fora dos shells. Defesa em profundidade —
+      // só admin abre o totem (o botão em Settings só aparece com a feature
+      // ligada, mas a URL direta precisa barrar aluno/não-admin).
+      if (state.matchedLocation == '/kiosk') {
+        if (user == null) return '/login';
+        if (!user.isAdmin) return '/portal';
+      }
+
+      // Fatia 7 (SPEC_ONBOARDING_2026-07.md §0.1): gate do wizard "Comece em
+      // 3 minutos". Só dispara quando o admin está exatamente na raiz
+      // `/admin` (dashboard) — nunca intercepta um deep link direto pra uma
+      // sub-rota (ex.: `/admin/configuracoes`), então não existe "trap": o
+      // dono sempre pode navegar livremente, o wizard só aparece na landing
+      // natural pós-login. `wizardGateStatusProvider.loading` (dados ainda
+      // resolvendo) deixa passar sem decidir — o listener acima re-roda o
+      // redirect assim que resolver, enquanto o admin ainda estiver em
+      // `/admin`.
+      if (user != null &&
+          user.isAdmin &&
+          state.matchedLocation == '/admin' &&
+          ref.read(wizardGateStatusProvider) == WizardGateStatus.show) {
+        return '/admin/comece-aqui';
+      }
+
       // Ready AND already sitting on a post-login route → we've landed. Latch
       // so any subsequent transient reload keeps the user here (no splash
       // bounce). Stay put.
       _sessionLanded = true;
+
+      // TAREFA 1: dispara o MESMO caminho idempotente de registro de token
+      // que o login explícito usa (auth_provider.dart), agora também para
+      // sessão restaurada silenciosamente — é exatamente aqui que o app
+      // "decide que a sessão está pronta". addPostFrameCallback porque
+      // `redirect` roda DURANTE a fase de build/navegação do GoRouter —
+      // side-effects de rede/plugin nativo não podem rodar no meio disso.
+      // onUserLogin() é best-effort e faz no-op sozinho se o FCM não foi
+      // inicializado nesta sessão (guard `_initialized` interno) — cobre o
+      // kill-switch do iOS (Tarefa 2): se o FCM não ligou, não há token a
+      // salvar. No iOS o init roda deferido (main.dart) e pode terminar
+      // DEPOIS deste ponto — por isso main.dart também chama onUserLogin()
+      // logo após o init lá, fechando essa corrida (dupla chamada é segura:
+      // mesmo token, mesmo merge:true).
+      if (!_pushTokenSyncedThisSession) {
+        _pushTokenSyncedThisSession = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          pushNotificationService.onUserLogin();
+          // Analytics (jul/2026): mesmo latch do token FCM — "sessão pousou"
+          // é exatamente o momento de contar app_open_auth (1x por sessão de
+          // processo, não a cada troca de aba) e fixar o contexto de usuário
+          // (uid/academia/role) pro resto dos eventos desta sessão. `user`
+          // pode ser null aqui (ex.: rota fora de /kiosk sem sessão resolvida)
+          // — nesse caso só o token sync roda, sem contexto pra fixar.
+          AnalyticsService.logAppOpenAuthenticated();
+          if (user != null) {
+            AnalyticsService.setUserContext(
+              uid: user.id,
+              academyId: user.academyId,
+              // `.name` (enum nativo) em vez do getter `.value` de
+              // UserRoleExtension — evitar importar models/user.dart aqui só
+              // pela extension; os valores são idênticos ('admin',
+              // 'instructor', 'student', 'guardian').
+              role: user.role.name,
+            );
+          }
+        });
+      }
+
       return null;
     },
     routes: [
@@ -588,13 +758,59 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
+      // Kiosk / Catraca — totem fullscreen, FORA dos shells (sem AppBar, sem
+      // navegação e sem o gate de assinatura). Lê o stream de accessEvents da
+      // academia e mostra ✅ Bem-vindo / ❌ Financeiro pendente.
+      GoRoute(
+        path: '/kiosk',
+        pageBuilder: (context, state) => _buildPageWithFadeTransition(
+          context: context,
+          state: state,
+          child: const KioskScreen(),
+        ),
+      ),
+
       // Portal Routes (Student Portal)
       ShellRoute(
         builder: (context, state, child) => PortalShell(child: child),
         routes: [
           // Main tab routes - instant/crossfade transitions
+          // B2C fighter-first: /portal é o HUB DO LUTADOR (identidade portátil).
           GoRoute(
             path: '/portal',
+            pageBuilder: (context, state) => _buildPageWithFade(
+              context: context,
+              state: state,
+              child: const LutadorHubScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/cena',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const CenaScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/academia',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AcademiaHubScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/portal/diario',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const DiarioScreen(),
+            ),
+          ),
+          // Home antiga (academy-mixed) — mantida acessível em /portal/home.
+          GoRoute(
+            path: '/portal/home',
             pageBuilder: (context, state) => _buildPageWithFade(
               context: context,
               state: state,
@@ -783,6 +999,15 @@ final routerProvider = Provider<GoRouter>((ref) {
               child: const AddAcademyScreen(),
             ),
           ),
+          // Notification preferences (opt-out granular — §4 plano repaginada)
+          GoRoute(
+            path: '/portal/preferencias-notificacoes',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const NotificationPrefsScreen(),
+            ),
+          ),
           // Workout plans (structured training)
           GoRoute(
             path: '/portal/treinos',
@@ -936,6 +1161,16 @@ final routerProvider = Provider<GoRouter>((ref) {
               child: const AdminStudentFormScreen(),
             ),
           ),
+          // Solicitações de entrada (self-onboarding) — declarado ANTES de
+          // '/admin/alunos/:id' senão o :id capturaria 'solicitacoes'.
+          GoRoute(
+            path: '/admin/alunos/solicitacoes',
+            pageBuilder: (context, state) => _buildPageWithPushTransition(
+              context: context,
+              state: state,
+              child: const AdminJoinRequestsScreen(),
+            ),
+          ),
           GoRoute(
             path: '/admin/alunos/:id',
             pageBuilder: (context, state) => _buildPageWithPushTransition(
@@ -1062,6 +1297,22 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
+            path: '/admin/assinaturas',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminSubscriptionsScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/catracas',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminDevicesScreen(),
+            ),
+          ),
+          GoRoute(
             path: '/admin/graduacao',
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,
@@ -1078,6 +1329,22 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
+            path: '/admin/ranking',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const RankingScreen(forStaff: true),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/social',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const AdminSocialScreen(),
+            ),
+          ),
+          GoRoute(
             path: '/admin/relatorios',
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,
@@ -1091,6 +1358,18 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const AdminBillingRemindersScreen(),
+            ),
+          ),
+          // Passo "Como vai funcionar a cobrança" (SPEC_ONBOARDING_2026-07.md
+          // §1.2/Fatia 5) — alcançado hoje pelo passo `billing` do
+          // ActivationChecklist e pelo banner de automação do Dashboard/
+          // Cobrança; preparado para ser reusado por um futuro wizard.
+          GoRoute(
+            path: '/admin/comece-aqui/cobranca',
+            pageBuilder: (context, state) => _buildPageWithCrossfade(
+              context: context,
+              state: state,
+              child: const BillingActivationStep(),
             ),
           ),
           GoRoute(
@@ -1157,6 +1436,25 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
         ],
+      ),
+
+      // Wizard "Comece em 3 minutos" (Fatia 7, SPEC_ONBOARDING_2026-07.md
+      // §0.1/§1.1) — fora do ShellRoute de propósito: sem bottom nav/rail do
+      // AdminShell distraindo, cada passo é uma tela cheia de verdade. Só é
+      // alcançado pelo gate do redirect acima; `isRootRoute: true` porque não
+      // há "voltar" significativo (chegada é sempre via redirect pós-login,
+      // igual /paywall).
+      GoRoute(
+        path: '/admin/comece-aqui',
+        pageBuilder: (context, state) => _buildPageWithFadeTransition(
+          context: context,
+          state: state,
+          child: const BackButtonHandler(
+            currentLocation: '/admin/comece-aqui',
+            isRootRoute: true,
+            child: AdminOnboardingWizardScreen(),
+          ),
+        ),
       ),
 
       // Admin Notifications (outside shell for full-screen overlay)

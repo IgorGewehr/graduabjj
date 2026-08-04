@@ -1,8 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../core/sports.dart';
 import 'achievement_service.dart';
-import 'belt_progression_service.dart';
 import 'firebase_service.dart';
 import 'student_service.dart';
 
@@ -62,6 +60,20 @@ class Attendance {
   }
 }
 
+/// Lançada por [AttendanceService.markStaffScheduleLessPresence] quando o
+/// aluno já tem presença registrada hoje naquela modalidade (pelo próprio
+/// app ou por outro membro da equipe) — o caller deve tratar como aviso
+/// ("já tem presença hoje"), nunca como erro genérico.
+class AttendanceAlreadyMarkedException implements Exception {
+  final String message;
+  const AttendanceAlreadyMarkedException([
+    this.message = 'Aluno já tem presença registrada hoje nesta modalidade.',
+  ]);
+
+  @override
+  String toString() => message;
+}
+
 /// Attendance Service - Multi-tenant attendance management
 class AttendanceService {
   final String academyId;
@@ -85,6 +97,7 @@ class AttendanceService {
   Future<List<Attendance>> getByStudent(
     String studentId, {
     int limit = 50,
+    String? sport,
   }) async {
     final query = await _attendanceRef
         .where('studentId', isEqualTo: studentId)
@@ -93,6 +106,15 @@ class AttendanceService {
     var attendance = query.docs
         .map((doc) => Attendance.fromFirestore(doc))
         .toList();
+
+    // Per-sport filter (additive): legacy docs without `sport` count as 'bjj',
+    // mirroring belt_progression_service.getWeightedAttendanceCount. When
+    // sport == null the behaviour is unchanged (global, all sports).
+    if (sport != null) {
+      attendance = attendance
+          .where((a) => (a.sport ?? 'bjj') == sport)
+          .toList();
+    }
 
     // Sort by date descending
     attendance.sort((a, b) => b.date.compareTo(a.date));
@@ -145,6 +167,25 @@ class AttendanceService {
         .where('studentId', isEqualTo: studentId)
         .get();
     return query.size;
+  }
+
+  // ============================================
+  // Get Attendance Count (optionally per sport)
+  //
+  // Counts a student's attendances, optionally filtered by sport. Legacy docs
+  // without a `sport` field count as 'bjj' (same convention as
+  // belt_progression_service.getWeightedAttendanceCount). When sport == null
+  // this returns the global count across all sports.
+  // ============================================
+  Future<int> getAttendanceCount(String studentId, {String? sport}) async {
+    final query = await _attendanceRef
+        .where('studentId', isEqualTo: studentId)
+        .get();
+    if (sport == null) return query.size;
+    return query.docs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return ((data['sport'] as String?) ?? 'bjj') == sport;
+    }).length;
   }
 
   // ============================================
@@ -338,6 +379,12 @@ class AttendanceService {
 
     if (dates.isEmpty) return 0;
 
+    // RESET se a corrente quebrou: só conta se o ÚLTIMO treino foi HOJE ou
+    // ONTEM. Sem isso o streak ficava preso em ≥1 mesmo após semanas parado.
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    if (today.difference(dates.first).inDays > 1) return 0;
+
     // Count consecutive days from most recent
     int streak = 1;
     for (int i = 0; i < dates.length - 1; i++) {
@@ -350,6 +397,61 @@ class AttendanceService {
     }
 
     return streak;
+  }
+
+  /// Info de streak para o dashboard do lutador: streak atual (dias), recorde
+  /// (maior sequência já feita) e quais dias da SEMANA ATUAL (Seg=1..Dom=7)
+  /// tiveram treino. Tudo de uma leitura só (sem custo extra).
+  Future<({int current, int record, Set<int> weekDays})> getStreakInfo(
+      String studentId, {String? sport}) async {
+    final attendance = await getByStudent(studentId, limit: 365, sport: sport);
+    if (attendance.isEmpty) {
+      return (current: 0, record: 0, weekDays: <int>{});
+    }
+    final days = attendance
+        .map((a) => DateTime(a.date.year, a.date.month, a.date.day))
+        .toSet()
+        .toList()
+      ..sort((a, b) => b.compareTo(a)); // desc
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    // Streak atual (reset se o último treino não foi hoje/ontem).
+    int current = 0;
+    if (today.difference(days.first).inDays <= 1) {
+      current = 1;
+      for (var i = 0; i < days.length - 1; i++) {
+        if (days[i].difference(days[i + 1]).inDays == 1) {
+          current++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    // Recorde: maior run de dias consecutivos em todo o histórico.
+    int record = days.isEmpty ? 0 : 1;
+    int run = 1;
+    for (var i = 0; i < days.length - 1; i++) {
+      if (days[i].difference(days[i + 1]).inDays == 1) {
+        run++;
+        if (run > record) record = run;
+      } else {
+        run = 1;
+      }
+    }
+    if (current > record) record = current;
+
+    // Dias da semana atual (segunda → domingo) com treino.
+    final monday = today.subtract(Duration(days: today.weekday - 1));
+    final weekDays = <int>{};
+    for (final d in days) {
+      final diff = d.difference(monday).inDays;
+      if (diff >= 0 && diff <= 6) weekDays.add(d.weekday); // 1=Seg..7=Dom
+    }
+
+    return (current: current, record: record, weekDays: weekDays);
   }
 
   // ============================================
@@ -426,9 +528,165 @@ class AttendanceService {
     return Attendance.fromFirestore(doc);
   }
 
+  // ============================================
+  // Mark MANUAL Presence (decoupled from any charge)
+  //
+  // Grants a presence to a student WITHOUT creating any financial doc — the
+  // professor is simply registering that the student trained (e.g. a one-off
+  // private/extra session, a make-up class, a courtesy presence). Mirrors the
+  // server-side aula-particular grant (functions/server_functions.js ~4719):
+  // classId 'aula_particular' / className 'Aula Particular' by default.
+  //
+  // Unlike [markPresent], this uses a NON-COLLIDING auto-generated doc id
+  // (Firestore `.doc()`) instead of the day-deterministic id, so a professor
+  // can grant SEVERAL presences on the SAME day without hitting the
+  // "Aluno já marcado como presente" guard. The attendance write and the
+  // student counter increment ship in the SAME transaction, exactly like
+  // [markPresent].
+  // ============================================
+  Future<Attendance> markManualPresence({
+    required String studentId,
+    required String studentName,
+    required String verifiedBy,
+    required String verifiedByName,
+    DateTime? date,
+    String? sport,
+    String? note,
+    String classId = 'aula_particular',
+    String className = 'Aula Particular',
+  }) async {
+    final attendanceDate = date ?? DateTime.now();
+    // Auto-id ref: never collides, so multiple manual presences per day are OK.
+    final attendanceRef = _attendanceRef.doc();
+    final studentRef = _collections.student(studentId);
+
+    final payload = <String, dynamic>{
+      'studentId': studentId,
+      'studentName': studentName,
+      'classId': classId,
+      'className': className,
+      'date': Timestamp.fromDate(attendanceDate),
+      'verifiedBy': verifiedBy,
+      'verifiedByName': verifiedByName,
+      'notes': note,
+      // Defaults to 'bjj' for legacy/graduation queries — same as markPresent.
+      'sport': sport ?? 'bjj',
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+
+    await FirebaseService.firestore.runTransaction((tx) async {
+      // No existence check: the auto-id ref is unique by construction, so a
+      // professor may grant several presences for the same day.
+      tx.set(attendanceRef, payload);
+      tx.update(studentRef, {
+        'attendanceCount': FieldValue.increment(1),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+
+    // Milestone notification is best-effort and outside the transaction.
+    checkAttendanceMilestone(studentId, studentName, verifiedBy).ignore();
+
+    // Auto-graduation: mirror markPresent so a manual presence can also cross
+    // the configured threshold. Fire-and-forget — never blocks the write.
+    _maybeAutoPromote(
+      studentId: studentId,
+      studentName: studentName,
+      verifiedBy: verifiedBy,
+      verifiedByName: verifiedByName,
+      sport: sport,
+    ).ignore();
+
+    final doc = await attendanceRef.get();
+    return Attendance.fromFirestore(doc);
+  }
+
+  // ============================================
+  // Mark STAFF presence for a schedule-less sport (musculação/boxe/MMA)
+  //
+  // A recepção usa isto pra registrar a presença de HOJE de um aluno que NÃO
+  // usa o app (ou não conseguiu se auto-registrar) numa modalidade sem-turma
+  // (GradeSystem.none — ver core/sports.dart). Espelha EXATAMENTE o doc-id
+  // determinístico e o shape gravados pela Cloud Function `selfCheckin`
+  // (functions/index.js `_selfCheckinCore`/`exports.selfCheckin`):
+  //   - musculação → docId `{studentId}_musculacao_{YYYYMMDD}` (retrocompat
+  //     com o dado legado, que é a maioria da base hoje)
+  //   - demais esportes → docId `{studentId}_checkin_{sport}_{YYYYMMDD}`
+  // Mesmo docId ⇒ NUNCA duplica com um self check-in que o aluno já tenha
+  // feito hoje pelo próprio app (ou com outro toque da equipe): a checagem
+  // de existência roda DENTRO da transação, então quem escrever primeiro
+  // ganha e o outro esbarra em [AttendanceAlreadyMarkedException] — mesma
+  // garantia de "set sem merge só se não existir" pedida, só que atômica
+  // (evita a janela de corrida de um get() + set() separados).
+  //
+  // `sport` é o id cru ('musculacao', 'boxing', 'mma', ...); `className` é
+  // responsabilidade do caller (ex.: `getSport(sportId).label` do catálogo
+  // Dart) — este service não depende do catálogo de esportes de propósito,
+  // mesma decisão de design de [markPresent]/[markManualPresence].
+  // ============================================
+  Future<void> markStaffScheduleLessPresence({
+    required String studentId,
+    required String studentName,
+    required String sport,
+    required String className,
+    required String verifiedBy,
+    required String verifiedByName,
+  }) async {
+    final now = DateTime.now();
+    final isMusculacao = sport == 'musculacao';
+    final y = now.year.toString().padLeft(4, '0');
+    final m = now.month.toString().padLeft(2, '0');
+    final d = now.day.toString().padLeft(2, '0');
+    final docId = isMusculacao
+        ? '${studentId}_musculacao_$y$m$d'
+        : '${studentId}_checkin_${sport}_$y$m$d';
+    final classId = isMusculacao ? 'musculacao' : 'checkin_$sport';
+
+    final attendanceRef = _attendanceRef.doc(docId);
+    final studentRef = _collections.student(studentId);
+
+    final payload = <String, dynamic>{
+      'studentId': studentId,
+      'studentName': studentName,
+      'classId': classId,
+      'className': className,
+      'date': Timestamp.fromDate(now),
+      'verifiedBy': verifiedBy,
+      'verifiedByName': verifiedByName,
+      'sport': sport,
+      // Distingue de 'self_checkin' (CF) nos relatórios/analytics — quem
+      // registrou foi a equipe, não o próprio aluno.
+      'source': 'staff_manual',
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+
+    await FirebaseService.firestore.runTransaction((tx) async {
+      final existing = await tx.get(attendanceRef);
+      if (existing.exists) {
+        throw const AttendanceAlreadyMarkedException();
+      }
+      tx.set(attendanceRef, payload);
+      tx.update(studentRef, {
+        'attendanceCount': FieldValue.increment(1),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+
+    // Milestone notification is best-effort and outside the transaction —
+    // mesmo padrão de markPresent/markManualPresence.
+    checkAttendanceMilestone(studentId, studentName, verifiedBy).ignore();
+  }
+
   /// Promote the student if the academy opted into auto graduation AND
   /// they just crossed the configured threshold. No-op when the feature
   /// is off or the mode is 'manual'.
+  /// Graduação automática DESATIVADA (decisão de produto: a promoção é sempre
+  /// um ato DELIBERADO do professor — o sistema nunca escreve a faixa sozinho).
+  /// A elegibilidade por presenças continua sendo CALCULADA e SUGERIDA ao
+  /// professor na tela de detalhe do aluno (student_detail_screen →
+  /// eligibilityBySport); a promoção em si é feita manualmente lá. Mantido como
+  /// no-op para não alterar os call sites do check-in; o gating por dados
+  /// (graduationMode != 'auto') também impede a versão antiga do app de promover.
   Future<void> _maybeAutoPromote({
     required String studentId,
     required String studentName,
@@ -436,89 +694,9 @@ class AttendanceService {
     required String verifiedByName,
     String? sport,
   }) async {
-    try {
-      final settingsDoc = await _collections.academy.get();
-      if (!settingsDoc.exists) return;
-      final settings = settingsDoc.data() as Map<String, dynamic>;
-      if (settings['autoGraduationEnabled'] != true) return;
-      if (settings['graduationMode'] != 'auto') return;
-
-      final sportId = SportId.fromString(sport ?? 'bjj');
-      final progressionService = BeltProgressionService(academyId);
-      final eligibility =
-          await progressionService.checkEligibilityForStudent(
-        studentId,
-        sportId: sportId,
-      );
-      if (!eligibility.eligible) return;
-
-      // Pick the next belt + stripes for this sport. The progression
-      // service exposes the helper indirectly via Sports; we mirror the
-      // same logic as the manual admin promotion path.
-      final studentSnap = await _collections.student(studentId).get();
-      if (!studentSnap.exists) return;
-      final studentData = studentSnap.data() as Map<String, dynamic>;
-      final next = _nextGradeFor(studentData, sportId);
-      if (next == null) return; // already top grade
-
-      await progressionService.promote(
-        studentId: studentId,
-        studentName: studentName,
-        newBelt: next.belt,
-        newStripes: next.stripes,
-        promotedBy: verifiedBy,
-        promotedByName: '$verifiedByName (auto)',
-        notes: 'Graduação automática por presenças',
-        sportId: sportId,
-      );
-    } catch (_) {
-      // Swallow — auto-promotion is opportunistic, never fail the check-in.
-    }
-  }
-
-  /// Returns the next (belt, stripes) for the given sport using the grade
-  /// list from core/sports.dart. Returns null when the student is already
-  /// at the highest grade for that sport.
-  ({String belt, int stripes})? _nextGradeFor(
-    Map<String, dynamic> studentData,
-    SportId sport,
-  ) {
-    String currentBelt;
-    int currentStripes;
-    if (sport == SportId.bjj &&
-        (studentData['sportData'] == null ||
-            (studentData['sportData'] as Map)['bjj'] == null)) {
-      currentBelt = studentData['currentBelt'] ?? 'white';
-      currentStripes = studentData['currentStripes'] ?? 0;
-    } else {
-      final sd = (studentData['sportData'] as Map?)?[sport.value]
-          as Map<String, dynamic>?;
-      currentBelt = sd?['currentGrade'] ?? 'white';
-      currentStripes = sd?['currentStripes'] ?? 0;
-    }
-
-    final grades = getGradesForSport(
-      sport,
-      category: (studentData['category'] ?? 'adult') as String,
-      muaythaiVariant:
-          sport == SportId.muaythai ? resolveMuaythaiVariant(currentBelt) : null,
-    );
-    final idx = grades.indexWhere((g) => g.id == currentBelt);
-    if (idx < 0) return (belt: currentBelt, stripes: currentStripes + 1);
-
-    // Coral/red are above black — auto-graduation never reaches them (manual).
-    if (grades[idx].aboveBlack) return null;
-
-    // Add a stripe until this grade's cap, then advance to the next grade —
-    // but stop before any above-black master rank (coral/red).
-    final maxStripes = grades[idx].maxStripes;
-    if (currentStripes < maxStripes) {
-      return (belt: currentBelt, stripes: currentStripes + 1);
-    }
-    if (idx + 1 >= grades.length) return null; // already at top
-    final nextGrade = grades[idx + 1];
-    if (nextGrade.aboveBlack) return null;
-    return (belt: nextGrade.id, stripes: 0);
+    // Intencionalmente vazio — ver doc acima. A sugestão ao professor vive na
+    // elegibilidade exibida em student_detail_screen.
+    return;
   }
 
   /// Student ids that already have a [classId] attendance dated today. Used by

@@ -137,6 +137,13 @@ class GlobalUserService {
     await userRef.update(updateData);
   }
 
+  /// Marca o onboarding de boas-vindas como visto/concluído (serverTimestamp).
+  /// Idempotente; chamado quando o usuário conclui ou pula o tour.
+  Future<void> markOnboardingSeen(String userId) async {
+    await RootCollections.user(userId)
+        .update({'onboardingSeenAt': FieldValue.serverTimestamp()});
+  }
+
   /// Check if global user exists
   Future<bool> globalUserExists(String userId) async {
     final userRef = RootCollections.user(userId);

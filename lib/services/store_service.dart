@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'fns.dart';
 
 import 'firebase_service.dart';
 import 'notification_dispatcher.dart';
+import 'payment_service.dart' show PaymentMethodPolicy, PaymentMethodPolicyExtension;
 
 /// Product Category
 enum StoreProductCategory { uniform, equipment, accessory, other }
@@ -154,6 +156,12 @@ class StoreProduct {
   final List<String>? sizes;
   final List<String>? colors;
   final bool isActive;
+
+  /// Which payment methods this product accepts. Snapshotted onto the order at
+  /// `createOrder` time. Absent on legacy docs → [PaymentMethodPolicy.both]
+  /// (the current unrestricted behavior). Editable in the admin product form.
+  final PaymentMethodPolicy paymentMethodPolicy;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -169,6 +177,7 @@ class StoreProduct {
     this.sizes,
     this.colors,
     this.isActive = true,
+    this.paymentMethodPolicy = PaymentMethodPolicy.both,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -193,6 +202,9 @@ class StoreProduct {
       sizes: data['sizes'] != null ? List<String>.from(data['sizes']) : null,
       colors: data['colors'] != null ? List<String>.from(data['colors']) : null,
       isActive: data['active'] ?? data['isActive'] ?? true,
+      paymentMethodPolicy: PaymentMethodPolicyExtension.fromString(
+        data['paymentMethodPolicy'] as String?,
+      ),
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -279,6 +291,13 @@ class StoreOrder {
   final String? pixCode;
   final String? pixQrCode;
   final String? externalPaymentId;
+
+  /// Snapshot of the accepted payment methods for this order, derived from the
+  /// products at creation time (most-restrictive wins). Absent on legacy docs →
+  /// [PaymentMethodPolicy.both] (compat). The server re-enforces it on the
+  /// charge; the UI only decorates.
+  final PaymentMethodPolicy paymentMethodPolicy;
+
   final DateTime? paidAt;
   final DateTime? deliveredAt;
   final DateTime createdAt;
@@ -295,6 +314,7 @@ class StoreOrder {
     this.pixCode,
     this.pixQrCode,
     this.externalPaymentId,
+    this.paymentMethodPolicy = PaymentMethodPolicy.both,
     this.paidAt,
     this.deliveredAt,
     required this.createdAt,
@@ -321,6 +341,9 @@ class StoreOrder {
       pixQrCode: data['pixQrCode'],
       externalPaymentId:
           data['externalPaymentId'] ?? data['abacatePayTransactionId'],
+      paymentMethodPolicy: PaymentMethodPolicyExtension.fromString(
+        data['paymentMethodPolicy'] as String?,
+      ),
       paidAt: data['paidAt'] != null
           ? (data['paidAt'] as Timestamp).toDate()
           : null,
@@ -439,6 +462,7 @@ class StoreService {
     int? stockQuantity,
     List<String>? sizes,
     List<String>? colors,
+    PaymentMethodPolicy paymentMethodPolicy = PaymentMethodPolicy.both,
   }) async {
     final docRef = await _productsRef.add({
       'academyId': academyId,
@@ -451,6 +475,7 @@ class StoreService {
       'stockQuantity': stockQuantity,
       'sizes': sizes,
       'colors': colors,
+      'paymentMethodPolicy': paymentMethodPolicy.value,
       'active': true,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -627,6 +652,14 @@ class StoreService {
     final validatedItems = <Map<String, dynamic>>[];
     double total = 0;
 
+    // Snapshot of the order's accepted payment methods, derived from the
+    // products in the cart. Combined most-restrictive: PIX stays allowed only
+    // while every product allows it, same for card. A mixed cart of pix_only +
+    // card_only collapses to the most restrictive single method (server is the
+    // final arbiter; this is only the snapshot written to the order).
+    bool orderAllowsPix = true;
+    bool orderAllowsCard = true;
+
     for (final item in items) {
       final product = await getProductById(item.productId);
 
@@ -668,6 +701,10 @@ class StoreService {
         }
       }
 
+      // Accumulate the order's effective policy (most-restrictive across items).
+      orderAllowsPix = orderAllowsPix && product.paymentMethodPolicy.allowsPix;
+      orderAllowsCard = orderAllowsCard && product.paymentMethodPolicy.allowsCard;
+
       // Build validated item with SERVER-SIDE price
       final itemTotal = product.price * item.quantity;
       total += itemTotal;
@@ -682,6 +719,17 @@ class StoreService {
       });
     }
 
+    // Resolve the combined policy snapshot. `card_only` wins when only card is
+    // allowed, `pix_only` when only PIX is allowed, else `both`.
+    final PaymentMethodPolicy orderPolicy;
+    if (orderAllowsPix && orderAllowsCard) {
+      orderPolicy = PaymentMethodPolicy.both;
+    } else if (orderAllowsPix) {
+      orderPolicy = PaymentMethodPolicy.pixOnly;
+    } else {
+      orderPolicy = PaymentMethodPolicy.cardOnly;
+    }
+
     final docRef = await _ordersRef.add({
       'academyId': academyId,
       'studentId': studentId,
@@ -690,6 +738,7 @@ class StoreService {
       'total': total,
       'status': StoreOrderStatus.pendingPayment.value,
       'notes': notes,
+      'paymentMethodPolicy': orderPolicy.value,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -713,6 +762,55 @@ class StoreService {
     }
 
     return order;
+  }
+
+  /// Auditoria MP: ao marcar um pedido como pago manualmente (cash/offline), o
+  /// PIX vivo cunhado no Mercado Pago continuaria pagável → janela de cobrança
+  /// dupla (webhook trataria como duplicatePayment). Espelha o cancelamento
+  /// server-side da aula particular cash (PaymentService.markPrivateLessonGiven):
+  /// cancela o PIX no MP (best-effort, nunca bloqueia o mark-paid) e limpa os
+  /// campos pix* do doc, tornando o código impagável. Retrocompatível: pedidos
+  /// sem PIX cunhado ou já expirado simplesmente não fazem nada.
+  Future<void> _killLivePixOnPaid(String orderId) async {
+    final docRef = _ordersRef.doc(orderId);
+    final snap = await docRef.get();
+    if (!snap.exists) return;
+    final data = snap.data() as Map<String, dynamic>?;
+    if (data == null) return;
+
+    final gatewayPaymentId = data['gatewayPaymentId'] as String?;
+    final pixCode = data['pixCode'] as String?;
+    final expiresAt = data['pixExpiresAt'];
+    final expiresMs = expiresAt is Timestamp
+        ? expiresAt.toDate().millisecondsSinceEpoch
+        : 0;
+    final hasLivePix = gatewayPaymentId != null &&
+        gatewayPaymentId.isNotEmpty &&
+        pixCode != null &&
+        pixCode.isNotEmpty &&
+        expiresMs > DateTime.now().millisecondsSinceEpoch;
+
+    if (!hasLivePix) return;
+
+    // Limpa o PIX no doc ANTES de cancelar no gateway (mirrors mpMktSettle):
+    // mesmo que o cancelamento remoto falhe, o código local some.
+    await docRef.update({
+      'pixCode': FieldValue.delete(),
+      'pixQrCode': FieldValue.delete(),
+      'pixTicketUrl': FieldValue.delete(),
+      'pixExpiresAt': FieldValue.delete(),
+    });
+
+    // Best-effort: cancela o PIX aberto no MP (callable cancelMpPix, admin-gated).
+    // Nunca bloqueia o mark-paid se o cancelamento falhar.
+    try {
+      await Fns.functions.httpsCallable('cancelMpPix').call({
+        'academyId': academyId,
+        'paymentId': gatewayPaymentId,
+      });
+    } catch (e) {
+      print('[StoreService] cancelMpPix falhou (non-fatal): $e');
+    }
   }
 
   /// Update order status
@@ -751,6 +849,10 @@ class StoreService {
           await decrementStock(item.productId, item.quantity);
         }
       }
+
+      // Auditoria MP: mark-paid manual deve invalidar o PIX vivo no gateway
+      // para fechar a janela de cobrança dupla.
+      await _killLivePixOnPaid(id);
     }
 
     final data = <String, dynamic>{
@@ -779,10 +881,14 @@ class StoreService {
       for (final item in order.items) {
         final product = await getProductById(item.productId);
         if (product != null && product.stockType == StoreStockType.inStock) {
-          await updateStock(
-            item.productId,
-            (product.stockQuantity ?? 0) + item.quantity,
-          );
+          // Auditoria MP: restauração de estoque via increment atômico
+          // (FieldValue.increment), alinhando com decrementStock e o estorno
+          // server-side. Evita perda de increments concorrentes do padrão
+          // anterior read-then-write (updateStock).
+          await _productsRef.doc(item.productId).update({
+            'stockQuantity': FieldValue.increment(item.quantity),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
         }
       }
     }
@@ -823,6 +929,10 @@ class StoreService {
         await decrementStock(item.productId, item.quantity);
       }
     }
+
+    // Auditoria MP: mark-paid manual deve invalidar o PIX vivo no gateway
+    // para fechar a janela de cobrança dupla.
+    await _killLivePixOnPaid(id);
 
     final data = <String, dynamic>{
       'status': StoreOrderStatus.paid.value,

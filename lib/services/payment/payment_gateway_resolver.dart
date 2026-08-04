@@ -1,6 +1,4 @@
-import '../abacate_pay_service.dart';
-import '../asaas_payment_service.dart';
-import '../mercado_pago_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// The payment gateway connected for an academy, resolved in precedence order.
 ///
@@ -25,23 +23,29 @@ class PaymentGatewayResolver {
   const PaymentGatewayResolver._();
 
   /// Resolves the connected gateway for [academyId] following the
-  /// MP > Asaas > AbacatePay precedence. Any resolution failure degrades to
-  /// [PaymentGateway.none] (safe default: no charge surface).
+  /// MP > Asaas > AbacatePay precedence, from the same academy-doc flags the
+  /// individual services check (`mpConnected`/`asaasEnabled`/
+  /// `abacatePayEnabled`), read once.
+  ///
+  /// IMPORTANT: a transient read failure RETHROWS instead of degrading to
+  /// [PaymentGateway.none] — 'falha ao resolver' e 'nada conectado' são estados
+  /// diferentes. Callers (FutureProvider) expose the AsyncError so the UI can
+  /// offer retry instead of silently hiding the pay surface of a connected
+  /// academy. [PaymentGateway.none] is returned only when the doc was READ and
+  /// no gateway flag is on.
   static Future<PaymentGateway> resolve(String academyId) async {
-    try {
-      if (await MercadoPagoService(academyId).isEnabled()) {
-        return PaymentGateway.mercadoPago;
-      }
-      if (await AsaasPaymentService(academyId).isEnabled()) {
-        return PaymentGateway.asaas;
-      }
-      if (await AbacatePayService(academyId).isEnabled()) {
-        return PaymentGateway.abacatePay;
-      }
-      return PaymentGateway.none;
-    } catch (_) {
-      return PaymentGateway.none;
-    }
+    final doc = await FirebaseFirestore.instance
+        .collection('academies')
+        .doc(academyId)
+        .get();
+    final data = doc.data();
+    if (data == null) return PaymentGateway.none;
+    // AbacatePay foi ELIMINADO do projeto — nunca mais é um gateway válido
+    // (mesmo que a flag legada abacatePayEnabled ainda exista no doc). Só o
+    // Mercado Pago habilita pagamento pelo app.
+    if (data['mpConnected'] == true) return PaymentGateway.mercadoPago;
+    if (data['asaasEnabled'] == true) return PaymentGateway.asaas;
+    return PaymentGateway.none;
   }
 }
 

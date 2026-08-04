@@ -12,6 +12,7 @@ import '../../providers/auth_provider.dart';
 import '../../services/global_user_service.dart';
 import '../../services/instructor_link_code_service.dart';
 import '../../services/link_code_service.dart';
+import '../../services/team_service.dart';
 
 /// Link Code Screen - Create account using access code
 class LinkCodeScreen extends ConsumerStatefulWidget {
@@ -46,6 +47,12 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
   InstructorLinkCode? _validatedInstructorCode;
   String? _validatedInstructorAcademyId;
   final _fullNameController = TextEditingController();
+
+  // Academy-code flow: the entered 6-char code is the academy's UNIQUE join
+  // code (not a per-student code). The student fills their own profile and,
+  // após criar a conta, envia uma SOLICITAÇÃO que o professor aprova.
+  bool _academyMode = false;
+  String? _academyName;
 
   bool get _isInstructorMode => _validatedInstructorCode != null;
 
@@ -104,6 +111,8 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
       _validatedLinkCode = null;
       _validatedInstructorCode = null;
       _validatedInstructorAcademyId = null;
+      _academyMode = false;
+      _academyName = null;
     });
 
     final raw = _codeController.text.trim().toUpperCase();
@@ -129,22 +138,35 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         return;
       }
 
-      // Student flow (6 chars).
+      // Student flow (6 chars). Tenta primeiro o código POR-ALUNO (legado);
+      // se não for, tenta o código ÚNICO da academia (auto-cadastro novo).
       final validation = await validateCodeGlobally(raw);
 
-      if (!validation.valid) {
+      if (validation.valid) {
         if (!mounted) return;
         setState(() {
-          _errorMessage = validation.error;
+          _validatedLinkCode = validation.linkCode;
+          _currentStep = _Step.register;
           _isLoading = false;
         });
         return;
       }
 
+      // Não é código de aluno → é o código da academia?
+      final acad = await teamService.resolveAcademyCode(raw);
       if (!mounted) return;
+      if (acad != null) {
+        setState(() {
+          _academyMode = true;
+          _academyName = acad['academyName']?.toString() ?? 'Academia';
+          _currentStep = _Step.register;
+          _isLoading = false;
+        });
+        return;
+      }
+
       setState(() {
-        _validatedLinkCode = validation.linkCode;
-        _currentStep = _Step.register;
+        _errorMessage = validation.error ?? 'Código não encontrado.';
         _isLoading = false;
       });
     } catch (e) {
@@ -264,14 +286,11 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     // so we use the ProviderContainer directly instead of ref.
     final container = ProviderScope.containerOf(context);
     final authService = ref.read(authServiceProvider);
-    final academyId = _validatedLinkCode!.academyId;
-    final linkCodeService = LinkCodeService(academyId);
     final cpfDigits = _cpfController.text.replaceAll(RegExp(r'\D'), '');
     final phone = _phoneController.text.replaceAll(RegExp(r'\D'), '');
     final email = _emailController.text.trim();
     final password = _passwordController.text;
     final studentName = _validatedLinkCode!.studentName;
-    final studentId = _validatedLinkCode!.studentId;
     final code = _validatedLinkCode!.code;
 
     // Show full-screen overlay (survives GoRouter rebuilds since it's in app.dart builder)
@@ -279,20 +298,18 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     container.read(isCreatingAccountProvider.notifier).state = true;
 
     try {
-      // Create Firebase account with the student name from the link code
-      // This will also update the student document with linkedUserId and CPF
-      final userCredential = await authService.createAccountWithLinkCode(
+      // Create the account and join the academy through the joinAcademy Cloud
+      // Function — it resolves studentId/academyId from the code, claims the
+      // orphan student record (incl. cpf/phone) and marks the code used, all
+      // server-side. The UI/flow here is unchanged.
+      await authService.createAccountWithLinkCode(
         email,
         password,
         studentName,
-        studentId,
-        academyId,
-        cpfDigits.isNotEmpty ? cpfDigits : null,
+        code,
+        cpf: cpfDigits.isNotEmpty ? cpfDigits : null,
         phone: phone.isNotEmpty ? phone : null,
       );
-
-      // Mark the code as used
-      await linkCodeService.markAsUsed(code, userCredential.user!.uid);
 
       // All Firestore documents are created. Force Riverpod to reload user data.
       container.invalidate(currentUserProvider);
@@ -329,6 +346,66 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
           _isLoading = false;
         });
       }
+    }
+  }
+
+  /// Academy-code signup: cria a conta (grátis) e envia uma SOLICITAÇÃO de
+  /// entrada. Nada é vinculado até o professor aprovar — o aluno cai na tela
+  /// "aguardando aprovação" na aba Academia.
+  Future<void> _createAcademyRequestAccount() async {
+    if (!_registerFormKey.currentState!.validate()) return;
+    final fullName = _fullNameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final phone = _phoneController.text.replaceAll(RegExp(r'\D'), '');
+    final cpf = _cpfController.text.replaceAll(RegExp(r'\D'), '');
+    final code = _codeController.text.trim().toUpperCase();
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _currentStep = _Step.creating;
+    });
+
+    try {
+      final credential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(email: email, password: password);
+      final user = credential.user;
+      if (user == null) throw Exception('No user returned from Firebase Auth');
+      await user.updateDisplayName(fullName);
+      await globalUserService.createGlobalUser(
+        userId: user.uid,
+        email: email,
+        displayName: fullName,
+        accountType: AccountType.free,
+      );
+      await teamService.submitJoinRequest(
+        code,
+        fullName: fullName,
+        phone: phone.isNotEmpty ? phone : null,
+        cpf: cpf.isNotEmpty ? cpf : null,
+      );
+      if (!mounted) return;
+      setState(() {
+        _currentStep = _Step.success;
+        _isLoading = false;
+      });
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _currentStep = _Step.register;
+        _isLoading = false;
+        _errorMessage = e.code == 'email-already-in-use'
+            ? 'Email já em uso. Faça login e entre com o código pela aba Academia.'
+            : 'Erro ao criar conta: ${e.message}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _currentStep = _Step.register;
+        _isLoading = false;
+        _errorMessage = _getErrorMessage(e);
+      });
     }
   }
 
@@ -603,7 +680,9 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
                       Text(
                         _isInstructorMode
                             ? 'Convite de ${_validatedInstructorCode!.createdByName}'
-                            : 'Aluno: ${_validatedLinkCode!.studentName}',
+                            : _academyMode
+                                ? 'Entrando na ${_academyName ?? 'academia'}'
+                                : 'Aluno: ${_validatedLinkCode!.studentName}',
                         style: AppTheme.bodySmall.copyWith(
                           color: AppTheme.success,
                         ),
@@ -667,25 +746,29 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
           if (_errorMessage != null) const SizedBox(height: 24),
 
-          // Name field (read-only, from link code)
-          TextFormField(
-            initialValue: _validatedLinkCode!.studentName,
-            enabled: false,
-            decoration: InputDecoration(
-              labelText: 'Nome',
-              prefixIcon: const Icon(LucideIcons.user, size: 20),
-              filled: true,
-              fillColor: AppTheme.surface,
-            ),
-          ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.1),
+          // Nome: read-only só no fluxo POR-ALUNO (vem do código pré-cadastrado).
+          // Instrutor e Academia digitam o próprio nome (_validatedLinkCode é
+          // null nesses modos — acessá-lo aqui crashava a tela).
+          if (!_isInstructorMode && !_academyMode) ...[
+            TextFormField(
+              initialValue: _validatedLinkCode!.studentName,
+              enabled: false,
+              decoration: InputDecoration(
+                labelText: 'Nome',
+                prefixIcon: const Icon(LucideIcons.user, size: 20),
+                filled: true,
+                fillColor: AppTheme.surface,
+              ),
+            ).animate().fadeIn(delay: 300.ms).slideX(begin: -0.1),
+            const SizedBox(height: 16),
+          ],
 
-          const SizedBox(height: 16),
-
-          // Instructor: full name field (student name comes from linkCode)
-          if (_isInstructorMode) ...[
+          // Nome editável: instrutor OU academia.
+          if (_isInstructorMode || _academyMode) ...[
             TextFormField(
               controller: _fullNameController,
               keyboardType: TextInputType.name,
+              textCapitalization: TextCapitalization.words,
               textInputAction: TextInputAction.next,
               decoration: const InputDecoration(
                 labelText: 'Nome completo',
@@ -695,8 +778,11 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
                   (v == null || v.trim().isEmpty) ? 'Informe seu nome' : null,
             ).animate().fadeIn(delay: 350.ms).slideX(begin: -0.1),
             const SizedBox(height: 16),
-          ] else ...[
-            // CPF field (student only)
+          ],
+
+          // Contato: fluxo POR-ALUNO e ACADEMIA (instrutor não coleta). Na
+          // academia o CPF é OPCIONAL (o professor completa depois se quiser).
+          if (!_isInstructorMode) ...[
             TextFormField(
               controller: _cpfController,
               keyboardType: TextInputType.number,
@@ -714,13 +800,15 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
                   );
                 }
               },
-              decoration: const InputDecoration(
-                labelText: 'CPF',
+              decoration: InputDecoration(
+                labelText: _academyMode ? 'CPF (opcional)' : 'CPF',
                 hintText: '000.000.000-00',
-                prefixIcon: Icon(LucideIcons.fileText, size: 20),
+                prefixIcon: const Icon(LucideIcons.fileText, size: 20),
               ),
               validator: (value) {
-                if (value == null || value.isEmpty) return 'Informe seu CPF';
+                final empty = value == null || value.isEmpty;
+                if (_academyMode && empty) return null; // opcional na academia
+                if (empty) return 'Informe seu CPF';
                 final digits = value.replaceAll(RegExp(r'\D'), '');
                 if (digits.length != 11) return 'CPF deve ter 11 digitos';
                 if (!_validateCpf(value)) return 'CPF invalido';
@@ -728,7 +816,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
               },
             ).animate().fadeIn(delay: 350.ms).slideX(begin: -0.1),
             const SizedBox(height: 16),
-            // WhatsApp field (student only)
+            // WhatsApp (obrigatório nos dois).
             TextFormField(
               controller: _phoneController,
               keyboardType: TextInputType.phone,
@@ -856,7 +944,9 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
                   ? null
                   : (_isInstructorMode
                       ? _createInstructorAccount
-                      : _createAccount),
+                      : _academyMode
+                          ? _createAcademyRequestAccount
+                          : _createAccount),
               child: _isLoading
                   ? const SizedBox(
                       width: 20,
@@ -909,7 +999,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
         // Title
         Text(
-          'Conta criada com sucesso!',
+          _academyMode ? 'Solicitação enviada!' : 'Conta criada com sucesso!',
           style: AppTheme.displaySmall,
           textAlign: TextAlign.center,
         ).animate().fadeIn(delay: 100.ms),
@@ -917,7 +1007,13 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         const SizedBox(height: 8),
 
         Text(
-          'Sua conta foi vinculada ao aluno ${_validatedLinkCode!.studentName}',
+          _isInstructorMode
+              ? 'Conta de professor criada e vinculada à academia.'
+              : _academyMode
+                  ? 'Enviamos sua solicitação para ${_academyName ?? 'a academia'}. '
+                      'Assim que o professor aprovar, seu acesso à academia libera '
+                      'sozinho no app.'
+                  : 'Sua conta foi vinculada ao aluno ${_validatedLinkCode!.studentName}',
           style: AppTheme.bodyMedium.copyWith(
             color: AppTheme.textSecondary,
           ),
@@ -927,7 +1023,9 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         const SizedBox(height: 16),
 
         Text(
-          'Agora faca login para acessar o app',
+          _academyMode
+              ? 'Você já pode usar o app enquanto aguarda.'
+              : 'Agora faca login para acessar o app',
           style: AppTheme.bodyMedium.copyWith(
             color: AppTheme.primary,
             fontWeight: FontWeight.w600,
@@ -941,8 +1039,8 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         SizedBox(
           height: 52,
           child: ElevatedButton(
-            onPressed: () => context.go('/login'),
-            child: const Text('Ir para Login'),
+            onPressed: () => context.go(_academyMode ? '/portal' : '/login'),
+            child: Text(_academyMode ? 'Entrar no app' : 'Ir para Login'),
           ),
         ).animate().fadeIn(delay: 300.ms).slideY(begin: 0.1),
       ],

@@ -51,7 +51,9 @@ class _StatSkeletonCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: height,
-      padding: const EdgeInsets.all(16),
+      // vertical 12 (não 16): com altura 72 o conteúdo (20+8+12=40) + 32 de
+      // padding estourava a Column por 2px.
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(12),

@@ -1,6 +1,12 @@
 # Plano de Implementação — Registro de Treino + Biblioteca de Exercícios (A6 + A5)
 
-> Status: planejamento. Itens **A6** (registro de execução + progressão/PR) e **A5**
+> **Status (2026-07): IMPLEMENTADO em produção** — `lib/models/exercise.dart`,
+> `lib/services/exercise_service.dart`, `lib/models/workout_execution.dart`,
+> `lib/services/workout_execution_service.dart`,
+> `lib/screens/portal/exercise_progress_screen.dart`. Mantido como
+> especificação de referência do que foi construído.
+>
+> Itens **A6** (registro de execução + progressão/PR) e **A5**
 > (biblioteca de exercícios com vídeo) do `docs/roadmap-modalidades.md`. Branch:
 > `feat/evolucao-modulos`.
 >

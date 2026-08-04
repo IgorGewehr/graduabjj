@@ -344,6 +344,24 @@ class CompetitionService {
   // Update Competition
   // ============================================
   Future<Competition> update(String id, Map<String, dynamic> data) async {
+    // Quando a data muda mas nenhum status explícito é informado, deriva o
+    // status da data (espelha o create) para o campeonato não cair na aba errada.
+    if (data.containsKey('date') && !data.containsKey('status')) {
+      final rawDate = data['date'];
+      DateTime? parsedDate;
+      if (rawDate is Timestamp) {
+        parsedDate = rawDate.toDate();
+      } else if (rawDate is DateTime) {
+        parsedDate = rawDate;
+        // Normaliza para Timestamp por paridade com o create.
+        data['date'] = Timestamp.fromDate(rawDate);
+      }
+      if (parsedDate != null) {
+        data['status'] = parsedDate.isBefore(DateTime.now())
+            ? CompetitionStatus.completed.value
+            : CompetitionStatus.upcoming.value;
+      }
+    }
     data['updatedAt'] = FieldValue.serverTimestamp();
     await _collections.competition(id).update(data);
     final updated = await getById(id);
@@ -351,17 +369,33 @@ class CompetitionService {
   }
 
   // ============================================
-  // Delete Competition (and all results)
+  // Delete Competition (cascade: results + enrollments + doc)
   // ============================================
   Future<void> delete(String id) async {
-    // Delete all results for this competition
-    final results = await getResultsForCompetition(id);
-    for (final result in results) {
-      await deleteResult(result.id);
-    }
+    // Busca todos os documentos dependentes para apagar em cascata.
+    final resultsSnapshot =
+        await _resultsRef.where('competitionId', isEqualTo: id).get();
+    final enrollmentsSnapshot = await _collections.competitionEnrollments
+        .where('competitionId', isEqualTo: id)
+        .get();
 
-    // Delete the competition
-    await _collections.competition(id).delete();
+    // Reúne todas as referências (results + enrollments + o doc do campeonato).
+    final refs = <DocumentReference>[
+      ...resultsSnapshot.docs.map((doc) => doc.reference),
+      ...enrollmentsSnapshot.docs.map((doc) => doc.reference),
+      _collections.competition(id),
+    ];
+
+    // Apaga em WriteBatch atômico, chunkando em lotes de 500 (limite do Firestore).
+    const chunkSize = 500;
+    for (var i = 0; i < refs.length; i += chunkSize) {
+      final batch = FirebaseService.firestore.batch();
+      final end = (i + chunkSize < refs.length) ? i + chunkSize : refs.length;
+      for (var j = i; j < end; j++) {
+        batch.delete(refs[j]);
+      }
+      await batch.commit();
+    }
   }
 
   // ============================================

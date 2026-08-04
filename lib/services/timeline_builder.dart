@@ -2,6 +2,7 @@ import '../core/sports.dart';
 import '../models/student.dart';
 import 'achievement_service.dart';
 import 'belt_progression_service.dart';
+import 'self_records_service.dart';
 
 /// Shared, UI-agnostic motor for the portal timeline.
 ///
@@ -38,6 +39,15 @@ class TimelineEvent {
   /// Modalidade do evento (define cor/label da faixa). Default BJJ.
   final SportId sportId;
 
+  /// True when this event originates from a student-declared self record
+  /// (selfGraduations / selfCompetitions sub-collections). These events are
+  /// editable/deletable by the student; verified events are read-only.
+  final bool isSelf;
+
+  /// Firestore doc id inside `selfGraduations/{id}` or `selfCompetitions/{id}`.
+  /// Null for verified events.
+  final String? selfDocId;
+
   const TimelineEvent({
     required this.id,
     required this.date,
@@ -49,6 +59,8 @@ class TimelineEvent {
     this.stripes,
     this.academyName,
     this.sportId = SportId.bjj,
+    this.isSelf = false,
+    this.selfDocId,
   });
 }
 
@@ -96,12 +108,14 @@ TimelineEventType? timelineTypeForAchievement(AchievementType type) {
 
 /// Builds the unified, ordered list of timeline events for a student.
 ///
-/// Combines three sources, in this exact precedence:
+/// Combines four sources, in this exact precedence:
 ///   1. A synthetic "Inicio da Jornada" start marker (per-sport startDate when
 ///      available, falling back to the student's BJJ/legacy start date).
-///   2. Belt progressions → graduation/stripe events.
+///   2. Belt progressions → graduation/stripe events (verified, read-only).
 ///   3. Achievements (competitions, generic milestones, and the gamification
 ///      markers); graduation/stripe achievements are skipped to avoid dupes.
+///   4. Auto-declared self records (selfGraduations + selfCompetitions):
+///      merged inline, tagged with isSelf=true so the UI can offer edit/delete.
 ///
 /// The result is sorted by date **ascending** (oldest first). When [sportFilter]
 /// is non-null (multi-sport student filtering by tab) the list is restricted to
@@ -113,6 +127,8 @@ List<TimelineEvent> buildTimelineEvents({
   required List<BeltProgression> progressions,
   String? academyName,
   SportId? sportFilter,
+  List<SelfGraduation> selfGraduations = const [],
+  List<SelfCompetition> selfCompetitions = const [],
 }) {
   final events = <TimelineEvent>[];
 
@@ -180,6 +196,47 @@ List<TimelineEvent> buildTimelineEvents({
         sportId: a.sport != null
             ? SportId.fromString(a.sport!)
             : student.getPrimarySport(),
+      ),
+    );
+  }
+
+  // Auto-declared self graduations — isSelf=true, tagged with selfDocId.
+  // A stripes==0 entry represents a belt change; stripes>0 is a grau marker.
+  for (final g in selfGraduations) {
+    final sportId = SportId.fromString(g.sport);
+    final isBeltChange = g.stripes == 0;
+    final gradeLabel = getGradeLabel(sportId, g.grade);
+    events.add(
+      TimelineEvent(
+        id: 'self_grad_${g.id}',
+        date: g.date,
+        type: isBeltChange
+            ? TimelineEventType.graduation
+            : TimelineEventType.stripe,
+        title: isBeltChange ? 'Faixa $gradeLabel' : '${g.stripes}o Grau',
+        belt: g.grade,
+        stripes: g.stripes,
+        sportId: sportId,
+        isSelf: true,
+        selfDocId: g.id,
+      ),
+    );
+  }
+
+  // Auto-declared self competitions — isSelf=true, tagged with selfDocId.
+  for (final c in selfCompetitions) {
+    final sportId = SportId.fromString(c.sport);
+    events.add(
+      TimelineEvent(
+        id: 'self_comp_${c.id}',
+        date: c.date,
+        type: TimelineEventType.competition,
+        title: c.name.isNotEmpty ? c.name : 'Competicao',
+        position: c.placement,
+        academyName: c.externalAcademy,
+        sportId: sportId,
+        isSelf: true,
+        selfDocId: c.id,
       ),
     );
   }

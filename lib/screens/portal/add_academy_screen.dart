@@ -3,12 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../providers/providers.dart';
 import '../../services/firebase_service.dart';
+import '../../services/link_code_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/polish/polish.dart';
 
@@ -360,48 +360,21 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
     });
 
     try {
-      final firestore = FirebaseService.firestore;
-
-      // Search for the code in all academies' linkCodes subcollection
-      final academiesSnapshot = await firestore.collection('academies').get();
-
-      String? foundAcademyId;
-      String? foundStudentId;
-      Map<String, dynamic>? codeData;
-
-      for (final academyDoc in academiesSnapshot.docs) {
-        final codeQuery = await academyDoc.reference
-            .collection('linkCodes')
-            .where('code', isEqualTo: code.toUpperCase())
-            .where('usedAt', isNull: true)
-            .limit(1)
-            .get();
-
-        if (codeQuery.docs.isNotEmpty) {
-          foundAcademyId = academyDoc.id;
-          codeData = codeQuery.docs.first.data();
-          foundStudentId = codeData['studentId'] as String?;
-          break;
-        }
-      }
-
-      if (foundAcademyId == null || codeData == null) {
+      // BUG FIX ("código inválido" ao entrar numa 2ª academia): a versão
+      // anterior listava TODAS as academias (rules: belongsToAcademy → o aluno
+      // de outra academia é NEGADO e caía no catch). O caminho certo é o MESMO
+      // do cadastro: collectionGroup em linkCodes (as rules liberam código
+      // não-usado explicitamente, e o índice CG code+usedAt já existe).
+      final validation = await validateCodeGlobally(code);
+      if (!validation.valid || validation.linkCode == null) {
         setState(() {
           _isValidating = false;
-          _errorMessage = 'Codigo invalido ou ja utilizado';
+          _errorMessage = validation.error ?? 'Codigo invalido ou ja utilizado';
         });
         return;
       }
-
-      // Check if code is expired
-      final expiresAt = (codeData['expiresAt'] as Timestamp?)?.toDate();
-      if (expiresAt != null && DateTime.now().isAfter(expiresAt)) {
-        setState(() {
-          _isValidating = false;
-          _errorMessage = 'Codigo expirado';
-        });
-        return;
-      }
+      final linkCode = validation.linkCode!;
+      final foundAcademyId = linkCode.academyId;
 
       // Check if already linked to this academy
       final mapping = ref.read(userAcademyMappingProvider).valueOrNull;
@@ -413,31 +386,27 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
         return;
       }
 
-      // Get academy info
-      final academyDoc = await firestore
-          .collection('academies')
-          .doc(foundAcademyId)
-          .get();
-      final academyData = academyDoc.data();
-
-      // Get student info if available
-      String? studentName;
-      if (foundStudentId != null) {
-        final studentDoc = await firestore
-            .collection('academies/$foundAcademyId/students')
-            .doc(foundStudentId)
+      // Nome/logo da academia: o aluno ainda NÃO é membro, então essa leitura
+      // pode ser negada pelas rules — é só decorativa. Best-effort com
+      // fallback; o nome do aluno vem do próprio doc do código (studentName).
+      String academyName = 'Academia';
+      String? academyLogoUrl;
+      try {
+        final academyDoc = await FirebaseService.firestore
+            .collection('academies')
+            .doc(foundAcademyId)
             .get();
-        if (studentDoc.exists) {
-          studentName = studentDoc.data()?['fullName'] as String?;
-        }
-      }
+        academyName = academyDoc.data()?['name'] ?? 'Academia';
+        academyLogoUrl = academyDoc.data()?['logoUrl'];
+      } catch (_) {/* sem acesso pré-vínculo: segue com fallback */}
 
       setState(() {
         _isValidating = false;
         _academyId = foundAcademyId;
-        _academyName = academyData?['name'] ?? 'Academia';
-        _academyLogoUrl = academyData?['logoUrl'];
-        _studentName = studentName;
+        _academyName = academyName;
+        _academyLogoUrl = academyLogoUrl;
+        _studentName =
+            linkCode.studentName.isNotEmpty ? linkCode.studentName : null;
       });
     } catch (e) {
       setState(() {

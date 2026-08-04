@@ -13,11 +13,28 @@ import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../services/checkin_service.dart';
 import '../../widgets/checkin_confirm_dialog.dart';
+import '../../widgets/onboarding/quick_create_class_form.dart';
 import '../../widgets/polish/polish.dart';
 
 /// Admin Attendance Screen - Mobile-optimized matching webapp UX
 class AdminAttendanceScreen extends ConsumerStatefulWidget {
-  const AdminAttendanceScreen({super.key});
+  /// Fatia 7 (SPEC_ONBOARDING_2026-07.md, W4 do wizard "Sua primeira
+  /// chamada"): quando presente, a turma correspondente já entra
+  /// pré-selecionada — o dono não precisa escolher no dropdown de novo logo
+  /// depois de criá-la. `null` preserva o comportamento de sempre (nenhuma
+  /// turma pré-selecionada).
+  final String? initialClassId;
+
+  /// Quando não-nulo, mostra um banner leve no topo com este texto até o
+  /// primeiro toque marcar alguém presente (some sozinho depois). Usado só
+  /// pelo wizard — fora dele o parâmetro fica `null` e nada muda.
+  final String? wizardBannerText;
+
+  const AdminAttendanceScreen({
+    super.key,
+    this.initialClassId,
+    this.wizardBannerText,
+  });
 
   @override
   ConsumerState<AdminAttendanceScreen> createState() =>
@@ -53,6 +70,13 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
     super.dispose();
   }
 
+  /// Real display name of the logged-in professor/admin to stamp on
+  /// attendance records (verifiedByName). Returns '' when there is no real
+  /// name set — the Jornada treats '' as "sem nome". We never fall back to a
+  /// generic label like "Administrador".
+  String get _verifierName =>
+      ref.read(currentUserProvider).valueOrNull?.displayName.trim() ?? '';
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
 
@@ -76,12 +100,28 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       final classes = results[0] as List<BJJClass>;
       final students = results[1] as List<Student>;
 
+      // Fatia 7: pré-seleciona a turma do wizard (widget.initialClassId), se
+      // informada e ainda existente. Sem isso, mantém o padrão de sempre
+      // (nenhuma turma selecionada — o dono escolhe no dropdown).
+      BJJClass? preselected;
+      if (widget.initialClassId != null) {
+        for (final c in classes) {
+          if (c.id == widget.initialClassId) {
+            preselected = c;
+            break;
+          }
+        }
+      }
+
       setState(() {
         _classes = classes;
         _students = students;
-        _selectedClass = null;
+        _selectedClass = preselected;
         _isLoading = false;
       });
+      if (preselected != null) {
+        await _loadAttendanceForClass();
+      }
     } catch (e) {
       setState(() => _isLoading = false);
     }
@@ -226,7 +266,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       final result = await checkinService.confirmCheckins(
         checkinIds,
         'admin',
-        'Administrador',
+        _verifierName,
       );
 
       if (mounted) {
@@ -301,7 +341,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           classId: _selectedClass!.id,
           className: _selectedClass!.name,
           verifiedBy: 'admin',
-          verifiedByName: 'Administrador',
+          verifiedByName: _verifierName,
           date: _selectedDate,
           weight: _selectedClass!.effectiveWeight(),
           sport: _selectedClass!.sport,
@@ -355,7 +395,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           classId: _selectedClass!.id,
           className: _selectedClass!.name,
           verifiedBy: 'admin',
-          verifiedByName: 'Administrador',
+          verifiedByName: _verifierName,
           date: _selectedDate,
           weight: _selectedClass!.effectiveWeight(),
           sport: _selectedClass!.sport,
@@ -433,7 +473,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
         classId: _selectedClass!.id,
         className: _selectedClass!.name,
         verifiedBy: 'admin',
-        verifiedByName: 'Administrador',
+        verifiedByName: _verifierName,
         date: _selectedDate,
         weight: _selectedClass!.effectiveWeight(),
         sport: _selectedClass!.sport,
@@ -623,6 +663,50 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                         ),
                       ),
 
+                      // Fatia 7 (SPEC_ONBOARDING_2026-07.md, W4 do wizard):
+                      // banner leve — some sozinho no 1º toque que marcar
+                      // alguém presente. Fora do wizard, wizardBannerText é
+                      // null e este sliver nunca aparece.
+                      if (widget.wizardBannerText != null &&
+                          _presentStudentIds.isEmpty)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: AppTheme.primary.withValues(alpha: 0.2),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    LucideIcons.handMetal,
+                                    size: 18,
+                                    color: AppTheme.primary,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      widget.wizardBannerText!,
+                                      style: AppTheme.bodySmall.copyWith(
+                                        color: AppTheme.textPrimary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
                       // Search bar
                       if (_selectedClass != null)
                         SliverToBoxAdapter(
@@ -652,7 +736,16 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
 
                       // Student list or empty state
                       _selectedClass == null
-                          ? SliverFillRemaining(child: _buildSelectClassState())
+                          ? SliverFillRemaining(
+                              // Beco sem saída do diagnóstico: sem NENHUMA
+                              // turma, o dropdown fica vazio e o professor
+                              // nunca descobre que precisa criar uma turma
+                              // pra registrar presença. Com turma(s), o
+                              // estado normal é só pedir pra selecionar uma.
+                              child: _classes.isEmpty
+                                  ? _buildNoClassesState()
+                                  : _buildSelectClassState(),
+                            )
                           : _buildStudentSliverList(),
 
                       // Bottom padding
@@ -942,6 +1035,117 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  /// Estado quando a academia ainda NÃO tem nenhuma turma cadastrada — o
+  /// beco sem saída do diagnóstico (19/36 academias mortas caíram aqui:
+  /// alunos e planos cadastrados, zero turmas, chamada sempre vazia sem
+  /// pista do porquê). O CTA cria a 1ª turma sem sair desta tela.
+  Widget _buildNoClassesState() {
+    return PolishedEmptyState(
+      icon: LucideIcons.calendarPlus,
+      title: 'Nenhuma turma ainda',
+      subtitle:
+          'Para registrar presença, crie ao menos uma turma. Leva menos de um minuto.',
+      actionLabel: 'Criar minha primeira turma',
+      onAction: _showQuickCreateClassSheet,
+    );
+  }
+
+  /// Bottom-sheet mínimo de criação de turma, aberto direto da chamada
+  /// quando `_classes.isEmpty`. Só o nome é obrigatório — horário/dias
+  /// ficam colapsados em "Mais opções" porque exigir isso aqui é mais um
+  /// jeito de travar o professor antes da 1ª presença. Ao salvar, a turma
+  /// nova já entra selecionada na chamada (sem isso ele cai de volta no
+  /// "escolha uma turma" e perde o fio).
+  void _showQuickCreateClassSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        // Captura o Navigator ANTES do primeiro await (dentro do form): depois
+        // de um gap assíncrono não dá pra usar `sheetContext` com segurança (o
+        // sheet pode já ter sido fechado por fora).
+        final navigator = Navigator.of(sheetContext);
+        return Container(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
+          ),
+          decoration: const BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTheme.divider,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        LucideIcons.users,
+                        color: AppTheme.primary,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Criar minha primeira turma',
+                        style: AppTheme.titleLarge.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                // Fatia 7 (SPEC_ONBOARDING_2026-07.md): conteúdo (nome + "mais
+                // opções" + matricular-todos + salvar) extraído para
+                // QuickCreateClassForm — reusado aqui E no wizard
+                // `/admin/comece-aqui` (W1 fight/hybrid), sem duplicar lógica.
+                QuickCreateClassForm(
+                  students: _students,
+                  analyticsSource: 'chamada_empty_state',
+                  onCreated: (created) async {
+                    if (!mounted) return;
+                    setState(() {
+                      _classes = [..._classes, created];
+                      _selectedClass = created;
+                    });
+                    navigator.pop();
+                    context.showSuccess('Turma criada!');
+                    await _loadAttendanceForClass();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1391,7 +1595,8 @@ class _AttendanceStudentCard extends StatelessWidget {
               ),
               child: Center(
                 child: Text(
-                  student.fullName[0].toUpperCase(),
+                  (student.fullName.isNotEmpty ? student.fullName[0] : '?')
+                      .toUpperCase(),
                   style: AppTheme.bodyMedium.copyWith(
                     fontWeight: FontWeight.w600,
                     color: AppTheme.textSecondary,

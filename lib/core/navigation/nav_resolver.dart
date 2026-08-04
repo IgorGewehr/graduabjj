@@ -72,6 +72,12 @@ List<ResolvedNavEntry> resolveAdminCatalog({
       return ResolvedNavEntry(entry, NavEntryState.hidden);
     }
 
+    // MP-connected gate: entries that only make sense with Mercado Pago
+    // conectado (ex.: admin_assinaturas) somem quando não está conectado.
+    if (entry.requiresMpConnected && !(settings?.mpConnected ?? false)) {
+      return ResolvedNavEntry(entry, NavEntryState.hidden);
+    }
+
     final feature = entry.feature;
     if (feature == null || isFeatureEnabled(feature, settings)) {
       return ResolvedNavEntry(entry, NavEntryState.visible);

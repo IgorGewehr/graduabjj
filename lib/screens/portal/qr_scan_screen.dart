@@ -4,9 +4,11 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../core/platform_support.dart';
 import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/student_provider.dart';
+import '../../services/analytics_service.dart';
 import '../../services/qr_attendance_service.dart';
 import '../../widgets/polish/polish.dart';
 
@@ -23,10 +25,15 @@ class QrScanScreen extends ConsumerStatefulWidget {
 }
 
 class _QrScanScreenState extends ConsumerState<QrScanScreen> {
-  final MobileScannerController _controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.normal,
-    facing: CameraFacing.back,
-  );
+  // Desktop (Windows/Linux) não tem câmera via mobile_scanner: controller fica
+  // nulo e o build mostra um fallback (o check-in por QR é do celular; no
+  // desktop a presença vem da catraca).
+  final MobileScannerController? _controller = PlatformSupport.canScanCamera
+      ? MobileScannerController(
+          detectionSpeed: DetectionSpeed.normal,
+          facing: CameraFacing.back,
+        )
+      : null;
 
   bool _isProcessing = false;
   String? _statusMessage;
@@ -35,7 +42,7 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
 
   @override
   void dispose() {
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -75,7 +82,7 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
         verifiedByName: user.displayName,
       );
 
-      await _controller.stop();
+      await _controller?.stop();
       if (!mounted) return;
       setState(() {
         _success = result;
@@ -116,11 +123,27 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
       _statusMessage = null;
       _statusIsError = false;
     });
-    _controller.start();
+    _controller?.start();
   }
 
   @override
   Widget build(BuildContext context) {
+    // Desktop: sem câmera. Mostra orientação em vez de crashar.
+    if (_controller == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Check-in por QR')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(32),
+            child: Text(
+              'A leitura de QR usa a câmera do celular. No computador, a '
+              'presença é registrada pela catraca/leitor da academia.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
     final success = _success;
     return Scaffold(
       backgroundColor: Colors.black,
@@ -132,14 +155,14 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
         actions: [
           IconButton(
             icon: ValueListenableBuilder<MobileScannerState>(
-              valueListenable: _controller,
+              valueListenable: _controller!,
               builder: (context, state, _) {
                 final on = state.torchState == TorchState.on;
                 return Icon(on ? LucideIcons.zapOff : LucideIcons.zap);
               },
             ),
             tooltip: 'Lanterna',
-            onPressed: () => _controller.toggleTorch(),
+            onPressed: () => _controller?.toggleTorch(),
           ),
         ],
       ),
@@ -148,12 +171,12 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
           : Stack(
               children: [
                 MobileScanner(
-                  controller: _controller,
+                  controller: _controller!,
                   onDetect: _handleDetection,
-                  errorBuilder: (context, error) => _CameraErrorView(
+                  errorBuilder: (context, error, child) => _CameraErrorView(
                     error: error,
                     onRetry: () {
-                      _controller.start();
+                      _controller?.start();
                     },
                   ),
                 ),
@@ -349,7 +372,7 @@ class _ReticleOverlayState extends State<_ReticleOverlay>
 
   @override
   void dispose() {
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -430,6 +453,10 @@ class _SuccessViewState extends State<_SuccessView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) Celebration.confetti(context);
     });
+    // Analytics (jul/2026): check-in por QR de turma confirmado. Aqui (não no
+    // handler de scan) porque _SuccessView só constrói quando o resultado já
+    // voltou com sucesso — 1x por check-in, sem contar tentativas com erro.
+    AnalyticsService.logCheckinScanned(kind: 'qr');
   }
 
   @override

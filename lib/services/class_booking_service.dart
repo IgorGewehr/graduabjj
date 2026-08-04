@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'fns.dart';
 
 import '../core/class_occurrences.dart';
 import '../models/class_booking.dart';
@@ -29,7 +29,7 @@ class BookingActionResult {
 class ClassBookingService {
   final String academyId;
   late final Collections _collections;
-  final FirebaseFunctions _functions = FirebaseFunctions.instance;
+  final CallableClient _functions = Fns.functions;
 
   ClassBookingService(this.academyId) {
     _collections = Collections.forAcademy(academyId);

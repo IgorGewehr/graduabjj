@@ -674,7 +674,35 @@ class _AdminOrderDetailsSheetState
     );
 
     if (confirmed == true) {
-      await _updateStatus(StoreOrderStatus.cancelled);
+      // Auditoria MP: cancelar via StoreService.cancelOrder (nao _updateStatus),
+      // pois cancelOrder restaura o estoque de pedidos ja pagos/preparando/prontos
+      // (estoque foi decrementado na transicao -> paid). _updateStatus(cancelled)
+      // pulava a restauracao, causando drift silencioso de estoque.
+      await _cancelOrderWithStockRestore();
+    }
+  }
+
+  /// Cancela o pedido restaurando estoque (delega ao StoreService.cancelOrder,
+  /// que so devolve estoque de itens inStock quando o pedido nao era pendente).
+  Future<void> _cancelOrderWithStockRestore() async {
+    final academyId = FirebaseService.academyId;
+    setState(() => _isUpdatingStatus = true);
+    try {
+      final storeService = StoreService(academyId);
+      await storeService.cancelOrder(widget.order.id);
+      if (mounted) {
+        Navigator.pop(context);
+        context.showSuccess('Pedido cancelado!');
+        ref.invalidate(ordersProvider);
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showError('Erro ao cancelar pedido: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingStatus = false);
+      }
     }
   }
 

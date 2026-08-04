@@ -61,6 +61,11 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
   StudentStatus _status = StudentStatus.active;
   List<Plan> _selectedPlans = [];
   List<Plan> _availablePlans = [];
+  // Turmas em que o aluno vai treinar. Sem NENHUMA, o aluno fica invisível
+  // na chamada (que filtra por studentIds da turma) — beco sem saída
+  // confirmado no diagnóstico. Ver _buildClassChips / sync em _saveStudent.
+  List<BJJClass> _selectedClasses = [];
+  List<BJJClass> _availableClasses = [];
 
   // Multi-sport graduation state. Each entry holds the current belt+stripes
   // for one modality the student practices. Starts empty so that creating a
@@ -165,8 +170,10 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
     try {
       final academyId = FirebaseService.academyId;
       final planService = PlanService(academyId);
+      final classService = ClassService(academyId);
 
       _availablePlans = await planService.list();
+      _availableClasses = await classService.list();
 
       // Academy's default Muay Thai ladder (overridden per-student below when
       // editing someone who already has a grade from the other system). Await
@@ -183,6 +190,11 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
           _existingStudent = student;
           _populateForm(student);
         }
+      } else if (_availableClasses.length == 1) {
+        // Só existe 1 turma na academia → matrícula óbvia, vem pré-marcada
+        // (o professor pode desmarcar). É exatamente o caso mais comum das
+        // academias pequenas que caíram no beco sem saída.
+        _selectedClasses = [_availableClasses.first];
       }
     } catch (e) {
       // Handle error
@@ -253,6 +265,12 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
 
     _selectedPlans = _availablePlans
         .where((p) => p.studentIds.contains(student.id))
+        .toList();
+
+    // Turmas em que o aluno já está matriculado (edição reflete e permite
+    // alterar — não é só um valor inicial).
+    _selectedClasses = _availableClasses
+        .where((c) => c.studentIds.contains(student.id))
         .toList();
   }
 
@@ -805,6 +823,18 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
 
         const SizedBox(height: 16),
 
+        // Turma: sem isso o aluno é cadastrado mas some da chamada (que
+        // filtra por studentIds da turma) — o beco sem saída do
+        // diagnóstico. Bloco discreto, não colapsável, pra ficar visível.
+        FormSection(
+          title: 'Turmas',
+          subtitle: 'Em qual turma o aluno vai treinar',
+          icon: LucideIcons.calendarClock,
+          child: _buildClassChips(),
+        ),
+
+        const SizedBox(height: 16),
+
         FormSection(
           title: 'Graduação',
           subtitle: 'Modalidades, faixas e graus atuais',
@@ -980,6 +1010,8 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         return AppTheme.textDisabled;
       case StudentStatus.suspended:
         return AppTheme.error;
+      case StudentStatus.transferred:
+        return AppTheme.info;
     }
   }
 
@@ -1528,6 +1560,61 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
 
 
 
+  /// Chips multi-select das turmas ativas da academia. Sem turma cadastrada
+  /// ainda, mostra um aviso em vez de uma lista vazia sem explicação.
+  Widget _buildClassChips() {
+    if (_availableClasses.isEmpty) {
+      return Text(
+        'Nenhuma turma cadastrada ainda. Crie uma turma antes de matricular alunos.',
+        style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+      );
+    }
+
+    final selectedIds = _selectedClasses.map((c) => c.id).toSet();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _availableClasses.map((cls) {
+            final isSelected = selectedIds.contains(cls.id);
+            return FilterChip(
+              label: Text(cls.name),
+              selected: isSelected,
+              onSelected: (selected) {
+                setState(() {
+                  if (selected) {
+                    _selectedClasses.add(cls);
+                  } else {
+                    _selectedClasses.removeWhere((c) => c.id == cls.id);
+                  }
+                });
+              },
+              selectedColor: AppTheme.primary.withValues(alpha: 0.15),
+              checkmarkColor: AppTheme.primary,
+              backgroundColor: AppTheme.surface,
+              side: BorderSide(
+                color: isSelected ? AppTheme.primary : AppTheme.divider,
+              ),
+              labelStyle: AppTheme.bodyMedium.copyWith(
+                color: isSelected ? AppTheme.primary : AppTheme.textPrimary,
+              ),
+            );
+          }).toList(),
+        ),
+        if (_selectedClasses.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Sem turma, o aluno não aparece na chamada.',
+              style: AppTheme.labelSmall.copyWith(color: AppTheme.warning),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildPlanDropdown() {
     final selectedIds = _selectedPlans.map((p) => p.id).toSet();
     return Column(
@@ -1683,12 +1770,21 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         };
       }
 
+      // Registrar mudança de status: statusChangedAt + statusChangeReason.
+      // Só grava quando o status realmente mudou (novo != atual no Firestore).
+      if (isEditing &&
+          _existingStudent != null &&
+          _existingStudent!.status != _status) {
+        data['statusChangedAt'] = FieldValue.serverTimestamp();
+        data['statusChangeReason'] = 'manual_edit';
+      }
+
       String studentId;
       if (isEditing) {
         await studentService.update(widget.studentId!, data);
         studentId = widget.studentId!;
       } else {
-        data['isProfilePublic'] = false;
+        data['isProfilePublic'] = true;
         data['attendanceCount'] = 0;
         data['initialAttendanceCount'] = 0;
         final created = await studentService.createFromMap(data);
@@ -1714,6 +1810,28 @@ class _AdminStudentFormScreenState extends ConsumerState<AdminStudentFormScreen>
         }
       } catch (planError) {
         debugPrint('Warning: Failed to sync plans: $planError');
+        // Continue execution - student was created successfully
+      }
+
+      // Sync turmas: matricula/desmatricula conforme os chips selecionados.
+      // Sem isso o aluno cadastrado nunca aparece na chamada — a chamada
+      // filtra por studentIds da turma (o beco sem saída do diagnóstico).
+      try {
+        final classService = ClassService(academyId);
+        final selectedClassIds = _selectedClasses.map((c) => c.id).toSet();
+        final currentClassIds = _availableClasses
+            .where((c) => c.studentIds.contains(studentId))
+            .map((c) => c.id)
+            .toSet();
+
+        for (final classId in selectedClassIds.difference(currentClassIds)) {
+          await classService.addStudent(classId, studentId);
+        }
+        for (final classId in currentClassIds.difference(selectedClassIds)) {
+          await classService.removeStudent(classId, studentId);
+        }
+      } catch (classError) {
+        debugPrint('Warning: Failed to sync classes: $classError');
         // Continue execution - student was created successfully
       }
 

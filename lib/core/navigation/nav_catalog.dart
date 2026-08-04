@@ -101,6 +101,12 @@ class NavEntry {
   /// Admin only (user.isAdmin). Instructor => `hidden`.
   final bool adminOnly;
 
+  /// Requires the academy to have Mercado Pago connected (AcademySettings
+  /// .mpConnected). Not satisfied => `hidden`. Used by admin_assinaturas: sem MP
+  /// o professor não recebe pelo app, então o item de assinaturas não faz
+  /// sentido. Independe de feature/permissão (são checados em conjunto).
+  final bool requiresMpConnected;
+
   /// Context gate of the portal that does not derive from AcademySettings.
   /// Evaluated by the portal resolver. null = no requirement.
   final PortalContextGate? portalGate;
@@ -118,6 +124,7 @@ class NavEntry {
     this.requiresAnyPermission,
     this.adminBypassesPermission = true,
     this.adminOnly = false,
+    this.requiresMpConnected = false,
     this.portalGate,
   });
 }
@@ -164,6 +171,17 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     ],
   ),
   NavEntry(
+    key: 'admin_retencao',
+    label: 'Retenção',
+    icon: LucideIcons.heartPulse,
+    route: '/admin/retencao',
+    section: NavSection.gestao,
+    // Retenção é gestão de pessoas (identificar/contactar alunos esfriando),
+    // não financeiro — gate igual ao de Alunos (students:manage).
+    // adminBypassesPermission = true (default): admin sempre vê.
+    requiresPermission: 'students:manage',
+  ),
+  NavEntry(
     key: 'admin_chamada',
     label: 'Chamada',
     icon: LucideIcons.clipboardCheck,
@@ -198,6 +216,16 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     adminBypassesPermission: false,
   ),
   NavEntry(
+    key: 'admin_social',
+    label: 'Social',
+    icon: LucideIcons.flame,
+    route: '/admin/social',
+    section: NavSection.gestao,
+    // No feature gate: rankingVisibleToStudents só controla a visão do ALUNO.
+    // Sem requiresPermission/adminOnly: professor (instrutor) E admin veem o
+    // ranking E a atividade (com moderação) dos seus alunos.
+  ),
+  NavEntry(
     key: 'admin_campeonatos',
     label: 'Campeonatos',
     icon: LucideIcons.trophy,
@@ -220,17 +248,22 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     icon: LucideIcons.newspaper,
     route: '/admin/jornal',
     section: NavSection.gestao,
-    feature: FeatureId.journal,
-    lockable: true,
+    // Auditoria jornal/eventos: NÃO gatear por FeatureId.journal — essa flag
+    // (journalVisibleToStudents) controla só a visão do ALUNO; gateá-la aqui
+    // travava o próprio staff de GERIR o jornal ao escondê-lo dos alunos (o
+    // cenário de rascunho onde a gestão é mais necessária). Gateado só por
+    // papel/permissão, espelhando admin_ranking.
     requiresPermission: 'events:manage',
-    adminBypassesPermission: false,
+    adminBypassesPermission: true,
   ),
   NavEntry(
-    key: 'admin_importar',
-    label: 'Importar alunos',
-    icon: Icons.upload_file,
-    route: '/admin/importar-alunos',
-    section: NavSection.gestao,
+    key: 'admin_financeiro',
+    label: 'Financeiro',
+    icon: LucideIcons.dollarSign,
+    route: '/admin/financeiro',
+    section: NavSection.financeiro,
+    requiresPermission: 'financial:view',
+    adminBypassesPermission: false,
   ),
   NavEntry(
     key: 'admin_cobranca',
@@ -249,6 +282,18 @@ const List<NavEntry> kAdminNavCatalog = <NavEntry>[
     section: NavSection.financeiro,
     requiresPermission: 'reports:view',
     adminBypassesPermission: false,
+  ),
+  NavEntry(
+    key: 'admin_assinaturas',
+    label: 'Assinaturas',
+    icon: LucideIcons.repeat,
+    route: '/admin/assinaturas',
+    section: NavSection.financeiro,
+    requiresPermission: 'financial:view',
+    adminBypassesPermission: false,
+    // Sem Mercado Pago conectado o professor não recebe pelo app, então o item
+    // de Assinaturas desaparece do menu (não há recorrência a gerir).
+    requiresMpConnected: true,
   ),
   NavEntry(
     key: 'admin_treinos',
@@ -431,6 +476,10 @@ const List<NavEntry> kPortalNavCatalog = <NavEntry>[
     icon: LucideIcons.store,
     route: '/portal/loja',
     section: NavSection.conta,
+    // Auditoria menu: gateado por storeEnabled (feature) E storePublished
+    // (portalGate). Antes só checava published, então uma loja desligada com
+    // published obsoleto=true ainda vazava para o aluno.
+    feature: FeatureId.store,
     portalGate: PortalContextGate.storePublished,
   ),
   NavEntry(

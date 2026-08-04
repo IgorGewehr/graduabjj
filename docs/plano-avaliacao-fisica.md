@@ -1,6 +1,12 @@
 # Plano de Implementação — Avaliação Física / Antropometria
 
-> Status: planejamento. Item **A3** do `docs/roadmap-modalidades.md` (transversal —
+> **Status (2026-07): IMPLEMENTADO em produção** — `lib/models/physical_assessment.dart`,
+> `lib/services/physical_assessment_service.dart`,
+> `lib/services/assessment_pdf_service.dart`,
+> `lib/screens/admin/physical_assessment_form_screen.dart`. Mantido como
+> especificação de referência do que foi construído.
+>
+> Item **A3** do `docs/roadmap-modalidades.md` (transversal —
 > beneficia todas as modalidades; essencial p/ musculação, útil p/ controle de peso
 > de combate). Branch de trabalho: `feat/evolucao-modulos`.
 >

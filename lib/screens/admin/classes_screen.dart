@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/constants.dart';
 import '../../core/feedback_utils.dart';
+import '../../core/formatters.dart' show formatTimeOfDay;
+import '../../core/responsive.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
@@ -16,12 +19,7 @@ import '../../widgets/polish/polish.dart';
 
 // Helper to convert dayOfWeek int to label
 String _getDayLabel(int dayOfWeek) {
-  const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
-  return days[dayOfWeek % 7];
-}
-
-String _formatTimeOfDay(TimeOfDay t) {
-  return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  return DayOfWeekLabels.short[dayOfWeek % 7];
 }
 
 TimeOfDay _parseTimeString(String time) {
@@ -126,7 +124,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: RefreshIndicator(
+      body: ContentBounded(
+        maxWidth: kContentMaxWidthList,
+        child: RefreshIndicator(
         onRefresh: _loadClasses,
         child: CustomScrollView(
           slivers: [
@@ -174,6 +174,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
             const SliverToBoxAdapter(child: SizedBox(height: 100)),
           ],
         ),
+      ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showCreateClassSheet,
@@ -494,7 +495,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                     initialTime: _parseTimeString(schedule.startTime),
                   );
                   if (time != null) {
-                    schedule.startTime = _formatTimeOfDay(time);
+                    schedule.startTime = formatTimeOfDay(time);
                     onChanged();
                   }
                 },
@@ -523,7 +524,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                     initialTime: _parseTimeString(schedule.endTime),
                   );
                   if (time != null) {
-                    schedule.endTime = _formatTimeOfDay(time);
+                    schedule.endTime = formatTimeOfDay(time);
                     onChanged();
                   }
                 },
@@ -2139,6 +2140,88 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
     }
   }
 
+  /// Matricula de uma vez todos os alunos visíveis (respeita busca/filtro
+  /// atual) que ainda não estão na turma. Respeita o limite `maxStudents`
+  /// quando definido, adicionando só até a vaga disponível.
+  Future<void> _selectAll() async {
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser?.academyId == null) return;
+
+    final candidates =
+        _visibleStudents.where((s) => !_enrolledIds.contains(s.id)).toList();
+    if (candidates.isEmpty) return;
+
+    final cap = widget.bjjClass.maxStudents;
+    final remainingSlots = cap == null
+        ? candidates.length
+        : (cap - _enrolledIds.length).clamp(0, candidates.length);
+    if (remainingSlots <= 0) {
+      context.showWarning('Turma já está lotada (máx. $cap).');
+      return;
+    }
+    final toAdd = candidates.take(remainingSlots).toList();
+    final ids = toAdd.map((s) => s.id).toList();
+
+    setState(() {
+      _pendingIds.addAll(ids);
+      _enrolledIds.addAll(ids);
+    });
+
+    try {
+      final service = ClassService(currentUser!.academyId!);
+      await service.addStudents(widget.bjjClass.id, ids);
+      _hasChanges = true;
+      if (mounted) {
+        setState(() => _pendingIds.removeAll(ids));
+        if (toAdd.length < candidates.length) {
+          context.showWarning(
+            'Adicionados ${toAdd.length} de ${candidates.length} — turma ficou lotada.',
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _pendingIds.removeAll(ids);
+          _enrolledIds.removeAll(ids);
+        });
+        context.showError('Erro: $e');
+      }
+    }
+  }
+
+  /// Remove da turma todos os alunos visíveis (respeita busca/filtro atual)
+  /// que estão matriculados.
+  Future<void> _clearAll() async {
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser?.academyId == null) return;
+
+    final candidates =
+        _visibleStudents.where((s) => _enrolledIds.contains(s.id)).toList();
+    if (candidates.isEmpty) return;
+    final ids = candidates.map((s) => s.id).toList();
+
+    setState(() {
+      _pendingIds.addAll(ids);
+      _enrolledIds.removeAll(ids);
+    });
+
+    try {
+      final service = ClassService(currentUser!.academyId!);
+      await service.removeStudents(widget.bjjClass.id, ids);
+      _hasChanges = true;
+      if (mounted) setState(() => _pendingIds.removeAll(ids));
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _pendingIds.removeAll(ids);
+          _enrolledIds.addAll(ids);
+        });
+        context.showError('Erro: $e');
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cls = widget.bjjClass;
@@ -2282,6 +2365,45 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
                     ),
                   ),
                 ),
+            ],
+          ),
+          // "Selecionar todos" / "Limpar": aplica sobre a lista visível
+          // (respeita busca/filtro) — evita ficar tocando aluno por aluno
+          // pra matricular uma turma inteira de uma vez.
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed:
+                    _pendingIds.isNotEmpty ||
+                        _visibleStudents.every(
+                          (s) => _enrolledIds.contains(s.id),
+                        )
+                    ? null
+                    : _selectAll,
+                icon: const Icon(LucideIcons.checkCheck, size: 16),
+                label: const Text('Selecionar todos'),
+                style: TextButton.styleFrom(
+                  foregroundColor: accent,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+              TextButton.icon(
+                onPressed:
+                    _pendingIds.isNotEmpty ||
+                        _visibleStudents.every(
+                          (s) => !_enrolledIds.contains(s.id),
+                        )
+                    ? null
+                    : _clearAll,
+                icon: const Icon(LucideIcons.x, size: 16),
+                label: const Text('Limpar'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.textSecondary,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),

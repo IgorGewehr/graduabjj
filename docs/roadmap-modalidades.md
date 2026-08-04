@@ -7,6 +7,14 @@
 > **Princípio de priorização:** features **transversais** (alcançam várias/todas
 > as modalidades) vêm antes das **específicas**, por terem o maior ROI.
 
+> **Status (2026-07):** todos os itens abaixo marcados `[x] ✅ CONCLUÍDA` **já
+> estão mergeados e deployados em `firebase-production`** (merge
+> `313f782`, "módulos de evolução (gust-code) — reserva, trocação, musculação,
+> gamificação, push"). As notas `_Pendente: teste manual + merge p/
+> produção._` espalhadas pelo doc são **obsoletas** — o merge já aconteceu;
+> ignore-as. Único pendente real e específico: a chave APNs (.p8) no Apple
+> Developer para push iOS (nota na seção de gamificação).
+
 ## Taxonomia das modalidades (para ler o "quem beneficia")
 
 - **🥋 Artes marciais com graduação:** BJJ · Muay Thai · Karatê · Judô · Kickboxing · Luta Livre

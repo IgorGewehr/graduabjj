@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -8,12 +9,16 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/brand_tokens.dart';
 import '../../core/feedback_utils.dart';
+import '../../core/responsive.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/join_request_providers.dart';
 import '../../providers/portal_providers.dart';
+import '../../services/analytics_service.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/academy_page_header.dart';
@@ -41,6 +46,10 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   SportId? _sportFilter;
   String? _beltFilter;
   bool? _accountFilter; // null=all, true=linked, false=unlinked
+  // Retenção (§3.3): null=off; 7/14/30 = "sem treinar há N+ dias".
+  // Usa retention.lastAttendanceDate (CF); aluno sem NENHUMA presença conhecida
+  // só entra na banda 30+ (não polui 7/14 antes do backfill rodar).
+  int? _inactivityFilter;
   String _sortBy = 'name';
 
   // Auto-graduation snapshot (only loaded when feature is on)
@@ -73,27 +82,45 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       final service = StudentService(academyId);
       final students = await service.getAll();
 
-      // Eligibility snapshot — only loaded when the academy has auto-graduation
-      // enabled. Reading the academy settings is cheap (single doc) and lets
-      // us skip the expensive batch query otherwise.
-      final settings = ref.read(academySettingsProvider).valueOrNull;
-      Map<String, EligibilitySnapshotEntry> eligibility = {};
-      if (settings?.autoGraduationEnabled == true) {
-        final beltService = BeltProgressionService(academyId);
-        final snapshot = await beltService.getEligibilitySnapshot();
-        eligibility = {for (final e in snapshot) e.studentId: e};
-      }
-
+      // PERFORMANCE: mostra a lista IMEDIATAMENTE (getAll é 1 query, rápido). A
+      // eligibility (badges de graduação) é CARA — N+1 sobre presenças/syllabus
+      // por aluno (15-30s p/ 100+ alunos) — e NÃO pode BLOQUEAR a lista. Carrega
+      // em background e preenche os badges quando pronto (a lista aparece na hora
+      // em vez de travar a tela sem feedback útil).
+      if (!mounted) return;
       setState(() {
         _students = students;
-        _eligibilityByStudent = eligibility;
         _applyFilters();
         _isLoading = false;
       });
+
+      final settings = ref.read(academySettingsProvider).valueOrNull;
+      if (settings?.autoGraduationEnabled == true) {
+        unawaited(_loadEligibilityInBackground(academyId));
+      }
     } catch (e) {
       // Surface the failure instead of masquerading as "0 alunos".
-      debugPrint('[StudentsList] load failed (academy=${FirebaseService.academyId}): $e');
-      setState(() => _isLoading = false);
+      debugPrint(
+        '[StudentsList] load failed (academy=${FirebaseService.academyId}): $e',
+      );
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Carrega a snapshot de elegibilidade de graduação em BACKGROUND (não bloqueia
+  /// a lista). Atualiza os badges quando pronto; falha silenciosa (badges apenas
+  /// não aparecem).
+  Future<void> _loadEligibilityInBackground(String academyId) async {
+    try {
+      final snapshot =
+          await BeltProgressionService(academyId).getEligibilitySnapshot();
+      if (!mounted) return;
+      setState(() {
+        _eligibilityByStudent = {for (final e in snapshot) e.studentId: e};
+        _applyFilters();
+      });
+    } catch (e) {
+      debugPrint('[StudentsList] eligibility (background) failed: $e');
     }
   }
 
@@ -116,6 +143,13 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     // Status filter
     if (_statusFilter != null) {
       filtered = filtered.where((s) => s.status == _statusFilter).toList();
+    } else {
+      // Sem filtro explícito: ex-alunos TRANSFERIDOS não poluem o roster ativo.
+      // Eles continuam acessíveis (com todo o histórico) ao selecionar o filtro
+      // "Transferido" — que já aparece porque o sheet itera StudentStatus.values.
+      filtered = filtered
+          .where((s) => s.status != StudentStatus.transferred)
+          .toList();
     }
 
     // Category filter
@@ -154,6 +188,17 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       }
     }
 
+    // Inactivity filter (Retenção §3.3) — só faz sentido para alunos ativos.
+    if (_inactivityFilter != null) {
+      final n = _inactivityFilter!;
+      filtered = filtered.where((s) {
+        if (s.status != StudentStatus.active) return false;
+        final days = s.daysSinceLastAttendance;
+        if (days == null) return n >= 30; // nunca treinou → só na banda 30+
+        return days >= n;
+      }).toList();
+    }
+
     // Sorting
     switch (_sortBy) {
       case 'name':
@@ -173,14 +218,16 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           final gradesA = getGradesForSport(
             sportA,
             category: a.category.value,
-            muaythaiVariant:
-                sportA == SportId.muaythai ? resolveMuaythaiVariant(gradeA) : null,
+            muaythaiVariant: sportA == SportId.muaythai
+                ? resolveMuaythaiVariant(gradeA)
+                : null,
           );
           final gradesB = getGradesForSport(
             sportB,
             category: b.category.value,
-            muaythaiVariant:
-                sportB == SportId.muaythai ? resolveMuaythaiVariant(gradeB) : null,
+            muaythaiVariant: sportB == SportId.muaythai
+                ? resolveMuaythaiVariant(gradeB)
+                : null,
           );
           final aIndex = gradesA.indexWhere((g) => g.id == gradeA);
           final bIndex = gradesB.indexWhere((g) => g.id == gradeB);
@@ -219,7 +266,8 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         _categoryFilter != null ||
         _sportFilter != null ||
         _beltFilter != null ||
-        _accountFilter != null;
+        _accountFilter != null ||
+        _inactivityFilter != null;
   }
 
   void _clearFilters() {
@@ -229,61 +277,83 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       _sportFilter = null;
       _beltFilter = null;
       _accountFilter = null;
+      _inactivityFilter = null;
       _applyFilters();
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    // Master switch (mesmo campo que gateia o botão de check-in do próprio
+    // aluno em lutador_hub_screen.dart) — decide se a ação "Marcar presença
+    // de hoje" aparece nos cards abaixo. `select` evita rebuild da tela
+    // inteira quando outros campos de AcademySettings mudam.
+    final musculacaoEnabled = ref.watch(
+      academySettingsProvider.select(
+        (s) => s.valueOrNull?.musculacaoEnabled ?? true,
+      ),
+    );
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: RefreshIndicator(
-        onRefresh: _loadStudents,
-        child: CustomScrollView(
-          slivers: [
-            // Multi-academy aware header — shows current academy + switcher
-            SliverToBoxAdapter(
-              child: AcademyPageHeader(
-                icon: LucideIcons.users,
-                title: 'Alunos',
-                description: '${_students.length} alunos cadastrados',
-                actions: [
-                  IconButton(
-                    onPressed: _exportStudents,
-                    icon: const Icon(Icons.download, size: 20),
-                    tooltip: 'Exportar CSV',
-                  ),
-                  IconButton(
-                    onPressed: _loadStudents,
-                    icon: const Icon(LucideIcons.refreshCw, size: 20),
-                    tooltip: 'Atualizar',
-                  ),
-                ],
-              ),
-            ),
-
-            // Search and filters
-            SliverToBoxAdapter(child: _buildSearchAndFilters()),
-
-            // Active filter chips
-            if (_hasActiveFilters())
-              SliverToBoxAdapter(child: _buildActiveFilterChips()),
-
-            // Student list
-            _isLoading
-                ? SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                    sliver: SliverToBoxAdapter(
-                      child: PolishSkeleton.list(count: 6, itemHeight: 88),
+      // ContentBounded: no-op no mobile; no desktop centraliza e limita a lista
+      // em 1200px (evita a tabela esticada edge-to-edge numa janela larga).
+      body: ContentBounded(
+        child: RefreshIndicator(
+          onRefresh: _loadStudents,
+          child: CustomScrollView(
+            slivers: [
+              // Multi-academy aware header — shows current academy + switcher
+              SliverToBoxAdapter(
+                child: AcademyPageHeader(
+                  icon: LucideIcons.users,
+                  title: 'Alunos',
+                  description: '${_students.length} alunos cadastrados',
+                  actions: [
+                    IconButton(
+                      onPressed: _exportStudents,
+                      icon: const Icon(Icons.download, size: 20),
+                      tooltip: 'Exportar CSV',
                     ),
-                  )
-                : _filteredStudents.isEmpty
-                ? SliverFillRemaining(child: _buildEmptyState())
-                : _buildStudentSliverList(),
+                    IconButton(
+                      onPressed: _loadStudents,
+                      icon: const Icon(LucideIcons.refreshCw, size: 20),
+                      tooltip: 'Atualizar',
+                    ),
+                  ],
+                ),
+              ),
 
-            // Bottom padding
-            const SliverToBoxAdapter(child: SizedBox(height: 100)),
-          ],
+              // Solicitações de entrada (self-onboarding) — destaque verde.
+              SliverToBoxAdapter(child: _buildRequestsButton()),
+
+              // Search and filters
+              SliverToBoxAdapter(child: _buildSearchAndFilters()),
+              SliverToBoxAdapter(child: _buildInactivityChips()),
+
+              // Active filter chips
+              if (_hasActiveFilters())
+                SliverToBoxAdapter(child: _buildActiveFilterChips()),
+
+              // Student list
+              _isLoading
+                  ? SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                      sliver: SliverToBoxAdapter(
+                        // scrollable:false: SliverToBoxAdapter dá altura
+                        // infinita ao filho — ListView scrollável aqui quebra
+                        // o layout da tela inteira (viewport unbounded).
+                        child: PolishSkeleton.list(
+                            count: 6, itemHeight: 88, scrollable: false),
+                      ),
+                    )
+                  : _filteredStudents.isEmpty
+                  ? SliverFillRemaining(child: _buildEmptyState())
+                  : _buildStudentSliverList(musculacaoEnabled),
+
+              // Bottom padding
+              const SliverToBoxAdapter(child: SizedBox(height: 100)),
+            ],
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -300,12 +370,13 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       return;
     }
     try {
-      final csv = StudentExportService(FirebaseService.academyId)
-          .buildCsv(_students);
+      final csv = StudentExportService(
+        FirebaseService.academyId,
+      ).buildCsv(_students);
       final bytes = Uint8List.fromList(utf8.encode(csv));
       final fileName =
           'alunos_${DateFormat('yyyyMMdd').format(DateTime.now())}.csv';
-      final path = await FilePicker.platform.saveFile(
+      final path = await FilePicker.saveFile(
         dialogTitle: 'Exportar alunos',
         fileName: fileName,
         type: FileType.custom,
@@ -319,6 +390,126 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     } catch (_) {
       if (mounted) context.showError('Erro ao exportar.');
     }
+  }
+
+  /// Chips rápidos de inatividade (Retenção §3.3) — 1 toque para achar quem
+  /// está esfriando, sem abrir o sheet de filtros.
+  Widget _buildInactivityChips() {
+    Widget chip(int days) {
+      final selected = _inactivityFilter == days;
+      return GestureDetector(
+        onTap: () {
+          setState(() {
+            _inactivityFilter = selected ? null : days;
+            _applyFilters();
+          });
+        },
+        child: Container(
+          margin: const EdgeInsets.only(right: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected ? Brand.blood : AppTheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected ? Brand.blood : AppTheme.divider,
+            ),
+          ),
+          child: Text(
+            '$days+ dias',
+            style: AppTheme.labelSmall.copyWith(
+              color: selected ? Colors.white : AppTheme.textSecondary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+      child: Row(
+        children: [
+          Text(
+            'SEM TREINAR HÁ',
+            style: AppTheme.labelSmall.copyWith(
+              color: AppTheme.textDisabled,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(width: 10),
+          chip(7),
+          chip(14),
+          chip(30),
+        ],
+      ),
+    );
+  }
+
+  /// Botão de destaque para as SOLICITAÇÕES de entrada. Verde e proeminente
+  /// quando há pendências ("Solicitações (N)"); discreto quando não há (mas
+  /// ainda leva à tela pra ver/compartilhar o código da academia).
+  Widget _buildRequestsButton() {
+    final count = ref.watch(pendingJoinRequestsCountProvider);
+    final has = count > 0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+      child: Material(
+        color: has ? AppTheme.success : AppTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => context.push('/admin/alunos/solicitacoes'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: has ? null : Border.all(color: AppTheme.divider),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  has ? LucideIcons.userCheck : LucideIcons.ticket,
+                  size: 20,
+                  color: has ? Colors.white : AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    has
+                        ? 'Solicitações de entrada'
+                        : 'Código da academia & solicitações',
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: has ? Colors.white : AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+                if (has)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: AppTheme.labelMedium.copyWith(
+                        color: AppTheme.success,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  )
+                else
+                  Icon(LucideIcons.chevronRight,
+                      size: 18, color: AppTheme.textSecondary),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildSearchAndFilters() {
@@ -468,6 +659,16 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                 });
               },
             ),
+          if (_inactivityFilter != null)
+            _FilterChip(
+              label: 'Sem treinar $_inactivityFilter+ dias',
+              onRemove: () {
+                setState(() {
+                  _inactivityFilter = null;
+                  _applyFilters();
+                });
+              },
+            ),
           GestureDetector(
             onTap: _clearFilters,
             child: Container(
@@ -486,7 +687,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     );
   }
 
-  Widget _buildStudentSliverList() {
+  Widget _buildStudentSliverList(bool musculacaoEnabled) {
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       sliver: SliverList(
@@ -495,6 +696,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           return _StudentCard(
             student: student,
             eligibility: _eligibilityByStudent[student.id],
+            musculacaoEnabled: musculacaoEnabled,
             onTap: () => context.go('/admin/alunos/${student.id}'),
           ).entrance(index: index);
         }, childCount: _filteredStudents.length),
@@ -515,8 +717,11 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         accountFilter: _accountFilter,
         sortBy: _sortBy,
         muaythaiVariant:
-            ref.read(academySettingsProvider).valueOrNull?.muaythaiGradeSystem ??
-                muaythaiVariantCbmt,
+            ref
+                .read(academySettingsProvider)
+                .valueOrNull
+                ?.muaythaiGradeSystem ??
+            muaythaiVariantCbmt,
         onApply: (status, category, sport, belt, account, sort) {
           setState(() {
             _statusFilter = status;
@@ -552,8 +757,11 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => _QuickAddStudentSheet(
         muaythaiVariant:
-            ref.read(academySettingsProvider).valueOrNull?.muaythaiGradeSystem ??
-                muaythaiVariantCbmt,
+            ref
+                .read(academySettingsProvider)
+                .valueOrNull
+                ?.muaythaiGradeSystem ??
+            muaythaiVariantCbmt,
         onCreated: (student) {
           // Genuine win — a new student joined the academy.
           if (mounted) Celebration.confetti(context);
@@ -568,9 +776,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     final hasFilters = _hasActiveFilters();
     return PolishedEmptyState(
       icon: LucideIcons.users,
-      title: hasFilters
-          ? 'Nenhum aluno encontrado'
-          : 'Nenhum aluno cadastrado',
+      title: hasFilters ? 'Nenhum aluno encontrado' : 'Nenhum aluno cadastrado',
       subtitle: hasFilters
           ? 'Tente ajustar os filtros'
           : 'Adicione o primeiro aluno da academia',
@@ -628,12 +834,34 @@ class _StudentCard extends StatelessWidget {
   /// a progress bar (current/required) and an "Elegível" badge.
   final EligibilitySnapshotEntry? eligibility;
 
-  const _StudentCard({required this.student, this.onTap, this.eligibility});
+  /// Master switch da academia (AcademySettings.musculacaoEnabled) — parte
+  /// do gate da ação "Marcar presença de hoje" (a outra parte é o próprio
+  /// aluno ter ≥1 modalidade sem-faixa, calculado abaixo).
+  final bool musculacaoEnabled;
+
+  const _StudentCard({
+    required this.student,
+    this.onTap,
+    this.eligibility,
+    this.musculacaoEnabled = false,
+  });
+
+  /// Modalidades sem-faixa (GradeSystem.none — musculação/boxe/MMA) que este
+  /// aluno pratica. Espelha o gate do botão de check-in do próprio aluno em
+  /// lutador_hub_screen.dart (`checkinIsAvailable`), sem a exigência de
+  /// `musculacaoCheckinMode == 'button'`: a ação da recepção é justamente a
+  /// via alternativa pra quem NÃO usa o app, então vale em qualquer modo.
+  List<SportId> get _gradelessSports => student
+      .getSports()
+      .where((s) => getSport(s).gradeSystem == GradeSystem.none)
+      .toList(growable: false);
 
   @override
   Widget build(BuildContext context) {
     final showEligibility =
         eligibility != null && eligibility!.requiredClasses > 0;
+    final gradelessSports = _gradelessSports;
+    final showStaffCheckin = musculacaoEnabled && gradelessSports.isNotEmpty;
     return Pressable(
       onTap: onTap,
       child: Container(
@@ -672,6 +900,12 @@ class _StudentCard extends StatelessWidget {
                         _buildEligibleBadge(),
                       if (student.status != StudentStatus.active)
                         _buildStatusBadge(),
+                      // Risco de churn (Retenção §3.3): só high/critical, e só
+                      // para ativos — discreto, não polui quem está ok.
+                      if (student.status == StudentStatus.active &&
+                          (student.retention?.riskLevel == 'high' ||
+                              student.retention?.riskLevel == 'critical'))
+                        _buildRiskBadge(),
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -709,6 +943,13 @@ class _StudentCard extends StatelessWidget {
               ),
             ),
 
+            if (showStaffCheckin) ...[
+              const SizedBox(width: 4),
+              _StaffCheckinAction(
+                student: student,
+                gradelessSports: gradelessSports,
+              ),
+            ],
             const SizedBox(width: 8),
             Icon(
               LucideIcons.chevronRight,
@@ -793,31 +1034,31 @@ class _StudentCard extends StatelessWidget {
     return Hero(
       tag: 'student-avatar-${student.id}',
       child: Container(
-      width: 48,
-      height: 48,
-      decoration: BoxDecoration(
-        color: avatarColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: sportColor, width: 2),
-      ),
-      child: student.photoUrl != null
-          ? AppCachedImage(
-              imageUrl: student.photoUrl,
-              width: 48,
-              height: 48,
-              fit: BoxFit.cover,
-              borderRadius: BorderRadius.circular(10),
-            )
-          : Center(
-              child: Text(
-                student.displayName[0].toUpperCase(),
-                style: TextStyle(
-                  color: isLightAvatar ? Colors.black87 : Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 18,
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: avatarColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: sportColor, width: 2),
+        ),
+        child: student.photoUrl != null
+            ? AppCachedImage(
+                imageUrl: student.photoUrl,
+                width: 48,
+                height: 48,
+                fit: BoxFit.cover,
+                borderRadius: BorderRadius.circular(10),
+              )
+            : Center(
+                child: Text(
+                  student.displayName[0].toUpperCase(),
+                  style: TextStyle(
+                    color: isLightAvatar ? Colors.black87 : Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 18,
+                  ),
                 ),
               ),
-            ),
       ),
     );
   }
@@ -873,6 +1114,40 @@ class _StudentCard extends StatelessWidget {
     );
   }
 
+  /// Badge de risco de churn — ponto blood + dias sem treinar. Mesmo molde
+  /// visual do badge de status.
+  Widget _buildRiskBadge() {
+    final critical = student.retention?.riskLevel == 'critical';
+    final color = critical ? Brand.blood : AppTheme.warning;
+    final days = student.daysSinceLastAttendance;
+    return Container(
+      margin: const EdgeInsets.only(left: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            days != null ? '${days}d' : 'esfriando',
+            style: AppTheme.labelSmall.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStatusBadge() {
     Color color;
     switch (student.status) {
@@ -912,6 +1187,144 @@ class _StudentCard extends StatelessWidget {
   bool _isLightGrade(String gradeId) {
     const lightGrades = {'white', 'yellow', 'orange'};
     return lightGrades.contains(gradeId.split('-').first);
+  }
+}
+
+/// Ação discreta da recepção: "Marcar presença de hoje" pra um aluno SEM app
+/// numa modalidade sem-turma (musculação/boxe/MMA). Só renderizada pelo
+/// _StudentCard quando o gate (musculacaoEnabled + ≥1 modalidade sem-faixa)
+/// passa. 1 modalidade → toque direto; ≥2 → mini-seletor num bottom sheet
+/// (mesma UX de escolha do botão de check-in do próprio aluno em
+/// lutador_hub_screen.dart `_CheckinButtonCard`).
+///
+/// A escrita (AttendanceService.markStaffScheduleLessPresence) usa o MESMO
+/// doc-id determinístico da Cloud Function `selfCheckin` — nunca duplica com
+/// um check-in que o aluno já tenha feito hoje pelo próprio app.
+class _StaffCheckinAction extends ConsumerStatefulWidget {
+  final Student student;
+  final List<SportId> gradelessSports;
+
+  const _StaffCheckinAction({
+    required this.student,
+    required this.gradelessSports,
+  });
+
+  @override
+  ConsumerState<_StaffCheckinAction> createState() =>
+      _StaffCheckinActionState();
+}
+
+class _StaffCheckinActionState extends ConsumerState<_StaffCheckinAction> {
+  bool _busy = false;
+
+  Future<void> _handleTap() async {
+    if (_busy) return;
+    final sports = widget.gradelessSports;
+    final chosen = sports.length == 1 ? sports.single : await _pickSport();
+    if (chosen != null) await _markPresence(chosen);
+  }
+
+  /// Mini-seletor quando o aluno pratica ≥2 modalidades sem-faixa.
+  Future<SportId?> _pickSport() {
+    final sports = widget.gradelessSports;
+    return showModalBottomSheet<SportId>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => SafeArea(
+        child: Container(
+          margin: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Text(
+                  'Presença de hoje — ${widget.student.fullName}',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              for (final s in sports)
+                ListTile(
+                  leading: Icon(getSport(s).icon, color: AppTheme.textPrimary),
+                  title: Text(getSport(s).label),
+                  onTap: () => Navigator.pop(sheetContext, s),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _markPresence(SportId sport) async {
+    setState(() => _busy = true);
+    try {
+      final user = await ref.read(currentUserProvider.future);
+      if (user == null) {
+        if (mounted) context.showError('Sessão inválida — entre novamente.');
+        return;
+      }
+      await AttendanceService(FirebaseService.academyId)
+          .markStaffScheduleLessPresence(
+        studentId: widget.student.id,
+        studentName: widget.student.fullName,
+        sport: sport.value,
+        className: getSport(sport).label,
+        verifiedBy: user.id,
+        verifiedByName: user.displayName,
+      );
+      unawaited(AnalyticsService.logCheckinScanned(kind: 'staff'));
+      if (!mounted) return;
+      context.showSuccess('Presença registrada: ${widget.student.fullName}');
+    } on AttendanceAlreadyMarkedException {
+      if (mounted) {
+        context.showError(
+          '${widget.student.fullName} já tem presença hoje nesta modalidade.',
+        );
+      }
+    } catch (_) {
+      if (mounted) context.showError('Erro ao marcar presença.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Marcar presença de hoje',
+      child: Pressable(
+        onTap: _busy ? null : _handleTap,
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: AppTheme.success.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          alignment: Alignment.center,
+          child: _busy
+              ? SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.success,
+                  ),
+                )
+              : Icon(LucideIcons.userCheck, size: 16, color: AppTheme.success),
+        ),
+      ),
+    );
   }
 }
 
@@ -1634,18 +2047,6 @@ class _QuickAddStudentSheetState extends State<_QuickAddStudentSheet> {
                         },
                   icon: const Icon(LucideIcons.fileText, size: 16),
                   label: const Text('Cadastro completo'),
-                ),
-              ),
-              Center(
-                child: TextButton.icon(
-                  onPressed: _isSaving
-                      ? null
-                      : () {
-                          Navigator.pop(context);
-                          context.go('/admin/importar-alunos');
-                        },
-                  icon: const Icon(Icons.upload_file, size: 16),
-                  label: const Text('Importar lista (CSV)'),
                 ),
               ),
             ],

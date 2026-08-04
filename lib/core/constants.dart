@@ -7,7 +7,7 @@ class AppConstants {
   // ===========================================
   // App Info
   // ===========================================
-  static const String appName = 'BJJEasy';
+  static const String appName = 'MyDojo';
   static const String appVersion = '2.1.0';
 
   // ===========================================

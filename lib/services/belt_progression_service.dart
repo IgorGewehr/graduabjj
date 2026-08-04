@@ -317,7 +317,11 @@ class BeltProgressionService {
       // Single global threshold for any belt/stripe transition.
       requiredClasses = cfg.threshold!;
     } else {
-      // Legacy fallback: per-belt requirements (BJJ only — other sports always eligible).
+      // Legacy fallback: the hardcoded per-belt table is BJJ-only. Sports
+      // without an explicit config get an empty table → requiredClasses = 0,
+      // which the `requiredClasses > 0` guard below treats as "not eligible"
+      // (instead of the old always-eligible bug). Such sports must be
+      // configured via [requirementsBySport]/[threshold] to graduate.
       final requirements = sportId == SportId.bjj
           ? (stripeRequirements[currentBelt] ?? [0, 0, 0, 0])
           : <int>[];
@@ -823,6 +827,67 @@ class BeltProgressionService {
   // ============================================
   // Promote Student (full promotion)
   // ============================================
+  /// Remove um EVENTO do histórico de graduação (correção de erro do staff —
+  /// ex.: grau dado sem querer e já revertido na faixa atual). NÃO toca a
+  /// faixa/grau atual do aluno (sportData) — apaga só o registro histórico.
+  /// Rules: admin ou instrutor com graduation:manage.
+  Future<void> deleteProgression(String progressionId) async {
+    await _collections.beltProgressions.doc(progressionId).delete();
+  }
+
+  /// DESFAZ uma graduação errada: remove o registro E, quando esta progressão
+  /// ainda REFLETE a faixa/grau atual do aluno, reverte a faixa/grau para o
+  /// estado anterior gravado na própria progressão (previousBelt/previousStripes).
+  ///
+  /// Diferente de [deleteProgression] (que só limpa o histórico), este é o
+  /// "desfazer" real — o professor graduou sem querer e quer o aluno de volta
+  /// à faixa anterior. Se o aluno já foi movido depois desta progressão (o
+  /// estado atual não bate com newBelt/newStripes), NÃO mexe na faixa atual
+  /// para não sobrescrever uma correção posterior — apenas remove o registro.
+  ///
+  /// Retorna `true` se a faixa/grau atual foi revertida; `false` se só o
+  /// histórico foi limpo. Rules: admin ou instrutor com graduation:manage.
+  Future<bool> undoProgression(BeltProgression p) async {
+    final sportId = p.getSport();
+    bool reverted = false;
+
+    final studentDoc = await _collections.student(p.studentId).get();
+    if (studentDoc.exists) {
+      final data = studentDoc.data() as Map<String, dynamic>;
+
+      // Faixa/grau atual neste esporte — mesma resolução de Student.getGrade
+      // (BJJ sem sportData cai nos campos legados).
+      String currentBelt;
+      int currentStripes;
+      final sd = (data['sportData'] as Map?)?[sportId.value];
+      if (sportId == SportId.bjj && sd == null) {
+        currentBelt = data['currentBelt'] ?? 'white';
+        currentStripes = (data['currentStripes'] as num?)?.toInt() ?? 0;
+      } else {
+        currentBelt = sd?['currentGrade'] ?? 'white';
+        currentStripes = (sd?['currentStripes'] as num?)?.toInt() ?? 0;
+      }
+
+      // Só reverte se o estado atual É exatamente o que esta progressão aplicou.
+      if (currentBelt == p.newBelt && currentStripes == p.newStripes) {
+        final update = <String, dynamic>{
+          'updatedAt': FieldValue.serverTimestamp(),
+          'sportData.${sportId.value}.currentGrade': p.previousBelt,
+          'sportData.${sportId.value}.currentStripes': p.previousStripes,
+        };
+        if (sportId == SportId.bjj) {
+          update['currentBelt'] = p.previousBelt;
+          update['currentStripes'] = p.previousStripes;
+        }
+        await _collections.student(p.studentId).update(update);
+        reverted = true;
+      }
+    }
+
+    await _collections.beltProgressions.doc(p.id).delete();
+    return reverted;
+  }
+
   Future<BeltProgression> promote({
     required String studentId,
     required String studentName,
@@ -832,6 +897,14 @@ class BeltProgressionService {
     required String promotedByName,
     String? notes,
     SportId sportId = SportId.bjj,
+    // Auditoria [MED race-condition]: quando informado, a progressão e a
+    // conquista usam IDs DETERMINÍSTICOS derivados desta chave, escritos em
+    // transação com create-if-absent. Assim duas promoções concorrentes para
+    // o MESMO alvo (ex.: presenças simultâneas em 2 aparelhos) colapsam em uma
+    // só — sem docs duplicados de beltProgressions nem conquistas públicas
+    // duplicadas. Ausente (null) preserva o comportamento legado (auto-id),
+    // usado pela promoção manual do admin onde a repetição é intencional.
+    String? idempotencyKey,
   }) async {
     // Get current student data
     final studentDoc = await _collections.student(studentId).get();
@@ -876,9 +949,9 @@ class BeltProgressionService {
 
     final sportLabel = getSport(sportId).label;
     final gradeLabelStr = getGradeLabel(sportId, newBelt);
+    final isBeltChange = currentBelt != newBelt;
 
-    // Create progression record
-    final progressionRef = await _progressionsRef.add({
+    final progressionPayload = <String, dynamic>{
       'studentId': studentId,
       'previousBelt': currentBelt,
       'previousStripes': currentStripes,
@@ -892,23 +965,9 @@ class BeltProgressionService {
       'notes': notes,
       'sport': sportId.value,
       'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    // Update student — always update legacy fields for BJJ
-    final updateData = <String, dynamic>{
-      'updatedAt': FieldValue.serverTimestamp(),
-      'sportData.${sportId.value}.currentGrade': newBelt,
-      'sportData.${sportId.value}.currentStripes': newStripes,
     };
-    if (sportId == SportId.bjj) {
-      updateData['currentBelt'] = newBelt;
-      updateData['currentStripes'] = newStripes;
-    }
-    await _collections.student(studentId).update(updateData);
 
-    // Create achievement
-    final isBeltChange = currentBelt != newBelt;
-    await _achievementsRef.add({
+    final achievementPayload = <String, dynamic>{
       'studentId': studentId,
       'studentName': studentName,
       'type': isBeltChange ? 'graduation' : 'stripe',
@@ -925,7 +984,52 @@ class BeltProgressionService {
       'isPublic': true,
       'createdAt': FieldValue.serverTimestamp(),
       'createdBy': promotedBy,
-    });
+    };
+
+    // Update student — always update legacy fields for BJJ. Idempotente por
+    // natureza (mesmo alvo → mesmo estado final), então fica fora da transação
+    // de promoção e roda igual nos dois caminhos.
+    final updateData = <String, dynamic>{
+      'updatedAt': FieldValue.serverTimestamp(),
+      'sportData.${sportId.value}.currentGrade': newBelt,
+      'sportData.${sportId.value}.currentStripes': newStripes,
+    };
+    if (sportId == SportId.bjj) {
+      updateData['currentBelt'] = newBelt;
+      updateData['currentStripes'] = newStripes;
+    }
+
+    // Auditoria [MED race-condition]: caminho idempotente. Com idempotencyKey,
+    // a progressão e a conquista recebem IDs determinísticos e são escritas em
+    // UMA transação com create-if-absent — se a progressão já existe (outra
+    // chamada concorrente venceu a corrida), abortamos sem duplicar nada e
+    // retornamos o doc existente.
+    if (idempotencyKey != null) {
+      final progressionRef = _progressionsRef.doc('promo_$idempotencyKey');
+      final achievementRef = _achievementsRef.doc('promo_$idempotencyKey');
+      // A progressão e a conquista só são criadas quando ainda NÃO existem (uma
+      // chamada concorrente que perdeu a corrida vira no-op nesses dois sets, sem
+      // duplicar). Já o update do aluno é IDEMPOTENTE (define o grau-alvo) e é
+      // aplicado SEMPRE — assim, se o doc de progressão já existir mas o aluno
+      // tiver sido revertido/corrigido depois, o estado final do aluno fica
+      // sempre consistente com o alvo (em vez de um no-op total).
+      await FirebaseService.firestore.runTransaction((tx) async {
+        final existing = await tx.get(progressionRef);
+        if (!existing.exists) {
+          tx.set(progressionRef, progressionPayload);
+          tx.set(achievementRef, achievementPayload);
+        }
+        tx.update(_collections.student(studentId), updateData);
+      });
+      final doc = await progressionRef.get();
+      return BeltProgression.fromFirestore(doc);
+    }
+
+    // Caminho legado (sem chave): promoção manual do admin. Mantém auto-id para
+    // preservar repetições intencionais (ex.: graus sucessivos) sem colisão.
+    final progressionRef = await _progressionsRef.add(progressionPayload);
+    await _collections.student(studentId).update(updateData);
+    await _achievementsRef.add(achievementPayload);
 
     final doc = await progressionRef.get();
     return BeltProgression.fromFirestore(doc);
@@ -1065,6 +1169,10 @@ class BeltProgressionService {
           'totalClasses': totalClasses,
           'eligibility': eligibility,
           'sportId': sportVal,
+          // Categoria (kids/adult) precisa viajar junto: sem ela a sheet de
+          // promoção caía em 'adult' e a troca de faixa usava a escada adulta
+          // (infantil branca → azul, em vez de → cinza).
+          'category': category,
           // Para notificar o aluno ("apto a graduar"); null se sem conta vinculada.
           'linkedUserId': data['linkedUserId'],
         });

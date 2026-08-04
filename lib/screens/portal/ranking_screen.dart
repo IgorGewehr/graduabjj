@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/brand_tokens.dart';
 import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/ranking_entry.dart';
+import '../../models/student.dart';
 import '../../providers/portal_providers.dart';
 import '../../providers/ranking_providers.dart';
+import '../../providers/student_provider.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/feature_disabled_state.dart';
 import '../../widgets/polish/polish.dart';
@@ -18,7 +21,22 @@ import '../../widgets/polish/polish.dart';
 /// Kids) + period and see who trained the most. Each row links to that
 /// student's public profile.
 class RankingScreen extends ConsumerStatefulWidget {
-  const RankingScreen({super.key});
+  /// When true, the screen is opened from the ADMIN/professor side: the
+  /// student-visibility gate (rankingVisibleToStudents) is bypassed — staff
+  /// always see the ranking of THEIR students — the title reflects the staff
+  /// view, and a row tap opens the admin student detail instead of the portal
+  /// public profile.
+  final bool forStaff;
+
+  /// When true, renders only the body (no Scaffold/AppBar) so it can be embedded
+  /// as a tab inside another screen (e.g. the admin SOCIAL screen). The caller
+  /// provides the surrounding Scaffold and background.
+  final bool embedded;
+  const RankingScreen({
+    super.key,
+    this.forStaff = false,
+    this.embedded = false,
+  });
 
   @override
   ConsumerState<RankingScreen> createState() => _RankingScreenState();
@@ -27,24 +45,76 @@ class RankingScreen extends ConsumerStatefulWidget {
 class _RankingScreenState extends ConsumerState<RankingScreen> {
   RankingCategory _category = RankingCategory.general;
   RankingPeriod _period = RankingPeriod.week;
+  // Intervalo escolhido quando _period == custom (dia X → dia Y).
+  DateTimeRange? _customRange;
   // Selected modality (null until the user picks). Only relevant for academies
   // that train more than one sport — keeps each modality's ranking separate.
   SportId? _selectedSport;
 
+  /// Janela (epoch millis) do período CUSTOM para a chave do provider. Presets
+  /// → (null, null). O fim é EXCLUSIVO (início do dia seguinte ao dia final),
+  /// pois a CF filtra `date < end`, incluindo assim o dia final inteiro.
+  ({int? startMillis, int? endMillis}) get _customMillis {
+    if (_period != RankingPeriod.custom || _customRange == null) {
+      return (startMillis: null, endMillis: null);
+    }
+    final r = _customRange!;
+    final start = DateTime(r.start.year, r.start.month, r.start.day);
+    final end = DateTime(r.end.year, r.end.month, r.end.day)
+        .add(const Duration(days: 1));
+    return (
+      startMillis: start.millisecondsSinceEpoch,
+      endMillis: end.millisecondsSinceEpoch,
+    );
+  }
+
+  Future<void> _pickCustomRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 3),
+      lastDate: now,
+      initialDateRange: _customRange ??
+          DateTimeRange(
+            start: now.subtract(const Duration(days: 29)),
+            end: now,
+          ),
+      helpText: 'Escolha o período',
+      saveText: 'Aplicar',
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _customRange = picked;
+      _period = RankingPeriod.custom;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Defense in depth: even reached via deep link / stale nav, the ranking
+    // Staff (admin/professor) ALWAYS see the ranking of their students — the
+    // rankingVisibleToStudents gate only governs the student portal. Defense in
+    // depth for the portal: even reached via deep link / stale nav, the ranking
     // stays hidden when the academy disabled student visibility. Loading/null
     // resolves to true so it shows by default for legacy academies.
-    final rankingVisible = ref.watch(
-      academySettingsProvider.select(
-        (s) => s.valueOrNull?.rankingVisibleToStudents ?? true,
-      ),
-    );
+    final rankingVisible = widget.forStaff ||
+        ref.watch(
+          academySettingsProvider.select(
+            (s) => s.valueOrNull?.rankingVisibleToStudents ?? true,
+          ),
+        );
+
+    // Embutido (aba de outra tela): só o corpo, sem Scaffold/AppBar — o pai já
+    // fornece o fundo bone e a barra.
+    if (widget.embedded) {
+      return !rankingVisible ? const _RankingUnavailableState() : _buildContent();
+    }
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(title: const Text('Ranking de Turmas')),
+      // Fundo bone (igual à Galera) pros cards brancos do leaderboard aparecerem.
+      backgroundColor: const Color(0xFFF4F3EF),
+      appBar: AppBar(
+        title: Text(widget.forStaff ? 'Ranking dos Alunos' : 'Ranking de Turmas'),
+      ),
       body: !rankingVisible
           ? const _RankingUnavailableState()
           : _buildContent(),
@@ -56,15 +126,36 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
     // appears for multi-modality academies; otherwise the ranking is over the
     // single sport (sport filter stays null = all, which is equivalent).
     final classes = ref.watch(classesProvider).valueOrNull ?? const [];
-    final academySports = (<SportId>{for (final c in classes) c.getSport()}
+    var academySports = (<SportId>{for (final c in classes) c.getSport()}
         .toList()
       ..sort((a, b) => a.index.compareTo(b.index)));
+
+    // Aluno (não-staff) vê SÓ a(s) modalidade(s) e a categoria (adulto/kids) em
+    // que ele está. Staff (admin/professor) continua vendo tudo e escolhendo.
+    final isStudentView = !widget.forStaff;
+    final student =
+        isStudentView ? ref.watch(currentStudentProvider).valueOrNull : null;
+    var effectiveCategory = _category;
+    if (student != null) {
+      final studentSports = student.getSports().toSet();
+      final mine = academySports.where(studentSports.contains).toList();
+      academySports = mine.isNotEmpty ? mine : student.getSports();
+      effectiveCategory = student.category == StudentCategory.kids
+          ? RankingCategory.kids
+          : RankingCategory.adult;
+    }
+
     final showSportSelector = academySports.length > 1;
-    final activeSport = showSportSelector
-        ? ((_selectedSport != null && academySports.contains(_selectedSport))
-            ? _selectedSport
-            : academySports.first)
-        : null;
+    // Staff com 1 modalidade usa sport=null (= todas, equivalente). O aluno
+    // SEMPRE escopa numa modalidade dele (nunca "todas"), mesmo sem seletor.
+    final SportId? activeSport = academySports.isEmpty
+        ? null
+        : (showSportSelector || isStudentView)
+            ? ((_selectedSport != null &&
+                    academySports.contains(_selectedSport))
+                ? _selectedSport
+                : academySports.first)
+            : null;
 
     return Column(
       children: [
@@ -75,18 +166,43 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
             onChanged: (s) => setState(() => _selectedSport = s),
           ),
         _RankingHeader(
-          category: _category,
+          category: effectiveCategory,
           period: _period,
+          customRange: _customRange,
           onCategoryChanged: (c) => setState(() => _category = c),
           onPeriodChanged: (p) => setState(() => _period = p),
+          onPickCustom: _pickCustomRange,
+          // Aluno: categoria travada na dele (sem seletor); só staff escolhe.
+          showCategorySelector: widget.forStaff,
         ),
-        Expanded(child: _buildLeaderboard(activeSport)),
+        // Sub-meta do meio da tabela (§2.3 U-shape) — só na visão do ALUNO e
+        // só quando ele está no terço central do ranking. Renderiza
+        // SizedBox.shrink() fora dessas condições (invisível por padrão).
+        if (isStudentView && student != null)
+          _MyPositionCard(
+            myStudentId: student.id,
+            rankingKey: (
+              category: effectiveCategory,
+              period: _period,
+              sport: activeSport?.value,
+              startMillis: _customMillis.startMillis,
+              endMillis: _customMillis.endMillis,
+            ),
+          ),
+        Expanded(child: _buildLeaderboard(activeSport, effectiveCategory)),
       ],
     );
   }
 
-  Widget _buildLeaderboard(SportId? sport) {
-    final key = (category: _category, period: _period, sport: sport?.value);
+  Widget _buildLeaderboard(SportId? sport, RankingCategory category) {
+    final m = _customMillis;
+    final key = (
+      category: category,
+      period: _period,
+      sport: sport?.value,
+      startMillis: m.startMillis,
+      endMillis: m.endMillis,
+    );
     final rankingAsync = ref.watch(classRankingProvider(key));
 
     return RefreshIndicator(
@@ -133,8 +249,11 @@ class _RankingScreenState extends ConsumerState<RankingScreen> {
               final entry = entries[i];
               return _RankingTile(
                 entry: entry,
-                onTap: () =>
-                    context.push('/portal/profile/${entry.studentId}'),
+                onTap: () => context.push(
+                  widget.forStaff
+                      ? '/admin/alunos/${entry.studentId}'
+                      : '/portal/profile/${entry.studentId}',
+                ),
               ).entrance(index: i);
             },
           );
@@ -189,15 +308,29 @@ class _SportSelector extends StatelessWidget {
 class _RankingHeader extends StatelessWidget {
   final RankingCategory category;
   final RankingPeriod period;
+  final DateTimeRange? customRange;
   final ValueChanged<RankingCategory> onCategoryChanged;
   final ValueChanged<RankingPeriod> onPeriodChanged;
+  final VoidCallback onPickCustom;
+  final bool showCategorySelector;
 
   const _RankingHeader({
     required this.category,
     required this.period,
+    required this.customRange,
     required this.onCategoryChanged,
     required this.onPeriodChanged,
+    required this.onPickCustom,
+    this.showCategorySelector = true,
   });
+
+  String _customLabel() {
+    if (period == RankingPeriod.custom && customRange != null) {
+      final f = DateFormat('dd/MM');
+      return '${f.format(customRange!.start)} – ${f.format(customRange!.end)}';
+    }
+    return 'Período';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -210,48 +343,73 @@ class _RankingHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Audience segmented control
-          SegmentedButton<RankingCategory>(
-            segments: const [
-              ButtonSegment(
-                value: RankingCategory.general,
-                label: Text('Geral'),
+          // Audience segmented control — só staff escolhe; o aluno tem a
+          // categoria travada na dele, então o seletor fica escondido.
+          if (showCategorySelector) ...[
+            SegmentedButton<RankingCategory>(
+              segments: const [
+                ButtonSegment(
+                  value: RankingCategory.general,
+                  label: Text('Geral'),
+                ),
+                ButtonSegment(
+                  value: RankingCategory.adult,
+                  label: Text('Adulto'),
+                ),
+                ButtonSegment(
+                  value: RankingCategory.kids,
+                  label: Text('Kids'),
+                ),
+              ],
+              selected: {category},
+              showSelectedIcon: false,
+              onSelectionChanged: (set) {
+                HapticFeedback.selectionClick();
+                onCategoryChanged(set.first);
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
+          // Seletor de período: presets (7/30 dias) + PERSONALIZADO (dia X →
+          // dia Y). Três estados, então um Row de pílulas em vez de
+          // SegmentedButton (que exige exatamente 1 selecionado entre 2).
+          Row(
+            children: [
+              Expanded(
+                child: _PeriodPill(
+                  label: '7 dias',
+                  selected: period == RankingPeriod.week,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onPeriodChanged(RankingPeriod.week);
+                  },
+                ),
               ),
-              ButtonSegment(
-                value: RankingCategory.adult,
-                label: Text('Adulto'),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _PeriodPill(
+                  label: '30 dias',
+                  selected: period == RankingPeriod.month,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onPeriodChanged(RankingPeriod.month);
+                  },
+                ),
               ),
-              ButtonSegment(
-                value: RankingCategory.kids,
-                label: Text('Kids'),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: _PeriodPill(
+                  label: _customLabel(),
+                  icon: LucideIcons.calendar,
+                  selected: period == RankingPeriod.custom,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onPickCustom();
+                  },
+                ),
               ),
             ],
-            selected: {category},
-            showSelectedIcon: false,
-            onSelectionChanged: (set) {
-              HapticFeedback.selectionClick();
-              onCategoryChanged(set.first);
-            },
-          ),
-          const SizedBox(height: 12),
-          // Period segmented control
-          SegmentedButton<RankingPeriod>(
-            segments: const [
-              ButtonSegment(
-                value: RankingPeriod.week,
-                label: Text('Esta Semana'),
-              ),
-              ButtonSegment(
-                value: RankingPeriod.month,
-                label: Text('Este Mes'),
-              ),
-            ],
-            selected: {period},
-            showSelectedIcon: false,
-            onSelectionChanged: (set) {
-              HapticFeedback.selectionClick();
-              onPeriodChanged(set.first);
-            },
           ),
         ],
       ),
@@ -259,12 +417,76 @@ class _RankingHeader extends StatelessWidget {
   }
 }
 
-/// One leaderboard row: medal/rank badge, avatar, name, training count.
+/// Pílula de período (preset ou personalizado). Selecionada = tinta cheia.
+class _PeriodPill extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PeriodPill({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? AppTheme.primary : AppTheme.surface,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? AppTheme.primary : AppTheme.divider,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (icon != null) ...[
+                Icon(icon,
+                    size: 15,
+                    color: selected ? Colors.white : AppTheme.textSecondary),
+                const SizedBox(width: 6),
+              ],
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTheme.labelMedium.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: selected ? Colors.white : AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One leaderboard row (fighter aesthetic): big tabular rank numeral (líder em
+/// vermelho), avatar, name, training count. Sem medalha laranja/dourada.
 class _RankingTile extends StatelessWidget {
   final RankingEntry entry;
   final VoidCallback onTap;
 
   const _RankingTile({required this.entry, required this.onTap});
+
+  static const _ink = Color(0xFF0A0A0A);
+  static const _red = Color(0xFFE0301E);
+  static const _smoke = Color(0xFF6E6E68);
 
   String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
@@ -275,62 +497,73 @@ class _RankingTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final leader = entry.rank == 1;
     return Pressable(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
-          color: AppTheme.surfaceVariant,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppTheme.border),
+          border: Border.all(color: _ink.withValues(alpha: 0.06)),
         ),
         child: Row(
           children: [
-            _RankBadge(rank: entry.rank),
-            const SizedBox(width: 12),
+            SizedBox(
+              width: 32,
+              child: Text(
+                '${entry.rank}',
+                style: TextStyle(
+                  fontSize: 23,
+                  height: 1.0,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                  color: leader ? _red : _ink,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
             Hero(
               tag: 'profile-avatar-${entry.studentId}',
               child: AppCachedAvatar(
                 imageUrl: entry.photoUrl,
-                radius: 22,
-                backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
-                foregroundColor: AppTheme.primary,
+                radius: 20,
+                backgroundColor: _ink.withValues(alpha: 0.06),
+                foregroundColor: _ink,
                 child: Text(
                   _initials(entry.studentName),
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: const TextStyle(
+                      color: _ink, fontWeight: FontWeight.w800),
                 ),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    entry.studentName,
-                    style: AppTheme.bodyMedium.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${entry.attendanceCount} treinos',
-                    style: AppTheme.labelSmall.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ],
+              child: Text(
+                entry.studentName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 15.5, fontWeight: FontWeight.w800, color: _ink),
               ),
             ),
-            const Icon(
-              LucideIcons.chevronRight,
-              size: 16,
-              color: AppTheme.textDisabled,
+            const SizedBox(width: 8),
+            Text(
+              '${entry.attendanceCount}',
+              style: const TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w900,
+                fontFeatures: [FontFeature.tabularFigures()],
+                color: _ink,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text('treinos',
+                  style: TextStyle(
+                      fontSize: 10, fontWeight: FontWeight.w700, color: _smoke)),
             ),
           ],
         ),
@@ -339,71 +572,138 @@ class _RankingTile extends StatelessWidget {
   }
 }
 
-/// Rank indicator: amber/silver/bronze medal disc for the top 3, plain numbered
-/// circle otherwise.
-class _RankBadge extends StatelessWidget {
-  final int rank;
+/// Card "VOCÊ" — sub-meta para o MEIO da tabela (visão do aluno).
+///
+/// Base científica (docs/b2c/PESQUISA_PSICOLOGIA_RETENCAO_RIVAIS_2026-07.md
+/// §2.3, efeito curvilíneo/U-shape): motivação é maior no TOPO e no FUNDO do
+/// ranking — a desmotivação mora no meio. A correção de design (P6) é dar a
+/// quem está no meio UMA sub-meta mais próxima que a posição global.
+///
+/// Regras de exibição (fora delas o widget é invisível — SizedBox.shrink):
+/// - tabela com >= 8 entries (ranking pequeno não tem "meio");
+/// - posição > 3 (topo NUNCA vê — seria redundante);
+/// - posição entre 25% e 75% da tabela (o terço central da curva U).
+///
+/// A sub-meta é a distância pro próximo colocado: como o desempate do
+/// [RankingService] é presença-mais-recente DESC, EMPATAR em treinos já sobe —
+/// então o alvo é `max(1, diff)` presenças. Nunca vira push (§2.3: "nunca push
+/// de posição"); é só um lembrete silencioso de que a próxima posição está a
+/// poucos treinos.
+class _MyPositionCard extends ConsumerWidget {
+  final String myStudentId;
+  final ({
+    RankingCategory category,
+    RankingPeriod period,
+    String? sport,
+    int? startMillis,
+    int? endMillis,
+  }) rankingKey;
 
-  const _RankBadge({required this.rank});
+  const _MyPositionCard({
+    required this.myStudentId,
+    required this.rankingKey,
+  });
 
   @override
-  Widget build(BuildContext context) {
-    Color? medal;
-    switch (rank) {
-      case 1:
-        medal = const Color(0xFFF59E0B); // amber/gold
-        break;
-      case 2:
-        medal = const Color(0xFF9CA3AF); // silver
-        break;
-      case 3:
-        medal = const Color(0xFFEA580C); // bronze/orange
-        break;
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Mesma family key da lista — zero fetch extra, e o pull-to-refresh da
+    // lista invalida este card junto.
+    final entries = ref.watch(classRankingProvider(rankingKey)).valueOrNull;
+    if (entries == null || entries.length < 8) return const SizedBox.shrink();
+
+    final idx = entries.indexWhere((e) => e.studentId == myStudentId);
+    if (idx <= 0) return const SizedBox.shrink(); // fora do ranking ou líder
+    final me = entries[idx];
+    final fraction = me.rank / entries.length;
+    if (me.rank <= 3 || fraction < 0.25 || fraction > 0.75) {
+      return const SizedBox.shrink();
     }
 
-    final bg = medal?.withValues(alpha: 0.15) ?? AppTheme.surface;
-    final fg = medal ?? AppTheme.textSecondary;
-    final isTopThree = medal != null;
+    // Distância pro próximo: empate + presença mais recente já desempata a
+    // favor de quem acabou de treinar, então o alvo mínimo é 1 presença.
+    final above = entries[idx - 1];
+    final needed = (above.attendanceCount - me.attendanceCount).clamp(1, 9999);
+    final subGoal = needed == 1
+        ? 'A 1 presença de subir uma posição'
+        : 'A $needed presenças de subir uma posição';
 
-    final badge = Container(
-      width: 32,
-      height: 32,
-      alignment: Alignment.center,
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: BoxDecoration(
-        color: bg,
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: medal ?? AppTheme.divider,
-          width: medal != null ? 2 : 1,
-        ),
-        boxShadow: medal != null
-            ? [
-                BoxShadow(
-                  color: medal.withValues(alpha: 0.35),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Brand.ink.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        children: [
+          // Posição atual — numeral tabular no padrão das linhas da tabela.
+          Text(
+            '${me.rank}º',
+            style: const TextStyle(
+              fontSize: 23,
+              height: 1.0,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+              fontFeatures: Brand.tabular,
+              color: Brand.ink,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'VOCÊ',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.4,
+                    color: Brand.blood,
+                  ),
                 ),
-              ]
-            : null,
+                const SizedBox(height: 2),
+                Text(
+                  subGoal,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    fontFeatures: Brand.tabular,
+                    color: Brand.ink,
+                    height: 1.15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${me.attendanceCount}',
+            style: const TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w900,
+              fontFeatures: Brand.tabular,
+              color: Brand.ink,
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text(
+              'treinos',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: Brand.ash,
+              ),
+            ),
+          ),
+        ],
       ),
-      child: Text(
-        '$rank',
-        style: AppTheme.bodyMedium.copyWith(
-          fontWeight: FontWeight.w700,
-          color: fg,
-        ),
-      ),
-    );
-
-    // Top-3 medals get a restrained scale-in pop (easeOutBack) so the podium
-    // reads instantly; plain ranks stay static.
-    if (!isTopThree) return badge;
-    return badge.animate().scale(
-          begin: const Offset(0.7, 0.7),
-          end: const Offset(1, 1),
-          duration: PolishMotion.normal,
-          curve: Curves.easeOutBack,
-        );
+    ).entrance();
   }
 }
 

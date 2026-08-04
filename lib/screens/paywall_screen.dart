@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import '../services/fns.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -101,7 +101,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     }
     setState(() => _launching = true);
     try {
-      final result = await FirebaseFunctions.instance
+      final result = await Fns.functions
           .httpsCallable('createMercadoPagoCheckout')
           .call(<String, dynamic>{
         'academyId': academyId,
@@ -383,7 +383,7 @@ class _Header extends StatelessWidget {
     if (pastDue) {
       title = 'Não conseguimos renovar sua assinatura';
       subtitle =
-          'Houve um problema na cobrança recorrente. Atualize seu pagamento abaixo para manter o BJJEasy ativo na sua academia.';
+          'Houve um problema na cobrança recorrente. Atualize seu pagamento abaixo para manter o MyDojo ativo na sua academia.';
     } else if (isTrialing) {
       title = 'Continue gerenciando sua academia sem interrupções';
       subtitle =
@@ -391,7 +391,7 @@ class _Header extends StatelessWidget {
     } else {
       title = 'Período de avaliação encerrado';
       subtitle =
-          'Assine para reativar o acesso a todos os recursos do BJJEasy. Seus dados continuam guardados.';
+          'Assine para reativar o acesso a todos os recursos do MyDojo. Seus dados continuam guardados.';
     }
 
     return Column(
@@ -399,8 +399,8 @@ class _Header extends StatelessWidget {
       children: [
         // Logo
         Image.asset(
-          'assets/images/bjjeasy_logo.png',
-          height: 72,
+          'assets/images/mydojo_logo.png',
+          height: 80,
         ),
         const SizedBox(height: 20),
 

@@ -42,6 +42,21 @@ class StudentService {
     return Student.fromFirestore(doc);
   }
 
+  /// Resolve o espelho público a partir de um AUTH uid (não do studentId) —
+  /// usado quando a navegação chega com o uid (ex.: autor de um post do feed).
+  /// Consulta `publicProfiles` por `linkedUserId == uid` na academia atual.
+  /// Retorna null quando o uid não pertence a nenhum aluno desta academia.
+  Future<Student?> getPublicProfileByUid(String uid) async {
+    if (uid.isEmpty) return null;
+    final q = await _collections.academy
+        .collection('publicProfiles')
+        .where('linkedUserId', isEqualTo: uid)
+        .limit(1)
+        .get();
+    if (q.docs.isEmpty) return null;
+    return Student.fromFirestore(q.docs.first);
+  }
+
   // ============================================
   // Get Student by Linked User ID
   // ============================================
@@ -413,7 +428,7 @@ class StudentService {
       'startDate': Timestamp.fromDate(now),
       'tuitionValue': 0.0,
       'tuitionDay': 10,
-      'isProfilePublic': false,
+      'isProfilePublic': true,
       'attendanceCount': 0,
       'initialAttendanceCount': 0,
       'createdAt': FieldValue.serverTimestamp(),
@@ -432,6 +447,8 @@ class StudentService {
   Future<void> delete(String id) async {
     await _collections.student(id).update({
       'status': StudentStatus.inactive.value,
+      'statusChangedAt': FieldValue.serverTimestamp(),
+      'statusChangeReason': 'archived',
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -577,19 +594,16 @@ class StudentService {
   // ============================================
   Future<Map<StudentStatus, int>> getCountByStatus() async {
     final snapshot = await _studentsRef.get();
-    final counts = {
-      StudentStatus.active: 0,
-      StudentStatus.injured: 0,
-      StudentStatus.inactive: 0,
-      StudentStatus.suspended: 0,
-    };
+    // Inicializa TODOS os status (inclui novos como transferred) — senão um
+    // status fora do mapa quebrava com null-check (`counts[status]!`).
+    final counts = {for (final s in StudentStatus.values) s: 0};
 
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       final status = StudentStatusExtension.fromString(
         data['status'] ?? 'active',
       );
-      counts[status] = counts[status]! + 1;
+      counts[status] = (counts[status] ?? 0) + 1;
     }
 
     return counts;
@@ -617,13 +631,21 @@ class StudentService {
   // ============================================
   // Update Status
   // ============================================
+  /// Atualiza o status do aluno e registra o momento e motivo da mudança.
+  /// [reason] identifica a origem da transição ('manual_edit', 'archived',
+  /// 'transferred', etc.). Só grava statusChangedAt quando o status realmente
+  /// muda — a responsabilidade de comparar o status anterior fica no call site
+  /// quando necessário (ex.: student_form_screen).
   Future<Student> updateStatus(
     String id,
     StudentStatus status, {
     String? note,
+    String reason = 'manual_edit',
   }) async {
     final data = <String, dynamic>{
       'status': status.value,
+      'statusChangedAt': FieldValue.serverTimestamp(),
+      'statusChangeReason': reason,
       'updatedAt': FieldValue.serverTimestamp(),
     };
     if (note != null) {
