@@ -11,6 +11,7 @@ import '../../providers/billing_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../services/billing_reminder_service.dart';
 import '../../services/payment_service.dart';
+import '../../services/plan_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/common/billing_automation_banner.dart';
@@ -166,7 +167,7 @@ class _AdminBillingRemindersScreenState
         children: [
           AcademyPageHeader(
             compact: true,
-            title: 'Cobranca',
+            title: 'Cobrança',
             leading: Navigator.canPop(context)
                 ? IconButton(
                     onPressed: () => Navigator.of(context).maybePop(),
@@ -178,12 +179,12 @@ class _AdminBillingRemindersScreenState
               IconButton(
                 onPressed: _showCreateChargeModal,
                 icon: const Icon(LucideIcons.plusCircle, size: 20),
-                tooltip: 'Nova Cobranca',
+                tooltip: 'Nova Cobrança',
               ),
               IconButton(
                 onPressed: () => _showSettingsDialog(),
                 icon: const Icon(LucideIcons.settings, size: 20),
-                tooltip: 'Configuracoes',
+                tooltip: 'Configurações',
               ),
               IconButton(
                 onPressed: _loadData,
@@ -997,7 +998,7 @@ class _AdminBillingRemindersScreenState
                   onPressed: () => _confirmDelete(item),
                   icon: const Icon(LucideIcons.trash2, size: 20),
                   color: AppTheme.error,
-                  tooltip: 'Excluir Cobranca',
+                  tooltip: 'Excluir Cobrança',
                   constraints: const BoxConstraints(),
                   padding: const EdgeInsets.all(8),
                 ),
@@ -1017,7 +1018,7 @@ class _AdminBillingRemindersScreenState
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Dar Baixa na Cobranca'),
+        title: const Text('Dar Baixa na Cobrança'),
         content: Text(
           'Deseja marcar como PAGO o valor de R\$ ${amount.toStringAsFixed(2)} para $studentName?',
         ),
@@ -1039,7 +1040,7 @@ class _AdminBillingRemindersScreenState
         final academyId = FirebaseService.academyId;
         await PaymentService(academyId).markAsPaid(financialId);
         if (mounted) {
-          FeedbackUtils.showSuccess(context, 'Cobranca quitada com sucesso!');
+          FeedbackUtils.showSuccess(context, 'Cobrança quitada com sucesso!');
           _loadData();
         }
       } catch (e) {
@@ -1058,9 +1059,9 @@ class _AdminBillingRemindersScreenState
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Excluir Cobranca'),
+        title: const Text('Excluir Cobrança'),
         content: Text(
-          'Deseja EXCLUIR permanentemente a cobranca de R\$ ${amount.toStringAsFixed(2)} para $studentName?',
+          'Deseja EXCLUIR permanentemente a cobrança de R\$ ${amount.toStringAsFixed(2)} para $studentName?',
         ),
         actions: [
           TextButton(
@@ -1081,7 +1082,7 @@ class _AdminBillingRemindersScreenState
         final academyId = FirebaseService.academyId;
         await PaymentService(academyId).delete(financialId);
         if (mounted) {
-          FeedbackUtils.showSuccess(context, 'Cobranca excluida!');
+          FeedbackUtils.showSuccess(context, 'Cobrança excluída!');
           _loadData();
         }
       } catch (e) {
@@ -2287,7 +2288,7 @@ class _AdminBillingRemindersScreenState
   }
 
   // ============================================
-  // Create Charge Modal (Plano vs Cobranca Unica)
+  // Create Charge Modal (Plano vs Cobrança Única)
   // ============================================
   Future<void> _showCreateChargeModal() async {
     final academyId = FirebaseService.academyId;
@@ -2304,18 +2305,36 @@ class _AdminBillingRemindersScreenState
       if (mounted) {
         FeedbackUtils.showError(
           context,
-          'Nenhum aluno encontrado para criar cobranca.',
+          'Nenhum aluno encontrado para criar cobrança.',
         );
       }
       return;
     }
 
+    // Load available plans
+    List<Plan> plans = [];
+    try {
+      plans = await PlanService(academyId).list();
+    } catch (e) {
+      print('Erro ao carregar planos: $e');
+    }
+
     String selectedStudentId = students.first.studentId;
     String chargeType = 'monthly_tuition';
-    DateTime selectedDueDate = DateTime.now().subtract(const Duration(days: 3));
+    String? selectedPlanId = plans.isNotEmpty ? plans.first.id : null;
 
-    final amountController = TextEditingController(text: '100.00');
-    final descController = TextEditingController(text: 'Mensalidade do Plano');
+    final amountController = TextEditingController(
+      text: (plans.isNotEmpty
+              ? plans.first.getStudentValue(selectedStudentId)
+              : 100.0)
+          .toStringAsFixed(2),
+    );
+    final descController = TextEditingController(
+      text: plans.isNotEmpty
+          ? 'Mensalidade - ${plans.first.name}'
+          : 'Mensalidade do Plano',
+    );
+    DateTime selectedDueDate = DateTime.now().subtract(const Duration(days: 3));
 
     await showModalBottomSheet(
       context: context,
@@ -2331,6 +2350,14 @@ class _AdminBillingRemindersScreenState
               (s) => s.studentId == selectedStudentId,
               orElse: () => students.first,
             );
+
+            Plan? selectedPlan;
+            if (plans.isNotEmpty && selectedPlanId != null) {
+              selectedPlan = plans.firstWhere(
+                (p) => p.id == selectedPlanId,
+                orElse: () => plans.first,
+              );
+            }
 
             return Padding(
               padding: EdgeInsets.only(
@@ -2360,7 +2387,7 @@ class _AdminBillingRemindersScreenState
                         ),
                         const SizedBox(width: 12),
                         Text(
-                          'Criar Nova Cobranca',
+                          'Criar Nova Cobrança',
                           style: AppTheme.titleLarge.copyWith(
                             fontWeight: FontWeight.w600,
                           ),
@@ -2395,14 +2422,22 @@ class _AdminBillingRemindersScreenState
                       }).toList(),
                       onChanged: (val) {
                         if (val != null) {
-                          setSheetState(() => selectedStudentId = val);
+                          setSheetState(() {
+                            selectedStudentId = val;
+                            if (chargeType == 'monthly_tuition' &&
+                                selectedPlan != null) {
+                              final planVal =
+                                  selectedPlan.getStudentValue(selectedStudentId);
+                              amountController.text = planVal.toStringAsFixed(2);
+                            }
+                          });
                         }
                       },
                     ),
                     const SizedBox(height: 14),
 
                     // Charge Type Selector
-                    Text('Tipo de Cobranca *', style: AppTheme.labelMedium),
+                    Text('Tipo de Cobrança *', style: AppTheme.labelMedium),
                     const SizedBox(height: 6),
                     Row(
                       children: [
@@ -2413,7 +2448,17 @@ class _AdminBillingRemindersScreenState
                             onSelected: (_) {
                               setSheetState(() {
                                 chargeType = 'monthly_tuition';
-                                descController.text = 'Mensalidade do Plano';
+                                if (selectedPlan != null) {
+                                  descController.text =
+                                      'Mensalidade - ${selectedPlan.name}';
+                                  final planVal = selectedPlan.getStudentValue(
+                                    selectedStudentId,
+                                  );
+                                  amountController.text =
+                                      planVal.toStringAsFixed(2);
+                                } else {
+                                  descController.text = 'Mensalidade do Plano';
+                                }
                               });
                             },
                           ),
@@ -2421,12 +2466,12 @@ class _AdminBillingRemindersScreenState
                         const SizedBox(width: 8),
                         Expanded(
                           child: ChoiceChip(
-                            label: const Text('Cobranca Unica'),
+                            label: const Text('Cobrança Única'),
                             selected: chargeType == 'custom_charge',
                             onSelected: (_) {
                               setSheetState(() {
                                 chargeType = 'custom_charge';
-                                descController.text = 'Cobranca Avulsa';
+                                descController.text = 'Cobrança Avulsa';
                               });
                             },
                           ),
@@ -2435,14 +2480,75 @@ class _AdminBillingRemindersScreenState
                     ),
                     const SizedBox(height: 14),
 
-                    // Description
-                    Text('Descricao / Referencia', style: AppTheme.labelMedium),
+                    // If Plano do Aluno -> Show Plan Selector Dropdown
+                    if (chargeType == 'monthly_tuition') ...[
+                      Text('Selecione o Plano *', style: AppTheme.labelMedium),
+                      const SizedBox(height: 6),
+                      if (plans.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppTheme.warning.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'Nenhum plano cadastrado na academia. Crie um plano em Financeiro > Planos.',
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.warning,
+                            ),
+                          ),
+                        )
+                      else
+                        DropdownButtonFormField<String>(
+                          value: selectedPlanId,
+                          decoration: InputDecoration(
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
+                          items: plans.map((p) {
+                            final val = p.getStudentValue(selectedStudentId);
+                            return DropdownMenuItem<String>(
+                              value: p.id,
+                              child: Text(
+                                '${p.name} — R\$ ${val.toStringAsFixed(2)}/mês',
+                                style: AppTheme.bodyMedium,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) {
+                              setSheetState(() {
+                                selectedPlanId = val;
+                                final plan = plans.firstWhere((p) => p.id == val);
+                                final planVal = plan.getStudentValue(
+                                  selectedStudentId,
+                                );
+                                amountController.text =
+                                    planVal.toStringAsFixed(2);
+                                descController.text = 'Mensalidade - ${plan.name}';
+                              });
+                            }
+                          },
+                        ),
+                      const SizedBox(height: 14),
+                    ],
+
+                    // Description Field
+                    Text('Descrição / Referência', style: AppTheme.labelMedium),
                     const SizedBox(height: 6),
                     TextField(
                       controller: descController,
                       style: AppTheme.bodyMedium,
                       decoration: InputDecoration(
-                        hintText: 'Ex: Mensalidade de Agosto, Aula Particular...',
+                        hintText: chargeType == 'monthly_tuition'
+                            ? 'Ex: Mensalidade - Meta'
+                            : 'Ex: Aula Particular, Exame de Faixa...',
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -2454,12 +2560,14 @@ class _AdminBillingRemindersScreenState
                     ),
                     const SizedBox(height: 14),
 
-                    // Amount (R$)
+                    // Amount Field
                     Text('Valor (R\$) *', style: AppTheme.labelMedium),
                     const SizedBox(height: 6),
                     TextField(
                       controller: amountController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       style: AppTheme.bodyMedium,
                       decoration: InputDecoration(
                         prefixText: 'R\$ ',
@@ -2483,7 +2591,9 @@ class _AdminBillingRemindersScreenState
                           context: ctx,
                           initialDate: selectedDueDate,
                           firstDate: DateTime(2020),
-                          lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
+                          lastDate: DateTime.now().add(
+                            const Duration(days: 365 * 5),
+                          ),
                           locale: const Locale('pt', 'BR'),
                         );
                         if (picked != null) {
@@ -2528,17 +2638,21 @@ class _AdminBillingRemindersScreenState
                           final parsedAmount = double.tryParse(
                             amountController.text.replaceAll(',', '.'),
                           );
-                          if (parsedAmount == null || parsedAmount <= 0) {
+                          if (parsedAmount == null || parsedAmount < 0) {
                             FeedbackUtils.showError(
                               ctx,
-                              'Informe um valor valido maior que zero.',
+                              'Informe um valor válido maior ou igual a zero.',
                             );
                             return;
                           }
 
                           try {
                             final now = DateTime.now();
-                            final todayStart = DateTime(now.year, now.month, now.day);
+                            final todayStart = DateTime(
+                              now.year,
+                              now.month,
+                              now.day,
+                            );
                             final dueStart = DateTime(
                               selectedDueDate.year,
                               selectedDueDate.month,
@@ -2564,11 +2678,14 @@ class _AdminBillingRemindersScreenState
                               'dueDate': Timestamp.fromDate(selectedDueDate),
                               'status': statusStr,
                               'type': chargeType,
+                              'planId': chargeType == 'monthly_tuition'
+                                  ? selectedPlanId
+                                  : null,
                               'description': descController.text.trim().isNotEmpty
                                   ? descController.text.trim()
                                   : (chargeType == 'monthly_tuition'
                                       ? 'Mensalidade do Plano'
-                                      : 'Cobranca Avulsa'),
+                                      : 'Cobrança Avulsa'),
                               'referenceMonth': refMonth,
                               'createdAt': Timestamp.fromDate(now),
                             });
@@ -2579,7 +2696,7 @@ class _AdminBillingRemindersScreenState
                             if (mounted) {
                               FeedbackUtils.showSuccess(
                                 context,
-                                'Cobranca criada com sucesso!',
+                                'Cobrança criada com sucesso!',
                               );
                               _loadData();
                             }
@@ -2587,13 +2704,13 @@ class _AdminBillingRemindersScreenState
                             if (ctx.mounted) {
                               FeedbackUtils.showError(
                                 ctx,
-                                'Erro ao criar cobranca: $e',
+                                'Erro ao criar cobrança: $e',
                               );
                             }
                           }
                         },
                         child: Text(
-                          'Criar Cobranca',
+                          'Criar Cobrança',
                           style: AppTheme.titleSmall.copyWith(
                             color: Colors.white,
                             fontWeight: FontWeight.w600,
@@ -2707,7 +2824,7 @@ class _AdminBillingRemindersScreenState
                         },
                       ),
                       SwitchListTile(
-                        title: const Text('Cobranca via Email'),
+                        title: const Text('Cobrança via Email'),
                         secondary: Icon(
                           LucideIcons.mail,
                           color: emailEnabled
