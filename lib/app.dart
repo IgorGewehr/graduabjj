@@ -608,7 +608,8 @@ final routerProvider = Provider<GoRouter>((ref) {
             // Determine whether this instructor has a student account (was
             // promoted from a student) and whether they have financial access.
             final hasStudentId = user.studentId != null;
-            final hasFinancial = user.hasPermission('financial:view') ||
+            final hasFinancial =
+                user.hasPermission('financial:view') ||
                 user.hasPermission('financial:create');
 
             // Some management permissions only have UI inside AdminShell
@@ -623,7 +624,9 @@ final routerProvider = Provider<GoRouter>((ref) {
             // admin-only management perm → send to the monitor/chamada portal
             // experience.
             if (hasStudentId && !hasFinancial && !hasAdminOnlyManagement) {
-              print('[ROUTER] Redirecting student-instructor (no financial) to /portal');
+              print(
+                '[ROUTER] Redirecting student-instructor (no financial) to /portal',
+              );
               return '/portal';
             }
 
@@ -856,9 +859,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) => _buildPageWithPushTransition(
               context: context,
               state: state,
-              child: EventDetailScreen(
-                eventId: state.pathParameters['id']!,
-              ),
+              child: EventDetailScreen(eventId: state.pathParameters['id']!),
             ),
           ),
           GoRoute(
@@ -1357,7 +1358,9 @@ final routerProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) => _buildPageWithCrossfade(
               context: context,
               state: state,
-              child: const AdminBillingRemindersScreen(),
+              child: AdminBillingRemindersScreen(
+                initialFinancialId: state.uri.queryParameters['financialId'],
+              ),
             ),
           ),
           // Passo "Como vai funcionar a cobrança" (SPEC_ONBOARDING_2026-07.md
@@ -1421,9 +1424,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) => _buildPageWithPushTransition(
               context: context,
               state: state,
-              child: AdminEventFormScreen(
-                eventId: state.pathParameters['id'],
-              ),
+              child: AdminEventFormScreen(eventId: state.pathParameters['id']),
             ),
           ),
           // Sub-pages

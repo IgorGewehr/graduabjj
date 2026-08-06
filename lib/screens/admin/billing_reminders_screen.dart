@@ -10,6 +10,7 @@ import '../../core/feedback_utils.dart';
 import '../../providers/billing_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../services/billing_reminder_service.dart';
+import '../../services/mercado_pago_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/common/billing_automation_banner.dart';
@@ -24,7 +25,9 @@ import '../../widgets/polish/polish.dart';
 /// estágio (getOverdueWithStages, sendBulk*ForStage, etc.) continuam
 /// existindo por baixo sem nenhuma mudança — só a apresentação agrega.
 class AdminBillingRemindersScreen extends ConsumerStatefulWidget {
-  const AdminBillingRemindersScreen({super.key});
+  final String? initialFinancialId;
+
+  const AdminBillingRemindersScreen({super.key, this.initialFinancialId});
 
   @override
   ConsumerState<AdminBillingRemindersScreen> createState() =>
@@ -35,6 +38,8 @@ class _AdminBillingRemindersScreenState
     extends ConsumerState<AdminBillingRemindersScreen> {
   // Data
   Map<BillingStage, List<Map<String, dynamic>>> _overdueStages = {
+    BillingStage.created: [],
+    BillingStage.upcoming: [],
     BillingStage.d0: [],
     BillingStage.d1: [],
     BillingStage.d3: [],
@@ -50,8 +55,11 @@ class _AdminBillingRemindersScreenState
   // Pré-carregado aqui (junto do resto) para que o dialog de configurações
   // abra com o valor já disponível, sem precisar de FutureBuilder/spinner.
   bool _autoTuitionEnabled = false;
+  bool _mercadoPagoEnabled = false;
   bool _isLoading = true;
   bool _isSending = false;
+  bool _didOpenInitialCharge = false;
+  String _chargeFilter = 'all';
 
   // Progressive disclosure: stats agregados + quebra por tempo de atraso
   // ficam colapsados atrás de "Ver detalhes" (dono: tela virou "sala de
@@ -79,11 +87,12 @@ class _AdminBillingRemindersScreenState
       _billingService = BillingReminderService(academyId);
 
       final results = await Future.wait([
-        _billingService.getOverdueWithStages(),
+        _billingService.getCollectibleWithStages(),
         _billingService.getCollectionStats(),
         _billingService.getStudentContacts(),
         _billingService.getNotificationSettings(),
         _billingService.getAutoTuitionEnabled(),
+        MercadoPagoService(academyId).isEnabled(),
       ]);
 
       // Get academy name for notification service
@@ -102,6 +111,7 @@ class _AdminBillingRemindersScreenState
         _studentContacts = results[2] as Map<String, StudentContact>;
         _notificationSettings = notifSettings;
         _autoTuitionEnabled = results[4] as bool;
+        _mercadoPagoEnabled = results[5] as bool;
         _notificationService = BillingNotificationService(
           academyId: academyId,
           academyName: academyName,
@@ -109,6 +119,7 @@ class _AdminBillingRemindersScreenState
         );
         _isLoading = false;
       });
+      _openInitialChargeIfNeeded();
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
@@ -122,7 +133,7 @@ class _AdminBillingRemindersScreenState
   /// (BillingStage, dados) porque o estágio real ainda é necessário por
   /// baixo (template de mensagem, PIX, log de contato); só não aparece mais
   /// na UI.
-  List<MapEntry<BillingStage, Map<String, dynamic>>> get _sortedDebtors {
+  List<MapEntry<BillingStage, Map<String, dynamic>>> get _sortedCharges {
     final all = <MapEntry<BillingStage, Map<String, dynamic>>>[];
     for (final stage in BillingStage.values) {
       for (final item in _overdueStages[stage] ?? const []) {
@@ -137,10 +148,69 @@ class _AdminBillingRemindersScreenState
     return all;
   }
 
+  List<MapEntry<BillingStage, Map<String, dynamic>>> get _filteredCharges {
+    return _sortedCharges.where((entry) {
+      final days = entry.value['daysOverdue'] as int? ?? 0;
+      if (_chargeFilter == 'upcoming') return days <= 0;
+      if (_chargeFilter == 'overdue') return days > 0;
+      return true;
+    }).toList();
+  }
+
+  void _openInitialChargeIfNeeded() {
+    final financialId = widget.initialFinancialId;
+    if (_didOpenInitialCharge || financialId == null || financialId.isEmpty) {
+      return;
+    }
+    for (final entry in _sortedCharges) {
+      if (entry.value['id'] == financialId) {
+        final contact = _studentContacts[entry.value['studentId']];
+        _didOpenInitialCharge = true;
+        if (contact?.effectivePhone == null ||
+            contact!.effectivePhone!.isEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              FeedbackUtils.showWarning(
+                context,
+                'Aluno sem telefone para receber a cobrança.',
+              );
+            }
+          });
+          return;
+        }
+        if (!(_notificationService?.hasWhatsAppApi ?? false)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              FeedbackUtils.showWarning(
+                context,
+                'O canal de WhatsApp ainda não está configurado.',
+              );
+            }
+          });
+          return;
+        }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _showSendDialog(
+            mode: 'whatsapp',
+            financialItem: entry.value,
+            stage: entry.key,
+            contact: contact,
+          );
+        });
+        return;
+      }
+    }
+  }
+
   /// Rótulo humano do estágio para a área "Ver detalhes" — a régua D+N é
   /// jargão de engenharia; aqui vira faixa de dias, sem código interno.
   String _humanStageLabel(BillingStage stage) {
     switch (stage) {
+      case BillingStage.created:
+        return 'Parcela criada';
+      case BillingStage.upcoming:
+        return 'A vencer';
       case BillingStage.d0:
         return 'Vence hoje';
       case BillingStage.d1:
@@ -158,7 +228,7 @@ class _AdminBillingRemindersScreenState
 
   @override
   Widget build(BuildContext context) {
-    final debtors = _sortedDebtors;
+    final charges = _filteredCharges;
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: Column(
@@ -204,20 +274,22 @@ class _AdminBillingRemindersScreenState
                           slivers: [
                             // Status da automação em destaque — o "aha" da
                             // cobrança: liga sozinho, ou CTA pra ligar.
-                            SliverToBoxAdapter(
-                              child: _buildAutomationBanner(),
-                            ),
+                            SliverToBoxAdapter(child: _buildAutomationBanner()),
+                            SliverToBoxAdapter(child: _buildAutomationCard()),
 
                             // API Warning (nenhum canal configurado ainda)
                             if (_notificationSettings != null &&
-                                !_notificationSettings!.hasWhatsAppApi &&
-                                !_notificationSettings!.hasEmailApi)
+                                !(_notificationService?.hasWhatsAppApi ??
+                                    false) &&
+                                !(_notificationService?.hasEmailApi ?? false))
                               SliverToBoxAdapter(child: _buildApiWarning()),
 
                             // Botão primário "Cobrar todos (N)"
                             SliverToBoxAdapter(
-                              child: _buildBulkAllButton(debtors),
+                              child: _buildBulkAllButton(charges),
                             ),
+
+                            SliverToBoxAdapter(child: _buildChargeFilters()),
 
                             // Stats/estágios — atrás de "Ver detalhes"
                             SliverToBoxAdapter(
@@ -229,13 +301,17 @@ class _AdminBillingRemindersScreenState
                             ),
 
                             // Lista única de devedores, por dias de atraso
-                            if (debtors.isEmpty)
-                              const SliverFillRemaining(
+                            if (charges.isEmpty)
+                              SliverFillRemaining(
                                 hasScrollBody: false,
                                 child: PolishedEmptyState(
                                   icon: LucideIcons.checkCircle,
-                                  title: 'Nenhum pagamento em atraso',
-                                  subtitle: 'Tudo em dia por aqui.',
+                                  title: _chargeFilter == 'overdue'
+                                      ? 'Nenhum pagamento em atraso'
+                                      : 'Nenhuma cobrança em aberto',
+                                  subtitle: _chargeFilter == 'overdue'
+                                      ? 'Tudo em dia por aqui.'
+                                      : 'As novas parcelas aparecerão aqui.',
                                   accent: AppTheme.success,
                                 ),
                               )
@@ -250,10 +326,10 @@ class _AdminBillingRemindersScreenState
                                 sliver: SliverList(
                                   delegate: SliverChildBuilderDelegate(
                                     (context, index) => _buildPaymentItem(
-                                      debtors[index].value,
-                                      debtors[index].key,
+                                      charges[index].value,
+                                      charges[index].key,
                                     ).entrance(index: index),
-                                    childCount: debtors.length,
+                                    childCount: charges.length,
                                   ),
                                 ),
                               ),
@@ -295,24 +371,16 @@ class _AdminBillingRemindersScreenState
         decoration: BoxDecoration(
           color: AppTheme.warning.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: AppTheme.warning.withValues(alpha: 0.3),
-          ),
+          border: Border.all(color: AppTheme.warning.withValues(alpha: 0.3)),
         ),
         child: Row(
           children: [
-            Icon(
-              LucideIcons.alertTriangle,
-              size: 16,
-              color: AppTheme.warning,
-            ),
+            Icon(LucideIcons.alertTriangle, size: 16, color: AppTheme.warning),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'Habilite os canais de cobranca (WhatsApp e/ou Email) nas configuracoes para enviar cobrancas automaticas.',
-                style: AppTheme.bodySmall.copyWith(
-                  color: AppTheme.warning,
-                ),
+                style: AppTheme.bodySmall.copyWith(color: AppTheme.warning),
               ),
             ),
           ],
@@ -330,6 +398,210 @@ class _AdminBillingRemindersScreenState
   /// dialog cru abaixo — que continua acessível pelo ícone de engrenagem no
   /// topo desta tela.
   Widget _buildAutomationBanner() => const BillingAutomationBanner();
+
+  Widget _buildAutomationCard() {
+    final whatsappEnabled = _notificationSettings?.whatsappEnabled ?? false;
+    final notifyOnCreation = _notificationSettings?.notifyOnCreation ?? false;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.border),
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(LucideIcons.bot, size: 16, color: AppTheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Automação de cobrança',
+                      style: AppTheme.labelLarge.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                TextButton.icon(
+                  onPressed: _showSettingsDialog,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: const Icon(LucideIcons.pencil, size: 14),
+                  label: const Text(
+                    'Editar',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              title: const Text('Gerar mensalidades automaticamente'),
+              subtitle: Text(
+                'Na virada do mês, gera as mensalidades de todos os planos ativos (diariamente às 6h).',
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              secondary: Icon(
+                LucideIcons.repeat,
+                color: _autoTuitionEnabled
+                    ? AppTheme.success
+                    : AppTheme.textSecondary,
+              ),
+              value: _autoTuitionEnabled,
+              activeThumbColor: AppTheme.success,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              onChanged: (value) async {
+                setState(() => _autoTuitionEnabled = value);
+                try {
+                  await _billingService.setAutoTuitionEnabled(value);
+                  ref.invalidate(billingAutomationStatusProvider);
+                  if (mounted) {
+                    FeedbackUtils.showSuccess(
+                      context,
+                      value
+                          ? 'Geração automática ativada!'
+                          : 'Geração automática desativada.',
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    FeedbackUtils.showError(context, 'Erro ao atualizar: $e');
+                  }
+                }
+              },
+            ),
+            const Divider(height: 16),
+            SwitchListTile(
+              title: const Text('Avisar quando a parcela for criada'),
+              subtitle: Text(
+                'Envia automaticamente o template "Parcela criada" assim que uma nova cobrança ficar disponível.',
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              secondary: Icon(
+                LucideIcons.bell,
+                color: notifyOnCreation
+                    ? AppTheme.success
+                    : AppTheme.textSecondary,
+              ),
+              value: notifyOnCreation,
+              activeThumbColor: AppTheme.success,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              onChanged: whatsappEnabled
+                  ? (value) async {
+                      final currentSettings = _notificationSettings ??
+                          BillingNotificationSettings();
+                      final updatedSettings =
+                          currentSettings.copyWith(notifyOnCreation: value);
+                      setState(() => _notificationSettings = updatedSettings);
+                      try {
+                        await _billingService
+                            .saveNotificationSettings(updatedSettings);
+                        ref.invalidate(billingAutomationStatusProvider);
+                        if (mounted) {
+                          FeedbackUtils.showSuccess(
+                            context,
+                            value
+                                ? 'Aviso de parcela criada ativado!'
+                                : 'Aviso de parcela criada desativado.',
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          FeedbackUtils.showError(
+                            context,
+                            'Erro ao atualizar: $e',
+                          );
+                        }
+                      }
+                    }
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChargeFilters() {
+    final all = _sortedCharges.length;
+    final upcoming = _sortedCharges
+        .where((entry) => (entry.value['daysOverdue'] as int? ?? 0) <= 0)
+        .length;
+    final overdue = all - upcoming;
+
+    Widget filter(String value, String label, int count) {
+      final selected = _chargeFilter == value;
+      return Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(9),
+          onTap: () => setState(() => _chargeFilter = value),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: selected ? AppTheme.surface : Colors.transparent,
+              borderRadius: BorderRadius.circular(9),
+              boxShadow: selected
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x12000000),
+                        blurRadius: 5,
+                        offset: Offset(0, 2),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Text(
+              '$label  $count',
+              textAlign: TextAlign.center,
+              style: AppTheme.labelMedium.copyWith(
+                color: selected ? AppTheme.textPrimary : AppTheme.textSecondary,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            filter('all', 'Todas', all),
+            filter('upcoming', 'A vencer', upcoming),
+            filter('overdue', 'Vencidas', overdue),
+          ],
+        ),
+      ),
+    );
+  }
 
   /// Progressive disclosure: estatísticas agregadas + quebra por tempo de
   /// atraso, colapsadas atrás de "Ver detalhes" (não competem com a lista
@@ -389,8 +661,8 @@ class _AdminBillingRemindersScreenState
         .toList();
     if (entries.isEmpty) return const SizedBox.shrink();
     final hasChannel =
-        (_notificationSettings?.hasWhatsAppApi ?? false) ||
-        (_notificationSettings?.hasEmailApi ?? false);
+        (_notificationSettings?.whatsappEnabled ?? false) ||
+        (_notificationSettings?.emailEnabled ?? false);
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -459,8 +731,8 @@ class _AdminBillingRemindersScreenState
   ) {
     if (debtors.isEmpty) return const SizedBox.shrink();
     final hasChannel =
-        (_notificationSettings?.hasWhatsAppApi ?? false) ||
-        (_notificationSettings?.hasEmailApi ?? false);
+        (_notificationSettings?.whatsappEnabled ?? false) ||
+        (_notificationSettings?.emailEnabled ?? false);
     if (!hasChannel) return const SizedBox.shrink();
 
     return Padding(
@@ -532,9 +804,9 @@ class _AdminBillingRemindersScreenState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Envia a cobrança pelo WhatsApp/Email para todos os '
-                '${debtors.length} alunos em atraso. Cada aluno recebe a '
-                'mensagem correspondente ao tempo de atraso dele.',
+                'Envia a mensagem pelo WhatsApp/Email para as '
+                '${debtors.length} cobranças exibidas. Cada aluno recebe o '
+                'texto adequado ao vencimento da parcela.',
                 style: AppTheme.bodyMedium.copyWith(
                   color: AppTheme.textSecondary,
                 ),
@@ -577,9 +849,7 @@ class _AdminBillingRemindersScreenState
                     const SizedBox(width: 6),
                     Text(
                       '${recipients.skipped} sem contato',
-                      style: AppTheme.bodySmall.copyWith(
-                        color: Colors.orange,
-                      ),
+                      style: AppTheme.bodySmall.copyWith(color: Colors.orange),
                     ),
                   ],
                 ),
@@ -633,16 +903,18 @@ class _AdminBillingRemindersScreenState
       return;
     }
 
-    final nonEmptyStages = BillingStage.values
-        .where((s) => (_overdueStages[s]?.isNotEmpty ?? false))
-        .toList();
+    final grouped = <BillingStage, List<Map<String, dynamic>>>{};
+    for (final entry in debtors) {
+      grouped.putIfAbsent(entry.key, () => []).add(entry.value);
+    }
+    final nonEmptyStages = grouped.keys.toList();
     if (nonEmptyStages.isEmpty) return;
 
     setState(() => _isSending = true);
     final aggregated = _BulkSendOutcome();
     try {
       for (final stage in nonEmptyStages) {
-        final items = _overdueStages[stage] ?? [];
+        final items = grouped[stage] ?? [];
         final message = _notificationService!.generateGenericStageMessage(
           stage,
         );
@@ -780,6 +1052,10 @@ class _AdminBillingRemindersScreenState
 
   Color _stageColor(BillingStage stage) {
     switch (stage) {
+      case BillingStage.created:
+        return AppTheme.info;
+      case BillingStage.upcoming:
+        return AppTheme.primary;
       case BillingStage.d0:
         return AppTheme.primary;
       case BillingStage.d1:
@@ -805,8 +1081,8 @@ class _AdminBillingRemindersScreenState
     final contact = _studentContacts[studentId];
     final phone = contact?.effectivePhone;
     final email = contact?.effectiveEmail;
-    final hasWhatsApp = _notificationSettings?.hasWhatsAppApi ?? false;
-    final hasEmail = _notificationSettings?.hasEmailApi ?? false;
+    final hasWhatsApp = _notificationService?.hasWhatsAppApi ?? false;
+    final hasEmail = _notificationService?.hasEmailApi ?? false;
     final photoUrl = contact?.photoUrl;
 
     return Card(
@@ -847,7 +1123,11 @@ class _AdminBillingRemindersScreenState
                         style: AppTheme.bodySmall,
                       ),
                       Text(
-                        '$daysOverdue dias em atraso',
+                        daysOverdue < 0
+                            ? 'Vence em ${-daysOverdue} dia(s)'
+                            : daysOverdue == 0
+                            ? 'Vence hoje'
+                            : '$daysOverdue dia(s) em atraso',
                         style: AppTheme.bodySmall.copyWith(
                           color: _stageColor(stage),
                           fontWeight: FontWeight.w500,
@@ -919,18 +1199,20 @@ class _AdminBillingRemindersScreenState
               children: [
                 // Send WhatsApp
                 if (hasWhatsApp && phone != null && phone.isNotEmpty)
-                  IconButton(
+                  ElevatedButton.icon(
                     onPressed: () => _showSendDialog(
                       mode: 'whatsapp',
                       financialItem: item,
                       stage: stage,
                       contact: contact!,
                     ),
-                    icon: const Icon(LucideIcons.messageCircle, size: 20),
-                    color: AppTheme.success,
-                    tooltip: 'Enviar WhatsApp',
-                    constraints: const BoxConstraints(),
-                    padding: const EdgeInsets.all(8),
+                    icon: const Icon(LucideIcons.messageCircle, size: 16),
+                    label: const Text('Cobrar'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.success,
+                      foregroundColor: Colors.white,
+                      visualDensity: VisualDensity.compact,
+                    ),
                   ),
                 // Send Email
                 if (hasEmail && email != null && email.isNotEmpty)
@@ -1920,8 +2202,7 @@ class _AdminBillingRemindersScreenState
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (!result.scheduled &&
-                    ((result.whatsapp.sent ?? 0) +
-                            (result.email.sent ?? 0)) >
+                    ((result.whatsapp.sent ?? 0) + (result.email.sent ?? 0)) >
                         0) ...[
                   const SuccessCheck(size: 64),
                   const SizedBox(height: 12),
@@ -2035,8 +2316,7 @@ class _AdminBillingRemindersScreenState
                 ],
 
                 // L3: PIX/link attachment outcome for WhatsApp sends.
-                if (linkIntended &&
-                    (waWithLink > 0 || waWithoutLink > 0)) ...[
+                if (linkIntended && (waWithLink > 0 || waWithoutLink > 0)) ...[
                   const SizedBox(height: 12),
                   Container(
                     width: double.infinity,
@@ -2179,6 +2459,8 @@ class _AdminBillingRemindersScreenState
     bool whatsappEnabled = _notificationSettings?.whatsappEnabled ?? false;
     bool emailEnabled = _notificationSettings?.emailEnabled ?? false;
     bool includePaymentLink = _notificationSettings?.includePaymentLink ?? true;
+    bool notifyOnCreation = _notificationSettings?.notifyOnCreation ?? false;
+    final dueSoonOffsets = <int>{...?_notificationSettings?.dueSoonOffsets};
     // Pré-carregado em _loadData (doc settings/billing, separado dos demais
     // toggles acima que moram em settings/billingReminders).
     bool autoTuitionEnabled = _autoTuitionEnabled;
@@ -2194,14 +2476,33 @@ class _AdminBillingRemindersScreenState
     );
     bool showTemplates = false;
     int selectedStageIdx = 0;
-    final stages = ['D+1', 'D+3', 'D+7', 'D+15', 'D+30'];
+    const stageKeys = [
+      'CREATED',
+      'UPCOMING',
+      'D+0',
+      'D+1',
+      'D+3',
+      'D+7',
+      'D+15',
+      'D+30',
+    ];
+    const stageLabels = [
+      'Parcela criada',
+      'A vencer',
+      'Vence hoje',
+      '1–2 dias',
+      '3–6 dias',
+      '7–14 dias',
+      '15–29 dias',
+      '30+ dias',
+    ];
 
     showDialog(
       context: context,
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final stageKey = stages[selectedStageIdx];
+            final stageKey = stageKeys[selectedStageIdx];
 
             return AlertDialog(
               shape: RoundedRectangleBorder(
@@ -2247,9 +2548,9 @@ class _AdminBillingRemindersScreenState
                       ),
                       const SizedBox(height: 16),
                       SwitchListTile(
-                        title: const Text('Cobranca via WhatsApp'),
+                        title: const Text('Automacao via WhatsApp'),
                         subtitle: Text(
-                          'Envia lembretes automaticos por WhatsApp na regua D+0, D+1, D+3, D+7, D+15 e D+30 (diariamente as 9h), alem dos envios manuais desta tela.',
+                          'Envia sozinho nos momentos configurados. O botão Cobrar continua disponível para envios manuais.',
                           style: AppTheme.bodySmall.copyWith(
                             color: AppTheme.textSecondary,
                           ),
@@ -2261,7 +2562,7 @@ class _AdminBillingRemindersScreenState
                               : AppTheme.textSecondary,
                         ),
                         value: whatsappEnabled,
-                        activeColor: AppTheme.success,
+                        activeThumbColor: AppTheme.success,
                         contentPadding: EdgeInsets.zero,
                         onChanged: (value) {
                           setDialogState(() => whatsappEnabled = value);
@@ -2276,7 +2577,7 @@ class _AdminBillingRemindersScreenState
                               : AppTheme.textSecondary,
                         ),
                         value: emailEnabled,
-                        activeColor: AppTheme.primary,
+                        activeThumbColor: AppTheme.primary,
                         contentPadding: EdgeInsets.zero,
                         onChanged: (value) {
                           setDialogState(() => emailEnabled = value);
@@ -2285,7 +2586,9 @@ class _AdminBillingRemindersScreenState
                       SwitchListTile(
                         title: const Text('Incluir link de pagamento (PIX)'),
                         subtitle: Text(
-                          'Anexa o copia-e-cola e o link de checkout do Mercado Pago nas cobrancas do WhatsApp',
+                          _mercadoPagoEnabled
+                              ? 'Anexa o copia-e-cola e o link de checkout do Mercado Pago.'
+                              : 'Conecte o Mercado Pago para incluir um link. As mensagens continuam funcionando sem ele.',
                           style: AppTheme.bodySmall.copyWith(
                             color: AppTheme.textSecondary,
                           ),
@@ -2296,12 +2599,16 @@ class _AdminBillingRemindersScreenState
                               ? AppTheme.success
                               : AppTheme.textSecondary,
                         ),
-                        value: includePaymentLink,
-                        activeColor: AppTheme.success,
+                        value: _mercadoPagoEnabled && includePaymentLink,
+                        activeThumbColor: AppTheme.success,
                         contentPadding: EdgeInsets.zero,
-                        onChanged: (value) {
-                          setDialogState(() => includePaymentLink = value);
-                        },
+                        onChanged: _mercadoPagoEnabled
+                            ? (value) {
+                                setDialogState(
+                                  () => includePaymentLink = value,
+                                );
+                              }
+                            : null,
                       ),
 
                       const Divider(height: 24),
@@ -2344,6 +2651,64 @@ class _AdminBillingRemindersScreenState
                           setDialogState(() => autoTuitionEnabled = value);
                         },
                       ),
+                      SwitchListTile(
+                        title: const Text('Avisar quando a parcela for criada'),
+                        subtitle: Text(
+                          'Envia automaticamente o template "Parcela criada" assim que uma nova cobrança ficar disponível.',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        secondary: Icon(
+                          LucideIcons.bell,
+                          color: notifyOnCreation
+                              ? AppTheme.success
+                              : AppTheme.textSecondary,
+                        ),
+                        value: notifyOnCreation,
+                        activeThumbColor: AppTheme.success,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: whatsappEnabled
+                            ? (value) =>
+                                  setDialogState(() => notifyOnCreation = value)
+                            : null,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Avisos antes e no dia do vencimento',
+                        style: AppTheme.labelMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'O aluno é avisado no app e, com WhatsApp automático ligado, recebe também o template "A vencer".',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [7, 3, 1, 0].map((days) {
+                          return FilterChip(
+                            label: Text(
+                              days == 0
+                                  ? 'No vencimento'
+                                  : '$days dia${days == 1 ? '' : 's'} antes',
+                            ),
+                            selected: dueSoonOffsets.contains(days),
+                            onSelected: (selected) => setDialogState(() {
+                              if (selected) {
+                                dueSoonOffsets.add(days);
+                              } else {
+                                dueSoonOffsets.remove(days);
+                              }
+                            }),
+                          );
+                        }).toList(),
+                      ),
 
                       const Divider(height: 24),
 
@@ -2366,9 +2731,9 @@ class _AdminBillingRemindersScreenState
                         ],
                       ),
                       Text(
-                        includePaymentLink
-                            ? 'Variaveis: {nome}, {valor}, {vencimento}, {dias}, {academia}, {pix} (copia-e-cola), {link} (checkout)'
-                            : 'Variaveis: {nome}, {valor}, {vencimento}, {dias}, {academia}',
+                        _mercadoPagoEnabled && includePaymentLink
+                            ? 'Variaveis: {nome}, {valor}, {vencimento}, {dias}, {diasAteVencimento}, {academia}, {pix}, {link}'
+                            : 'Variaveis: {nome}, {valor}, {vencimento}, {dias}, {diasAteVencimento}, {academia}',
                         style: AppTheme.labelSmall.copyWith(
                           color: AppTheme.textSecondary,
                         ),
@@ -2380,10 +2745,10 @@ class _AdminBillingRemindersScreenState
                         // Stage selector chips
                         Wrap(
                           spacing: 6,
-                          children: List.generate(stages.length, (i) {
+                          children: List.generate(stageKeys.length, (i) {
                             return ChoiceChip(
                               label: Text(
-                                stages[i],
+                                stageLabels[i],
                                 style: const TextStyle(fontSize: 12),
                               ),
                               selected: selectedStageIdx == i,
@@ -2401,11 +2766,12 @@ class _AdminBillingRemindersScreenState
 
                         // WhatsApp template
                         Text(
-                          'WhatsApp - $stageKey',
+                          'WhatsApp · ${stageLabels[selectedStageIdx]}',
                           style: AppTheme.labelMedium,
                         ),
                         const SizedBox(height: 6),
                         TextFormField(
+                          key: ValueKey('wa-$stageKey'),
                           initialValue:
                               waTemplates[stageKey] ??
                               BillingNotificationService
@@ -2426,12 +2792,10 @@ class _AdminBillingRemindersScreenState
                         const SizedBox(height: 12),
 
                         // Email subject
-                        Text(
-                          'Assunto Email - $stageKey',
-                          style: AppTheme.labelMedium,
-                        ),
+                        Text('Assunto do e-mail', style: AppTheme.labelMedium),
                         const SizedBox(height: 6),
                         TextFormField(
+                          key: ValueKey('email-subject-$stageKey'),
                           initialValue:
                               emailSubjectTemplates[stageKey] ??
                               BillingNotificationService
@@ -2454,12 +2818,10 @@ class _AdminBillingRemindersScreenState
                         const SizedBox(height: 12),
 
                         // Email body
-                        Text(
-                          'Corpo Email - $stageKey',
-                          style: AppTheme.labelMedium,
-                        ),
+                        Text('Corpo do e-mail', style: AppTheme.labelMedium),
                         const SizedBox(height: 6),
                         TextFormField(
+                          key: ValueKey('email-body-$stageKey'),
                           initialValue:
                               emailBodyTemplates[stageKey] ??
                               BillingNotificationService
@@ -2490,7 +2852,7 @@ class _AdminBillingRemindersScreenState
                               });
                             },
                             child: Text(
-                              'Restaurar padrao para $stageKey',
+                              'Restaurar padrão deste momento',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: AppTheme.warning,
@@ -2523,7 +2885,11 @@ class _AdminBillingRemindersScreenState
                       final newSettings = BillingNotificationSettings(
                         whatsappEnabled: whatsappEnabled,
                         emailEnabled: emailEnabled,
-                        includePaymentLink: includePaymentLink,
+                        includePaymentLink:
+                            _mercadoPagoEnabled && includePaymentLink,
+                        notifyOnCreation: notifyOnCreation,
+                        dueSoonOffsets: dueSoonOffsets.toList()
+                          ..sort((a, b) => b.compareTo(a)),
                         messageTemplates: templates,
                       );
 
@@ -2532,9 +2898,7 @@ class _AdminBillingRemindersScreenState
                       // settings/billing) para que "Salvar" seja uma ação
                       // única e previsível para o admin.
                       await Future.wait([
-                        _billingService.saveNotificationSettings(
-                          newSettings,
-                        ),
+                        _billingService.saveNotificationSettings(newSettings),
                         _billingService.setAutoTuitionEnabled(
                           autoTuitionEnabled,
                         ),
@@ -2780,7 +3144,11 @@ class _BulkSendOutcome {
     return BulkServerResult(
       success: true,
       scheduled: false,
-      whatsapp: BulkChannelSummary(total: waTotal, sent: waSent, failed: waFailed),
+      whatsapp: BulkChannelSummary(
+        total: waTotal,
+        sent: waSent,
+        failed: waFailed,
+      ),
       email: BulkChannelSummary(total: emTotal, sent: emSent, failed: emFailed),
       failures: failures,
     );

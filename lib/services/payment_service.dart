@@ -164,6 +164,7 @@ class Payment {
   /// Settling gateway: 'mercadopago' | 'abacatepay' | 'manual'. Canonical field
   /// written by every paid path (webhook, inline settle, manual mark-paid).
   final String? paymentGateway;
+
   /// Gateway-side charge id for the settlement (MP/AbacatePay payment id).
   final String? gatewayPaymentId;
   final String? pixCode;
@@ -173,6 +174,7 @@ class Payment {
   /// Snapshot of the plan/charge payment-method policy at generation time.
   /// Absent on legacy docs → [PaymentMethodPolicy.both].
   final PaymentMethodPolicy paymentMethodPolicy;
+
   /// Aula particular (type == 'private_lesson'): true depois que o backend
   /// concedeu a presença ao aluno (no settle do pagamento ou no grant manual).
   final bool attendanceGranted;
@@ -214,8 +216,8 @@ class Payment {
       paidAt: data['paymentDate'] != null
           ? (data['paymentDate'] as Timestamp).toDate()
           : data['paidAt'] != null
-              ? (data['paidAt'] as Timestamp).toDate()
-              : null,
+          ? (data['paidAt'] as Timestamp).toDate()
+          : null,
       status: PaymentStatusExtension.fromString(data['status'] ?? 'pending'),
       method: data['method'] != null
           ? PaymentMethodExtension.fromString(data['method'])
@@ -229,8 +231,9 @@ class Payment {
       pixQrCode: data['pixQrCode'],
       planId: data['planId'],
       type: data['type'] ?? 'monthly_tuition',
-      paymentMethodPolicy:
-          PaymentMethodPolicyExtension.fromString(data['paymentMethodPolicy']),
+      paymentMethodPolicy: PaymentMethodPolicyExtension.fromString(
+        data['paymentMethodPolicy'],
+      ),
       attendanceGranted: data['attendanceGranted'] == true,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -300,10 +303,12 @@ class PaymentService {
         .where('studentId', isEqualTo: studentId)
         .snapshots()
         .map((snapshot) {
-      var payments = snapshot.docs.map((doc) => Payment.fromFirestore(doc)).toList();
-      payments.sort((a, b) => b.dueDate.compareTo(a.dueDate));
-      return payments;
-    });
+          var payments = snapshot.docs
+              .map((doc) => Payment.fromFirestore(doc))
+              .toList();
+          payments.sort((a, b) => b.dueDate.compareTo(a.dueDate));
+          return payments;
+        });
   }
 
   // ============================================
@@ -359,7 +364,11 @@ class PaymentService {
   Future<List<Payment>> getPendingByStudent(String studentId) async {
     final payments = await getByStudent(studentId);
     return payments
-        .where((p) => p.status == PaymentStatus.pending || p.status == PaymentStatus.overdue)
+        .where(
+          (p) =>
+              p.status == PaymentStatus.pending ||
+              p.status == PaymentStatus.overdue,
+        )
         .toList();
   }
 
@@ -441,15 +450,23 @@ class PaymentService {
   // ============================================
   // Get Payments by Reference Month
   // ============================================
-  Future<List<Payment>> getByMonth(String referenceMonth, {String? studentId}) async {
-    Query query = _paymentsRef.where('referenceMonth', isEqualTo: referenceMonth);
+  Future<List<Payment>> getByMonth(
+    String referenceMonth, {
+    String? studentId,
+  }) async {
+    Query query = _paymentsRef.where(
+      'referenceMonth',
+      isEqualTo: referenceMonth,
+    );
 
     if (studentId != null) {
       query = query.where('studentId', isEqualTo: studentId);
     }
 
     final snapshot = await query.get();
-    var payments = snapshot.docs.map((doc) => Payment.fromFirestore(doc)).toList();
+    var payments = snapshot.docs
+        .map((doc) => Payment.fromFirestore(doc))
+        .toList();
     payments.sort((a, b) => b.dueDate.compareTo(a.dueDate));
     return payments;
   }
@@ -462,11 +479,12 @@ class PaymentService {
         .where('referenceMonth', isEqualTo: referenceMonth)
         .snapshots()
         .map((snap) {
-      final payments =
-          snap.docs.map((d) => Payment.fromFirestore(d)).toList();
-      payments.sort((a, b) => b.dueDate.compareTo(a.dueDate));
-      return payments;
-    });
+          final payments = snap.docs
+              .map((d) => Payment.fromFirestore(d))
+              .toList();
+          payments.sort((a, b) => b.dueDate.compareTo(a.dueDate));
+          return payments;
+        });
   }
 
   // ============================================
@@ -573,13 +591,13 @@ class PaymentService {
     final payment = Payment.fromFirestore(doc);
 
     // Send notification to student if they have a linked account
-    if (sendNotification &&
-        (type == 'monthly_tuition' || isPrivateLesson)) {
+    if (sendNotification && (type == 'monthly_tuition' || isPrivateLesson)) {
       try {
         final student = await _studentService.getById(studentId);
         // Route to the responsible adult (kids) when set, else the student's
         // own account.
-        final notifyUserId = student?.responsibleUserId ?? student?.linkedUserId;
+        final notifyUserId =
+            student?.responsibleUserId ?? student?.linkedUserId;
         if (student != null && notifyUserId != null) {
           await _notificationDispatcher.notifyNewTuition(
             userId: notifyUserId,
@@ -608,9 +626,7 @@ class PaymentService {
     bool markPaidCash = false,
     String? staffName,
   }) async {
-    await Fns.functions
-        .httpsCallable('markPrivateLessonGiven')
-        .call({
+    await Fns.functions.httpsCallable('markPrivateLessonGiven').call({
       'academyId': academyId,
       'financialId': financialId,
       'markPaidCash': markPaidCash,
@@ -626,6 +642,62 @@ class PaymentService {
     await _paymentsRef.doc(id).update(data);
     final doc = await _paymentsRef.doc(id).get();
     return Payment.fromFirestore(doc);
+  }
+
+  /// Edita os termos de uma cobrança ainda aberta. Qualquer PIX já emitido
+  /// deixa de representar o novo valor/vencimento, então ele é invalidado e
+  /// será recriado no próximo envio. Os marcadores da régua também são limpos
+  /// para que a automação reavalie a cobrança com a nova data.
+  Future<Payment> updateTerms({
+    required String id,
+    required double value,
+    required DateTime dueDate,
+  }) async {
+    if (value <= 0) throw ArgumentError.value(value, 'value');
+
+    final current = await getById(id);
+    if (current == null) throw StateError('Pagamento nao encontrado');
+    if (current.status == PaymentStatus.paid) {
+      throw StateError('Pagamentos ja quitados nao podem ser editados');
+    }
+
+    String? gatewayPaymentId = current.gatewayPaymentId;
+    final paymentGateway = current.paymentGateway;
+    final today = DateTime.now();
+    final todayStart = DateTime(today.year, today.month, today.day);
+    final dueStart = DateTime(dueDate.year, dueDate.month, dueDate.day);
+    final status = dueStart.isBefore(todayStart)
+        ? PaymentStatus.overdue
+        : PaymentStatus.pending;
+
+    final updated = await update(id, {
+      'amount': value,
+      'dueDate': Timestamp.fromDate(dueDate),
+      'status': status.value,
+      'gatewayPaymentId': FieldValue.delete(),
+      'pixCode': FieldValue.delete(),
+      'pixQrCode': FieldValue.delete(),
+      'pixTicketUrl': FieldValue.delete(),
+      'pixExpiresAt': FieldValue.delete(),
+      'lastReminderStage': FieldValue.delete(),
+      'lastReminderAt': FieldValue.delete(),
+      'lastDueSoonStage': FieldValue.delete(),
+      'lastDueSoonAt': FieldValue.delete(),
+    });
+
+    if (gatewayPaymentId != null &&
+        gatewayPaymentId.isNotEmpty &&
+        paymentGateway == 'mercadopago') {
+      try {
+        await Fns.functions.httpsCallable('cancelMpPix').call({
+          'academyId': academyId,
+          'paymentId': gatewayPaymentId,
+        });
+      } catch (e) {
+        print('[PaymentService] cancelMpPix on terms edit failed: $e');
+      }
+    }
+    return updated;
   }
 
   // ============================================
@@ -751,15 +823,17 @@ class PaymentService {
     // Determine new status based on due date
     final today = DateTime.now();
     final todayStart = DateTime(today.year, today.month, today.day);
-    final dueDate = DateTime(payment.dueDate.year, payment.dueDate.month, payment.dueDate.day);
+    final dueDate = DateTime(
+      payment.dueDate.year,
+      payment.dueDate.month,
+      payment.dueDate.day,
+    );
 
     final newStatus = dueDate.isBefore(todayStart)
         ? PaymentStatus.overdue
         : PaymentStatus.pending;
 
-    return update(id, {
-      'status': newStatus.value,
-    });
+    return update(id, {'status': newStatus.value});
   }
 
   // ============================================
@@ -806,11 +880,13 @@ class PaymentService {
     final snapshot = await _paymentsRef.get();
     var payments = snapshot.docs
         .map((doc) => Payment.fromFirestore(doc))
-        .where((p) =>
-            p.status == PaymentStatus.paid &&
-            p.paidAt != null &&
-            p.paidAt!.isAfter(startOfMonth) &&
-            p.paidAt!.isBefore(endOfMonth))
+        .where(
+          (p) =>
+              p.status == PaymentStatus.paid &&
+              p.paidAt != null &&
+              p.paidAt!.isAfter(startOfMonth) &&
+              p.paidAt!.isBefore(endOfMonth),
+        )
         .toList();
     payments.sort((a, b) => b.paidAt!.compareTo(a.paidAt!));
     return payments;
@@ -861,7 +937,17 @@ class PaymentService {
   /// (quarterly/semiannual/annual). A student already charged within the period is skipped.
   /// If [planId] is provided, generates only for students in that specific plan.
   Future<List<Payment>> generateMonthlyTuitions({
-    List<({String id, String name, double value, int dueDay, String? planId, BillingPeriod billingPeriod})>? students,
+    List<
+      ({
+        String id,
+        String name,
+        double value,
+        int dueDay,
+        String? planId,
+        BillingPeriod billingPeriod,
+      })
+    >?
+    students,
     required String referenceMonth,
     String? createdBy,
     String? planId,
@@ -873,7 +959,17 @@ class PaymentService {
     // plan's policy. Populated from the plans we process below.
     final planPolicies = <String, PaymentMethodPolicy>{};
 
-    List<({String id, String name, double value, int dueDay, String? planId, BillingPeriod billingPeriod})> studentList;
+    List<
+      ({
+        String id,
+        String name,
+        double value,
+        int dueDay,
+        String? planId,
+        BillingPeriod billingPeriod,
+      })
+    >
+    studentList;
     if (students != null) {
       studentList = students;
     } else {
@@ -887,7 +983,16 @@ class PaymentService {
         plansToProcess = await planService.getActive();
       }
 
-      final entries = <({String studentId, String planId, double value, int dueDay, BillingPeriod billingPeriod})>[];
+      final entries =
+          <
+            ({
+              String studentId,
+              String planId,
+              double value,
+              int dueDay,
+              BillingPeriod billingPeriod,
+            })
+          >[];
 
       for (final plan in plansToProcess) {
         planPolicies[plan.id] = plan.paymentMethodPolicy;
@@ -920,24 +1025,26 @@ class PaymentService {
       studentList = entries
           .where((e) => activeStudentMap.containsKey(e.studentId))
           .map((e) {
-        final data = activeStudentMap[e.studentId]!;
-        return (
-          id: e.studentId,
-          name: data['fullName'] as String? ?? '',
-          value: e.value,
-          dueDay: data['tuitionDay'] as int? ?? e.dueDay,
-          planId: e.planId as String?,
-          billingPeriod: e.billingPeriod,
-        );
-      }).where((s) => s.value > 0).toList();
+            final data = activeStudentMap[e.studentId]!;
+            return (
+              id: e.studentId,
+              name: data['fullName'] as String? ?? '',
+              value: e.value,
+              dueDay: data['tuitionDay'] as int? ?? e.dueDay,
+              planId: e.planId as String?,
+              billingPeriod: e.billingPeriod,
+            );
+          })
+          .where((s) => s.value > 0)
+          .toList();
     }
 
     // Prefetch this month's charges ONCE for the monthly-plan dedup, instead of
     // one Firestore query per student (the N+1 that made bulk generation hang).
     // Non-monthly plans still use the per-student period check below.
-    final monthCharges = (await getByMonth(referenceMonth))
-        .where((p) => p.status != PaymentStatus.cancelled)
-        .toList();
+    final monthCharges = (await getByMonth(
+      referenceMonth,
+    )).where((p) => p.status != PaymentStatus.cancelled).toList();
 
     for (final student in studentList) {
       final period = student.billingPeriod;
@@ -946,10 +1053,13 @@ class PaymentService {
       if (period == BillingPeriod.monthly) {
         // Skip if an active charge already exists this month for this student
         // (matched against the plan, mirroring the prior per-student query).
-        final activeExisting =
-            monthCharges.where((p) => p.studentId == student.id).toList();
+        final activeExisting = monthCharges
+            .where((p) => p.studentId == student.id)
+            .toList();
         if (student.planId != null) {
-          shouldGenerate = !activeExisting.any((p) => p.planId == student.planId);
+          shouldGenerate = !activeExisting.any(
+            (p) => p.planId == student.planId,
+          );
         } else {
           shouldGenerate = !activeExisting.any((p) => p.planId == null);
         }
@@ -967,7 +1077,9 @@ class PaymentService {
       if (!shouldGenerate) continue;
 
       final lastDayOfMonth = DateTime(year, month + 1, 0).day;
-      final clampedDay = student.dueDay > lastDayOfMonth ? lastDayOfMonth : student.dueDay;
+      final clampedDay = student.dueDay > lastDayOfMonth
+          ? lastDayOfMonth
+          : student.dueDay;
       final dueDate = DateTime(year, month, clampedDay);
 
       final payment = await create(
@@ -975,7 +1087,9 @@ class PaymentService {
         studentName: student.name,
         value: student.value,
         dueDate: dueDate,
-        description: period == BillingPeriod.monthly ? 'Mensalidade' : period.label,
+        description: period == BillingPeriod.monthly
+            ? 'Mensalidade'
+            : period.label,
         referenceMonth: referenceMonth,
         createdBy: createdBy,
         planId: student.planId,
@@ -1085,7 +1199,9 @@ class PaymentService {
       'pending': {'value': totalPending, 'count': countPending},
       'overdue': {'value': totalOverdue, 'count': countOverdue},
       'cancelled': countCancelled,
-      'collectionRate': totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0,
+      'collectionRate': totalExpected > 0
+          ? (totalPaid / totalExpected * 100)
+          : 0,
     };
   }
 
@@ -1118,7 +1234,7 @@ class PaymentService {
     final hasPix = pixCode != null && pixCode.isNotEmpty;
     final pixBlock = hasPix
         ? 'Pague agora pelo PIX (copia e cola):\n$pixCode\n\n'
-            '${(ticketUrl != null && ticketUrl.isNotEmpty) ? 'Ou acesse: $ticketUrl\n\n' : ''}'
+              '${(ticketUrl != null && ticketUrl.isNotEmpty) ? 'Ou acesse: $ticketUrl\n\n' : ''}'
         : '';
 
     final message = Uri.encodeComponent(

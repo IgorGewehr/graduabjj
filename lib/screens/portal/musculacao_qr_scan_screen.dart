@@ -22,8 +22,7 @@ class MusculacaoQrScanScreen extends ConsumerStatefulWidget {
       _MusculacaoQrScanScreenState();
 }
 
-class _MusculacaoQrScanScreenState
-    extends ConsumerState<MusculacaoQrScanScreen>
+class _MusculacaoQrScanScreenState extends ConsumerState<MusculacaoQrScanScreen>
     with SingleTickerProviderStateMixin {
   // Sem câmera no desktop (mobile_scanner): controller nulo → build mostra
   // fallback.
@@ -139,20 +138,20 @@ class _MusculacaoQrScanScreenState
         foregroundColor: Colors.white,
         title: const Text('Check-in da Musculacao'),
       ),
-      body: _success ? _buildSuccess() : _buildScanner(),
+      body: _success ? _buildSuccess() : _buildScanner(_controller),
     );
   }
 
-  Widget _buildScanner() {
+  Widget _buildScanner(MobileScannerController controller) {
     return Stack(
       children: [
         MobileScanner(
-          controller: _controller!,
+          controller: controller,
           onDetect: _handle,
-          errorBuilder: (context, error, child) => _CameraErrorView(
+          errorBuilder: (context, error) => _CameraErrorView(
             error: error,
             onRetry: () {
-              _controller?.start();
+              controller.start();
             },
           ),
         ),

@@ -61,11 +61,15 @@ extension ContactTypeExtension on ContactType {
 /// Matches marcusjj's BillingStage union (`'D+0' | 'D+1' | 'D+3' | 'D+7' |
 /// 'D+15' | 'D+30'`). `d0` is the "due-today" courtesy reminder; the others
 /// fire after vencimento.
-enum BillingStage { d0, d1, d3, d7, d15, d30 }
+enum BillingStage { created, upcoming, d0, d1, d3, d7, d15, d30 }
 
 extension BillingStageExtension on BillingStage {
   String get label {
     switch (this) {
+      case BillingStage.created:
+        return 'CREATED';
+      case BillingStage.upcoming:
+        return 'UPCOMING';
       case BillingStage.d0:
         return 'D+0';
       case BillingStage.d1:
@@ -83,6 +87,10 @@ extension BillingStageExtension on BillingStage {
 
   String get value {
     switch (this) {
+      case BillingStage.created:
+        return 'CREATED';
+      case BillingStage.upcoming:
+        return 'UPCOMING';
       case BillingStage.d0:
         return 'D+0';
       case BillingStage.d1:
@@ -143,8 +151,7 @@ class BillingContactLog {
       contactedBy: data['contactedBy'] ?? '',
       contactedByName: data['contactedByName'] ?? '',
       academyId: data['academyId'] ?? '',
-      createdAt:
-          (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
 }
@@ -154,10 +161,7 @@ class CollectionStageData {
   final int count;
   final double amount;
 
-  CollectionStageData({
-    required this.count,
-    required this.amount,
-  });
+  CollectionStageData({required this.count, required this.amount});
 }
 
 /// Aggregate collection statistics
@@ -206,6 +210,7 @@ class BillingReminderService {
   // Helper: Classify billing stage from days overdue
   // ============================================
   BillingStage? _classifyStage(int daysOverdue) {
+    if (daysOverdue < 0) return BillingStage.upcoming;
     if (daysOverdue >= 30) return BillingStage.d30;
     if (daysOverdue >= 15) return BillingStage.d15;
     if (daysOverdue >= 7) return BillingStage.d7;
@@ -219,10 +224,21 @@ class BillingReminderService {
   // Get Overdue Financials Grouped by Stage
   // ============================================
   Future<Map<BillingStage, List<Map<String, dynamic>>>>
-      getOverdueWithStages() async {
+  getOverdueWithStages() async {
+    return getCollectibleWithStages(includeUpcoming: false);
+  }
+
+  /// Todas as cobranças ainda abertas, inclusive as que ainda não venceram.
+  /// A tela de Cobranças usa esta leitura para permitir avisos/cobranças antes
+  /// do vencimento; relatórios de inadimplência continuam usando
+  /// [getOverdueWithStages] e, portanto, não misturam valores futuros.
+  Future<Map<BillingStage, List<Map<String, dynamic>>>>
+  getCollectibleWithStages({bool includeUpcoming = true}) async {
     final snapshot = await _financialsRef.get();
 
     final result = <BillingStage, List<Map<String, dynamic>>>{
+      BillingStage.created: [],
+      BillingStage.upcoming: [],
       BillingStage.d0: [],
       BillingStage.d1: [],
       BillingStage.d3: [],
@@ -246,9 +262,9 @@ class BillingReminderService {
           : DateTime.now();
 
       final daysOverdue = _calculateDaysOverdue(dueDate);
-      // Include due-today (daysOverdue == 0 -> D+0 courtesy) up to D+30+.
-      // Negative (not yet due) is excluded.
-      if (daysOverdue < 0) continue;
+      // A tela operacional inclui a vencer; consumidores históricos podem
+      // manter o comportamento antigo passando includeUpcoming=false.
+      if (daysOverdue < 0 && !includeUpcoming) continue;
 
       final stage = _classifyStage(daysOverdue);
       if (stage == null) continue;
@@ -445,8 +461,9 @@ class BillingReminderService {
       totalOverdueAmount: totalOverdueAmount,
       totalStudentsOverdue: uniqueStudents.length,
       recoveryRate: 0, // Placeholder - needs historical data
-      averageDaysOverdue:
-          totalOverdue > 0 ? (totalDaysOverdue / totalOverdue).round() : 0,
+      averageDaysOverdue: totalOverdue > 0
+          ? (totalDaysOverdue / totalOverdue).round()
+          : 0,
       byStage: finalByStage,
     );
   }
@@ -502,6 +519,14 @@ class BillingReminderService {
       whatsappEnabled: data['whatsappEnabled'] as bool? ?? false,
       emailEnabled: data['emailEnabled'] as bool? ?? false,
       includePaymentLink: data['includePaymentLink'] as bool? ?? true,
+      notifyOnCreation: data['notifyOnCreation'] as bool? ?? false,
+      dueSoonOffsets:
+          ((data['dueSoonOffsets'] as List?) ?? const [7, 3, 1, 0])
+              .map((value) => (value as num).toInt())
+              .where((value) => value >= 0)
+              .toSet()
+              .toList()
+            ..sort((a, b) => b.compareTo(a)),
       messageTemplates: BillingMessageTemplates.fromMap(
         data['messageTemplates'] as Map<String, dynamic>?,
       ),
@@ -511,11 +536,15 @@ class BillingReminderService {
   // ============================================
   // Save Notification Settings (Toggles)
   // ============================================
-  Future<void> saveNotificationSettings(BillingNotificationSettings settings) async {
+  Future<void> saveNotificationSettings(
+    BillingNotificationSettings settings,
+  ) async {
     final data = <String, dynamic>{
       'whatsappEnabled': settings.whatsappEnabled,
       'emailEnabled': settings.emailEnabled,
       'includePaymentLink': settings.includePaymentLink,
+      'notifyOnCreation': settings.notifyOnCreation,
+      'dueSoonOffsets': settings.dueSoonOffsets,
       'updatedAt': Timestamp.fromDate(DateTime.now()),
     };
     if (settings.messageTemplates != null) {
@@ -560,9 +589,9 @@ class BillingReminderService {
         .collection('settings')
         .doc('billing')
         .set({
-      'autoTuitionEnabled': enabled,
-      'updatedAt': Timestamp.fromDate(DateTime.now()),
-    }, SetOptions(merge: true));
+          'autoTuitionEnabled': enabled,
+          'updatedAt': Timestamp.fromDate(DateTime.now()),
+        }, SetOptions(merge: true));
   }
 
   // ============================================
@@ -711,11 +740,9 @@ class StudentContact {
     this.photoUrl,
   });
 
-  String? get effectivePhone =>
-      category == 'kids' ? guardianPhone : phone;
+  String? get effectivePhone => category == 'kids' ? guardianPhone : phone;
 
-  String? get effectiveEmail =>
-      category == 'kids' ? guardianEmail : email;
+  String? get effectiveEmail => category == 'kids' ? guardianEmail : email;
 
   /// CPF do PAGADOR pro PIX do Mercado Pago (que exige um CPF válido).
   /// Kids: prefere o CPF do RESPONSÁVEL (pagador correto de um menor); se o
@@ -763,41 +790,75 @@ class BillingNotificationSettings {
   final bool whatsappEnabled;
   final bool emailEnabled;
   final bool includePaymentLink;
+  final bool notifyOnCreation;
+  final List<int> dueSoonOffsets;
   final BillingMessageTemplates? messageTemplates;
 
   BillingNotificationSettings({
     this.whatsappEnabled = false,
     this.emailEnabled = false,
     this.includePaymentLink = true,
+    this.notifyOnCreation = false,
+    this.dueSoonOffsets = const [7, 3, 1, 0],
     this.messageTemplates,
   });
 
   bool get hasWhatsAppApi => whatsappEnabled;
   bool get hasEmailApi => emailEnabled;
+
+  BillingNotificationSettings copyWith({
+    bool? whatsappEnabled,
+    bool? emailEnabled,
+    bool? includePaymentLink,
+    bool? notifyOnCreation,
+    List<int>? dueSoonOffsets,
+    BillingMessageTemplates? messageTemplates,
+  }) {
+    return BillingNotificationSettings(
+      whatsappEnabled: whatsappEnabled ?? this.whatsappEnabled,
+      emailEnabled: emailEnabled ?? this.emailEnabled,
+      includePaymentLink: includePaymentLink ?? this.includePaymentLink,
+      notifyOnCreation: notifyOnCreation ?? this.notifyOnCreation,
+      dueSoonOffsets: dueSoonOffsets ?? this.dueSoonOffsets,
+      messageTemplates: messageTemplates ?? this.messageTemplates,
+    );
+  }
 }
 
 // ============================================
 // Billing Notification Service
 // ============================================
 class BillingNotificationService {
-  static const String _whatsappApiUrl =
-      String.fromEnvironment('WHATSAPP_API_URL', defaultValue: '');
-  static const String _emailApiUrl =
-      String.fromEnvironment('EMAIL_API_URL', defaultValue: '');
+  static const String _whatsappApiUrl = String.fromEnvironment(
+    'WHATSAPP_API_URL',
+    defaultValue: '',
+  );
+  static const String _emailApiUrl = String.fromEnvironment(
+    'EMAIL_API_URL',
+    defaultValue: '',
+  );
   // Matches marcusjj split: WHATSAPP_API_KEY + EMAIL_API_KEY are independent.
   // NOTIFICATION_API_KEY remains as legacy fallback for older builds.
-  static const String _legacyApiKey =
-      String.fromEnvironment('NOTIFICATION_API_KEY', defaultValue: '');
-  static const String _whatsappApiKeyRaw =
-      String.fromEnvironment('WHATSAPP_API_KEY', defaultValue: '');
-  static const String _emailApiKeyRaw =
-      String.fromEnvironment('EMAIL_API_KEY', defaultValue: '');
+  static const String _legacyApiKey = String.fromEnvironment(
+    'NOTIFICATION_API_KEY',
+    defaultValue: '',
+  );
+  static const String _whatsappApiKeyRaw = String.fromEnvironment(
+    'WHATSAPP_API_KEY',
+    defaultValue: '',
+  );
+  static const String _emailApiKeyRaw = String.fromEnvironment(
+    'EMAIL_API_KEY',
+    defaultValue: '',
+  );
   static String get _whatsappApiKey =>
       _whatsappApiKeyRaw.isNotEmpty ? _whatsappApiKeyRaw : _legacyApiKey;
   static String get _emailApiKey =>
       _emailApiKeyRaw.isNotEmpty ? _emailApiKeyRaw : _legacyApiKey;
-  static const String _bulkApiUrlEnv =
-      String.fromEnvironment('NOTIFICATION_BULK_API_URL', defaultValue: '');
+  static const String _bulkApiUrlEnv = String.fromEnvironment(
+    'NOTIFICATION_BULK_API_URL',
+    defaultValue: '',
+  );
   // Marcusjj proxies stamp every notification payload with this appId so the
   // notification server can route per-app. Match it for parity.
   static const String _appId = 'gestao-raiz';
@@ -818,8 +879,7 @@ class BillingNotificationService {
   final String academyId;
   final String academyName;
   BillingMessageTemplates? customTemplates;
-  final _currencyFormat =
-      NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+  final _currencyFormat = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
   final _dateFormat = DateFormat('dd/MM/yyyy');
 
   // Default templates with placeholders: {nome}, {valor}, {vencimento}, {dias}, {academia}.
@@ -829,15 +889,27 @@ class BillingNotificationService {
   // there is no PIX (e.g. MP disconnected, or template preview), the whole
   // block is stripped so the message stays clean.
   static const defaultWhatsAppTemplates = {
-    'D+0': 'Oi {nome}! Passando rapidinho para lembrar que hoje, dia {vencimento}, vence sua mensalidade de {valor} com a {academia}. Contamos com voce! Qualquer duvida, estamos a disposicao.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
-    'D+1': 'Ola {nome}! Aqui e a {academia}. Identificamos que sua mensalidade de {valor} venceu em {vencimento}. Caso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem. Caso contrario, solicitamos a regularizacao. Obrigado![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
-    'D+3': 'Ola {nome}! Sua mensalidade de {valor} da {academia} esta com 3 dias de atraso (vencimento: {vencimento}). Por favor, regularize sua situacao o mais breve possivel. Em caso de duvidas, estamos a disposicao![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
-    'D+7': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Precisamos que regularize sua situacao para manter seus treinos em dia. Entre em contato conosco para combinar o pagamento.[[PIX]]\n\nPara facilitar, pague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
-    'D+15': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Sua situacao precisa ser regularizada com urgencia para evitar a suspensao do acesso aos treinos. Por favor, entre em contato.[[PIX]]\n\nRegularize agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
-    'D+30': 'Ola {nome}, sua mensalidade de {valor} da {academia} esta com mais de 30 dias de atraso. Caso a situacao nao seja regularizada, infelizmente precisaremos suspender seu acesso. Entre em contato urgente para negociarmos.[[PIX]]\n\nRegularize agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'CREATED':
+        'Oi {nome}! Uma nova parcela de {valor} da {academia} ja esta disponivel, com vencimento em {vencimento}.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'UPCOMING':
+        'Oi {nome}! Sua parcela de {valor} da {academia} vence em {diasAteVencimento} dia(s), em {vencimento}.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'D+0':
+        'Oi {nome}! Passando rapidinho para lembrar que hoje, dia {vencimento}, vence sua mensalidade de {valor} com a {academia}. Contamos com voce! Qualquer duvida, estamos a disposicao.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'D+1':
+        'Ola {nome}! Aqui e a {academia}. Identificamos que sua mensalidade de {valor} venceu em {vencimento}. Caso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem. Caso contrario, solicitamos a regularizacao. Obrigado![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'D+3':
+        'Ola {nome}! Sua mensalidade de {valor} da {academia} esta com 3 dias de atraso (vencimento: {vencimento}). Por favor, regularize sua situacao o mais breve possivel. Em caso de duvidas, estamos a disposicao![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'D+7':
+        'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Precisamos que regularize sua situacao para manter seus treinos em dia. Entre em contato conosco para combinar o pagamento.[[PIX]]\n\nPara facilitar, pague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'D+15':
+        'Ola {nome}, sua mensalidade de {valor} da {academia} esta com {dias} dias de atraso. Sua situacao precisa ser regularizada com urgencia para evitar a suspensao do acesso aos treinos. Por favor, entre em contato.[[PIX]]\n\nRegularize agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+    'D+30':
+        'Ola {nome}, sua mensalidade de {valor} da {academia} esta com mais de 30 dias de atraso. Caso a situacao nao seja regularizada, infelizmente precisaremos suspender seu acesso. Entre em contato urgente para negociarmos.[[PIX]]\n\nRegularize agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
   };
 
   static const defaultEmailSubjectTemplates = {
+    'CREATED': 'Nova parcela disponivel - {academia}',
+    'UPCOMING': 'Sua parcela vence em breve - {academia}',
     'D+0': 'Lembrete: Sua mensalidade vence hoje - {academia}',
     'D+1': 'Lembrete de Pagamento - {academia}',
     'D+3': 'Pagamento Atrasado - {academia}',
@@ -847,12 +919,22 @@ class BillingNotificationService {
   };
 
   static const defaultEmailBodyTemplates = {
-    'D+0': 'Ola {nome},\n\nPassamos apenas para lembrar que hoje, dia {vencimento}, vence sua mensalidade no valor de {valor} com a {academia}.\n\nSe voce ja efetuou o pagamento, obrigado e pode desconsiderar este aviso!\n\nCaso ainda nao tenha pago, contamos com voce para manter tudo em dia.\n\nAtenciosamente,\n{academia}',
-    'D+1': 'Prezado(a) {nome},\n\nIdentificamos que sua mensalidade no valor de {valor} com vencimento em {vencimento} ainda nao foi quitada.\n\nCaso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem.\n\nCaso contrario, solicitamos que regularize sua situacao o mais breve possivel.\n\nAtenciosamente,\n{academia}',
-    'D+3': 'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} da {academia} esta com 3 dias de atraso (vencimento: {vencimento}).\n\nPor favor, regularize sua situacao o mais breve possivel.\n\nEm caso de duvidas ou dificuldades, estamos a disposicao para ajudar.\n\nAtenciosamente,\n{academia}',
-    'D+7': 'Prezado(a) {nome},\n\nGostaramos de informar que sua mensalidade no valor de {valor} esta com {dias} dias de atraso.\n\nPrecisamos que regularize sua situacao para manter seus treinos em dia. Entre em contato conosco para combinar a melhor forma de pagamento.\n\nAtenciosamente,\n{academia}',
-    'D+15': 'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} esta com {dias} dias de atraso.\n\nInformamos que sua situacao precisa ser regularizada com URGENCIA para evitar a suspensao do acesso aos treinos.\n\nPor favor, entre em contato imediatamente para negociarmos o pagamento.\n\nAtenciosamente,\n{academia}',
-    'D+30': 'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} esta com mais de 30 dias de atraso.\n\nCaso a situacao nao seja regularizada nos proximos dias, infelizmente precisaremos suspender seu acesso a academia.\n\nEntre em contato urgente para que possamos encontrar uma solucao.\n\nAtenciosamente,\n{academia}',
+    'CREATED':
+        'Ola {nome},\n\nUma nova parcela no valor de {valor} ja esta disponivel. O vencimento sera em {vencimento}.\n\nAtenciosamente,\n{academia}',
+    'UPCOMING':
+        'Ola {nome},\n\nSua parcela de {valor} vence em {diasAteVencimento} dia(s), em {vencimento}.\n\nSe voce ja efetuou o pagamento, pode desconsiderar este aviso.\n\nAtenciosamente,\n{academia}',
+    'D+0':
+        'Ola {nome},\n\nPassamos apenas para lembrar que hoje, dia {vencimento}, vence sua mensalidade no valor de {valor} com a {academia}.\n\nSe voce ja efetuou o pagamento, obrigado e pode desconsiderar este aviso!\n\nCaso ainda nao tenha pago, contamos com voce para manter tudo em dia.\n\nAtenciosamente,\n{academia}',
+    'D+1':
+        'Prezado(a) {nome},\n\nIdentificamos que sua mensalidade no valor de {valor} com vencimento em {vencimento} ainda nao foi quitada.\n\nCaso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem.\n\nCaso contrario, solicitamos que regularize sua situacao o mais breve possivel.\n\nAtenciosamente,\n{academia}',
+    'D+3':
+        'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} da {academia} esta com 3 dias de atraso (vencimento: {vencimento}).\n\nPor favor, regularize sua situacao o mais breve possivel.\n\nEm caso de duvidas ou dificuldades, estamos a disposicao para ajudar.\n\nAtenciosamente,\n{academia}',
+    'D+7':
+        'Prezado(a) {nome},\n\nGostaramos de informar que sua mensalidade no valor de {valor} esta com {dias} dias de atraso.\n\nPrecisamos que regularize sua situacao para manter seus treinos em dia. Entre em contato conosco para combinar a melhor forma de pagamento.\n\nAtenciosamente,\n{academia}',
+    'D+15':
+        'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} esta com {dias} dias de atraso.\n\nInformamos que sua situacao precisa ser regularizada com URGENCIA para evitar a suspensao do acesso aos treinos.\n\nPor favor, entre em contato imediatamente para negociarmos o pagamento.\n\nAtenciosamente,\n{academia}',
+    'D+30':
+        'Prezado(a) {nome},\n\nSua mensalidade no valor de {valor} esta com mais de 30 dias de atraso.\n\nCaso a situacao nao seja regularizada nos proximos dias, infelizmente precisaremos suspender seu acesso a academia.\n\nEntre em contato urgente para que possamos encontrar uma solucao.\n\nAtenciosamente,\n{academia}',
   };
 
   BillingNotificationService({
@@ -861,12 +943,22 @@ class BillingNotificationService {
     this.customTemplates,
   });
 
-  String _applyTemplate(String template, String studentName, String amountStr, String dateStr, int daysOverdue) {
+  String _applyTemplate(
+    String template,
+    String studentName,
+    String amountStr,
+    String dateStr,
+    int daysOverdue,
+  ) {
     return template
         .replaceAll('{nome}', studentName)
         .replaceAll('{valor}', amountStr)
         .replaceAll('{vencimento}', dateStr)
         .replaceAll('{dias}', '$daysOverdue')
+        .replaceAll(
+          '{diasAteVencimento}',
+          daysOverdue < 0 ? '${-daysOverdue}' : '0',
+        )
         .replaceAll('{academia}', academyName);
   }
 
@@ -949,11 +1041,18 @@ class BillingNotificationService {
     final dateStr = _dateFormat.format(dueDate);
     final stageKey = stage.value;
 
-    final template = customTemplates?.whatsapp[stageKey]
-        ?? defaultWhatsAppTemplates[stageKey]
-        ?? defaultWhatsAppTemplates['D+1']!;
+    final template =
+        customTemplates?.whatsapp[stageKey] ??
+        defaultWhatsAppTemplates[stageKey] ??
+        defaultWhatsAppTemplates['D+1']!;
 
-    final result = _applyTemplate(template, studentName, amountStr, dateStr, daysOverdue);
+    final result = _applyTemplate(
+      template,
+      studentName,
+      amountStr,
+      dateStr,
+      daysOverdue,
+    );
     return injectPaymentInfo(result, pixCode: pixCode, ticketUrl: ticketUrl);
   }
 
@@ -971,17 +1070,31 @@ class BillingNotificationService {
     final dateStr = _dateFormat.format(dueDate);
     final stageKey = stage.value;
 
-    final subjectTemplate = customTemplates?.emailSubject[stageKey]
-        ?? defaultEmailSubjectTemplates[stageKey]
-        ?? defaultEmailSubjectTemplates['D+1']!;
+    final subjectTemplate =
+        customTemplates?.emailSubject[stageKey] ??
+        defaultEmailSubjectTemplates[stageKey] ??
+        defaultEmailSubjectTemplates['D+1']!;
 
-    final bodyTemplate = customTemplates?.emailBody[stageKey]
-        ?? defaultEmailBodyTemplates[stageKey]
-        ?? defaultEmailBodyTemplates['D+1']!;
+    final bodyTemplate =
+        customTemplates?.emailBody[stageKey] ??
+        defaultEmailBodyTemplates[stageKey] ??
+        defaultEmailBodyTemplates['D+1']!;
 
     return (
-      subject: _applyTemplate(subjectTemplate, studentName, amountStr, dateStr, daysOverdue),
-      message: _applyTemplate(bodyTemplate, studentName, amountStr, dateStr, daysOverdue),
+      subject: _applyTemplate(
+        subjectTemplate,
+        studentName,
+        amountStr,
+        dateStr,
+        daysOverdue,
+      ),
+      message: _applyTemplate(
+        bodyTemplate,
+        studentName,
+        amountStr,
+        dateStr,
+        daysOverdue,
+      ),
     );
   }
 
@@ -1016,33 +1129,39 @@ class BillingNotificationService {
       );
     }
     try {
-      final response = await http.post(
-        Uri.parse(_whatsappApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          if (_whatsappApiKey.isNotEmpty) 'x-api-key': _whatsappApiKey,
-        },
-        body: jsonEncode({
-          'phone': _normalizePhone(phone),
-          'studentName': studentName,
-          'studentId': studentId,
-          'financialId': financialId,
-          'academyId': academyId,
-          'academyName': academyName,
-          'amount': amount,
-          'amountFormatted': _currencyFormat.format(amount),
-          'dueDate': DateFormat('yyyy-MM-dd').format(dueDate),
-          'dueDateFormatted': _dateFormat.format(dueDate),
-          'daysOverdue': daysOverdue,
-          'stage': stage.value,
-          'message': message,
-          'type': 'billing_reminder',
-          'appId': _appId,
-        }),
-      ).timeout(const Duration(seconds: 30));
+      final response = await http
+          .post(
+            Uri.parse(_whatsappApiUrl),
+            headers: {
+              'Content-Type': 'application/json',
+              if (_whatsappApiKey.isNotEmpty) 'x-api-key': _whatsappApiKey,
+            },
+            body: jsonEncode({
+              'phone': _normalizePhone(phone),
+              'studentName': studentName,
+              'studentId': studentId,
+              'financialId': financialId,
+              'academyId': academyId,
+              'academyName': academyName,
+              'amount': amount,
+              'amountFormatted': _currencyFormat.format(amount),
+              'dueDate': DateFormat('yyyy-MM-dd').format(dueDate),
+              'dueDateFormatted': _dateFormat.format(dueDate),
+              'daysOverdue': daysOverdue,
+              'stage': stage.value,
+              'message': message,
+              'type': 'billing_reminder',
+              'appId': _appId,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        return NotificationResult(success: true, studentName: studentName, studentId: studentId);
+        return NotificationResult(
+          success: true,
+          studentName: studentName,
+          studentId: studentId,
+        );
       } else {
         return NotificationResult(
           success: false,
@@ -1064,7 +1183,9 @@ class BillingNotificationService {
         success: false,
         studentName: studentName,
         studentId: studentId,
-        error: isTimeout ? 'Timeout: API demorou mais de 30 segundos' : e.toString(),
+        error: isTimeout
+            ? 'Timeout: API demorou mais de 30 segundos'
+            : e.toString(),
       );
     }
   }
@@ -1093,34 +1214,40 @@ class BillingNotificationService {
       );
     }
     try {
-      final response = await http.post(
-        Uri.parse(_emailApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          if (_emailApiKey.isNotEmpty) 'x-api-key': _emailApiKey,
-        },
-        body: jsonEncode({
-          'email': email,
-          'studentName': studentName,
-          'studentId': studentId,
-          'financialId': financialId,
-          'academyId': academyId,
-          'academyName': academyName,
-          'amount': amount,
-          'amountFormatted': _currencyFormat.format(amount),
-          'dueDate': DateFormat('yyyy-MM-dd').format(dueDate),
-          'dueDateFormatted': _dateFormat.format(dueDate),
-          'daysOverdue': daysOverdue,
-          'stage': stage.value,
-          'subject': subject,
-          'message': message,
-          'type': 'billing_reminder',
-          'appId': _appId,
-        }),
-      ).timeout(const Duration(seconds: 30));
+      final response = await http
+          .post(
+            Uri.parse(_emailApiUrl),
+            headers: {
+              'Content-Type': 'application/json',
+              if (_emailApiKey.isNotEmpty) 'x-api-key': _emailApiKey,
+            },
+            body: jsonEncode({
+              'email': email,
+              'studentName': studentName,
+              'studentId': studentId,
+              'financialId': financialId,
+              'academyId': academyId,
+              'academyName': academyName,
+              'amount': amount,
+              'amountFormatted': _currencyFormat.format(amount),
+              'dueDate': DateFormat('yyyy-MM-dd').format(dueDate),
+              'dueDateFormatted': _dateFormat.format(dueDate),
+              'daysOverdue': daysOverdue,
+              'stage': stage.value,
+              'subject': subject,
+              'message': message,
+              'type': 'billing_reminder',
+              'appId': _appId,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        return NotificationResult(success: true, studentName: studentName, studentId: studentId);
+        return NotificationResult(
+          success: true,
+          studentName: studentName,
+          studentId: studentId,
+        );
       } else {
         return NotificationResult(
           success: false,
@@ -1142,7 +1269,9 @@ class BillingNotificationService {
         success: false,
         studentName: studentName,
         studentId: studentId,
-        error: isTimeout ? 'Timeout: API demorou mais de 30 segundos' : e.toString(),
+        error: isTimeout
+            ? 'Timeout: API demorou mais de 30 segundos'
+            : e.toString(),
       );
     }
   }
@@ -1207,7 +1336,8 @@ class BillingNotificationService {
         continue;
       }
 
-      final msg = customMessage ??
+      final msg =
+          customMessage ??
           generateWhatsAppMessage(
             stage: stage,
             studentName: studentName,
@@ -1324,14 +1454,16 @@ class BillingNotificationService {
       results: results,
     );
   }
+
   // ============================================
   // Generate Generic Stage Message (template preview with placeholders)
   // ============================================
   String generateGenericStageMessage(BillingStage stage) {
     final stageKey = stage.value;
-    final template = customTemplates?.whatsapp[stageKey]
-        ?? defaultWhatsAppTemplates[stageKey]
-        ?? defaultWhatsAppTemplates['D+1']!;
+    final template =
+        customTemplates?.whatsapp[stageKey] ??
+        defaultWhatsAppTemplates[stageKey] ??
+        defaultWhatsAppTemplates['D+1']!;
     return template.replaceAll('{academia}', academyName);
   }
 
@@ -1349,7 +1481,13 @@ class BillingNotificationService {
   }) {
     final amountStr = _currencyFormat.format(amount);
     final dateStr = _dateFormat.format(dueDate);
-    final result = _applyTemplate(template, studentName, amountStr, dateStr, daysOverdue);
+    final result = _applyTemplate(
+      template,
+      studentName,
+      amountStr,
+      dateStr,
+      daysOverdue,
+    );
     return injectPaymentInfo(result, pixCode: pixCode, ticketUrl: ticketUrl);
   }
 
@@ -1358,16 +1496,18 @@ class BillingNotificationService {
   // ============================================
   String generateGenericEmailSubject(BillingStage stage) {
     final stageKey = stage.value;
-    final template = customTemplates?.emailSubject[stageKey]
-        ?? defaultEmailSubjectTemplates[stageKey]
-        ?? defaultEmailSubjectTemplates['D+1']!;
+    final template =
+        customTemplates?.emailSubject[stageKey] ??
+        defaultEmailSubjectTemplates[stageKey] ??
+        defaultEmailSubjectTemplates['D+1']!;
     return template.replaceAll('{academia}', academyName);
   }
 
   // ============================================
   // Collect Recipients for Stage (phones + emails, deduplicated)
   // ============================================
-  ({List<String> phones, List<String> emails, int skipped}) collectRecipientsForStage({
+  ({List<String> phones, List<String> emails, int skipped})
+  collectRecipientsForStage({
     required List<Map<String, dynamic>> financials,
     required Map<String, StudentContact> contacts,
   }) {
@@ -1393,12 +1533,17 @@ class BillingNotificationService {
         emailsSet.add(email);
       }
 
-      if ((phone == null || phone.isEmpty) && (email == null || email.isEmpty)) {
+      if ((phone == null || phone.isEmpty) &&
+          (email == null || email.isEmpty)) {
         skipped++;
       }
     }
 
-    return (phones: phonesSet.toList(), emails: emailsSet.toList(), skipped: skipped);
+    return (
+      phones: phonesSet.toList(),
+      emails: emailsSet.toList(),
+      skipped: skipped,
+    );
   }
 
   // ============================================
@@ -1429,15 +1574,19 @@ class BillingNotificationService {
 
       // Bulk hits both channels; the notification server accepts either key.
       // Prefer WhatsApp key (most builds use the same value anyway).
-      final bulkKey = _whatsappApiKey.isNotEmpty ? _whatsappApiKey : _emailApiKey;
-      final response = await http.post(
-        Uri.parse(_bulkApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          if (bulkKey.isNotEmpty) 'x-api-key': bulkKey,
-        },
-        body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 120));
+      final bulkKey = _whatsappApiKey.isNotEmpty
+          ? _whatsappApiKey
+          : _emailApiKey;
+      final response = await http
+          .post(
+            Uri.parse(_bulkApiUrl),
+            headers: {
+              'Content-Type': 'application/json',
+              if (bulkKey.isNotEmpty) 'x-api-key': bulkKey,
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 120));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -1480,7 +1629,11 @@ class BulkFailure {
   final String recipient;
   final String error;
 
-  BulkFailure({required this.type, required this.recipient, required this.error});
+  BulkFailure({
+    required this.type,
+    required this.recipient,
+    required this.error,
+  });
 
   factory BulkFailure.fromJson(Map<String, dynamic> json) {
     return BulkFailure(
@@ -1512,9 +1665,11 @@ class BulkServerResult {
 
   factory BulkServerResult.fromJson(Map<String, dynamic> json) {
     final summary = json['summary'] as Map<String, dynamic>? ?? {};
-    final failuresList = (json['failures'] as List<dynamic>?)
-        ?.map((f) => BulkFailure.fromJson(f as Map<String, dynamic>))
-        .toList() ?? [];
+    final failuresList =
+        (json['failures'] as List<dynamic>?)
+            ?.map((f) => BulkFailure.fromJson(f as Map<String, dynamic>))
+            .toList() ??
+        [];
 
     return BulkServerResult(
       success: json['success'] as bool? ?? false,
