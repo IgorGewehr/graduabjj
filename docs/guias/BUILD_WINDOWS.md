@@ -51,9 +51,18 @@ windows --release` falha antes mesmo de compilar uma linha de Dart.
    (com fallback para o layout antigo `build/windows/runner/Release`, sem a
    subpasta `x64`, para robustez entre versões do Flutter) num único
    `graduabjj-windows.zip` via `Compress-Archive`.
-8. `actions/upload-artifact@v4` — nome `graduabjj-windows`, retenção de
-   **30 dias**, `if-no-files-found: error` (o build falha alto e claro se o
-   zip não existir, em vez de publicar um artefato vazio silenciosamente).
+7. Compilação do Instalador: compila `windows/installer/graduabjj_installer.iss` via Inno Setup (`ISCC.exe`), empacotando `graduabjj.exe`, todas as DLLs nativas (`file_selector_windows_plugin.dll`, etc.) e os assets na pasta `data/` em um único instalador `GraduaBJJ-Setup-v3.4.1.exe`.
+8. `actions/upload-artifact@v4` — artefatos `graduabjj-installer` (`.exe`) e `graduabjj-windows` (`.zip`), retenção de **30 dias**.
+
+### Compilando o Instalador Localmente
+```powershell
+$env:CMAKE_POLICY_VERSION_MINIMUM = '3.5'
+flutter config --enable-windows-desktop
+flutter pub get
+flutter build windows --release
+ISCC windows/installer/graduabjj_installer.iss
+```
+O instalador final estará disponível em `build/windows/installer/GraduaBJJ-Setup-v3.4.1.exe`.
 
 ## 2. Camada de compatibilidade desktop
 

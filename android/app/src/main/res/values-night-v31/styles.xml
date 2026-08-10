@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowSplashScreenBackground">#F4F3EF</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/mydojo_mark_vector</item>
+    </style>
+</resources>
