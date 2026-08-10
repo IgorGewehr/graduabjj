@@ -128,7 +128,7 @@ void main() async {
     ]);
   }
 
-  runApp(const ProviderScope(child: GraduaBJJApp()));
+  runApp(coanst ProviderScope(child: GraduaBJJApp()));
 
   // TAREFA 2 (iOS): init do FCM deferido pra depois do 1º frame — se o
   // crash nativo do plugin (ver comentário acima) voltar a acontecer, o
