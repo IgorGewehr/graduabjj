@@ -155,14 +155,14 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
         actions: [
           IconButton(
             icon: ValueListenableBuilder<MobileScannerState>(
-              valueListenable: _controller!,
+              valueListenable: _controller,
               builder: (context, state, _) {
                 final on = state.torchState == TorchState.on;
                 return Icon(on ? LucideIcons.zapOff : LucideIcons.zap);
               },
             ),
             tooltip: 'Lanterna',
-            onPressed: () => _controller?.toggleTorch(),
+            onPressed: () => _controller.toggleTorch(),
           ),
         ],
       ),
@@ -171,12 +171,12 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
           : Stack(
               children: [
                 MobileScanner(
-                  controller: _controller!,
+                  controller: _controller,
                   onDetect: _handleDetection,
-                  errorBuilder: (context, error, child) => _CameraErrorView(
+                  errorBuilder: (context, error) => _CameraErrorView(
                     error: error,
                     onRetry: () {
-                      _controller?.start();
+                      _controller.start();
                     },
                   ),
                 ),
@@ -231,7 +231,7 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
                             vertical: 10,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.55),
+                            color: Colors.black.withValues(alpha: 0.55),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Row(
@@ -372,7 +372,7 @@ class _ReticleOverlayState extends State<_ReticleOverlay>
 
   @override
   void dispose() {
-    _controller?.dispose();
+    _controller.dispose();
     super.dispose();
   }
 

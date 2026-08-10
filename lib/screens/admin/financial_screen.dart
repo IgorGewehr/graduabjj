@@ -6,18 +6,16 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
-import 'package:url_launcher/url_launcher.dart';
-
 import '../../core/feedback_utils.dart';
 import '../../core/responsive.dart';
 import '../../providers/auth_provider.dart';
-import '../../widgets/common/academy_page_header.dart';
+import '../../widgets/cached_image.dart';
+import '../../widgets/common/grade_display.dart';
+import '../../widgets/common/sport_chip.dart';
 import '../../widgets/polish/polish.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
-import 'paying_students_screen.dart';
-import 'financial_reports_screen.dart';
 
 /// Parse robusto de valor em R$ digitado por brasileiro. Aceita "150,50"
 /// (vírgula decimal), "1.500,00" (ponto milhar + vírgula) e "150.50"/"150".
@@ -71,7 +69,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
     _loadData();
   }
 
@@ -115,7 +113,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
       'pending': {'value': totalPending, 'count': countPending},
       'overdue': {'value': totalOverdue, 'count': countOverdue},
       'cancelled': countCancelled,
-      'collectionRate': totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0,
+      'collectionRate': totalExpected > 0
+          ? (totalPaid / totalExpected * 100)
+          : 0,
     };
   }
 
@@ -155,8 +155,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
       // Live updates: reflect a webhook flip to `paid` in real time (the
       // one-shot read above could otherwise show a just-paid charge as open).
       _paymentsSub?.cancel();
-      _paymentsSub =
-          paymentService.streamByMonth(_currentMonthKey).listen((payments) {
+      _paymentsSub = paymentService.streamByMonth(_currentMonthKey).listen((
+        payments,
+      ) {
         if (!mounted) return;
         setState(() {
           _allPayments = payments;
@@ -170,8 +171,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
   void _changeMonth(int delta) {
     setState(() {
-      _selectedMonth =
-          DateTime(_selectedMonth.year, _selectedMonth.month + delta);
+      _selectedMonth = DateTime(
+        _selectedMonth.year,
+        _selectedMonth.month + delta,
+      );
     });
     _loadData();
   }
@@ -182,18 +185,26 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
   // Computed values
   // Pending: status is pending AND not overdue (dueDate hasn't passed)
-  List<Payment> get _pendingPayments =>
-      _allPayments.where((p) => p.status == PaymentStatus.pending && !p.isOverdue).toList();
+  List<Payment> get _pendingPayments => _allPayments
+      .where((p) => p.status == PaymentStatus.pending && !p.isOverdue)
+      .toList();
 
   // Overdue: isOverdue computed property (status pending/overdue AND dueDate passed)
-  List<Payment> get _overduePayments =>
-      _allPayments.where((p) => p.isOverdue || p.status == PaymentStatus.overdue).toList();
+  List<Payment> get _overduePayments => _allPayments
+      .where((p) => p.isOverdue || p.status == PaymentStatus.overdue)
+      .toList();
+
+  Map<String, Student> get _studentsById => {
+    for (final student in _students) student.id: student,
+  };
 
   double get _expectedRevenue {
     double total = 0;
     for (final plan in _plans.where((p) => p.isActive)) {
-      final periodRevenue = plan.studentIds
-          .fold(0.0, (sum, sid) => sum + plan.getStudentValue(sid));
+      final periodRevenue = plan.studentIds.fold(
+        0.0,
+        (sum, sid) => sum + plan.getStudentValue(sid),
+      );
       total += periodRevenue / plan.billingPeriod.months;
     }
     return total;
@@ -204,44 +215,36 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     return Scaffold(
       backgroundColor: AppTheme.background,
       floatingActionButton: _canManageFinance ? _buildFAB() : null,
-      body: _isLoading
-          ? Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: PolishSkeleton.list(count: 5),
-            )
-          : RefreshIndicator(
-              onRefresh: _loadData,
-              child: ContentBounded(
-                maxWidth: kContentMaxWidthList,
-                child: CustomScrollView(
-                  slivers: [
-                    SliverToBoxAdapter(child: _buildHeader()),
-                    SliverToBoxAdapter(child: _buildMonthSelector()),
+      body: SafeArea(
+        child: _isLoading
+            ? Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: PolishSkeleton.list(count: 5),
+              )
+            : RefreshIndicator(
+                onRefresh: _loadData,
+                child: ContentBounded(
+                  maxWidth: kContentMaxWidthList,
+                  child: CustomScrollView(
+                    slivers: [
+                      SliverToBoxAdapter(child: _buildMonthSelector()),
+                      SliverToBoxAdapter(child: _buildBillingShortcut()),
 
-                    // Uma linha de ação só quando há atraso (substitui os
-                    // cards Recebido/Pendente/Atrasado + barra de taxa —
-                    // essa informação já vive na aba Relatórios/:779 e em
-                    // AdminFinancialReportsScreen; zero perda, só reposição).
-                    SliverToBoxAdapter(child: _buildOverdueActionRow()),
+                      // Tab Bar
+                      SliverToBoxAdapter(child: _buildTabBar()),
 
-                    // Tab Bar
-                    SliverToBoxAdapter(child: _buildTabBar()),
-
-                    // Tab Content
-                    SliverFillRemaining(
-                      child: TabBarView(
-                        controller: _tabController,
-                        children: [
-                          _buildPlansTab(),
-                          _buildPaymentsTab(),
-                          _buildReportsTab(),
-                        ],
+                      // Tab Content
+                      SliverFillRemaining(
+                        child: TabBarView(
+                          controller: _tabController,
+                          children: [_buildPlansTab(), _buildPaymentsTab()],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
+      ),
     );
   }
 
@@ -264,67 +267,73 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     );
   }
 
-  // Header compacto (NOTAS_FINANCEIRO_2026-07.md): "Alunos Pagantes" e
-  // "Relatórios" saíram dos IconButtons do header — já existem como entrada
-  // dentro da própria aba Relatórios (_QuickInsightCard + "Ver Relatórios
-  // Detalhados", logo abaixo), então 2 dos 3 ícones eram redundantes com um
-  // destino um toque mais perto. Decisão: manter só "Atualizar" no header
-  // compacto (1 linha, sem ícone grande/descrição/chip) e reaproveitar os
-  // pontos de entrada já existentes na aba — zero função removida, só
-  // reposicionada.
-  Widget _buildHeader() {
-    return AcademyPageHeader(
-      compact: true,
-      title: 'Financeiro',
-      actions: [
-        IconButton(
-          onPressed: _loadData,
-          icon: const Icon(LucideIcons.refreshCw, size: 20),
-          tooltip: 'Atualizar',
-        ),
-      ],
-    );
-  }
-
-  /// Substitui os cards Recebido/Pendente/Atrasado + barra "Taxa" no topo:
-  /// uma única linha clicável, só quando há atraso (some por completo quando
-  /// não há nada a cobrar — nada de card vazio). Os valores vêm da mesma
-  /// `_monthlySummary` que alimentava os cards removidos.
-  Widget _buildOverdueActionRow() {
+  /// Atalho permanente: cobrança não começa apenas depois do vencimento.
+  Widget _buildBillingShortcut() {
     final summary = _monthlySummary ?? {};
     final totalOverdue = (summary['overdue']?['value'] ?? 0).toDouble();
     final overdueCount = summary['overdue']?['count'] ?? 0;
 
-    if (overdueCount <= 0) return const SizedBox.shrink();
-
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () => context.push('/admin/cobranca'),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: AppTheme.error.withValues(alpha: 0.06),
+            color: AppTheme.primary.withValues(alpha: 0.07),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.error.withValues(alpha: 0.2)),
+            border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
           ),
           child: Row(
             children: [
-              Icon(LucideIcons.alertTriangle, size: 16, color: AppTheme.error),
-              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Icon(
+                  LucideIcons.messageCircle,
+                  size: 18,
+                  color: AppTheme.primary,
+                ),
+              ),
+              const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  '$overdueCount em atraso — ${_formatCurrency(totalOverdue)} · COBRAR',
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.error,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Ir para Cobranças',
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (overdueCount > 0)
+                      Text(
+                        '$overdueCount em atraso · ${_formatCurrency(totalOverdue)}',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      )
+                    else
+                      Text(
+                        'Avisar, cobrar e configurar automações',
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(width: 4),
-              Icon(LucideIcons.arrowRight, size: 16, color: AppTheme.error),
+              const Icon(
+                LucideIcons.arrowRight,
+                size: 18,
+                color: AppTheme.primary,
+              ),
             ],
           ),
         ),
@@ -363,9 +372,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
           ),
           Text(
             monthYear,
-            style: AppTheme.titleMedium.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
           ),
           GestureDetector(
             onTap: () => _changeMonth(1),
@@ -383,11 +390,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   Widget _buildTabBar() {
     final pendingTotal = _pendingPayments.length + _overduePayments.length;
     return Container(
-      margin: const EdgeInsets.fromLTRB(8, 16, 8, 0),
-      decoration: const BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: AppTheme.divider, width: 1),
-        ),
+      height: 48,
+      margin: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: TabBar(
         controller: _tabController,
@@ -395,9 +403,19 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         unselectedLabelColor: AppTheme.textSecondary,
         labelStyle: AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600),
         unselectedLabelStyle: AppTheme.labelMedium,
-        indicatorColor: AppTheme.textPrimary,
-        indicatorWeight: 2,
-        labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+        dividerColor: Colors.transparent,
+        indicatorSize: TabBarIndicatorSize.tab,
+        indicator: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(9),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 6,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
         tabs: [
           const Tab(text: 'Planos'),
           Tab(
@@ -408,7 +426,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 if (pendingTotal > 0) ...[
                   const SizedBox(width: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: AppTheme.warning,
                       borderRadius: BorderRadius.circular(10),
@@ -426,7 +447,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
               ],
             ),
           ),
-          const Tab(text: 'Relatórios'),
         ],
       ),
     );
@@ -461,38 +481,42 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 ],
               ),
               if (_canManageFinance)
-              ElevatedButton(
-                onPressed: _showCreatePlanDialog,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.textPrimary,
-                  foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                ElevatedButton(
+                  onPressed: _showCreatePlanDialog,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.textPrimary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: const Text(
+                    'Novo',
+                    style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
-                child: const Text(
-                  'Novo',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-              ),
             ],
           ),
 
           const SizedBox(height: 20),
 
           // Plan Cards
-          ..._plans.asMap().entries.map((entry) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _PlanCard(
-                  plan: entry.value,
-                  formatCurrency: _formatCurrency,
-                  onEdit: () => _showEditPlanDialog(entry.value),
-                  onDelete: () => _showDeletePlanDialog(entry.value),
-                  onManageStudents: () => _showManageStudentsDialog(entry.value),
-                ).entrance(index: entry.key),
-              )),
+          ..._plans.asMap().entries.map(
+            (entry) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _PlanCard(
+                plan: entry.value,
+                formatCurrency: _formatCurrency,
+                onEdit: () => _showEditPlanDialog(entry.value),
+                onDelete: () => _showDeletePlanDialog(entry.value),
+                onManageStudents: () => _showManageStudentsDialog(entry.value),
+              ).entrance(index: entry.key),
+            ),
+          ),
 
           if (_plans.isEmpty)
             const PolishedEmptyState(
@@ -511,10 +535,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   Widget _buildPaymentsTab() {
     // Filter payments based on current filter
     List<Payment> filteredPayments = _allPayments;
-    
+
     switch (_paymentFilter) {
       case 'paid':
-        filteredPayments = _allPayments.where((p) => p.status == PaymentStatus.paid).toList();
+        filteredPayments = _allPayments
+            .where((p) => p.status == PaymentStatus.paid)
+            .toList();
         break;
       case 'pending':
         filteredPayments = _pendingPayments;
@@ -523,15 +549,21 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         filteredPayments = _overduePayments;
         break;
       case 'cancelled':
-        filteredPayments = _allPayments.where((p) => p.status == PaymentStatus.cancelled).toList();
+        filteredPayments = _allPayments
+            .where((p) => p.status == PaymentStatus.cancelled)
+            .toList();
         break;
     }
 
     // Apply search filter
     if (_paymentSearch.isNotEmpty) {
-      filteredPayments = filteredPayments.where((p) =>
-        p.studentName.toLowerCase().contains(_paymentSearch.toLowerCase())
-      ).toList();
+      filteredPayments = filteredPayments
+          .where(
+            (p) => p.studentName.toLowerCase().contains(
+              _paymentSearch.toLowerCase(),
+            ),
+          )
+          .toList();
     }
 
     return Column(
@@ -551,14 +583,28 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 child: TextField(
                   decoration: InputDecoration(
                     hintText: 'Buscar por nome...',
-                    hintStyle: AppTheme.bodySmall.copyWith(color: AppTheme.textDisabled),
-                    prefixIcon: Icon(LucideIcons.search, size: 18, color: AppTheme.textSecondary),
+                    hintStyle: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textDisabled,
+                    ),
+                    prefixIcon: Icon(
+                      LucideIcons.search,
+                      size: 18,
+                      color: AppTheme.textSecondary,
+                    ),
                     border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
                     suffixIcon: _paymentSearch.isNotEmpty
                         ? IconButton(
-                            icon: Icon(LucideIcons.x, size: 16, color: AppTheme.textSecondary),
-                            onPressed: () => setState(() => _paymentSearch = ''),
+                            icon: Icon(
+                              LucideIcons.x,
+                              size: 16,
+                              color: AppTheme.textSecondary,
+                            ),
+                            onPressed: () =>
+                                setState(() => _paymentSearch = ''),
                           )
                         : null,
                   ),
@@ -580,7 +626,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                     const SizedBox(width: 8),
                     _FilterChip(
                       label: 'Pagos',
-                      count: _allPayments.where((p) => p.status == PaymentStatus.paid).length,
+                      count: _allPayments
+                          .where((p) => p.status == PaymentStatus.paid)
+                          .length,
                       isSelected: _paymentFilter == 'paid',
                       color: AppTheme.success,
                       onTap: () => setState(() => _paymentFilter = 'paid'),
@@ -604,7 +652,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                     const SizedBox(width: 8),
                     _FilterChip(
                       label: 'Cancelados',
-                      count: _allPayments.where((p) => p.status == PaymentStatus.cancelled).length,
+                      count: _allPayments
+                          .where((p) => p.status == PaymentStatus.cancelled)
+                          .length,
                       isSelected: _paymentFilter == 'cancelled',
                       color: AppTheme.textDisabled,
                       onTap: () => setState(() => _paymentFilter = 'cancelled'),
@@ -641,14 +691,26 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                       padding: const EdgeInsets.only(bottom: 8),
                       child: _PaymentCard(
                         payment: payment,
+                        student: _studentsById[payment.studentId],
                         formatCurrency: _formatCurrency,
-                        onMarkPaid: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
+                        onMarkPaid:
+                            payment.status != PaymentStatus.paid &&
+                                payment.status != PaymentStatus.cancelled
                             ? () => _showMarkPaidDialog(payment)
                             : null,
-                        onSendReminder: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
+                        onSendReminder:
+                            payment.status != PaymentStatus.paid &&
+                                payment.status != PaymentStatus.cancelled
                             ? () => _sendReminder(payment)
                             : null,
-                        onCancel: payment.status != PaymentStatus.paid && payment.status != PaymentStatus.cancelled
+                        onEdit:
+                            payment.status != PaymentStatus.paid &&
+                                payment.status != PaymentStatus.cancelled
+                            ? () => _showEditPaymentSheet(payment)
+                            : null,
+                        onCancel:
+                            payment.status != PaymentStatus.paid &&
+                                payment.status != PaymentStatus.cancelled
                             ? () => _cancelPayment(payment)
                             : null,
                         onReactivate: payment.status == PaymentStatus.cancelled
@@ -660,186 +722,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 ),
         ),
       ],
-    );
-  }
-
-  /// Reports tab - shows summary and link to detailed reports
-  Widget _buildReportsTab() {
-    final summary = _monthlySummary ?? {};
-    final totalPaid = (summary['paid']?['value'] ?? 0).toDouble();
-    final totalPending = (summary['pending']?['value'] ?? 0).toDouble();
-    final totalOverdue = (summary['overdue']?['value'] ?? 0).toDouble();
-    final totalExpected = (summary['totalExpected'] ?? 0).toDouble();
-    final rate = totalExpected > 0 ? (totalPaid / totalExpected * 100) : 0.0;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Quick summary
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppTheme.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppTheme.divider),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(LucideIcons.pieChart, color: AppTheme.primary),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Resumo do Mês',
-                            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w600),
-                          ),
-                          Text(
-                            DateFormat("MMMM 'de' yyyy", 'pt_BR').format(_selectedMonth).capitalize(),
-                            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Recebido', style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
-                          const SizedBox(height: 4),
-                          Text(_formatCurrency(totalPaid), style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700, color: AppTheme.success)),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Esperado', style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
-                          const SizedBox(height: 4),
-                          Text(_formatCurrency(totalExpected), style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700)),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Taxa', style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
-                          const SizedBox(height: 4),
-                          Text('${rate.toStringAsFixed(0)}%', style: AppTheme.titleMedium.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: rate >= 70 ? AppTheme.success : rate >= 40 ? AppTheme.warning : AppTheme.error,
-                          )),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                // Pendente/Atrasado: mesma informação que antes vivia nos
-                // cards do topo — preservada aqui (zero perda) desde que os
-                // cards saíram de cima.
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Pendente', style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
-                          const SizedBox(height: 4),
-                          Text(_formatCurrency(totalPending), style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700, color: AppTheme.warning)),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Atrasado', style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary)),
-                          const SizedBox(height: 4),
-                          Text(_formatCurrency(totalOverdue), style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700, color: AppTheme.error)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          // Detailed reports button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const AdminFinancialReportsScreen(),
-                ),
-              ),
-              icon: const Icon(LucideIcons.externalLink, size: 18),
-              label: const Text('Ver Relatórios Detalhados'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.textPrimary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Quick info cards
-          Text(
-            'Insights Rápidos',
-            style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 12),
-          _QuickInsightCard(
-            icon: LucideIcons.users,
-            title: 'Alunos Pagantes',
-            value: '${_plans.expand((p) => p.studentIds).toSet().length}',
-            subtitle: 'com planos ativos',
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => PayingStudentsScreen(
-                  students: _students,
-                  plans: _plans,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          _QuickInsightCard(
-            icon: LucideIcons.package,
-            title: 'Planos Ativos',
-            value: '${_plans.where((p) => p.isActive).length}',
-            subtitle: 'de ${_plans.length} total',
-          ),
-        ],
-      ),
     );
   }
 
@@ -867,7 +749,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
             );
             if (mounted) {
               Navigator.pop(context);
-              this.context.showSuccess('${payments.length} mensalidade${payments.length != 1 ? 's' : ''} gerada${payments.length != 1 ? 's' : ''}!');
+              this.context.showSuccess(
+                '${payments.length} mensalidade${payments.length != 1 ? 's' : ''} gerada${payments.length != 1 ? 's' : ''}!',
+              );
               _loadData();
             }
           } catch (e) {
@@ -923,8 +807,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 const SizedBox(height: 20),
                 Text(
                   'Novo Plano',
-                  style:
-                      AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w700),
+                  style: AppTheme.titleLarge.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 20),
 
@@ -942,13 +827,20 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                       ? 'Valor (R\$)'
                       : 'Valor por ${billingPeriod.periodLabel.capitalize()} (R\$)',
                   valueController,
-                  billingPeriod == BillingPeriod.monthly ? 'Ex: 150' : 'Ex: 400',
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  billingPeriod == BillingPeriod.monthly
+                      ? 'Ex: 150'
+                      : 'Ex: 400',
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                 ),
 
-                _buildFormField('Dia de Vencimento', dueDayController, '1-31',
-                    keyboardType: TextInputType.number),
+                _buildFormField(
+                  'Dia de Vencimento',
+                  dueDayController,
+                  '1-31',
+                  keyboardType: TextInputType.number,
+                ),
 
                 const SizedBox(height: 4),
                 _PaymentMethodPolicySelector(
@@ -969,8 +861,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
                 Text(
                   'Aulas por Semana',
-                  style:
-                      AppTheme.labelMedium.copyWith(fontWeight: FontWeight.w600),
+                  style: AppTheme.labelMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
@@ -979,8 +872,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                     _ClassesChip(
                       label: 'Ilimitado',
                       isSelected: classesPerWeek == null,
-                      onTap: () =>
-                          setDialogState(() => classesPerWeek = null),
+                      onTap: () => setDialogState(() => classesPerWeek = null),
                     ),
                     ...List.generate(5, (i) {
                       final count = i + 1;
@@ -1018,21 +910,27 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                               valueController.text.isEmpty) {
                             return;
                           }
-                          final enteredValue =
-                              parseBrlAmount(valueController.text);
+                          final enteredValue = parseBrlAmount(
+                            valueController.text,
+                          );
                           if (enteredValue <= 0) {
-                            context.showError('Informe um valor válido (ex: 150,00).');
+                            context.showError(
+                              'Informe um valor válido (ex: 150,00).',
+                            );
                             return;
                           }
                           try {
-                            final service =
-                                PlanService(FirebaseService.academyId);
+                            final service = PlanService(
+                              FirebaseService.academyId,
+                            );
                             await service.create(
                               name: nameController.text,
-                              monthlyValue: billingPeriod == BillingPeriod.monthly
+                              monthlyValue:
+                                  billingPeriod == BillingPeriod.monthly
                                   ? enteredValue
                                   : enteredValue / billingPeriod.months,
-                              periodValue: billingPeriod == BillingPeriod.monthly
+                              periodValue:
+                                  billingPeriod == BillingPeriod.monthly
                                   ? null
                                   : enteredValue,
                               billingPeriod: billingPeriod,
@@ -1040,14 +938,14 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                                   int.tryParse(dueDayController.text) ?? 10,
                               classesPerWeek: classesPerWeek,
                               paymentMethodPolicy: paymentMethodPolicy,
-                              recurringMonths: (billingPeriod ==
-                                          BillingPeriod.monthly &&
+                              recurringMonths:
+                                  (billingPeriod == BillingPeriod.monthly &&
                                       paymentMethodPolicy ==
                                           PaymentMethodPolicy.cardOnly)
                                   ? int.tryParse(recurringMonthsController.text)
                                   : null,
-                              billingDay: (billingPeriod ==
-                                          BillingPeriod.monthly &&
+                              billingDay:
+                                  (billingPeriod == BillingPeriod.monthly &&
                                       paymentMethodPolicy ==
                                           PaymentMethodPolicy.cardOnly)
                                   ? int.tryParse(dueDayController.text)
@@ -1111,8 +1009,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide.none,
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 14,
+              ),
             ),
           ),
         ],
@@ -1125,8 +1025,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     final valueController = TextEditingController(
       text: plan.effectivePeriodValue.toStringAsFixed(2),
     );
-    final dueDayController =
-        TextEditingController(text: plan.defaultDueDay.toString());
+    final dueDayController = TextEditingController(
+      text: plan.defaultDueDay.toString(),
+    );
     int? classesPerWeek = plan.classesPerWeek;
     bool isActive = plan.isActive;
     BillingPeriod billingPeriod = plan.billingPeriod;
@@ -1171,8 +1072,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 const SizedBox(height: 20),
                 Text(
                   'Editar Plano',
-                  style:
-                      AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w700),
+                  style: AppTheme.titleLarge.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 20),
 
@@ -1190,12 +1092,17 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                       : 'Valor por ${billingPeriod.periodLabel.capitalize()} (R\$)',
                   valueController,
                   '',
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                 ),
 
-                _buildFormField('Dia de Vencimento', dueDayController, '',
-                    keyboardType: TextInputType.number),
+                _buildFormField(
+                  'Dia de Vencimento',
+                  dueDayController,
+                  '',
+                  keyboardType: TextInputType.number,
+                ),
 
                 const SizedBox(height: 4),
                 _PaymentMethodPolicySelector(
@@ -1218,8 +1125,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   children: [
                     Text(
                       'Status:',
-                      style: AppTheme.labelMedium
-                          .copyWith(fontWeight: FontWeight.w600),
+                      style: AppTheme.labelMedium.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Switch(
@@ -1255,38 +1163,41 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                       child: ElevatedButton(
                         onPressed: () async {
                           try {
-                            final service =
-                                PlanService(FirebaseService.academyId);
-                            final enteredValue =
-                                parseBrlAmount(valueController.text);
+                            final service = PlanService(
+                              FirebaseService.academyId,
+                            );
+                            final enteredValue = parseBrlAmount(
+                              valueController.text,
+                            );
                             await service.update(plan.id, {
                               'name': nameController.text,
                               'billingPeriod': billingPeriod.name,
                               'paymentMethodPolicy': paymentMethodPolicy.value,
                               'monthlyValue':
                                   billingPeriod == BillingPeriod.monthly
-                                      ? enteredValue
-                                      : enteredValue / billingPeriod.months,
+                                  ? enteredValue
+                                  : enteredValue / billingPeriod.months,
                               'periodValue':
                                   billingPeriod == BillingPeriod.monthly
-                                      ? null
-                                      : enteredValue,
+                                  ? null
+                                  : enteredValue,
                               'defaultDueDay':
                                   int.tryParse(dueDayController.text) ?? 10,
                               'classesPerWeek': classesPerWeek,
                               'isActive': isActive,
                               // Recurring fields only meaningful for monthly +
                               // card-only plans; clear otherwise.
-                              'recurringMonths': (billingPeriod ==
-                                          BillingPeriod.monthly &&
+                              'recurringMonths':
+                                  (billingPeriod == BillingPeriod.monthly &&
                                       paymentMethodPolicy ==
                                           PaymentMethodPolicy.cardOnly)
                                   ? (int.tryParse(
-                                          recurringMonthsController.text) ??
-                                      0)
+                                          recurringMonthsController.text,
+                                        ) ??
+                                        0)
                                   : 0,
-                              'billingDay': (billingPeriod ==
-                                          BillingPeriod.monthly &&
+                              'billingDay':
+                                  (billingPeriod == BillingPeriod.monthly &&
                                       paymentMethodPolicy ==
                                           PaymentMethodPolicy.cardOnly)
                                   ? (int.tryParse(dueDayController.text) ?? 10)
@@ -1350,7 +1261,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 }
               }
             },
-            child: const Text('Excluir', style: TextStyle(color: AppTheme.error)),
+            child: const Text(
+              'Excluir',
+              style: TextStyle(color: AppTheme.error),
+            ),
           ),
         ],
       ),
@@ -1405,7 +1319,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
               const SizedBox(height: 20),
               Text(
                 'Confirmar Pagamento',
-                style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.w700),
+                style: AppTheme.titleLarge.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 20),
 
@@ -1445,13 +1361,15 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                         children: [
                           Text(
                             payment.studentName,
-                            style: AppTheme.bodyMedium
-                                .copyWith(fontWeight: FontWeight.w600),
+                            style: AppTheme.bodyMedium.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                           Text(
                             'Vencimento: ${DateFormat('dd/MM').format(payment.dueDate)}',
-                            style: AppTheme.bodySmall
-                                .copyWith(color: AppTheme.textSecondary),
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
                           ),
                         ],
                       ),
@@ -1471,7 +1389,9 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
               // Payment method
               Text(
                 'Metodo de pagamento',
-                style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+                style: AppTheme.bodyMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 12),
               Wrap(
@@ -1480,11 +1400,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 children: PaymentMethod.values.map((method) {
                   final isSelected = selectedMethod == method;
                   return GestureDetector(
-                    onTap: () =>
-                        setDialogState(() => selectedMethod = method),
+                    onTap: () => setDialogState(() => selectedMethod = method),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
                       decoration: BoxDecoration(
                         color: isSelected
                             ? AppTheme.textPrimary
@@ -1499,9 +1420,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                       child: Text(
                         method.label,
                         style: AppTheme.bodySmall.copyWith(
-                          color: isSelected ? Colors.white : AppTheme.textPrimary,
-                          fontWeight:
-                              isSelected ? FontWeight.w600 : FontWeight.w500,
+                          color: isSelected
+                              ? Colors.white
+                              : AppTheme.textPrimary,
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
                         ),
                       ),
                     ),
@@ -1529,26 +1453,33 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: isSaving ? null : () async {
-                        setDialogState(() => isSaving = true);
-                        try {
-                          final service =
-                              PaymentService(FirebaseService.academyId);
-                          await service.markAsPaid(payment.id,
-                              method: selectedMethod);
-                          if (mounted) {
-                            Navigator.pop(context);
-                            Celebration.confetti(this.context);
-                            this.context.showSuccess('Pagamento confirmado!');
-                            _loadData();
-                          }
-                        } catch (e) {
-                          setDialogState(() => isSaving = false);
-                          if (mounted) {
-                            this.context.showError('Erro: $e');
-                          }
-                        }
-                      },
+                      onPressed: isSaving
+                          ? null
+                          : () async {
+                              setDialogState(() => isSaving = true);
+                              try {
+                                final service = PaymentService(
+                                  FirebaseService.academyId,
+                                );
+                                await service.markAsPaid(
+                                  payment.id,
+                                  method: selectedMethod,
+                                );
+                                if (mounted) {
+                                  Navigator.pop(context);
+                                  Celebration.confetti(this.context);
+                                  this.context.showSuccess(
+                                    'Pagamento confirmado!',
+                                  );
+                                  _loadData();
+                                }
+                              } catch (e) {
+                                setDialogState(() => isSaving = false);
+                                if (mounted) {
+                                  this.context.showError('Erro: $e');
+                                }
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.success,
                         padding: const EdgeInsets.symmetric(vertical: 16),
@@ -1578,55 +1509,168 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     );
   }
 
-  void _sendReminder(Payment payment) async {
-    try {
-      final studentService = StudentService(FirebaseService.academyId);
-      final student = await studentService.getById(payment.studentId);
-      if (student?.phone == null) {
-        if (mounted) {
-          context.showWarning('Aluno nao possui telefone cadastrado');
-        }
-        return;
-      }
+  void _showEditPaymentSheet(Payment payment) {
+    final valueController = TextEditingController(
+      text: payment.value.toStringAsFixed(2).replaceAll('.', ','),
+    );
+    var dueDate = payment.dueDate;
+    var isSaving = false;
 
-      final paymentService = PaymentService(FirebaseService.academyId);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => Container(
+          padding: EdgeInsets.fromLTRB(
+            24,
+            16,
+            24,
+            MediaQuery.of(context).viewInsets.bottom +
+                MediaQuery.of(context).padding.bottom +
+                20,
+          ),
+          decoration: const BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTheme.divider,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Editar pagamento',
+                  style: AppTheme.titleLarge.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  payment.studentName,
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: valueController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Valor',
+                    prefixText: 'R\$ ',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: isSaving
+                      ? null
+                      : () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: dueDate,
+                            firstDate: DateTime(2020),
+                            lastDate: DateTime.now().add(
+                              const Duration(days: 3650),
+                            ),
+                            locale: const Locale('pt', 'BR'),
+                          );
+                          if (picked != null) {
+                            setSheetState(() => dueDate = picked);
+                          }
+                        },
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'Data de vencimento',
+                      prefixIcon: Icon(LucideIcons.calendar, size: 19),
+                      border: OutlineInputBorder(),
+                    ),
+                    child: Text(DateFormat('dd/MM/yyyy').format(dueDate)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Se houver um PIX emitido, ele será substituído por um novo link na próxima cobrança.',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: isSaving
+                        ? null
+                        : () async {
+                            final value = parseBrlAmount(valueController.text);
+                            if (value <= 0) {
+                              this.context.showWarning(
+                                'Informe um valor maior que zero',
+                              );
+                              return;
+                            }
+                            setSheetState(() => isSaving = true);
+                            try {
+                              await PaymentService(
+                                FirebaseService.academyId,
+                              ).updateTerms(
+                                id: payment.id,
+                                value: value,
+                                dueDate: dueDate,
+                              );
+                              if (!mounted) return;
+                              Navigator.pop(sheetContext);
+                              this.context.showSuccess('Pagamento atualizado');
+                              _loadData();
+                            } catch (e) {
+                              setSheetState(() => isSaving = false);
+                              if (mounted) {
+                                this.context.showError('Erro ao editar: $e');
+                              }
+                            }
+                          },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                    ),
+                    child: isSaving
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text('Salvar alterações'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
-      // Best-effort PIX: quando o Mercado Pago está conectado, anexa o
-      // copia-e-cola/link ao lembrete manual — mesmo padrão do canal de
-      // cobrança automática (BillingNotificationService.
-      // ensureValidPixForFinancial). Sem MP configurado, `pixCode` volta
-      // vazio e a mensagem sai igual à de antes.
-      final payerCpf = student!.isKids
-          ? (student.guardian?.cpf ?? student.cpf)
-          : student.cpf;
-      final pix = await paymentService.generateReminderPix(
-        financialId: payment.id,
-        studentId: payment.studentId,
-        studentName: payment.studentName,
-        amount: payment.value,
-        cpf: payerCpf,
-      );
-
-      final whatsappLink = paymentService.getWhatsAppReminderLink(
-        studentName: payment.studentName,
-        amount: payment.value,
-        dueDate: payment.dueDate,
-        phone: student.phone!,
-        pixCode: pix.pixCode.isNotEmpty ? pix.pixCode : null,
-        ticketUrl: pix.ticketUrl.isNotEmpty ? pix.ticketUrl : null,
-      );
-
-      final uri = Uri.parse(whatsappLink);
-      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!launched && mounted) {
-        // fallback: copia o link no snackbar caso o dispositivo não consiga abrir
-        context.showInfo('Abrir WhatsApp: $whatsappLink');
-      }
-    } catch (e) {
-      if (mounted) {
-        context.showError('Erro: $e');
-      }
-    }
+  void _sendReminder(Payment payment) {
+    context.push('/admin/cobranca?financialId=${payment.id}');
   }
 
   Future<void> _cancelPayment(Payment payment) async {
@@ -1681,7 +1725,10 @@ class _PlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final expectedRevenue = plan.studentIds.fold(0.0, (sum, sid) => sum + plan.getStudentValue(sid));
+    final expectedRevenue = plan.studentIds.fold(
+      0.0,
+      (sum, sid) => sum + plan.getStudentValue(sid),
+    );
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1705,17 +1752,22 @@ class _PlanCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
-                  color: plan.isActive ? AppTheme.successLight : AppTheme.surfaceVariant,
+                  color: plan.isActive
+                      ? AppTheme.successLight
+                      : AppTheme.surfaceVariant,
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   plan.isActive ? 'Ativo' : 'Inativo',
                   style: AppTheme.labelSmall.copyWith(
-                    color:
-                        plan.isActive ? AppTheme.success : AppTheme.textSecondary,
+                    color: plan.isActive
+                        ? AppTheme.success
+                        : AppTheme.textSecondary,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -1723,14 +1775,20 @@ class _PlanCard extends StatelessWidget {
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: onEdit,
-                child: const Icon(LucideIcons.pencil,
-                    size: 18, color: AppTheme.textSecondary),
+                child: const Icon(
+                  LucideIcons.pencil,
+                  size: 18,
+                  color: AppTheme.textSecondary,
+                ),
               ),
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: onDelete,
-                child: const Icon(LucideIcons.trash2,
-                    size: 18, color: AppTheme.textSecondary),
+                child: const Icon(
+                  LucideIcons.trash2,
+                  size: 18,
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ],
           ),
@@ -1757,7 +1815,8 @@ class _PlanCard extends StatelessWidget {
               ),
               _InfoChip(
                 icon: LucideIcons.users,
-                label: '${plan.studentCount} aluno${plan.studentCount != 1 ? 's' : ''}',
+                label:
+                    '${plan.studentCount} aluno${plan.studentCount != 1 ? 's' : ''}',
               ),
               if (plan.customValues.isNotEmpty)
                 _InfoChip(
@@ -1811,10 +1870,7 @@ class _InfoChip extends StatelessWidget {
   final IconData icon;
   final String label;
 
-  const _InfoChip({
-    required this.icon,
-    required this.label,
-  });
+  const _InfoChip({required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -1841,17 +1897,21 @@ class _InfoChip extends StatelessWidget {
 
 class _PaymentCard extends StatelessWidget {
   final Payment payment;
+  final Student? student;
   final String Function(double) formatCurrency;
   final VoidCallback? onMarkPaid;
   final VoidCallback? onSendReminder;
+  final VoidCallback? onEdit;
   final VoidCallback? onCancel;
   final VoidCallback? onReactivate;
 
   const _PaymentCard({
     required this.payment,
+    this.student,
     required this.formatCurrency,
     this.onMarkPaid,
     this.onSendReminder,
+    this.onEdit,
     this.onCancel,
     this.onReactivate,
   });
@@ -1861,6 +1921,8 @@ class _PaymentCard extends StatelessWidget {
     final isOverdue = payment.isOverdue;
     final isPaid = payment.status == PaymentStatus.paid;
     final isCancelled = payment.status == PaymentStatus.cancelled;
+    final primarySport = student?.getPrimarySport();
+    final grade = primarySport == null ? null : student?.getGrade(primarySport);
 
     return Opacity(
       opacity: isCancelled ? 0.6 : 1.0,
@@ -1870,254 +1932,311 @@ class _PaymentCard extends StatelessWidget {
           color: isOverdue
               ? AppTheme.error.withValues(alpha: 0.05)
               : isPaid
-                  ? AppTheme.success.withValues(alpha: 0.05)
-                  : isCancelled
-                      ? AppTheme.surfaceVariant
-                      : AppTheme.surface,
+              ? AppTheme.success.withValues(alpha: 0.05)
+              : isCancelled
+              ? AppTheme.surfaceVariant
+              : AppTheme.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isOverdue
                 ? AppTheme.error.withValues(alpha: 0.2)
                 : isPaid
-                    ? AppTheme.success.withValues(alpha: 0.2)
-                    : isCancelled
-                        ? AppTheme.divider
-                        : AppTheme.divider,
+                ? AppTheme.success.withValues(alpha: 0.2)
+                : isCancelled
+                ? AppTheme.divider
+                : AppTheme.divider,
           ),
         ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: isOverdue
+        child: Column(
+          children: [
+            Row(
+              children: [
+                AppCachedAvatar(
+                  imageUrl: student?.photoUrl,
+                  radius: 22,
+                  backgroundColor: isOverdue
                       ? AppTheme.error.withValues(alpha: 0.1)
                       : isPaid
-                          ? AppTheme.success.withValues(alpha: 0.1)
-                          : AppTheme.surfaceVariant,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Center(
+                      ? AppTheme.success.withValues(alpha: 0.1)
+                      : AppTheme.surfaceVariant,
                   child: Text(
                     payment.studentName.isNotEmpty
                         ? payment.studentName[0].toUpperCase()
                         : '?',
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      fontSize: 16,
                       color: isOverdue
                           ? AppTheme.error
                           : isPaid
-                              ? AppTheme.success
-                              : AppTheme.textPrimary,
+                          ? AppTheme.success
+                          : AppTheme.textPrimary,
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      payment.studentName,
-                      style: AppTheme.bodyMedium.copyWith(
-                        fontWeight: FontWeight.w600,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        payment.studentName,
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            payment.description ?? 'Mensalidade',
-                            style: AppTheme.labelSmall.copyWith(
-                              color: AppTheme.textSecondary,
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              payment.description ?? 'Mensalidade',
+                              style: AppTheme.labelSmall.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        Container(
-                          width: 4,
-                          height: 4,
-                          margin: const EdgeInsets.symmetric(horizontal: 6),
-                          decoration: const BoxDecoration(
-                            color: AppTheme.textDisabled,
-                            shape: BoxShape.circle,
+                          Container(
+                            width: 4,
+                            height: 4,
+                            margin: const EdgeInsets.symmetric(horizontal: 6),
+                            decoration: const BoxDecoration(
+                              color: AppTheme.textDisabled,
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                        ),
-                        Text(
-                          'Venc: ${DateFormat('dd/MM').format(payment.dueDate)}',
-                          style: AppTheme.labelSmall.copyWith(
-                            color:
-                                isOverdue ? AppTheme.error : AppTheme.textSecondary,
-                            fontWeight:
-                                isOverdue ? FontWeight.w600 : FontWeight.normal,
+                          Text(
+                            'Venc: ${DateFormat('dd/MM').format(payment.dueDate)}',
+                            style: AppTheme.labelSmall.copyWith(
+                              color: isOverdue
+                                  ? AppTheme.error
+                                  : AppTheme.textSecondary,
+                              fontWeight: isOverdue
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
                           ),
+                        ],
+                      ),
+                      if (primarySport != null && grade != null) ...[
+                        const SizedBox(height: 5),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            SportChip(sportId: primarySport),
+                            GradeDisplay(
+                              sportId: primarySport,
+                              grade: grade.currentGrade,
+                              stripes: grade.currentStripes,
+                              size: GradeDisplaySize.small,
+                            ),
+                          ],
                         ),
                       ],
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      formatCurrency(payment.value),
+                      style: AppTheme.titleMedium.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: isPaid ? AppTheme.success : AppTheme.textPrimary,
+                      ),
                     ),
+                    // Cobrança indevida de assinatura: está 'paid' no gateway,
+                    // mas é dinheiro a devolver — destaca em vez de 'Pago'.
+                    if (isPaid && payment.isOvercharge)
+                      Container(
+                        margin: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.warning.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'Reembolso pendente',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.warning,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      )
+                    else if (isPaid)
+                      Container(
+                        margin: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.success.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'Pago',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.success,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    if (isCancelled)
+                      Container(
+                        margin: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.textDisabled.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'Cancelado',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textDisabled,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    formatCurrency(payment.value),
-                    style: AppTheme.titleMedium.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: isPaid ? AppTheme.success : AppTheme.textPrimary,
-                    ),
-                  ),
-                  // Cobrança indevida de assinatura: está 'paid' no gateway,
-                  // mas é dinheiro a devolver — destaca em vez de 'Pago'.
-                  if (isPaid && payment.isOvercharge)
-                    Container(
-                      margin: const EdgeInsets.only(top: 4),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppTheme.warning.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'Reembolso pendente',
-                        style: AppTheme.labelSmall.copyWith(
-                          color: AppTheme.warning,
-                          fontWeight: FontWeight.w600,
+                // Menu de ações
+                PopupMenuButton<String>(
+                  icon: const Icon(LucideIcons.moreVertical, size: 20),
+                  itemBuilder: (context) => [
+                    if (onEdit != null)
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Row(
+                          children: [
+                            Icon(LucideIcons.pencil, size: 16),
+                            SizedBox(width: 8),
+                            Text('Editar valor e vencimento'),
+                          ],
                         ),
                       ),
-                    )
-                  else if (isPaid)
-                    Container(
-                      margin: const EdgeInsets.only(top: 4),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppTheme.success.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'Pago',
-                        style: AppTheme.labelSmall.copyWith(
-                          color: AppTheme.success,
-                          fontWeight: FontWeight.w600,
+                    // Decisão do dono: sem funções repetidas na mesma tela —
+                    // "Dar Baixa" removido daqui; o botão "Confirmar" (abaixo)
+                    // já é a única via de dar baixa no pagamento.
+                    if (!isPaid && !isCancelled)
+                      PopupMenuItem(
+                        value: 'cancel',
+                        child: Row(
+                          children: [
+                            Icon(
+                              LucideIcons.x,
+                              size: 16,
+                              color: AppTheme.error,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Cancelar',
+                              style: TextStyle(color: AppTheme.error),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  if (isCancelled)
-                    Container(
-                      margin: const EdgeInsets.only(top: 4),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppTheme.textDisabled.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'Cancelado',
-                        style: AppTheme.labelSmall.copyWith(
-                          color: AppTheme.textDisabled,
-                          fontWeight: FontWeight.w600,
+                    if (isCancelled)
+                      PopupMenuItem(
+                        value: 'reactivate',
+                        child: Row(
+                          children: [
+                            Icon(
+                              LucideIcons.rotateCcw,
+                              size: 16,
+                              color: AppTheme.success,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Reativar',
+                              style: TextStyle(color: AppTheme.success),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                ],
-              ),
-              // Menu de ações
-              PopupMenuButton<String>(
-                icon: const Icon(LucideIcons.moreVertical, size: 20),
-                itemBuilder: (context) => [
-                  // Decisão do dono: sem funções repetidas na mesma tela —
-                  // "Dar Baixa" removido daqui; o botão "Confirmar" (abaixo)
-                  // já é a única via de dar baixa no pagamento.
-                  if (!isPaid && !isCancelled)
-                    PopupMenuItem(
-                      value: 'cancel',
-                      child: Row(
-                        children: [
-                          Icon(LucideIcons.x, size: 16, color: AppTheme.error),
-                          const SizedBox(width: 8),
-                          Text('Cancelar', style: TextStyle(color: AppTheme.error)),
-                        ],
+                    if (isPaid)
+                      const PopupMenuItem(
+                        value: 'none',
+                        enabled: false,
+                        child: Text(
+                          'Sem ações disponíveis',
+                          style: TextStyle(color: AppTheme.textDisabled),
+                        ),
                       ),
-                    ),
-                  if (isCancelled)
-                    PopupMenuItem(
-                      value: 'reactivate',
-                      child: Row(
-                        children: [
-                          Icon(LucideIcons.rotateCcw, size: 16, color: AppTheme.success),
-                          const SizedBox(width: 8),
-                          Text('Reativar', style: TextStyle(color: AppTheme.success)),
-                        ],
-                      ),
-                    ),
-                  if (isPaid)
-                    const PopupMenuItem(
-                      value: 'none',
-                      enabled: false,
-                      child: Text('Sem ações disponíveis', style: TextStyle(color: AppTheme.textDisabled)),
-                    ),
-                ],
-                onSelected: (value) {
-                  switch (value) {
-                    // 'mark_paid' removido: única via de dar baixa é o
-                    // botão "Confirmar" (decisão do dono, sem duplicidade).
-                    case 'cancel':
-                      onCancel?.call();
-                      break;
-                    case 'reactivate':
-                      onReactivate?.call();
-                      break;
-                  }
-                },
-              ),
-            ],
-          ),
-          if (onMarkPaid != null || onSendReminder != null) ...[
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (onSendReminder != null)
-                  TextButton.icon(
-                    onPressed: onSendReminder,
-                    icon: Icon(LucideIcons.messageSquare,
-                        size: 16, color: AppTheme.textSecondary),
-                    label: Text(
-                      'Lembrar',
-                      style: AppTheme.bodySmall
-                          .copyWith(color: AppTheme.textSecondary),
-                    ),
-                  ),
-                if (onMarkPaid != null) ...[
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    onPressed: onMarkPaid,
-                    icon: const Icon(LucideIcons.check, size: 16),
-                    label: const Text('Confirmar'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.success,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      textStyle:
-                          AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
+                  ],
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'edit':
+                        onEdit?.call();
+                        break;
+                      // 'mark_paid' removido: única via de dar baixa é o
+                      // botão "Confirmar" (decisão do dono, sem duplicidade).
+                      case 'cancel':
+                        onCancel?.call();
+                        break;
+                      case 'reactivate':
+                        onReactivate?.call();
+                        break;
+                    }
+                  },
+                ),
               ],
             ),
+            if (onMarkPaid != null || onSendReminder != null) ...[
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (onSendReminder != null)
+                    TextButton.icon(
+                      onPressed: onSendReminder,
+                      icon: Icon(
+                        LucideIcons.messageSquare,
+                        size: 16,
+                        color: AppTheme.textSecondary,
+                      ),
+                      label: Text(
+                        'Cobrar',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ),
+                  if (onMarkPaid != null) ...[
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: onMarkPaid,
+                      icon: const Icon(LucideIcons.check, size: 16),
+                      label: const Text('Confirmar'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.success,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        textStyle: AppTheme.bodySmall.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
           ],
-        ],
-      ),
+        ),
       ),
     );
   }
@@ -2195,19 +2314,22 @@ class _ManageStudentsSheetState extends State<_ManageStudentsSheet> {
 
     // Filter by search
     if (_searchQuery.isNotEmpty) {
-      result = result.where((s) =>
-          s.fullName.toLowerCase().contains(_searchQuery) ||
-          (s.nickname?.toLowerCase().contains(_searchQuery) ?? false)
-      ).toList();
+      result = result
+          .where(
+            (s) =>
+                s.fullName.toLowerCase().contains(_searchQuery) ||
+                (s.nickname?.toLowerCase().contains(_searchQuery) ?? false),
+          )
+          .toList();
     }
 
-    // Sort: enrolled first, then alphabetically
+    // Sort: NOT enrolled first, then alphabetically
     result.sort((a, b) {
       final aInPlan = _enrolledIds.contains(a.id);
       final bInPlan = _enrolledIds.contains(b.id);
-      if (aInPlan && !bInPlan) return -1;
-      if (!aInPlan && bInPlan) return 1;
-      return a.fullName.compareTo(b.fullName);
+      if (!aInPlan && bInPlan) return -1;
+      if (aInPlan && !bInPlan) return 1;
+      return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
     });
 
     return result;
@@ -2430,9 +2552,7 @@ class _ManageStudentsSheetState extends State<_ManageStudentsSheet> {
               ),
               decoration: BoxDecoration(
                 color: AppTheme.surface,
-                border: Border(
-                  top: BorderSide(color: AppTheme.divider),
-                ),
+                border: Border(top: BorderSide(color: AppTheme.divider)),
               ),
               child: SafeArea(
                 top: false,
@@ -2479,6 +2599,8 @@ class _StudentToggleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final primarySport = student.getPrimarySport();
+    final grade = student.getGrade(primarySport);
     return Pressable(
       onTap: isLoading ? null : onTap,
       child: Container(
@@ -2509,34 +2631,24 @@ class _StudentToggleCard extends StatelessWidget {
                     : Border.all(color: AppTheme.divider, width: 2),
               ),
               child: isInPlan
-                  ? const Icon(
-                      LucideIcons.check,
-                      color: Colors.white,
-                      size: 16,
-                    )
+                  ? const Icon(LucideIcons.check, color: Colors.white, size: 16)
                   : null,
             ),
             const SizedBox(width: 12),
 
             // Avatar
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: isInPlan
-                    ? AppTheme.success.withValues(alpha: 0.1)
-                    : AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text(
-                  (student.fullName.isNotEmpty ? student.fullName[0] : '?')
-                      .toUpperCase(),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 16,
-                    color: isInPlan ? AppTheme.success : AppTheme.textPrimary,
-                  ),
+            AppCachedAvatar(
+              imageUrl: student.photoUrl,
+              radius: 22,
+              backgroundColor: isInPlan
+                  ? AppTheme.success.withValues(alpha: 0.1)
+                  : AppTheme.surfaceVariant,
+              child: Text(
+                (student.fullName.isNotEmpty ? student.fullName[0] : '?')
+                    .toUpperCase(),
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: isInPlan ? AppTheme.success : AppTheme.textPrimary,
                 ),
               ),
             ),
@@ -2548,20 +2660,42 @@ class _StudentToggleCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    student.nickname ?? student.fullName.split(' ').first,
+                    student.fullName,
                     style: AppTheme.bodyMedium.copyWith(
                       fontWeight: FontWeight.w600,
                       color: isInPlan ? AppTheme.success : AppTheme.textPrimary,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  if (student.nickname != null)
+                  if (student.nickname != null &&
+                      student.nickname!.trim().isNotEmpty &&
+                      student.nickname!.trim().toLowerCase() !=
+                          student.fullName.trim().toLowerCase())
                     Text(
-                      student.fullName,
+                      '(${student.nickname!.trim()})',
                       style: AppTheme.bodySmall.copyWith(
                         color: AppTheme.textSecondary,
                       ),
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                  const SizedBox(height: 5),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      SportChip(sportId: primarySport),
+                      if (grade != null)
+                        GradeDisplay(
+                          sportId: primarySport,
+                          grade: grade.currentGrade,
+                          stripes: grade.currentStripes,
+                          size: GradeDisplaySize.small,
+                        ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -2653,7 +2787,10 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
   @override
   Widget build(BuildContext context) {
     final stats = _stats;
-    final monthLabel = DateFormat("MMMM 'de' yyyy", 'pt_BR').format(widget.month);
+    final monthLabel = DateFormat(
+      "MMMM 'de' yyyy",
+      'pt_BR',
+    ).format(widget.month);
 
     return Container(
       decoration: const BoxDecoration(
@@ -2662,7 +2799,10 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
       ),
       child: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
-          24, 16, 24, MediaQuery.of(context).padding.bottom + 24,
+          24,
+          16,
+          24,
+          MediaQuery.of(context).padding.bottom + 24,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2709,7 +2849,11 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                       color: AppTheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(LucideIcons.calendar, color: AppTheme.primary, size: 20),
+                    child: const Icon(
+                      LucideIcons.calendar,
+                      color: AppTheme.primary,
+                      size: 20,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Column(
@@ -2717,11 +2861,15 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                     children: [
                       Text(
                         'Mes de referencia',
-                        style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.labelSmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                       Text(
                         monthLabel.capitalize(),
-                        style: AppTheme.titleSmall.copyWith(fontWeight: FontWeight.w600),
+                        style: AppTheme.titleSmall.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
@@ -2787,21 +2935,27 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                             ),
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppTheme.surfaceVariant,
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
                                 '${plan.studentCount} aluno${plan.studentCount != 1 ? 's' : ''}',
-                                style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                                style: AppTheme.labelSmall.copyWith(
+                                  color: AppTheme.textSecondary,
+                                ),
                               ),
                             ),
                           ],
                         ),
                       );
                     }).toList(),
-                    onChanged: (value) => setState(() => _selectedPlanId = value),
+                    onChanged: (value) =>
+                        setState(() => _selectedPlanId = value),
                   ),
                 ),
               ),
@@ -2828,8 +2982,12 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                   Row(
                     children: [
                       Icon(
-                        stats.willReceive > 0 ? LucideIcons.checkCircle : LucideIcons.alertCircle,
-                        color: stats.willReceive > 0 ? AppTheme.success : AppTheme.warning,
+                        stats.willReceive > 0
+                            ? LucideIcons.checkCircle
+                            : LucideIcons.alertCircle,
+                        color: stats.willReceive > 0
+                            ? AppTheme.success
+                            : AppTheme.warning,
                         size: 20,
                       ),
                       const SizedBox(width: 8),
@@ -2840,7 +2998,9 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                               : 'Nenhuma mensalidade sera gerada',
                           style: AppTheme.titleSmall.copyWith(
                             fontWeight: FontWeight.w600,
-                            color: stats.willReceive > 0 ? AppTheme.success : AppTheme.warning,
+                            color: stats.willReceive > 0
+                                ? AppTheme.success
+                                : AppTheme.warning,
                           ),
                         ),
                       ),
@@ -2851,7 +3011,8 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                     children: [
                       Expanded(
                         child: _StatItem(
-                          label: 'Total no${_filterType == 'specific' ? ' plano' : 's planos'}',
+                          label:
+                              'Total no${_filterType == 'specific' ? ' plano' : 's planos'}',
                           value: stats.totalInPlans.toString(),
                         ),
                       ),
@@ -2885,12 +3046,18 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(LucideIcons.info, color: AppTheme.info, size: 18),
+                    const Icon(
+                      LucideIcons.info,
+                      color: AppTheme.info,
+                      size: 18,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Selecione um plano para continuar',
-                        style: AppTheme.bodySmall.copyWith(color: AppTheme.info),
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.info,
+                        ),
                       ),
                     ),
                   ],
@@ -2918,14 +3085,18 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: _generating ||
+                    onPressed:
+                        _generating ||
                             stats.willReceive == 0 ||
-                            (_filterType == 'specific' && _selectedPlanId == null)
+                            (_filterType == 'specific' &&
+                                _selectedPlanId == null)
                         ? null
                         : () async {
                             setState(() => _generating = true);
                             await widget.onGenerate(
-                              _filterType == 'specific' ? _selectedPlanId : null,
+                              _filterType == 'specific'
+                                  ? _selectedPlanId
+                                  : null,
                             );
                             // Parent pops the sheet on success; on error it stays
                             // open, so re-enable the button.
@@ -2945,8 +3116,9 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                             width: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
                             ),
                           )
                         : Text('Gerar ${stats.willReceive}'),
@@ -2982,7 +3154,9 @@ class _FilterOption extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primary.withValues(alpha: 0.05) : Colors.transparent,
+          color: isSelected
+              ? AppTheme.primary.withValues(alpha: 0.05)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? AppTheme.primary : AppTheme.divider,
@@ -3023,12 +3197,16 @@ class _FilterOption extends StatelessWidget {
                     title,
                     style: AppTheme.bodyMedium.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: isSelected ? AppTheme.primary : AppTheme.textPrimary,
+                      color: isSelected
+                          ? AppTheme.primary
+                          : AppTheme.textPrimary,
                     ),
                   ),
                   Text(
                     subtitle,
-                    style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -3091,14 +3269,16 @@ class _FilterChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final chipColor = color ?? AppTheme.textPrimary;
-    
+
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? chipColor.withValues(alpha: 0.1) : AppTheme.surface,
+          color: isSelected
+              ? chipColor.withValues(alpha: 0.1)
+              : AppTheme.surface,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: isSelected ? chipColor : AppTheme.divider,
@@ -3138,78 +3318,6 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-/// Quick insight card for reports tab
-class _QuickInsightCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String value;
-  final String subtitle;
-  final VoidCallback? onTap;
-
-  const _QuickInsightCard({
-    required this.icon,
-    required this.title,
-    required this.value,
-    required this.subtitle,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Pressable(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.divider),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, size: 22, color: AppTheme.textSecondary),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-                  ),
-                  Row(
-                    children: [
-                      Text(
-                        value,
-                        style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        subtitle,
-                        style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            if (onTap != null)
-              Icon(LucideIcons.chevronRight, size: 18, color: AppTheme.textSecondary),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _BillingPeriodSelector extends StatelessWidget {
   final BillingPeriod selected;
   final ValueChanged<BillingPeriod> onChanged;
@@ -3236,7 +3344,10 @@ class _BillingPeriodSelector extends StatelessWidget {
             return GestureDetector(
               onTap: () => onChanged(period),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: isSelected
                       ? AppTheme.textPrimary
@@ -3297,7 +3408,10 @@ class _PaymentMethodPolicySelector extends StatelessWidget {
             return GestureDetector(
               onTap: () => onChanged(policy),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: isSelected
                       ? AppTheme.textPrimary

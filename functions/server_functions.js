@@ -307,6 +307,8 @@ function mpInjectPaymentInfo(text, pixCode, ticketUrl) {
 // Includes the [[PIX]]..[[/PIX]] block resolved by mpInjectPaymentInfo.
 // Placeholders: {nome}, {valor}, {vencimento}, {dias}, {academia}.
 const DEFAULT_WHATSAPP_TEMPLATES = {
+  'CREATED': 'Oi {nome}! Uma nova parcela de {valor} da {academia} ja esta disponivel, com vencimento em {vencimento}.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'UPCOMING': 'Oi {nome}! Sua parcela de {valor} da {academia} vence em {diasAteVencimento} dia(s), em {vencimento}.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
   'D+0': 'Oi {nome}! Passando rapidinho para lembrar que hoje, dia {vencimento}, vence sua mensalidade de {valor} com a {academia}. Contamos com voce! Qualquer duvida, estamos a disposicao.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
   'D+1': 'Ola {nome}! Aqui e a {academia}. Identificamos que sua mensalidade de {valor} venceu em {vencimento}. Caso ja tenha efetuado o pagamento, por favor desconsidere esta mensagem. Caso contrario, solicitamos a regularizacao. Obrigado![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
   'D+3': 'Ola {nome}! Sua mensalidade de {valor} da {academia} esta com 3 dias de atraso (vencimento: {vencimento}). Por favor, regularize sua situacao o mais breve possivel. Em caso de duvidas, estamos a disposicao![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
@@ -321,6 +323,8 @@ const DEFAULT_WHATSAPP_TEMPLATES = {
 // um wording próprio, mais leve, SEM ameaça de suspensão — suspender o acesso
 // por uma aula avulsa não paga não é a política. Mesmos placeholders.
 const DEFAULT_WHATSAPP_TEMPLATES_GENERIC = {
+  'CREATED': 'Oi {nome}! Uma nova cobranca de {valor} ({descricao}) da {academia} ja esta disponivel, com vencimento em {vencimento}.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
+  'UPCOMING': 'Oi {nome}! Sua cobranca de {valor} ({descricao}) da {academia} vence em {diasAteVencimento} dia(s), em {vencimento}.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
   'D+0': 'Oi {nome}! Passando para lembrar que hoje, dia {vencimento}, vence sua cobranca de {valor} ({descricao}) com a {academia}. Qualquer duvida, estamos a disposicao.[[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
   'D+1': 'Ola {nome}! Aqui e a {academia}. Identificamos que sua cobranca de {valor} ({descricao}) venceu em {vencimento}. Caso ja tenha pago, desconsidere. Caso contrario, pedimos a regularizacao. Obrigado![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
   'D+3': 'Ola {nome}! Sua cobranca de {valor} ({descricao}) da {academia} esta com 3 dias de atraso (vencimento: {vencimento}). Quando puder, regularize. Em caso de duvidas, estamos a disposicao![[PIX]]\n\nPague agora pelo PIX (copia e cola):\n{pix}\n\nOu acesse: {link}[[/PIX]]',
@@ -330,12 +334,17 @@ const DEFAULT_WHATSAPP_TEMPLATES_GENERIC = {
 };
 
 // Mirrors the Dart _applyTemplate replaceAll (all occurrences).
-function applyBillingTemplate(tpl, { nome, valor, vencimento, dias, academia, descricao }) {
+function applyBillingTemplate(tpl, {
+  nome, valor, vencimento, dias, diasAteVencimento, academia, descricao
+}) {
   return String(tpl || '')
     .split('{nome}').join(nome != null ? String(nome) : '')
     .split('{valor}').join(valor != null ? String(valor) : '')
     .split('{vencimento}').join(vencimento != null ? String(vencimento) : '')
     .split('{dias}').join(dias != null ? String(dias) : '')
+    .split('{diasAteVencimento}').join(
+      diasAteVencimento != null ? String(diasAteVencimento) : ''
+    )
     .split('{academia}').join(academia != null ? String(academia) : '')
     // Auditoria: placeholder usado pelos templates genéricos (não-mensalidade).
     .split('{descricao}').join(descricao != null ? String(descricao) : '');
@@ -544,14 +553,18 @@ async function sendBillingReminderWhatsApp(
     const defaults = isTuition
       ? DEFAULT_WHATSAPP_TEMPLATES
       : DEFAULT_WHATSAPP_TEMPLATES_GENERIC;
-    const customTpl = settings.messageTemplates?.whatsapp?.[stage];
-    const tpl = customTpl || defaults[stage] || defaults['D+1'];
+    const templateKey = String(stage || '').startsWith('due-')
+      ? 'UPCOMING'
+      : stage;
+    const customTpl = settings.messageTemplates?.whatsapp?.[templateKey];
+    const tpl = customTpl || defaults[templateKey] || defaults['D+1'];
 
     const filled = applyBillingTemplate(tpl, {
       nome: financial.studentName || '',
       valor,
       vencimento,
       dias,
+      diasAteVencimento: daysOverdue < 0 ? Math.abs(daysOverdue) : 0,
       academia: academyName || '',
       descricao: financial.description || 'cobranca',
     });
@@ -676,40 +689,54 @@ exports.onFinancialCreated = functions.firestore
 
     console.log(`New financial created: ${financialId} in academy ${academyId}`);
 
-    // Get student's userId
-    const userId = await getStudentUserId(financial.studentId, academyId);
-    if (!userId) {
-      console.log(`No userId found for student: ${financial.studentId}`);
-      return;
-    }
+    // Docs sintéticos/terminais não representam uma nova parcela disponível.
+    if (financial.status !== 'pending' || !financial.dueDate ||
+        typeof financial.dueDate.toDate !== 'function') return null;
 
-    // Send notification to student
     const dueDate = financial.dueDate.toDate();
     const formattedDate = dueDate.toLocaleDateString('pt-BR');
     const formattedAmount = (Number(financial.amount) || 0).toFixed(2);
 
-    // Push notification
-    await sendToUser(
-      userId,
-      'Nova Mensalidade Disponivel',
-      `Uma nova mensalidade de R$ ${formattedAmount} foi gerada. Vencimento: ${formattedDate}.`,
-      {
-        type: 'financial',
-        id: financialId,
+    // Push/interna continuam independentes do WhatsApp. Sem conta vinculada,
+    // o aluno ainda pode receber a mensagem automática pelo telefone cadastrado.
+    const userId = await getBillingRecipientUid(financial.studentId, academyId);
+    if (userId) {
+      await sendToUser(
+        userId,
+        'Nova Mensalidade Disponivel',
+        `Uma nova mensalidade de R$ ${formattedAmount} foi gerada. Vencimento: ${formattedDate}.`,
+        {
+          type: 'financial',
+          id: financialId,
+          academyId,
+          category: 'financial',
+          actionUrl: '/portal/financeiro',
+        }
+      );
+      await createInternalNotification(academyId, userId, 'financial', 'normal',
+        'Nova Mensalidade',
+        `Sua mensalidade de R$ ${formattedAmount} vence em ${formattedDate}.`,
+        { actionUrl: '/portal/financeiro', actionLabel: 'Ver detalhes', financialId, expiresInDays: 30 }
+      );
+    }
+
+    // Aviso de criação é opt-in e usa o mesmo template/PIX das cobranças.
+    const billingSettings = await getBillingReminderSettings(academyId);
+    if (billingSettings.notifyOnCreation === true) {
+      const academySnap = await db.doc(`academies/${academyId}`).get();
+      const academy = academySnap.exists ? (academySnap.data() || {}) : {};
+      await sendBillingReminderWhatsApp(
         academyId,
-        category: 'financial', // sempre notificado — ver comentário no gate acima
-        actionUrl: '/portal/financeiro',
-      }
-    );
+        academy.name || academy.academyName || '',
+        billingSettings,
+        { ...financial, id: financialId },
+        'CREATED',
+        0
+      );
+    }
 
-    // Internal notification
-    await createInternalNotification(academyId, userId, 'financial', 'normal',
-      'Nova Mensalidade',
-      `Sua mensalidade de R$ ${formattedAmount} vence em ${formattedDate}.`,
-      { actionUrl: '/portal/financeiro', actionLabel: 'Ver detalhes', financialId, expiresInDays: 30 }
-    );
-
-    console.log(`Notification sent to user ${userId} for financial ${financialId}`);
+    console.log(`Creation notifications processed for financial ${financialId}`);
+    return null;
   });
 
 /**
@@ -1195,12 +1222,12 @@ exports.scheduledDueSoonReminder = functions.pubsub
         // positivos e ordena desc para deduplicar pelo MAIOR offset elegível.
         const rawOffsets = Array.isArray(billingSettings.dueSoonOffsets)
           ? billingSettings.dueSoonOffsets
-          : [7, 2];
+          : [7, 3, 1, 0];
         const offsets = Array.from(new Set(
-          rawOffsets.map((n) => Math.trunc(Number(n))).filter((n) => n > 0)
+          rawOffsets.map((n) => Math.trunc(Number(n))).filter((n) => n >= 0)
         )).sort((a, b) => b - a);
         const maxOffset = offsets.length ? offsets[0] : 0;
-        if (maxOffset === 0) continue; // a-vencer desligado para esta academia
+        if (offsets.length === 0) continue;
 
         // Find pending financials due within the largest configured window.
         const financialsSnapshot = await db
@@ -1224,14 +1251,14 @@ exports.scheduledDueSoonReminder = functions.pubsub
           );
 
           // Só a-vencer (futuro). Vencido é tratado pelo scheduledOverdueCheck.
-          if (daysUntilDue <= 0 || daysUntilDue > maxOffset) continue;
+          if (daysUntilDue < 0 || daysUntilDue > maxOffset) continue;
 
           // Auditoria (LOW): só dispara num offset CONFIGURADO (ex.: 7 ou 2),
           // não em todo dia da janela. O estágio (ex.: 'due-7') deduplica para
           // não reenviar o mesmo aviso a-vencer. Campo separado do overdue
           // (lastDueSoonStage) para as duas réguas não colidirem.
           if (!offsets.includes(daysUntilDue)) continue;
-          const dueStage = `due-${daysUntilDue}`;
+          const dueStage = daysUntilDue === 0 ? 'D+0' : `due-${daysUntilDue}`;
           if (financial.lastDueSoonStage === dueStage) continue;
 
           const isTuition = (financial.type || 'monthly_tuition') === 'monthly_tuition';
@@ -1262,20 +1289,17 @@ exports.scheduledDueSoonReminder = functions.pubsub
             console.log(`Sent due soon reminder to user ${userId} for financial ${financialDoc.id}`);
           }
 
-          // S7: WhatsApp courtesy. O template 'D+0' diz "vence hoje", então só
-          // mandamos no dia do vencimento (daysUntilDue===1, isto é, vence
-          // amanhã/ainda dá pra pagar hoje). Os demais offsets (D-7/D-2) mantêm
-          // só push/interna. INERT até WHATSAPP_API_KEY (gate no sender).
-          if (daysUntilDue <= 1) {
-            await sendBillingReminderWhatsApp(
-              academyId,
-              academyName,
-              billingSettings,
-              { ...financial, id: financialDoc.id },
-              'D+0',
-              0
-            );
-          }
+          // WhatsApp a vencer em todos os dias escolhidos pelo professor. O
+          // stage dinâmico deduplica cada marco; o conteúdo usa o template
+          // único UPCOMING, com {diasAteVencimento} preenchido.
+          await sendBillingReminderWhatsApp(
+            academyId,
+            academyName,
+            billingSettings,
+            { ...financial, id: financialDoc.id },
+            dueStage,
+            -daysUntilDue
+          );
 
           // Persist o estágio a-vencer coberto (best-effort) p/ deduplicar.
           try {

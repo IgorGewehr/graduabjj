@@ -72,6 +72,31 @@ void main() {
         expect(msg, isNot(contains('{link}')));
       });
     }
+
+    test('upcoming template uses a positive days-until-due value', () {
+      final msg = service.generateWhatsAppMessage(
+        stage: BillingStage.upcoming,
+        studentName: 'Joao',
+        amount: 150,
+        dueDate: dueDate,
+        daysOverdue: -7,
+      );
+      expect(msg, contains('7 dia(s)'));
+      expect(msg, isNot(contains('-7')));
+      expect(msg, isNot(contains('{diasAteVencimento}')));
+    });
+
+    test('created template clearly says the installment is available', () {
+      final msg = service.generateWhatsAppMessage(
+        stage: BillingStage.created,
+        studentName: 'Maria',
+        amount: 120,
+        dueDate: dueDate,
+        daysOverdue: 0,
+      );
+      expect(msg, contains('ja esta disponivel'));
+      expect(msg, contains('Maria'));
+    });
   });
 
   group('BillingNotificationSettings.includePaymentLink', () {
@@ -84,10 +109,14 @@ void main() {
     });
 
     test('honors explicit false', () {
-      final settings = BillingNotificationSettings(
-        includePaymentLink: false,
-      );
+      final settings = BillingNotificationSettings(includePaymentLink: false);
       expect(settings.includePaymentLink, isFalse);
+    });
+
+    test('automation defaults are safe and include useful due moments', () {
+      final settings = BillingNotificationSettings();
+      expect(settings.notifyOnCreation, isFalse);
+      expect(settings.dueSoonOffsets, containsAll([7, 3, 1, 0]));
     });
   });
 }
