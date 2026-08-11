@@ -91,10 +91,9 @@ test('markPrivateLessonGiven é gated para staff e reusa o grant idempotente', (
   const body = SRC.slice(start, SRC.indexOf('\n});', start));
 
   assert.ok(
-    body.includes('getUserAcademyMembership(request.auth.uid, academyId)') &&
-      body.includes("membership.role === 'admin'") &&
-      body.includes("membership.role === 'instructor'"),
-    'gate admin/instrutor via getUserAcademyMembership'
+    body.includes('staffCanWithPermission(') &&
+      body.includes("request.auth.uid, academyId, 'attendance:take'"),
+    'gate admin/instrutor via permissionamento de presença'
   );
   assert.ok(
     body.includes("fin.type !== 'private_lesson'"),

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../models/billing_payment_preference.dart';
 import 'firebase_service.dart';
 
 /// PIX Key Type
@@ -137,6 +138,7 @@ class AcademySettings {
   // Financial
   final String? pixKey;
   final PixKeyType? pixKeyType;
+  final BillingPaymentPreference billingPaymentPreference;
 
   // AbacatePay Integration (API key is global in backend env, not per-academy)
   final bool abacatePayEnabled;
@@ -331,6 +333,7 @@ class AcademySettings {
     this.sidebarBackgroundUrl,
     this.pixKey,
     this.pixKeyType,
+    this.billingPaymentPreference = BillingPaymentPreference.mercadoPago,
     this.abacatePayEnabled = false,
     this.asaasEnabled = false,
     this.asaasOnboardingStatus,
@@ -426,6 +429,9 @@ class AcademySettings {
       pixKeyType: data['pixKeyType'] != null
           ? PixKeyTypeExtension.fromString(data['pixKeyType'])
           : null,
+      billingPaymentPreference: BillingPaymentPreferenceExtension.fromString(
+        data['billingPaymentPreference'] as String?,
+      ),
       abacatePayEnabled: data['abacatePayEnabled'] ?? false,
       asaasEnabled: data['asaasEnabled'] ?? false,
       asaasOnboardingStatus: data['asaasOnboardingStatus'],
@@ -746,6 +752,16 @@ class SettingsService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     }
+  }
+
+  /// Persists the academy's preferred payment instruction for charges.
+  Future<void> updateBillingPaymentPreference(
+    BillingPaymentPreference preference,
+  ) async {
+    await _academyRef.update({
+      'billingPaymentPreference': preference.value,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   // ============================================

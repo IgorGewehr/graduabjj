@@ -33,6 +33,19 @@ const messaging = admin.messaging();
 // inadimplência da catraca (access_control/financial_gate.js). Fonte ÚNICA da
 // verdade: cron de cobrança e portão NUNCA discordam de quem está em atraso.
 const { isOverdueBR, daysOverdueBR } = require('./access_control/overdue_util');
+const {
+  BillingPaymentMode,
+  resolveBillingPaymentInstruction,
+} = require('./billing_payment_resolver');
+const {
+  buildBillingTemplatePayload,
+  normalizeTemplateStage,
+} = require('./billing_whatsapp_templates');
+const {
+  ManualPixConfirmationDecision,
+  classifyManualPixConfirmation,
+  classifyMercadoPagoCancellation,
+} = require('./manual_pix_confirmation');
 
 // ============================================
 // Helper Functions
@@ -215,7 +228,7 @@ async function getBillingRecipientUid(studentId, academyId) {
 // ============================================
 //
 // This whole block is INERT until the WHATSAPP_API_KEY secret/env var is set.
-// The gate lives in sendWhatsAppServer(): with no key it returns immediately
+// The gate lives in sendWhatsAppTemplateServer(): with no key it returns immediately
 // WITHOUT performing any network call, so wiring it into the crons is safe to
 // ship disabled. The owner sets WHATSAPP_API_KEY later to turn it on.
 //
@@ -227,16 +240,21 @@ async function getBillingRecipientUid(studentId, academyId) {
 // Secret Manager. For v1, WHATSAPP_API_KEY MUST be provided via functions
 // config / .env (same mechanism as NOTIFICATION_API_KEY in index.js).
 
-// ---- 1. Gated WhatsApp sender (the inert switch) -------------------------
+// ---- 1. Gated Meta-template sender (the inert switch) --------------------
 // GATE: with no WHATSAPP_API_KEY, returns {sent:false, skipped:'no_key'}
-// without calling anything. Never throws.
-async function sendWhatsAppServer(phone, message, academyId) {
+// without calling anything. No academy-editable WhatsApp text crosses this
+// boundary: billing copy is identified by templateName and variables.
+async function sendWhatsAppTemplateServer(phone, academyId, templatePayload) {
   const key = process.env.WHATSAPP_API_KEY;
   if (!key) {
     return { sent: false, skipped: 'no_key' };
   }
-  const url = process.env.WHATSAPP_API_URL ||
+  const legacyUrl = process.env.WHATSAPP_API_URL ||
     'https://notification.tensorroot.com/api/send-whatsapp';
+  const url = process.env.WHATSAPP_TEMPLATE_API_URL || legacyUrl.replace(
+    /\/api\/send-whatsapp\/?$/,
+    '/api/send-whatsapp-template'
+  );
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -245,9 +263,15 @@ async function sendWhatsAppServer(phone, message, academyId) {
         'x-api-key': key,
       },
       body: JSON.stringify({
+        appId: process.env.WHATSAPP_APP_ID || 'gestao-raiz',
+        tenantId: academyId,
         phone,
-        message,
-        academyId,
+        templateName: templatePayload.templateName,
+        languageCode: process.env.WHATSAPP_TEMPLATE_LANG || 'pt_BR',
+        variables: templatePayload.variables,
+        ...(templatePayload.buttonUrl
+          ? { buttonUrl: templatePayload.buttonUrl }
+          : {}),
         type: 'billing_reminder',
       }),
     });
@@ -258,10 +282,16 @@ async function sendWhatsAppServer(phone, message, academyId) {
     if (!res.ok) return { sent: false };
     let body = null;
     try { body = await res.json(); } catch (_) { body = null; }
-    if (body && body.success === true) return { sent: true };
+    if (body && body.success === true) {
+      return {
+        sent: true,
+        provider: body.provider || 'unknown',
+        wamid: body.wamid || null,
+      };
+    }
     return { sent: false, skipped: 'not_confirmed' };
   } catch (e) {
-    console.error('[S7] sendWhatsAppServer failed:', e && e.message);
+    console.error('[S7] sendWhatsAppTemplateServer failed:', e && e.message);
     return { sent: false };
   }
 }
@@ -473,11 +503,10 @@ async function generateReminderPix(academyId, financial) {
   }
 }
 
-// ---- 6. Orchestrator: build + send one WhatsApp billing reminder ---------
+// ---- 6. Orchestrator: resolve + send one Meta billing template -----------
 // GATES: billingSettings.whatsappEnabled !== false; recipient phone present
-// (kids -> guardian.phone else phone, mirroring effectivePhone). When
-// includePaymentLink !== false, generates a best-effort PIX. Picks the custom
-// template (billingSettings.messageTemplates.whatsapp[stage]) or the JS default.
+// (kids -> guardian.phone else phone, mirroring effectivePhone). Payment mode
+// is resolved centrally: MP, personal PIX, or no payment instructions.
 // NEVER throws.
 //
 // `stage` is 'D+0'..'D+30'. `daysOverdue` defaults to 0 for the due-soon cron.
@@ -495,7 +524,7 @@ async function sendBillingReminderWhatsApp(
     // doc AUSENTE (settings/billingReminders nunca salvo) como LIGADO. O
     // cliente (BillingReminderService.getNotificationSettings) faz o oposto:
     // default whatsappEnabled=false quando o doc não existe. Enquanto
-    // WHATSAPP_API_KEY estava vazia isso era inofensivo (sendWhatsAppServer
+    // WHATSAPP_API_KEY estava vazia isso era inofensivo (sendWhatsAppTemplateServer
     // nunca disparava); assim que a chave for configurada, TODAS as
     // academias sem settings salvos passariam a receber WhatsApp automático
     // sem nunca terem optado. `!== true` alinha o server com o default do
@@ -533,44 +562,55 @@ async function sendBillingReminderWhatsApp(
     // WHATSAPP_API_KEY still delivers once the key is later configured.
     if (financial.lastReminderStage === stage) return;
 
+    // Only stages with approved Meta templates may use this official path.
+    // Creation and due-soon (>0) continue through push/internal notifications.
+    if (!normalizeTemplateStage(stage)) {
+      console.log(`[S7] WhatsApp skipped: no approved Meta template for stage=${stage}`);
+      return;
+    }
+
     const dueDate = financial.dueDate && typeof financial.dueDate.toDate === 'function'
       ? financial.dueDate.toDate()
       : new Date();
     const valor = formatBrlAmount(Number(financial.amount) || 0);
     const vencimento = formatBrDate(dueDate);
-    const dias = daysOverdue || 0;
-
-    // PIX (best-effort) when the academy opted into payment links.
-    let pix = { pixCode: '', ticketUrl: '' };
-    if (settings.includePaymentLink !== false) {
-      pix = await generateReminderPix(academyId, financial);
+    let academy = {};
+    try {
+      const academySnap = await db.doc(`academies/${academyId}`).get();
+      academy = academySnap.exists ? (academySnap.data() || {}) : {};
+    } catch (_) {
+      // Missing academy payment data safely resolves to `none` below.
     }
 
-    // Auditoria (LOW ux): só a régua de mensalidade usa o wording de
-    // "mensalidade atrasada" (com ameaça de suspensão). Cobranças avulsas
-    // (aula particular, loja, etc.) caem no template genérico, mais leve.
-    const isTuition = (financial.type || 'monthly_tuition') === 'monthly_tuition';
-    const defaults = isTuition
-      ? DEFAULT_WHATSAPP_TEMPLATES
-      : DEFAULT_WHATSAPP_TEMPLATES_GENERIC;
-    const templateKey = String(stage || '').startsWith('due-')
-      ? 'UPCOMING'
-      : stage;
-    const customTpl = settings.messageTemplates?.whatsapp?.[templateKey];
-    const tpl = customTpl || defaults[templateKey] || defaults['D+1'];
+    let paymentInstruction = { mode: BillingPaymentMode.NONE };
+    if (settings.includePaymentLink !== false) {
+      paymentInstruction = await resolveBillingPaymentInstruction({
+        academy,
+        generateMercadoPagoPix: () => generateReminderPix(academyId, financial),
+      });
+    }
 
-    const filled = applyBillingTemplate(tpl, {
-      nome: financial.studentName || '',
-      valor,
-      vencimento,
-      dias,
-      diasAteVencimento: daysOverdue < 0 ? Math.abs(daysOverdue) : 0,
-      academia: academyName || '',
-      descricao: financial.description || 'cobranca',
+    // The approved Meta template matrix is selected only by stage and payment
+    // mode. Academy-editable WhatsApp copy is intentionally ignored here.
+    const templatePayload = buildBillingTemplatePayload({
+      stage,
+      paymentInstruction,
+      studentName: financial.studentName || '',
+      academyName: academyName || academy.name || academy.academyName || '',
+      amountFormatted: valor,
+      dueDateFormatted: vencimento,
     });
-    const msg = mpInjectPaymentInfo(filled, pix.pixCode, pix.ticketUrl);
+    if (!templatePayload) return;
 
-    const result = await sendWhatsAppServer(phone, msg, academyId);
+    console.log(
+      `[S7] WhatsApp billing mode=${templatePayload.paymentMode} ` +
+      `template=${templatePayload.templateName} stage=${stage}`
+    );
+    const result = await sendWhatsAppTemplateServer(
+      phone,
+      academyId,
+      templatePayload
+    );
     // Persist the dedup marker ONLY when the message actually went out (not on
     // the INERT no_key path), so re-enabling WhatsApp later still delivers.
     if (result && result.sent && financial.id) {
@@ -1137,7 +1177,7 @@ exports.scheduledOverdueCheck = functions.pubsub
           }
 
           // S7: additionally send the autonomous WhatsApp + PIX reminder.
-          // INERT until WHATSAPP_API_KEY is set (gate in sendWhatsAppServer).
+          // INERT until WHATSAPP_API_KEY is set (template sender gate).
           await sendBillingReminderWhatsApp(
             academyId,
             academyName,
@@ -3319,7 +3359,8 @@ async function requireAdminOf(request, academyId) {
   }
   const info = await getUserAcademyMembership(request.auth.uid, academyId);
   if (!info || info.role !== 'admin') {
-    throw new HttpsError('permission-denied', 'Apenas o admin da academia pode conectar.');
+    throw new HttpsError('permission-denied',
+      'Apenas o administrador da academia pode realizar esta acao.');
   }
   return info;
 }
@@ -5715,6 +5756,206 @@ exports.cancelMpPix = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
     throw new HttpsError('internal', 'Falha ao cancelar a cobranca PIX.');
   }
 });
+
+/**
+ * Confirma o recebimento de uma cobranca paga na chave PIX pessoal da
+ * academia. A baixa e exclusivamente server-side e admin-only: o aluno nao
+ * consegue quitar a propria cobranca e o cliente nao escolhe valor, aluno,
+ * data ou identidade do confirmador.
+ *
+ * Se existir um PIX/cartao Mercado Pago concorrente, ele precisa estar
+ * comprovadamente cancelado ou terminal antes da baixa. Falhas e estados
+ * intermediarios bloqueiam a operacao (fail closed) para evitar pagamento
+ * duplicado. A transacao final revalida o status para cobrir a corrida com o
+ * webhook do Mercado Pago.
+ */
+exports.confirmManualPixPayment = onCall(
+  { secrets: MP_MKT_SECRETS }, async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Login obrigatorio.');
+    }
+    const academyId = String(request.data?.academyId || '').trim();
+    const financialId = String(request.data?.financialId || '').trim();
+    if (!academyId || !financialId || academyId.includes('/') ||
+        financialId.includes('/')) {
+      throw new HttpsError('invalid-argument',
+        'academyId e financialId validos sao obrigatorios.');
+    }
+    await requireAdminOf(request, academyId);
+
+    const finRef = db.doc(`academies/${academyId}/financials/${financialId}`);
+    const initialSnap = await finRef.get();
+    if (!initialSnap.exists) {
+      throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+    }
+    const initialFin = initialSnap.data();
+    const initialDecision = classifyManualPixConfirmation(initialFin);
+    if (initialDecision === ManualPixConfirmationDecision.PAID_BY_OTHER_METHOD) {
+      throw new HttpsError('failed-precondition',
+        'Esta cobranca ja foi paga por outro meio. Atualize a tela.');
+    }
+    if (initialDecision === ManualPixConfirmationDecision.INVALID_STATUS) {
+      throw new HttpsError('failed-precondition',
+        'Somente cobrancas pendentes ou vencidas podem receber baixa de PIX manual.');
+    }
+
+    // Idempotencia: uma repeticao da mesma baixa nao volta a consultar/cancelar
+    // o MP nem altera a data original. O grant de aula particular, se pendente,
+    // ainda e tentado depois da transacao abaixo.
+    const verifiedCompetingPaymentIds = new Set();
+    if (initialDecision !== ManualPixConfirmationDecision.ALREADY_CONFIRMED) {
+      const competingPaymentIds = new Set();
+      if (initialFin.gatewayPaymentId &&
+          (initialFin.paymentGateway === 'mercadopago' || initialFin.pixCode)) {
+        competingPaymentIds.add(String(initialFin.gatewayPaymentId));
+      }
+      if (initialFin.cardPendingPaymentId) {
+        competingPaymentIds.add(String(initialFin.cardPendingPaymentId));
+      }
+
+      if (competingPaymentIds.size > 0) {
+        const token = await getMpAccessToken(academyId);
+        for (const paymentId of competingPaymentIds) {
+          const cancelResult = await mpCancelPixPayment(
+            academyId, paymentId, { token }
+          );
+          const safety = classifyMercadoPagoCancellation(cancelResult);
+          if (!safety.safe && safety.reason === 'approved') {
+            throw new HttpsError('failed-precondition',
+              'O Mercado Pago ja aprovou este pagamento. Aguarde a baixa automatica e atualize a tela.');
+          }
+          if (!safety.safe) {
+            console.error('[confirmManualPixPayment] cancelamento MP inconclusivo',
+              { academyId, financialId, status: safety.reason });
+            throw new HttpsError('unavailable',
+              'Nao foi possivel cancelar a cobranca concorrente do Mercado Pago. Tente novamente antes de confirmar o PIX manual.');
+          }
+          verifiedCompetingPaymentIds.add(paymentId);
+        }
+      }
+    }
+
+    let confirmedByName = '';
+    try {
+      const userSnap = await db.doc(`users/${request.auth.uid}`).get();
+      const user = userSnap.exists ? userSnap.data() : {};
+      confirmedByName = String(user.displayName || user.name || '').trim();
+    } catch (e) {
+      console.error('[confirmManualPixPayment] perfil do confirmador indisponivel',
+        e && e.message);
+    }
+    confirmedByName = confirmedByName ||
+      String(request.auth.token?.name || request.auth.token?.email || '').trim() ||
+      'Administrador';
+
+    const auditRef = db.doc(
+      `academies/${academyId}/paymentAuditLogs/manual_pix_${financialId}`
+    );
+    const result = await db.runTransaction(async (tx) => {
+      const liveSnap = await tx.get(finRef);
+      if (!liveSnap.exists) {
+        throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+      }
+      const live = liveSnap.data();
+      const decision = classifyManualPixConfirmation(live);
+      if (decision === ManualPixConfirmationDecision.ALREADY_CONFIRMED) {
+        return { alreadyConfirmed: true, finData: live };
+      }
+      if (decision === ManualPixConfirmationDecision.PAID_BY_OTHER_METHOD) {
+        throw new HttpsError('failed-precondition',
+          'O pagamento foi confirmado por outro meio enquanto esta tela estava aberta. Atualize a tela.');
+      }
+      if (decision !== ManualPixConfirmationDecision.CONFIRM) {
+        throw new HttpsError('failed-precondition',
+          'A cobranca nao esta mais disponivel para baixa manual. Atualize a tela.');
+      }
+
+      // Uma nova geracao MP pode ter ocorrido entre a leitura inicial e esta
+      // transacao. Nunca apague/quite um pagamento que nao foi verificado e
+      // cancelado acima. Como o financial e lido dentro da tx, qualquer mint
+      // concorrente tambem faz a transacao repetir e passar por este guard.
+      const liveCompetingPaymentIds = [];
+      if (live.gatewayPaymentId &&
+          (live.paymentGateway === 'mercadopago' || live.pixCode)) {
+        liveCompetingPaymentIds.push(String(live.gatewayPaymentId));
+      }
+      if (live.cardPendingPaymentId) {
+        liveCompetingPaymentIds.push(String(live.cardPendingPaymentId));
+      }
+      if (liveCompetingPaymentIds.some(
+        (paymentId) => !verifiedCompetingPaymentIds.has(paymentId)
+      )) {
+        throw new HttpsError('aborted',
+          'Uma nova cobranca do Mercado Pago foi criada durante a confirmacao. Tente novamente para cancela-la com seguranca.');
+      }
+
+      const confirmedAt = admin.firestore.Timestamp.now();
+      const manualPaymentAudit = {
+        type: 'personal_pix',
+        source: 'admin_app',
+        confirmedByName,
+        confirmedAt,
+      };
+      tx.update(finRef, {
+        status: 'paid',
+        method: 'pix',
+        paymentGateway: 'manual',
+        paymentDate: confirmedAt,
+        manualPaymentAudit,
+        gatewayPaymentId: admin.firestore.FieldValue.delete(),
+        pixCode: admin.firestore.FieldValue.delete(),
+        pixQrCode: admin.firestore.FieldValue.delete(),
+        pixTicketUrl: admin.firestore.FieldValue.delete(),
+        pixExpiresAt: admin.firestore.FieldValue.delete(),
+        pixAmount: admin.firestore.FieldValue.delete(),
+        pixMintAt: admin.firestore.FieldValue.delete(),
+        pixMintBy: admin.firestore.FieldValue.delete(),
+        cardPendingPaymentId: admin.firestore.FieldValue.delete(),
+        cardPendingStatus: admin.firestore.FieldValue.delete(),
+        cardPendingExpiresAt: admin.firestore.FieldValue.delete(),
+        updatedAt: confirmedAt,
+      });
+      tx.set(auditRef, {
+        event: 'manual_pix_confirmed',
+        academyId,
+        financialId,
+        studentId: live.studentId || '',
+        studentName: live.studentName || '',
+        amount: Number(live.amount) || 0,
+        method: 'pix',
+        paymentGateway: 'manual',
+        confirmedBy: request.auth.uid,
+        confirmedByName,
+        confirmedAt,
+      });
+      return { alreadyConfirmed: false, finData: live };
+    });
+
+    let attendanceGranted = result.finData?.attendanceGranted === true;
+    if (result.finData?.type === 'private_lesson' && !attendanceGranted) {
+      try {
+        await grantPrivateLessonAttendance(
+          academyId, financialId, result.finData, {
+            verifiedBy: request.auth.uid,
+            verifiedByName: confirmedByName,
+          }
+        );
+        attendanceGranted = true;
+      } catch (e) {
+        // A baixa do dinheiro ja foi confirmada. O callable e idempotente: uma
+        // nova tentativa completa apenas a presenca, sem duplicar pagamento.
+        console.error('[confirmManualPixPayment] grant aula particular falhou',
+          financialId, e && e.message);
+      }
+    }
+
+    return {
+      success: true,
+      alreadyConfirmed: result.alreadyConfirmed,
+      attendanceGranted,
+    };
+  }
+);
 
 /** Parses `${academyId}:fin:${id}` / `${academyId}:order:${id}`. */
 function mpMktParseRef(ref) {

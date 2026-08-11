@@ -913,7 +913,10 @@ service cloud.firestore {
         //    move money between settled states (e.g. paid -> refunded via a webhook).
         allow update: if isAcademyStaff(academyId)
                       && !request.resource.data.diff(resource.data).affectedKeys()
-                          .hasAny(['paidViaAbacatePay', 'abacatePayTransactionId'])
+                          .hasAny([
+                            'paidViaAbacatePay', 'abacatePayTransactionId',
+                            'manualPaymentAudit'
+                          ])
                       && !(
                         (resource.data.status == 'paid'
                          || resource.data.status == 'refunded'
@@ -929,6 +932,14 @@ service cloud.firestore {
                       && resource.data.status != 'paid'
                       && resource.data.status != 'refunded'
                       && resource.data.status != 'chargeback';
+      }
+
+      // Trilha imutavel de baixas manuais. O callable grava pelo Admin SDK;
+      // clientes nunca criam/alteram/apagam eventos e somente administradores
+      // podem consultar a identidade de quem confirmou o recebimento.
+      match /paymentAuditLogs/{auditId} {
+        allow read: if isAcademyAdmin(academyId);
+        allow write: if false;
       }
 
       // ============================================

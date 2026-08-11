@@ -23,6 +23,7 @@ DEFINES=(
   --dart-define=APP_BASE_URL=https://bjjeasy.netlify.app
   --dart-define=API_BASE_URL=https://bjjeasy.netlify.app/api
   --dart-define=WHATSAPP_API_URL=https://notification.tensorroot.com/api/send-whatsapp
+  --dart-define=WHATSAPP_TEMPLATE_API_URL=https://notification.tensorroot.com/api/send-whatsapp-template
   --dart-define=EMAIL_API_URL=https://notification.tensorroot.com/api/send-email
   --dart-define=WHATSAPP_API_KEY="$NOTIFICATION_INTERNAL_KEY"
   --dart-define=EMAIL_API_KEY="$NOTIFICATION_INTERNAL_KEY"

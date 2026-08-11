@@ -7,12 +7,14 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import '../../core/feedback_utils.dart';
+import '../../models/billing_payment_preference.dart';
+import '../../models/user.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/billing_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../services/billing_reminder_service.dart';
 import '../../services/payment_service.dart';
 import '../../services/plan_service.dart';
-import '../../services/mercado_pago_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/common/billing_automation_banner.dart';
@@ -57,7 +59,6 @@ class _AdminBillingRemindersScreenState
   // Pré-carregado aqui (junto do resto) para que o dialog de configurações
   // abra com o valor já disponível, sem precisar de FutureBuilder/spinner.
   bool _autoTuitionEnabled = false;
-  bool _mercadoPagoEnabled = false;
   bool _isLoading = true;
   bool _isSending = false;
   bool _didOpenInitialCharge = false;
@@ -94,7 +95,6 @@ class _AdminBillingRemindersScreenState
         _billingService.getStudentContacts(),
         _billingService.getNotificationSettings(),
         _billingService.getAutoTuitionEnabled(),
-        MercadoPagoService(academyId).isEnabled(),
       ]);
 
       // Get academy name for notification service
@@ -113,7 +113,6 @@ class _AdminBillingRemindersScreenState
         _studentContacts = results[2] as Map<String, StudentContact>;
         _notificationSettings = notifSettings;
         _autoTuitionEnabled = results[4] as bool;
-        _mercadoPagoEnabled = results[5] as bool;
         _notificationService = BillingNotificationService(
           academyId: academyId,
           academyName: academyName,
@@ -231,6 +230,8 @@ class _AdminBillingRemindersScreenState
   @override
   Widget build(BuildContext context) {
     final charges = _filteredCharges;
+    final canConfirmManualPix =
+        ref.watch(currentUserProvider).valueOrNull?.role == UserRole.admin;
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: Column(
@@ -331,6 +332,7 @@ class _AdminBillingRemindersScreenState
                                     (context, index) => _buildPaymentItem(
                                       charges[index].value,
                                       charges[index].key,
+                                      canConfirmManualPix: canConfirmManualPix,
                                     ).entrance(index: index),
                                     childCount: charges.length,
                                   ),
@@ -382,7 +384,7 @@ class _AdminBillingRemindersScreenState
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Habilite os canais de cobranca (WhatsApp e/ou Email) nas configuracoes para enviar cobrancas automaticas.',
+                'Este build foi iniciado sem as configuracoes das APIs de WhatsApp e e-mail. Reinicie o app com os dart-defines do notification server.',
                 style: AppTheme.bodySmall.copyWith(color: AppTheme.warning),
               ),
             ),
@@ -444,10 +446,7 @@ class _AdminBillingRemindersScreenState
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   icon: const Icon(LucideIcons.pencil, size: 14),
-                  label: const Text(
-                    'Editar',
-                    style: TextStyle(fontSize: 12),
-                  ),
+                  label: const Text('Editar', style: TextStyle(fontSize: 12)),
                 ),
               ],
             ),
@@ -511,14 +510,17 @@ class _AdminBillingRemindersScreenState
               dense: true,
               onChanged: whatsappEnabled
                   ? (value) async {
-                      final currentSettings = _notificationSettings ??
+                      final currentSettings =
+                          _notificationSettings ??
                           BillingNotificationSettings();
-                      final updatedSettings =
-                          currentSettings.copyWith(notifyOnCreation: value);
+                      final updatedSettings = currentSettings.copyWith(
+                        notifyOnCreation: value,
+                      );
                       setState(() => _notificationSettings = updatedSettings);
                       try {
-                        await _billingService
-                            .saveNotificationSettings(updatedSettings);
+                        await _billingService.saveNotificationSettings(
+                          updatedSettings,
+                        );
                         ref.invalidate(billingAutomationStatusProvider);
                         if (mounted) {
                           FeedbackUtils.showSuccess(
@@ -664,8 +666,10 @@ class _AdminBillingRemindersScreenState
         .toList();
     if (entries.isEmpty) return const SizedBox.shrink();
     final hasChannel =
-        (_notificationSettings?.whatsappEnabled ?? false) ||
-        (_notificationSettings?.emailEnabled ?? false);
+        ((_notificationSettings?.whatsappEnabled ?? false) &&
+            (_notificationService?.hasWhatsAppApi ?? false)) ||
+        ((_notificationSettings?.emailEnabled ?? false) &&
+            (_notificationService?.hasEmailApi ?? false));
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -734,8 +738,10 @@ class _AdminBillingRemindersScreenState
   ) {
     if (debtors.isEmpty) return const SizedBox.shrink();
     final hasChannel =
-        (_notificationSettings?.whatsappEnabled ?? false) ||
-        (_notificationSettings?.emailEnabled ?? false);
+        ((_notificationSettings?.whatsappEnabled ?? false) &&
+            (_notificationService?.hasWhatsAppApi ?? false)) ||
+        ((_notificationSettings?.emailEnabled ?? false) &&
+            (_notificationService?.hasEmailApi ?? false));
     if (!hasChannel) return const SizedBox.shrink();
 
     return Padding(
@@ -1074,7 +1080,11 @@ class _AdminBillingRemindersScreenState
     }
   }
 
-  Widget _buildPaymentItem(Map<String, dynamic> item, BillingStage stage) {
+  Widget _buildPaymentItem(
+    Map<String, dynamic> item,
+    BillingStage stage, {
+    required bool canConfirmManualPix,
+  }) {
     final studentName = item['studentName'] as String? ?? '';
     final amount = (item['amount'] as num?)?.toDouble() ?? 0;
     final dueDate = item['dueDate'] as DateTime;
@@ -1201,34 +1211,46 @@ class _AdminBillingRemindersScreenState
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 // Send WhatsApp
-                if (hasWhatsApp && phone != null && phone.isNotEmpty)
+                if (phone != null && phone.isNotEmpty)
                   ElevatedButton.icon(
-                    onPressed: () => _showSendDialog(
-                      mode: 'whatsapp',
-                      financialItem: item,
-                      stage: stage,
-                      contact: contact!,
-                    ),
+                    onPressed: hasWhatsApp
+                        ? () => _showSendDialog(
+                            mode: 'whatsapp',
+                            financialItem: item,
+                            stage: stage,
+                            contact: contact!,
+                          )
+                        : () => FeedbackUtils.showInfo(
+                            context,
+                            'WhatsApp indisponivel neste build. Reinicie o app com a configuracao do notification server.',
+                          ),
                     icon: const Icon(LucideIcons.messageCircle, size: 16),
-                    label: const Text('Cobrar'),
+                    label: const Text('Cobrar aluno'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.success,
+                      backgroundColor: hasWhatsApp
+                          ? AppTheme.success
+                          : AppTheme.textDisabled,
                       foregroundColor: Colors.white,
                       visualDensity: VisualDensity.compact,
                     ),
                   ),
                 // Send Email
-                if (hasEmail && email != null && email.isNotEmpty)
+                if (email != null && email.isNotEmpty)
                   IconButton(
-                    onPressed: () => _showSendDialog(
-                      mode: 'email',
-                      financialItem: item,
-                      stage: stage,
-                      contact: contact!,
-                    ),
+                    onPressed: hasEmail
+                        ? () => _showSendDialog(
+                            mode: 'email',
+                            financialItem: item,
+                            stage: stage,
+                            contact: contact!,
+                          )
+                        : () => FeedbackUtils.showInfo(
+                            context,
+                            'E-mail indisponivel neste build. Reinicie o app com a configuracao do notification server.',
+                          ),
                     icon: const Icon(LucideIcons.mail, size: 20),
-                    color: AppTheme.info,
-                    tooltip: 'Enviar Email',
+                    color: hasEmail ? AppTheme.info : AppTheme.textDisabled,
+                    tooltip: 'Enviar cobranca individual por e-mail',
                     constraints: const BoxConstraints(),
                     padding: const EdgeInsets.all(8),
                   ),
@@ -1266,15 +1288,17 @@ class _AdminBillingRemindersScreenState
                   constraints: const BoxConstraints(),
                   padding: const EdgeInsets.all(8),
                 ),
-                // Mark as Paid (Dar Baixa)
-                IconButton(
-                  onPressed: () => _confirmMarkAsPaid(item),
-                  icon: const Icon(LucideIcons.checkCircle2, size: 20),
-                  color: AppTheme.success,
-                  tooltip: 'Dar Baixa (Marcar Pago)',
-                  constraints: const BoxConstraints(),
-                  padding: const EdgeInsets.all(8),
-                ),
+                // PIX pessoal nao possui webhook: somente o administrador pode
+                // confirmar o recebimento, pelo callable auditavel.
+                if (canConfirmManualPix)
+                  IconButton(
+                    onPressed: () => _confirmManualPixPayment(item),
+                    icon: const Icon(LucideIcons.badgeCheck, size: 20),
+                    color: AppTheme.success,
+                    tooltip: 'Confirmar PIX pessoal recebido',
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(8),
+                  ),
                 // Delete Charge
                 IconButton(
                   onPressed: () => _confirmDelete(item),
@@ -1292,42 +1316,91 @@ class _AdminBillingRemindersScreenState
     );
   }
 
-  Future<void> _confirmMarkAsPaid(Map<String, dynamic> item) async {
+  Future<void> _confirmManualPixPayment(Map<String, dynamic> item) async {
     final studentName = item['studentName'] as String? ?? 'Aluno';
     final amount = (item['amount'] as num?)?.toDouble() ?? 0;
     final financialId = item['id'] as String? ?? '';
 
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Dar Baixa na Cobrança'),
-        content: Text(
-          'Deseja marcar como PAGO o valor de R\$ ${amount.toStringAsFixed(2)} para $studentName?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
+      builder: (ctx) {
+        var receiptChecked = false;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            title: const Text('Confirmar PIX pessoal'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Aluno: $studentName\n'
+                    'Valor: ${_currencyFormat.format(amount)}',
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.warning.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: AppTheme.warning.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: const Text(
+                      'O PIX pessoal não possui confirmação automática. '
+                      'Ao continuar, a cobrança será quitada e qualquer '
+                      'pagamento concorrente do Mercado Pago será cancelado.',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: receiptChecked,
+                    onChanged: (value) =>
+                        setDialogState(() => receiptChecked = value == true),
+                    title: const Text(
+                      'Conferi o recebimento na conta da academia',
+                    ),
+                    subtitle: const Text(
+                      'A confirmação ficará registrada com seu usuário e data.',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: receiptChecked
+                    ? () => Navigator.pop(ctx, true)
+                    : null,
+                child: const Text('Confirmar recebimento'),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Confirmar Baixa'),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
     if (confirm == true) {
       try {
         final academyId = FirebaseService.academyId;
-        await PaymentService(academyId).markAsPaid(financialId);
+        await PaymentService(academyId).confirmManualPix(financialId);
         if (mounted) {
-          FeedbackUtils.showSuccess(context, 'Cobrança quitada com sucesso!');
+          FeedbackUtils.showSuccess(
+            context,
+            'PIX pessoal confirmado e cobrança quitada!',
+          );
           _loadData();
         }
       } catch (e) {
         if (mounted) {
-          FeedbackUtils.showError(context, 'Erro ao dar baixa: $e');
+          FeedbackUtils.showError(context, e.toString());
         }
       }
     }
@@ -1396,6 +1469,8 @@ class _AdminBillingRemindersScreenState
 
     String message;
     String subject = '';
+    BillingPaymentInstruction paymentInstruction =
+        const BillingPaymentInstruction.none();
 
     if (mode == 'whatsapp') {
       // PIX gate: only attach a payment link when the setting is on, the
@@ -1407,22 +1482,22 @@ class _AdminBillingRemindersScreenState
       String? pixCode;
       String? ticketUrl;
       if (pixGate) {
-        final pix = await _notificationService!.ensureValidPixForFinancial(
-          academyId: FirebaseService.academyId,
-          financialId: financialId,
-          amount: amount,
-          studentId: studentId,
-          studentName: studentName,
-          payerCpf: contact.effectiveCpf,
-        );
-        if (pix.pixCode.isNotEmpty) {
-          pixCode = pix.pixCode;
-          ticketUrl = pix.ticketUrl;
+        paymentInstruction = await _notificationService!
+            .resolvePaymentInstruction(
+              financialId: financialId,
+              amount: amount,
+              studentId: studentId,
+              studentName: studentName,
+              payerCpf: contact.effectiveCpf,
+            );
+        if (paymentInstruction.hasPayment) {
+          pixCode = paymentInstruction.paymentValue;
+          ticketUrl = paymentInstruction.ticketUrl;
         } else if (mounted) {
           // MP off / no PIX / error: send without link, but let the admin know.
           FeedbackUtils.showInfo(
             context,
-            'PIX indisponivel — enviando sem link de pagamento',
+            'Nenhuma forma de pagamento disponivel — enviando apenas o lembrete.',
           );
         }
       }
@@ -1523,8 +1598,18 @@ class _AdminBillingRemindersScreenState
                 ],
                 Text('Mensagem', style: AppTheme.labelMedium),
                 const SizedBox(height: 8),
+                if (mode == 'whatsapp') ...[
+                  Text(
+                    'Previa do template oficial aprovado na Meta. O texto do WhatsApp nao pode ser editado.',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 TextField(
                   controller: messageController,
+                  readOnly: mode == 'whatsapp',
                   maxLines: 8,
                   decoration: InputDecoration(
                     border: OutlineInputBorder(
@@ -1553,6 +1638,7 @@ class _AdminBillingRemindersScreenState
                   contact: contact,
                   message: messageController.text,
                   subject: mode == 'email' ? subjectController.text : null,
+                  paymentInstruction: paymentInstruction,
                 );
               },
               icon: Icon(LucideIcons.send, size: 16),
@@ -1585,6 +1671,8 @@ class _AdminBillingRemindersScreenState
     required StudentContact contact,
     required String message,
     String? subject,
+    BillingPaymentInstruction paymentInstruction =
+        const BillingPaymentInstruction.none(),
   }) async {
     if (_notificationService == null) return;
 
@@ -1624,7 +1712,7 @@ class _AdminBillingRemindersScreenState
           dueDate: dueDate,
           daysOverdue: daysOverdue,
           stage: stage,
-          message: message,
+          paymentInstruction: paymentInstruction,
         );
       } else {
         result = await _notificationService!.sendEmail(
@@ -1815,18 +1903,26 @@ class _AdminBillingRemindersScreenState
                         const SizedBox(height: 16),
                       ],
 
-                      // Message
-                      Text('Mensagem', style: AppTheme.labelMedium),
+                      // WhatsApp uses the approved Meta template. This field
+                      // remains editable only for the e-mail channel.
+                      Text(
+                        recipients.emails.isNotEmpty
+                            ? 'Mensagem do e-mail'
+                            : 'Previa do template oficial do WhatsApp',
+                        style: AppTheme.labelMedium,
+                      ),
                       const SizedBox(height: 6),
                       TextField(
                         controller: messageController,
+                        readOnly: recipients.emails.isEmpty,
                         maxLines: 6,
                         decoration: InputDecoration(
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          helperText:
-                              'Variaveis: {nome}, {valor}, {vencimento}, {dias} — personalizadas por aluno',
+                          helperText: recipients.emails.isNotEmpty
+                              ? 'Este texto afeta somente o e-mail. O WhatsApp usa o template aprovado na Meta.'
+                              : 'O texto do WhatsApp nao pode ser editado.',
                           helperMaxLines: 2,
                         ),
                       ),
@@ -2075,7 +2171,7 @@ class _AdminBillingRemindersScreenState
     // For every WhatsApp-eligible, unpaid item (when the setting is on) we
     // generate a PIX up front, with at most 5 concurrent CF calls. Results
     // are keyed by financialId; a missing/empty entry => send without PIX.
-    final pixByFinancialId = <String, ({String pixCode, String ticketUrl})>{};
+    final paymentByFinancialId = <String, BillingPaymentInstruction>{};
     final includePix = _notificationSettings?.includePaymentLink ?? false;
     final whatsappOn = _notificationSettings?.whatsappEnabled ?? false;
 
@@ -2104,20 +2200,20 @@ class _AdminBillingRemindersScreenState
             final financialId = item['id'] as String? ?? '';
             final studentId = item['studentId'] as String? ?? '';
             final contact = _studentContacts[studentId];
-            final pix = await _notificationService!.ensureValidPixForFinancial(
-              academyId: FirebaseService.academyId,
-              financialId: financialId,
-              amount: (item['amount'] as num?)?.toDouble() ?? 0,
-              studentId: studentId,
-              studentName: item['studentName'] as String? ?? '',
-              payerCpf: contact?.effectiveCpf,
-            );
-            return MapEntry(financialId, pix);
+            final payment = await _notificationService!
+                .resolvePaymentInstruction(
+                  financialId: financialId,
+                  amount: (item['amount'] as num?)?.toDouble() ?? 0,
+                  studentId: studentId,
+                  studentName: item['studentName'] as String? ?? '',
+                  payerCpf: contact?.effectiveCpf,
+                );
+            return MapEntry(financialId, payment);
           }),
         );
         for (final entry in results) {
-          if (entry.value.pixCode.isNotEmpty) {
-            pixByFinancialId[entry.key] = entry.value;
+          if (entry.value.hasPayment) {
+            paymentByFinancialId[entry.key] = entry.value;
           }
         }
       }
@@ -2152,16 +2248,9 @@ class _AdminBillingRemindersScreenState
 
       // WhatsApp message: inject the pre-generated PIX (if any) for this
       // financial. When absent, the [[PIX]] block strips to a clean message.
-      final pix = pixByFinancialId[financialId];
-      final whatsAppMessage = _notificationService!.applyMessageTemplate(
-        messageTemplate,
-        studentName,
-        amount,
-        dueDate,
-        daysOverdue,
-        pixCode: pix?.pixCode,
-        ticketUrl: pix?.ticketUrl,
-      );
+      final paymentInstruction =
+          paymentByFinancialId[financialId] ??
+          const BillingPaymentInstruction.none();
 
       // Send WhatsApp (only if enabled in settings)
       final phone = contact.effectivePhone;
@@ -2178,14 +2267,14 @@ class _AdminBillingRemindersScreenState
           dueDate: dueDate,
           daysOverdue: daysOverdue,
           stage: stage,
-          message: whatsAppMessage,
+          paymentInstruction: paymentInstruction,
         );
         if (result.success) {
           outcome.waSent++;
           // L3: only meaningful when a link was actually intended (PIX setting
           // on + WhatsApp on). Otherwise neither counter moves.
           if (includePix && whatsappOn) {
-            if (pix != null && pix.pixCode.isNotEmpty) {
+            if (paymentInstruction.hasPayment) {
               outcome.waWithLink++;
             } else {
               outcome.waWithoutLink++;
@@ -2419,7 +2508,7 @@ class _AdminBillingRemindersScreenState
                   ),
                 ],
 
-                // L3: PIX/link attachment outcome for WhatsApp sends.
+                // Payment instruction outcome for WhatsApp sends.
                 if (linkIntended && (waWithLink > 0 || waWithoutLink > 0)) ...[
                   const SizedBox(height: 12),
                   Container(
@@ -2446,20 +2535,17 @@ class _AdminBillingRemindersScreenState
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'WhatsApp — enviadas com link: $waWithLink / sem link: $waWithoutLink',
+                                'WhatsApp — com forma de pagamento: $waWithLink / somente lembrete: $waWithoutLink',
                                 style: AppTheme.bodySmall.copyWith(
                                   color: waWithoutLink > 0
                                       ? AppTheme.warning
                                       : AppTheme.success,
                                 ),
                               ),
-                              // Motivo acionável do "sem link": falta de CPF.
                               if (missingCpfNames.isNotEmpty) ...[
                                 const SizedBox(height: 6),
                                 Text(
-                                  'Sem CPF cadastrado (o PIX do Mercado Pago exige '
-                                  'CPF do pagador). Adicione o CPF na ficha — do '
-                                  'responsável, se for kids — para incluir o link:',
+                                  'Alguns alunos sem forma de pagamento também estão sem CPF. Verifique o Mercado Pago, a chave PIX pessoal e o CPF do pagador:',
                                   style: AppTheme.labelSmall.copyWith(
                                     color: AppTheme.textSecondary,
                                   ),
@@ -2521,7 +2607,10 @@ class _AdminBillingRemindersScreenState
                             ),
                             child: Text(
                               f.type == 'whatsapp' ? 'WA' : 'Email',
-                              style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w600),
+                              style: const TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 6),
@@ -2604,10 +2693,11 @@ class _AdminBillingRemindersScreenState
     String? selectedPlanId = plans.isNotEmpty ? plans.first.id : null;
 
     final amountController = TextEditingController(
-      text: (plans.isNotEmpty
-              ? plans.first.getStudentValue(selectedStudentId)
-              : 100.0)
-          .toStringAsFixed(2),
+      text:
+          (plans.isNotEmpty
+                  ? plans.first.getStudentValue(selectedStudentId)
+                  : 100.0)
+              .toStringAsFixed(2),
     );
     final descController = TextEditingController(
       text: plans.isNotEmpty
@@ -2641,7 +2731,9 @@ class _AdminBillingRemindersScreenState
 
             // If Plano do Aluno is selected, enforce the plan's fixed due day
             if (chargeType == 'monthly_tuition' && selectedPlan != null) {
-              final targetDay = selectedPlan.getStudentDueDay(selectedStudentId);
+              final targetDay = selectedPlan.getStudentDueDay(
+                selectedStudentId,
+              );
               final maxDays = DateUtils.getDaysInMonth(
                 selectedDueDate.year,
                 selectedDueDate.month,
@@ -2723,17 +2815,22 @@ class _AdminBillingRemindersScreenState
                             selectedStudentId = val;
                             if (chargeType == 'monthly_tuition' &&
                                 selectedPlan != null) {
-                              final planVal =
-                                  selectedPlan.getStudentValue(selectedStudentId);
-                              amountController.text = planVal.toStringAsFixed(2);
-                              final targetDay =
-                                  selectedPlan.getStudentDueDay(selectedStudentId);
+                              final planVal = selectedPlan.getStudentValue(
+                                selectedStudentId,
+                              );
+                              amountController.text = planVal.toStringAsFixed(
+                                2,
+                              );
+                              final targetDay = selectedPlan.getStudentDueDay(
+                                selectedStudentId,
+                              );
                               final maxDays = DateUtils.getDaysInMonth(
                                 selectedDueDate.year,
                                 selectedDueDate.month,
                               );
-                              final validDay =
-                                  targetDay > maxDays ? maxDays : targetDay;
+                              final validDay = targetDay > maxDays
+                                  ? maxDays
+                                  : targetDay;
                               selectedDueDate = DateTime(
                                 selectedDueDate.year,
                                 selectedDueDate.month,
@@ -2764,17 +2861,17 @@ class _AdminBillingRemindersScreenState
                                   final planVal = selectedPlan.getStudentValue(
                                     selectedStudentId,
                                   );
-                                  amountController.text =
-                                      planVal.toStringAsFixed(2);
-                                  final targetDay = selectedPlan.getStudentDueDay(
-                                    selectedStudentId,
-                                  );
+                                  amountController.text = planVal
+                                      .toStringAsFixed(2);
+                                  final targetDay = selectedPlan
+                                      .getStudentDueDay(selectedStudentId);
                                   final maxDays = DateUtils.getDaysInMonth(
                                     selectedDueDate.year,
                                     selectedDueDate.month,
                                   );
-                                  final validDay =
-                                      targetDay > maxDays ? maxDays : targetDay;
+                                  final validDay = targetDay > maxDays
+                                      ? maxDays
+                                      : targetDay;
                                   selectedDueDate = DateTime(
                                     selectedDueDate.year,
                                     selectedDueDate.month,
@@ -2850,21 +2947,27 @@ class _AdminBillingRemindersScreenState
                             if (val != null) {
                               setSheetState(() {
                                 selectedPlanId = val;
-                                final plan = plans.firstWhere((p) => p.id == val);
+                                final plan = plans.firstWhere(
+                                  (p) => p.id == val,
+                                );
                                 final planVal = plan.getStudentValue(
                                   selectedStudentId,
                                 );
-                                amountController.text =
-                                    planVal.toStringAsFixed(2);
-                                descController.text = 'Mensalidade - ${plan.name}';
-                                final targetDay =
-                                    plan.getStudentDueDay(selectedStudentId);
+                                amountController.text = planVal.toStringAsFixed(
+                                  2,
+                                );
+                                descController.text =
+                                    'Mensalidade - ${plan.name}';
+                                final targetDay = plan.getStudentDueDay(
+                                  selectedStudentId,
+                                );
                                 final maxDays = DateUtils.getDaysInMonth(
                                   selectedDueDate.year,
                                   selectedDueDate.month,
                                 );
-                                final validDay =
-                                    targetDay > maxDays ? maxDays : targetDay;
+                                final validDay = targetDay > maxDays
+                                    ? maxDays
+                                    : targetDay;
                                 selectedDueDate = DateTime(
                                   selectedDueDate.year,
                                   selectedDueDate.month,
@@ -2930,7 +3033,8 @@ class _AdminBillingRemindersScreenState
                     const SizedBox(height: 6),
                     InkWell(
                       onTap: () async {
-                        final planDueDay = chargeType == 'monthly_tuition' &&
+                        final planDueDay =
+                            chargeType == 'monthly_tuition' &&
                                 selectedPlan != null
                             ? selectedPlan.getStudentDueDay(selectedStudentId)
                             : null;
@@ -3030,25 +3134,28 @@ class _AdminBillingRemindersScreenState
                                 .doc(academyId)
                                 .collection('financials')
                                 .add({
-                              'academyId': academyId,
-                              'studentId': selectedStudent.studentId,
-                              'studentName': selectedStudent.studentName,
-                              'amount': parsedAmount,
-                              'value': parsedAmount,
-                              'dueDate': Timestamp.fromDate(selectedDueDate),
-                              'status': statusStr,
-                              'type': chargeType,
-                              'planId': chargeType == 'monthly_tuition'
-                                  ? selectedPlanId
-                                  : null,
-                              'description': descController.text.trim().isNotEmpty
-                                  ? descController.text.trim()
-                                  : (chargeType == 'monthly_tuition'
-                                      ? 'Mensalidade do Plano'
-                                      : 'Cobrança Avulsa'),
-                              'referenceMonth': refMonth,
-                              'createdAt': Timestamp.fromDate(now),
-                            });
+                                  'academyId': academyId,
+                                  'studentId': selectedStudent.studentId,
+                                  'studentName': selectedStudent.studentName,
+                                  'amount': parsedAmount,
+                                  'value': parsedAmount,
+                                  'dueDate': Timestamp.fromDate(
+                                    selectedDueDate,
+                                  ),
+                                  'status': statusStr,
+                                  'type': chargeType,
+                                  'planId': chargeType == 'monthly_tuition'
+                                      ? selectedPlanId
+                                      : null,
+                                  'description':
+                                      descController.text.trim().isNotEmpty
+                                      ? descController.text.trim()
+                                      : (chargeType == 'monthly_tuition'
+                                            ? 'Mensalidade do Plano'
+                                            : 'Cobrança Avulsa'),
+                                  'referenceMonth': refMonth,
+                                  'createdAt': Timestamp.fromDate(now),
+                                });
 
                             if (ctx.mounted) {
                               Navigator.pop(ctx);
@@ -3101,9 +3208,6 @@ class _AdminBillingRemindersScreenState
     // toggles acima que moram em settings/billingReminders).
     bool autoTuitionEnabled = _autoTuitionEnabled;
     // Clone current templates or start empty
-    final waTemplates = Map<String, String>.from(
-      _notificationSettings?.messageTemplates?.whatsapp ?? {},
-    );
     final emailSubjectTemplates = Map<String, String>.from(
       _notificationSettings?.messageTemplates?.emailSubject ?? {},
     );
@@ -3220,11 +3324,11 @@ class _AdminBillingRemindersScreenState
                         },
                       ),
                       SwitchListTile(
-                        title: const Text('Incluir link de pagamento (PIX)'),
+                        title: const Text(
+                          'Incluir forma de pagamento nas mensagens',
+                        ),
                         subtitle: Text(
-                          _mercadoPagoEnabled
-                              ? 'Anexa o copia-e-cola e o link de checkout do Mercado Pago.'
-                              : 'Conecte o Mercado Pago para incluir um link. As mensagens continuam funcionando sem ele.',
+                          'Usa a preferencia definida em Financeiro: Mercado Pago ou PIX pessoal, com fallback automatico.',
                           style: AppTheme.bodySmall.copyWith(
                             color: AppTheme.textSecondary,
                           ),
@@ -3235,16 +3339,12 @@ class _AdminBillingRemindersScreenState
                               ? AppTheme.success
                               : AppTheme.textSecondary,
                         ),
-                        value: _mercadoPagoEnabled && includePaymentLink,
+                        value: includePaymentLink,
                         activeThumbColor: AppTheme.success,
                         contentPadding: EdgeInsets.zero,
-                        onChanged: _mercadoPagoEnabled
-                            ? (value) {
-                                setDialogState(
-                                  () => includePaymentLink = value,
-                                );
-                              }
-                            : null,
+                        onChanged: (value) {
+                          setDialogState(() => includePaymentLink = value);
+                        },
                       ),
 
                       const Divider(height: 24),
@@ -3353,7 +3453,7 @@ class _AdminBillingRemindersScreenState
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            'Templates de Mensagem',
+                            'Templates oficiais e e-mail',
                             style: AppTheme.titleSmall,
                           ),
                           TextButton(
@@ -3362,14 +3462,14 @@ class _AdminBillingRemindersScreenState
                                 () => showTemplates = !showTemplates,
                               );
                             },
-                            child: Text(showTemplates ? 'Ocultar' : 'Editar'),
+                            child: Text(
+                              showTemplates ? 'Ocultar' : 'Configurar',
+                            ),
                           ),
                         ],
                       ),
                       Text(
-                        _mercadoPagoEnabled && includePaymentLink
-                            ? 'Variaveis: {nome}, {valor}, {vencimento}, {dias}, {diasAteVencimento}, {academia}, {pix}, {link}'
-                            : 'Variaveis: {nome}, {valor}, {vencimento}, {dias}, {diasAteVencimento}, {academia}',
+                        'O WhatsApp usa modelos aprovados na Meta. Apenas os textos de e-mail podem ser editados.',
                         style: AppTheme.labelSmall.copyWith(
                           color: AppTheme.textSecondary,
                         ),
@@ -3424,7 +3524,10 @@ class _AdminBillingRemindersScreenState
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
-                                      'WhatsApp - Modelo Oficial Meta ($stageKey)',
+                                      stageKey == 'CREATED' ||
+                                              stageKey == 'UPCOMING'
+                                          ? 'WhatsApp - modelo Meta ainda nao disponivel ($stageKey)'
+                                          : 'WhatsApp - modelo oficial Meta ($stageKey)',
                                       style: AppTheme.labelSmall.copyWith(
                                         color: AppTheme.success,
                                         fontWeight: FontWeight.w600,
@@ -3435,9 +3538,11 @@ class _AdminBillingRemindersScreenState
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                BillingNotificationService
-                                        .defaultWhatsAppTemplates[stageKey] ??
-                                    '',
+                                stageKey == 'CREATED' || stageKey == 'UPCOMING'
+                                    ? 'Esta etapa continua disponivel para notificacoes internas e e-mail. O WhatsApp sera ignorado ate existir um template aprovado.'
+                                    : BillingNotificationService
+                                              .defaultWhatsAppTemplates[stageKey] ??
+                                          '',
                                 style: AppTheme.bodySmall.copyWith(
                                   color: AppTheme.textSecondary,
                                   fontSize: 12,
@@ -3507,7 +3612,6 @@ class _AdminBillingRemindersScreenState
                           child: TextButton(
                             onPressed: () {
                               setDialogState(() {
-                                waTemplates.remove(stageKey);
                                 emailSubjectTemplates.remove(stageKey);
                                 emailBodyTemplates.remove(stageKey);
                               });
@@ -3538,7 +3642,6 @@ class _AdminBillingRemindersScreenState
                   onPressed: () async {
                     try {
                       final templates = BillingMessageTemplates(
-                        whatsapp: waTemplates,
                         emailSubject: emailSubjectTemplates,
                         emailBody: emailBodyTemplates,
                       );
@@ -3546,8 +3649,7 @@ class _AdminBillingRemindersScreenState
                       final newSettings = BillingNotificationSettings(
                         whatsappEnabled: whatsappEnabled,
                         emailEnabled: emailEnabled,
-                        includePaymentLink:
-                            _mercadoPagoEnabled && includePaymentLink,
+                        includePaymentLink: includePaymentLink,
                         notifyOnCreation: notifyOnCreation,
                         dueSoonOffsets: dueSoonOffsets.toList()
                           ..sort((a, b) => b.compareTo(a)),

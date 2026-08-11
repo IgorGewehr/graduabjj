@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/constants.dart';
+import 'billing_payment_preference.dart';
 
 /// Academy Subscription Plan.
 /// `pro` = assinante pago via Cakto. Importante: `pro` NÃO concede acesso
@@ -327,6 +328,7 @@ class Academy {
   // Financial Settings
   final String? pixKey;
   final PixKeyType? pixKeyType;
+  final BillingPaymentPreference billingPaymentPreference;
 
   // AbacatePay Integration (API key is global in backend env, not per-academy)
   final bool abacatePayEnabled;
@@ -392,6 +394,7 @@ class Academy {
     this.responsibleBirthDate,
     this.pixKey,
     this.pixKeyType,
+    this.billingPaymentPreference = BillingPaymentPreference.mercadoPago,
     this.abacatePayEnabled = false,
     this.asaasEnabled = false,
     this.asaasOnboardingStatus,
@@ -477,6 +480,9 @@ class Academy {
       pixKeyType: data['pixKeyType'] != null
           ? PixKeyTypeExtension.fromString(data['pixKeyType'])
           : null,
+      billingPaymentPreference: BillingPaymentPreferenceExtension.fromString(
+        data['billingPaymentPreference'] as String?,
+      ),
       abacatePayEnabled: data['abacatePayEnabled'] ?? false,
       asaasEnabled: data['asaasEnabled'] ?? false,
       asaasOnboardingStatus: data['asaasOnboardingStatus'],
@@ -527,6 +533,7 @@ class Academy {
       'responsibleBirthDate': responsibleBirthDate,
       'pixKey': pixKey,
       'pixKeyType': pixKeyType?.value,
+      'billingPaymentPreference': billingPaymentPreference.value,
       'abacatePayEnabled': abacatePayEnabled,
       'asaasEnabled': asaasEnabled,
       'asaasOnboardingStatus': asaasOnboardingStatus,
@@ -579,6 +586,7 @@ class Academy {
     String? responsibleBirthDate,
     String? pixKey,
     PixKeyType? pixKeyType,
+    BillingPaymentPreference? billingPaymentPreference,
     bool? abacatePayEnabled,
     bool? asaasEnabled,
     String? asaasOnboardingStatus,
@@ -620,6 +628,8 @@ class Academy {
       responsibleBirthDate: responsibleBirthDate ?? this.responsibleBirthDate,
       pixKey: pixKey ?? this.pixKey,
       pixKeyType: pixKeyType ?? this.pixKeyType,
+      billingPaymentPreference:
+          billingPaymentPreference ?? this.billingPaymentPreference,
       abacatePayEnabled: abacatePayEnabled ?? this.abacatePayEnabled,
       asaasEnabled: asaasEnabled ?? this.asaasEnabled,
       asaasOnboardingStatus: asaasOnboardingStatus ?? this.asaasOnboardingStatus,

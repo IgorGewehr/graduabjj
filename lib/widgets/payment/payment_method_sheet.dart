@@ -55,6 +55,10 @@ class PaymentMethodSheet extends StatelessWidget {
   /// [createPix]); the value is otherwise the gateway default.
   final bool? requireCpf;
 
+  /// Chave pessoal exibida somente se a geracao no gateway falhar. Esse PIX
+  /// continua pendente ate a academia confirmar o recebimento manualmente.
+  final String manualPixFallbackKey;
+
   const PaymentMethodSheet({
     super.key,
     required this.target,
@@ -63,6 +67,7 @@ class PaymentMethodSheet extends StatelessWidget {
     this.storeCreditCardEnabled = false,
     this.onSettled,
     this.requireCpf,
+    this.manualPixFallbackKey = '',
   });
 
   /// Whether the card option should be shown: store orders require the academy
@@ -90,6 +95,7 @@ class PaymentMethodSheet extends StatelessWidget {
         // Every gateway can regenerate after expiry / failed generation.
         onRegenerate: (cpf) => createPix(cpf),
         onPaymentConfirmed: onSettled,
+        manualPixFallbackKey: manualPixFallbackKey,
       ),
     );
   }

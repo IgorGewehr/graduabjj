@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:graduabjj/models/billing_payment_preference.dart';
 import 'package:graduabjj/services/billing_reminder_service.dart';
 
 void main() {
@@ -34,6 +35,61 @@ void main() {
       expect(out, isNot(contains('{pix}')));
       expect(out, isNot(contains('{link}')));
       expect(out, isNot(contains('code:')));
+    });
+  });
+
+  group('official Meta template selection', () {
+    test('selects Mercado Pago, personal PIX and no-payment variants', () {
+      expect(
+        service.templateNameForStage(
+          BillingStage.d7,
+          paymentMode: BillingPaymentPreference.mercadoPago,
+        ),
+        'cobranca_d7',
+      );
+      expect(
+        service.templateNameForStage(
+          BillingStage.d7,
+          paymentMode: BillingPaymentPreference.manualPix,
+        ),
+        'cobranca_d7_pix_manual',
+      );
+      expect(
+        service.templateNameForStage(
+          BillingStage.d7,
+          paymentMode: BillingPaymentPreference.none,
+        ),
+        'cobranca_d7_sempix',
+      );
+    });
+
+    test('does not silently substitute an unapproved stage', () {
+      expect(
+        service.templateNameForStage(
+          BillingStage.created,
+          paymentMode: BillingPaymentPreference.none,
+        ),
+        isNull,
+      );
+      expect(
+        service.templateNameForStage(
+          BillingStage.upcoming,
+          paymentMode: BillingPaymentPreference.mercadoPago,
+        ),
+        isNull,
+      );
+    });
+
+    test('legacy academy WhatsApp text is discarded on read and save', () {
+      final templates = BillingMessageTemplates.fromMap({
+        'whatsapp': {'D+1': 'texto personalizado obsoleto'},
+        'emailSubject': {'D+1': 'Assunto permitido'},
+        'emailBody': {'D+1': 'Corpo permitido'},
+      });
+
+      expect(templates.toMap(), isNot(contains('whatsapp')));
+      expect(templates.emailSubject['D+1'], 'Assunto permitido');
+      expect(templates.emailBody['D+1'], 'Corpo permitido');
     });
   });
 

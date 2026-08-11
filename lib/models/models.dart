@@ -4,4 +4,5 @@
 export 'user.dart';
 export 'student.dart';
 export 'academy.dart';
+export 'billing_payment_preference.dart';
 export 'competition_photo.dart';

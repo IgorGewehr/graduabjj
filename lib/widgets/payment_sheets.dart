@@ -53,6 +53,10 @@ class PixPaymentSheet extends StatefulWidget {
   /// CPF is passed back so the payer does not retype it.
   final Future<PaymentLink?> Function(String? cpf)? onRegenerate;
 
+  /// Alternativa manual apresentada apenas quando o gateway nao consegue
+  /// gerar o PIX. Nao inicia listener nem marca a cobranca como paga.
+  final String manualPixFallbackKey;
+
   const PixPaymentSheet({
     super.key,
     this.paymentLink,
@@ -65,6 +69,7 @@ class PixPaymentSheet extends StatefulWidget {
     this.requireCpf = false,
     this.onGenerateWithCpf,
     this.onRegenerate,
+    this.manualPixFallbackKey = '',
   }) : assert(
           paymentLink != null || requireCpf || onRegenerate != null,
           'PixPaymentSheet needs a paymentLink, or requireCpf, or an onRegenerate callback to obtain one.',
@@ -911,6 +916,46 @@ class _PixPaymentSheetState extends State<PixPaymentSheet>
                   elevation: 0,
                 ),
               ),
+            ),
+          ],
+          if (widget.manualPixFallbackKey.trim().isNotEmpty) ...[
+            const SizedBox(height: 20),
+            const Divider(),
+            const SizedBox(height: 12),
+            Text(
+              'Ou pague com a chave PIX da academia',
+              style: AppTheme.titleSmall.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Clipboard.setData(
+                    ClipboardData(text: widget.manualPixFallbackKey.trim()),
+                  );
+                  HapticFeedback.mediumImpact();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Chave PIX copiada!'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                icon: const Icon(LucideIcons.copy, size: 18),
+                label: const Text('Copiar chave PIX pessoal'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Envie o comprovante para a academia. A confirmacao deste pagamento e manual.',
+              style: AppTheme.labelSmall.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+              textAlign: TextAlign.center,
             ),
           ],
         ],

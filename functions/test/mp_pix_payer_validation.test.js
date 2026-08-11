@@ -19,8 +19,8 @@
 // module-internal, so we cannot invoke them without mocking the whole MP HTTP +
 // Firestore + Auth surface. Instead we pin the *observable invariants*:
 //   1. createMpPix's identification rule: omitted iff normalized CPF < 11 digits.
-//   2. The shared PIX guard predicate (cpfDigits.length < 11) rejects exactly
-//      what createMpPix would otherwise silently drop — on BOTH paths.
+//   2. The shared PIX guard validates the CPF checksum on BOTH paths before
+//      createMpPix can send invalid payer identification to Mercado Pago.
 //   3. The shared e-mail resolution (Auth fallback, placeholder domain rejected)
 //      used by mensalidade, loja AND cartao.
 // A SOURCE-SYNC canary then greps server_functions.js to prove the mirrors below
@@ -36,11 +36,25 @@ function mpPixIdentification(payerCpf) {
   return cpf.length >= 11 ? { type: 'CPF', number: cpf } : undefined;
 }
 
-// --- Mirror of the SHARED PIX CPF guard ---------------------------------------
-// Identical in mensalidade (3299-3303) and loja (3429-3433).
+// --- Mirror of the SHARED CPF checksum guard ---------------------------------
+function validateCPF(cpf) {
+  const cleaned = String(cpf || '').replace(/\D/g, '');
+  if (cleaned.length !== 11 || /^(\d)\1{10}$/.test(cleaned)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += parseInt(cleaned[i]) * (10 - i);
+  let remainder = (sum * 10) % 11;
+  if (remainder === 10 || remainder === 11) remainder = 0;
+  if (remainder !== parseInt(cleaned[9])) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i++) sum += parseInt(cleaned[i]) * (11 - i);
+  remainder = (sum * 10) % 11;
+  if (remainder === 10 || remainder === 11) remainder = 0;
+  return remainder === parseInt(cleaned[10]);
+}
+
 function pixCpfGuardRejects(payerCpf) {
   const cpfDigits = String(payerCpf || '').replace(/\D/g, '');
-  return cpfDigits.length < 11; // true => HttpsError failed-precondition
+  return !validateCPF(cpfDigits); // true => HttpsError failed-precondition
 }
 
 // --- Mirror of the SHARED e-mail resolution -----------------------------------
@@ -59,8 +73,8 @@ function resolvePayerEmail(payerEmail, authEmail) {
 }
 
 test('createMpPix OMITS identification for a valid 11-digit CPF? no — it includes it', () => {
-  assert.deepEqual(mpPixIdentification('12345678901'), { type: 'CPF', number: '12345678901' });
-  assert.deepEqual(mpPixIdentification('123.456.789-01'), { type: 'CPF', number: '12345678901' });
+  assert.deepEqual(mpPixIdentification('52998224725'), { type: 'CPF', number: '52998224725' });
+  assert.deepEqual(mpPixIdentification('529.982.247-25'), { type: 'CPF', number: '52998224725' });
 });
 
 test('createMpPix DROPS identification for short/empty CPF (the silent failure surface)', () => {
@@ -72,18 +86,15 @@ test('createMpPix DROPS identification for short/empty CPF (the silent failure s
   assert.equal(mpPixIdentification('1234567890'), undefined);
 });
 
-test('PIX guard (mensalidade E loja) rejects exactly the CPFs createMpPix would drop', () => {
-  // The guard is the contract that protects BOTH PIX paths: every CPF that
-  // would yield identification=undefined MUST be rejected up front.
-  for (const bad of ['', '123', '1234567890', undefined, null, '...']) {
+test('PIX guard (mensalidade E loja) rejects missing and invalid CPFs', () => {
+  for (const bad of ['', '123', '1234567890', '12345678901',
+    '11111111111', undefined, null, '...']) {
     assert.equal(pixCpfGuardRejects(bad), true,
       `guard should reject ${JSON.stringify(bad)}`);
-    assert.equal(mpPixIdentification(bad), undefined,
-      `and createMpPix would have dropped it: ${JSON.stringify(bad)}`);
   }
-  // Valid CPF passes the guard AND keeps identification.
-  assert.equal(pixCpfGuardRejects('123.456.789-01'), false);
-  assert.notEqual(mpPixIdentification('123.456.789-01'), undefined);
+  // Valid CPF passes the checksum guard AND keeps identification.
+  assert.equal(pixCpfGuardRejects('529.982.247-25'), false);
+  assert.notEqual(mpPixIdentification('529.982.247-25'), undefined);
 });
 
 test('e-mail resolution (mensalidade/loja/cartao) falls back to Auth and rejects empty', () => {
@@ -121,7 +132,7 @@ test('SOURCE SYNC: payer guards are symmetric in production (loja fix is in plac
   };
 
   const cpfNormalize = "const cpfDigits = String(payerCpf || '').replace(/\\D/g, '')";
-  const cpfGuard = 'if (cpfDigits.length < 11)';
+  const cpfGuard = 'if (!validateCPF(cpfDigits))';
   const emailPlaceholder = "resolvedEmail.endsWith('@bjjeasy.com.br')";
   const emailGuard = "if (!resolvedEmail || !resolvedEmail.includes('@'))";
 
@@ -137,14 +148,13 @@ test('SOURCE SYNC: payer guards are symmetric in production (loja fix is in plac
       `${marker}: validated payer is forwarded to createMpPix`);
   }
 
-  // CARD path (achado #25): e-mail resolved+validated; CPF stays OPTIONAL
-  // (identification omitted when < 11 digits — cards do not require CPF).
+  // CARD path: e-mail and CPF checksum are both validated before sending.
   const card = handlerBody('exports.createMpCardPayment');
   assert.ok(card.includes(emailPlaceholder), 'card: placeholder e-mail fallback present');
   assert.ok(card.includes(emailGuard), 'card: e-mail fail-fast guard present');
-  assert.ok(!card.includes(cpfGuard), 'card: CPF must remain optional (no length guard)');
+  assert.ok(card.includes('if (!validateCPF(cpf))'), 'card: CPF checksum guard present');
   assert.ok(card.includes("cpf.length >= 11 ? { type: 'CPF', number: cpf } : undefined"),
-    'card: identification omitted iff CPF < 11 digits (mirrors createMpPix)');
+    'card: validated CPF is forwarded as identification');
 
   // createMpPix itself: identification ternary unchanged (mirror of
   // mpPixIdentification above).

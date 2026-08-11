@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'fns.dart';
 
 import 'firebase_service.dart';
@@ -167,6 +168,12 @@ class Payment {
 
   /// Gateway-side charge id for the settlement (MP/AbacatePay payment id).
   final String? gatewayPaymentId;
+
+  /// Server-authored marker for a payment received through the academy's
+  /// personal PIX key. The immutable full audit (including uid) lives in
+  /// paymentAuditLogs; this safe summary is also visible in payment history.
+  final String? manualPaymentConfirmedByName;
+  final DateTime? manualPaymentConfirmedAt;
   final String? pixCode;
   final String? pixQrCode;
   final String? planId;
@@ -194,6 +201,8 @@ class Payment {
     this.externalId,
     this.paymentGateway,
     this.gatewayPaymentId,
+    this.manualPaymentConfirmedByName,
+    this.manualPaymentConfirmedAt,
     this.pixCode,
     this.pixQrCode,
     this.planId,
@@ -205,6 +214,9 @@ class Payment {
 
   factory Payment.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    final manualAudit = data['manualPaymentAudit'] is Map
+        ? Map<String, dynamic>.from(data['manualPaymentAudit'] as Map)
+        : const <String, dynamic>{};
     return Payment(
       id: doc.id,
       studentId: data['studentId'] ?? '',
@@ -227,6 +239,10 @@ class Payment {
       externalId: data['externalId'],
       paymentGateway: data['paymentGateway'],
       gatewayPaymentId: data['gatewayPaymentId'],
+      manualPaymentConfirmedByName: manualAudit['confirmedByName'] as String?,
+      manualPaymentConfirmedAt: manualAudit['confirmedAt'] is Timestamp
+          ? (manualAudit['confirmedAt'] as Timestamp).toDate()
+          : null,
       pixCode: data['pixCode'],
       pixQrCode: data['pixQrCode'],
       planId: data['planId'],
@@ -241,6 +257,12 @@ class Payment {
 
   // Computed properties
   bool get isPaid => status == PaymentStatus.paid;
+
+  bool get isManualPersonalPix =>
+      isPaid &&
+      method == PaymentMethod.pix &&
+      paymentGateway == 'manual' &&
+      manualPaymentConfirmedAt != null;
 
   /// Aula particular 1:1 (type 'private_lesson') — cobrança avulsa que concede
   /// uma presença ao aluno quando paga, sem plano nem turma.
@@ -703,6 +725,32 @@ class PaymentService {
   // ============================================
   // Mark as Paid
   // ============================================
+  /// Confirms payment made to the academy's personal PIX key.
+  ///
+  /// This path is intentionally server-only: the callable checks the caller is
+  /// an academy admin, cancels any competing Mercado Pago charge, revalidates
+  /// the financial record transactionally and writes an immutable audit log.
+  Future<Payment> confirmManualPix(String id) async {
+    try {
+      await Fns.functions.httpsCallable('confirmManualPixPayment').call({
+        'academyId': academyId,
+        'financialId': id,
+      });
+    } on FirebaseFunctionsException catch (e) {
+      throw PaymentOperationException(
+        e.message ?? 'Nao foi possivel confirmar o PIX manual.',
+      );
+    }
+
+    final payment = await getById(id);
+    if (payment == null) {
+      throw PaymentOperationException(
+        'A cobranca foi confirmada, mas nao foi possivel recarregar os dados.',
+      );
+    }
+    return payment;
+  }
+
   Future<Payment> markAsPaid(
     String id, {
     PaymentMethod method = PaymentMethod.pix,
@@ -1278,6 +1326,15 @@ class PaymentService {
       return (pixCode: '', ticketUrl: '');
     }
   }
+}
+
+class PaymentOperationException implements Exception {
+  final String message;
+
+  const PaymentOperationException(this.message);
+
+  @override
+  String toString() => message;
 }
 
 // ============================================

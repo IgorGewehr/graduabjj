@@ -1,5 +1,20 @@
 # Plano — cobranças via Meta Cloud, PIX pessoal e Mercado Pago
 
+## Status da implementação
+
+- [x] Templates `*_pix_manual` cadastrados e aprovados na Meta.
+- [x] Preferência da academia, fallback retrocompatível e resolvedor testado.
+- [x] Lembretes automáticos migrados para templates Meta, com fallback Baileys
+  fixo no notification server.
+- [x] Edição de WhatsApp removida do app; envios manuais e em lote usam os
+  templates Meta e o portal respeita a preferência, inclusive exibindo o PIX
+  pessoal quando a geração do Mercado Pago falha.
+- [x] Confirmação de PIX pessoal movida para o servidor, restrita ao
+  administrador, com cancelamento seguro de cobranças concorrentes e trilha de
+  auditoria imutável.
+- [ ] Executar o roteiro completo em uma academia de teste antes do corte
+  final: `docs/ROTEIRO_TESTES_COBRANCAS_META_PIX.md`.
+
 ## Objetivo
 
 Consolidar o envio de cobranças por WhatsApp na **Meta Cloud API**. O Baileys

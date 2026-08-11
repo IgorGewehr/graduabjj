@@ -9,14 +9,10 @@ import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
 import '../../core/validators.dart';
 import '../../providers/providers.dart';
-import '../../providers/payment_providers.dart';
-import '../../providers/selected_academy_provider.dart';
 import '../../services/services.dart';
-import '../../services/abacate_pay_service.dart';
-import '../../services/asaas_payment_service.dart';
-import '../../services/mercado_pago_service.dart';
 import '../../services/subscription_service.dart';
 import '../../services/payment/payment_gateway_resolver.dart';
+import '../../models/billing_payment_preference.dart';
 import '../../models/student.dart';
 import '../../widgets/payment/payment_method_sheet.dart';
 import '../../widgets/payment/payment_target.dart';
@@ -25,27 +21,17 @@ import '../../widgets/payment_sheets.dart' show CardPaymentSheet;
 import '../../widgets/polish/polish.dart';
 import '../../widgets/skeletons/skeletons.dart';
 
-/// PIX payment enabled provider — true when any gateway is connected.
-///
-/// Derived from [currentPaymentGatewayProvider] (the single source of truth for
-/// the MP > Asaas > AbacatePay precedence) via the [PaymentGatewayCapabilities]
-/// `pixEnabled` flag, preserving the previous "PIX available?" semantics.
-final abacatePayEnabledProvider = FutureProvider<bool>((ref) async {
-  final gateway = await ref.watch(currentPaymentGatewayProvider.future);
-  return gateway.pixEnabled;
-});
-
 /// One section per dependent: their OPEN charges with a pay button. Hidden when
 /// the dependent has no open charges.
 /// Live recurring subscriptions for a student (academy resolved from the
 /// logged-in user). Drives the "Minha assinatura" card + dunning banner.
 final studentSubscriptionsProvider =
     StreamProvider.family<List<Subscription>, String>((ref, studentId) {
-  final user = ref.watch(currentUserProvider).valueOrNull;
-  final academyId = user?.academyId;
-  if (academyId == null) return Stream.value(const <Subscription>[]);
-  return SubscriptionService(academyId).streamByStudent(studentId);
-});
+      final user = ref.watch(currentUserProvider).valueOrNull;
+      final academyId = user?.academyId;
+      if (academyId == null) return Stream.value(const <Subscription>[]);
+      return SubscriptionService(academyId).streamByStudent(studentId);
+    });
 
 /// Student-facing subscription block: shows the active subscription (status,
 /// next charge, remaining months, cancel + dunning), or an "Assinar" CTA when
@@ -79,19 +65,23 @@ class _SubscriptionSection extends ConsumerWidget {
           ),
           child: Row(
             children: [
-              const Icon(LucideIcons.alertTriangle,
-                  size: 18, color: AppTheme.error),
+              const Icon(
+                LucideIcons.alertTriangle,
+                size: 18,
+                color: AppTheme.error,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   'Não foi possível carregar sua assinatura.',
-                  style: AppTheme.bodySmall
-                      .copyWith(color: AppTheme.textSecondary),
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
               ),
               TextButton(
-                onPressed: () => ref
-                    .invalidate(studentSubscriptionsProvider(student.id)),
+                onPressed: () =>
+                    ref.invalidate(studentSubscriptionsProvider(student.id)),
                 child: const Text('Tentar de novo'),
               ),
             ],
@@ -103,10 +93,12 @@ class _SubscriptionSection extends ConsumerWidget {
     final plan = ref.watch(studentPlanProvider(student.id)).valueOrNull;
 
     final active = subs
-        .where((s) =>
-            s.status == 'authorized' ||
-            s.status == 'pending' ||
-            s.status == 'paused')
+        .where(
+          (s) =>
+              s.status == 'authorized' ||
+              s.status == 'pending' ||
+              s.status == 'paused',
+        )
         .toList();
 
     // Fixed-term subscriptions that ran their full course (months>0, all
@@ -159,14 +151,18 @@ class _SubscriptionSection extends ConsumerWidget {
             children: [
               Row(
                 children: [
-                  const Icon(LucideIcons.repeat,
-                      size: 18, color: AppTheme.primary),
+                  const Icon(
+                    LucideIcons.repeat,
+                    size: 18,
+                    color: AppTheme.primary,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Assinatura ${plan.name}',
-                      style: AppTheme.titleSmall
-                          .copyWith(fontWeight: FontWeight.w700),
+                      style: AppTheme.titleSmall.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -176,8 +172,9 @@ class _SubscriptionSection extends ConsumerWidget {
                 'R\$ ${value.toStringAsFixed(2)}/mês no cartão'
                 '${(plan.recurringMonths ?? 0) > 0 ? ' por ${plan.recurringMonths} meses' : ''}'
                 ', cobrança automática todo dia ${plan.billingDay ?? plan.defaultDueDay}.',
-                style: AppTheme.bodySmall
-                    .copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
               const SizedBox(height: 12),
               SizedBox(
@@ -200,7 +197,8 @@ class _SubscriptionSection extends ConsumerWidget {
                         // backend (createMpSubscription).
                         gateway: PaymentGateway.mercadoPago,
                         onPaymentSuccess: () => ref.invalidate(
-                            studentSubscriptionsProvider(student.id)),
+                          studentSubscriptionsProvider(student.id),
+                        ),
                       ),
                     );
                   },
@@ -259,86 +257,107 @@ class _SubscriptionCard extends ConsumerWidget {
       onTap: () => _openDetail(context, ref),
       borderRadius: BorderRadius.circular(14),
       child: Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(LucideIcons.repeat, size: 18, color: AppTheme.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text('Minha assinatura',
-                    style: AppTheme.titleSmall
-                        .copyWith(fontWeight: FontWeight.w700)),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: chip.color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(chip.label,
-                    style: AppTheme.labelSmall.copyWith(
-                        color: chip.color, fontWeight: FontWeight.w700)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'R\$ ${sub.recurringValue.toStringAsFixed(2)}/mês'
-            '${sub.nextBillingDate != null ? ' · próxima ${df.format(sub.nextBillingDate!)}' : ''}',
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-          ),
-          if (sub.remainingCharges != null)
-            Text(
-              'Faltam ${sub.remainingCharges} de ${sub.months} cobranças',
-              style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-            ),
-          if (sub.needsReauth) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppTheme.error.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                'Pagamento recusado — atualize o cartão para retomar a assinatura.',
-                style:
-                    AppTheme.labelSmall.copyWith(color: AppTheme.error),
-              ),
-            ),
-          ],
-          if (sub.status == 'authorized' ||
-              sub.status == 'pending' ||
-              sub.status == 'paused') ...[
-            const SizedBox(height: 12),
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppTheme.divider),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Row(
               children: [
-                Icon(LucideIcons.settings2,
-                    size: 14, color: AppTheme.textSecondary),
-                const SizedBox(width: 6),
-                Text(
-                  'Toque para gerenciar',
-                  style: AppTheme.labelSmall
-                      .copyWith(color: AppTheme.textSecondary),
+                const Icon(
+                  LucideIcons.repeat,
+                  size: 18,
+                  color: AppTheme.primary,
                 ),
-                const Spacer(),
-                const Icon(LucideIcons.chevronRight,
-                    size: 16, color: AppTheme.textSecondary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Minha assinatura',
+                    style: AppTheme.titleSmall.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: chip.color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    chip.label,
+                    style: AppTheme.labelSmall.copyWith(
+                      color: chip.color,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
               ],
             ),
+            const SizedBox(height: 8),
+            Text(
+              'R\$ ${sub.recurringValue.toStringAsFixed(2)}/mês'
+              '${sub.nextBillingDate != null ? ' · próxima ${df.format(sub.nextBillingDate!)}' : ''}',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+            if (sub.remainingCharges != null)
+              Text(
+                'Faltam ${sub.remainingCharges} de ${sub.months} cobranças',
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            if (sub.needsReauth) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppTheme.error.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Pagamento recusado — atualize o cartão para retomar a assinatura.',
+                  style: AppTheme.labelSmall.copyWith(color: AppTheme.error),
+                ),
+              ),
+            ],
+            if (sub.status == 'authorized' ||
+                sub.status == 'pending' ||
+                sub.status == 'paused') ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(
+                    LucideIcons.settings2,
+                    size: 14,
+                    color: AppTheme.textSecondary,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Toque para gerenciar',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const Spacer(),
+                  const Icon(
+                    LucideIcons.chevronRight,
+                    size: 16,
+                    color: AppTheme.textSecondary,
+                  ),
+                ],
+              ),
+            ],
           ],
-        ],
-      ),
+        ),
       ),
     );
   }
@@ -364,19 +383,19 @@ class _DunningBanner extends ConsumerWidget {
           onTap: academyId == null
               ? null
               : () => UpdateSubscriptionCardSheet.show(
-                    context,
-                    academyId: academyId,
-                    subscriptionId: sub.id,
-                    onUpdated: () => ref.invalidate(
-                        studentSubscriptionsProvider(sub.studentId)),
+                  context,
+                  academyId: academyId,
+                  subscriptionId: sub.id,
+                  onUpdated: () => ref.invalidate(
+                    studentSubscriptionsProvider(sub.studentId),
                   ),
+                ),
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: AppTheme.error.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(14),
-              border:
-                  Border.all(color: AppTheme.error.withValues(alpha: 0.3)),
+              border: Border.all(color: AppTheme.error.withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
@@ -387,8 +406,11 @@ class _DunningBanner extends ConsumerWidget {
                     color: AppTheme.error.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(LucideIcons.alertTriangle,
-                      size: 20, color: AppTheme.error),
+                  child: const Icon(
+                    LucideIcons.alertTriangle,
+                    size: 20,
+                    color: AppTheme.error,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -405,14 +427,18 @@ class _DunningBanner extends ConsumerWidget {
                       const SizedBox(height: 2),
                       Text(
                         'Atualize o cartão para retomar a assinatura.',
-                        style: AppTheme.bodySmall
-                            .copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                     ],
                   ),
                 ),
-                const Icon(LucideIcons.creditCard,
-                    size: 18, color: AppTheme.error),
+                const Icon(
+                  LucideIcons.creditCard,
+                  size: 18,
+                  color: AppTheme.error,
+                ),
               ],
             ),
           ),
@@ -430,6 +456,7 @@ class _DependentSection extends ConsumerWidget {
   /// misleading 'not connected' notice on the cards — the screen-level banner
   /// already explains and offers retry.
   final bool gatewayError;
+  final String pixKey;
   final String Function(double) formatCurrency;
   final void Function(Payment) onPayPix;
 
@@ -437,6 +464,7 @@ class _DependentSection extends ConsumerWidget {
     required this.dependent,
     required this.abacatePayEnabled,
     this.gatewayError = false,
+    this.pixKey = '',
     required this.formatCurrency,
     required this.onPayPix,
   });
@@ -446,12 +474,15 @@ class _DependentSection extends ConsumerWidget {
     final paymentsAsync = ref.watch(studentPaymentsProvider(dependent.id));
     return paymentsAsync.maybeWhen(
       data: (payments) {
-        final open = payments
-            .where((p) =>
-                p.status == PaymentStatus.pending ||
-                p.status == PaymentStatus.overdue)
-            .toList()
-          ..sort((a, b) => a.dueDate.compareTo(b.dueDate));
+        final open =
+            payments
+                .where(
+                  (p) =>
+                      p.status == PaymentStatus.pending ||
+                      p.status == PaymentStatus.overdue,
+                )
+                .toList()
+              ..sort((a, b) => a.dueDate.compareTo(b.dueDate));
         if (open.isEmpty) return const SizedBox.shrink();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -469,6 +500,13 @@ class _DependentSection extends ConsumerWidget {
                   formatCurrency: formatCurrency,
                   showPayButton: abacatePayEnabled,
                   gatewayConnected: abacatePayEnabled || gatewayError,
+                  pixKey: pixKey,
+                  onCopyPix: pixKey.isEmpty
+                      ? null
+                      : () {
+                          Clipboard.setData(ClipboardData(text: pixKey));
+                          context.showSuccess('Chave PIX copiada!');
+                        },
                   onPayPix: () => onPayPix(payment),
                 ),
               ),
@@ -507,16 +545,16 @@ class _GatewayErrorBanner extends ConsumerWidget {
             Expanded(
               child: Text(
                 'Não foi possível verificar o pagamento online.',
-                style:
-                    AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ),
             TextButton(
               onPressed: () {
                 // Raiz da resolução + derivada (o botão de pagar volta sozinho
                 // quando a nova resolução conclui).
-                ref.invalidate(paymentGatewayProvider);
-                ref.invalidate(abacatePayEnabledProvider);
+                ref.invalidate(academySettingsProvider);
               },
               child: const Text('Tentar de novo'),
             ),
@@ -549,37 +587,14 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
   Future<void> _showPixPaymentDialog(
     Payment payment,
     Student payer,
+    String manualPixFallbackKey,
   ) async {
     final academyId = FirebaseService.academyId;
     final studentName = payer.fullName;
-    final description = payment.description ??
-        'Mensalidade - ${payment.referenceMonth ?? ''}';
+    final description =
+        payment.description ?? 'Mensalidade - ${payment.referenceMonth ?? ''}';
 
-    // Resolve the connected gateway up front (single source of truth) so we
-    // know whether the payer CPF must be captured (Mercado Pago requires it for
-    // PIX). Precedence: Mercado Pago > Asaas > AbacatePay.
-    final PaymentGateway gateway;
-    try {
-      gateway = await ref.read(paymentGatewayProvider(academyId).future);
-    } catch (_) {
-      // Falha transitória ao resolver (≠ 'nada conectado'): nunca tentar um
-      // gateway às cegas — avisa e deixa o aluno tentar de novo.
-      if (!mounted) return;
-      ref.invalidate(paymentGatewayProvider(academyId));
-      context.showError(
-          'Não foi possível verificar o pagamento online. Tente novamente.');
-      return;
-    }
-
-    if (!mounted) return;
-
-    // Nada conectado de fato (resolução CONCLUÍDA): estado sem método, sem
-    // chamar gateway nenhum.
-    if (gateway == PaymentGateway.none) {
-      context.showWarning(
-          'Pagamento online não configurado — combine com a academia.');
-      return;
-    }
+    const gateway = PaymentGateway.mercadoPago;
 
     // One-tap checkout: if Mercado Pago needs the CPF and the payer already has
     // a VALID one saved on their student doc, skip the CPF form and generate the
@@ -588,57 +603,26 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
     final savedCpf = (payer.cpf ?? '').replaceAll(RegExp(r'\D'), '');
     final hasSavedCpf =
         savedCpf.length == 11 && Validators.cpf(savedCpf) == null;
-    final needsCpf = gateway.requireCpf && !hasSavedCpf;
+    final needsCpf = !hasSavedCpf;
 
-    // Builds the PIX link on the resolved gateway. Only Mercado Pago forwards
-    // the payer CPF; Asaas/AbacatePay createPix* do not accept it. When a CPF is
-    // typed in the form (first payment), persist it to the student doc so the
-    // next payment becomes a single tap.
     Future<PaymentLink?> generate(String? cpf) async {
-      switch (gateway) {
-        case PaymentGateway.mercadoPago:
-          // Prefer the just-typed CPF (form), else the one saved on the doc.
-          final effectiveCpf = (cpf != null && cpf.isNotEmpty)
-              ? cpf.replaceAll(RegExp(r'\D'), '')
-              : (hasSavedCpf ? savedCpf : null);
-          // Persist a freshly captured, valid CPF for next time (best-effort —
-          // a failure here must never block the payment).
-          if (!hasSavedCpf &&
-              effectiveCpf != null &&
-              effectiveCpf.length == 11 &&
-              effectiveCpf != savedCpf) {
-            await _persistPayerCpf(payer, effectiveCpf);
-          }
-          return MercadoPagoService(academyId).createPixPayment(
-            amount: payment.value,
-            financialId: payment.id,
-            studentId: payment.studentId,
-            studentName: studentName,
-            description: description,
-            cpf: effectiveCpf,
-          );
-        case PaymentGateway.asaas:
-          return AsaasPaymentService(academyId).createPixPayment(
-            amount: payment.value,
-            financialId: payment.id,
-            studentId: payment.studentId,
-            studentName: studentName,
-            description: description,
-          );
-        case PaymentGateway.abacatePay:
-          return AbacatePayService(academyId).createPixPayment(
-            amount: payment.value,
-            financialId: payment.id,
-            studentId: payment.studentId,
-            studentName: studentName,
-            description: description,
-          );
-        case PaymentGateway.none:
-          // Nunca chamar um gateway não conectado. O guard acima impede
-          // chegar aqui; se chegar, o sheet exibe a mensagem amigável.
-          throw Exception(
-              'Pagamento online não configurado — combine com a academia.');
+      final effectiveCpf = (cpf != null && cpf.isNotEmpty)
+          ? cpf.replaceAll(RegExp(r'\D'), '')
+          : (hasSavedCpf ? savedCpf : null);
+      if (!hasSavedCpf &&
+          effectiveCpf != null &&
+          effectiveCpf.length == 11 &&
+          effectiveCpf != savedCpf) {
+        await _persistPayerCpf(payer, effectiveCpf);
       }
+      return MercadoPagoService(academyId).createPixPayment(
+        amount: payment.value,
+        financialId: payment.id,
+        studentId: payment.studentId,
+        studentName: studentName,
+        description: description,
+        cpf: effectiveCpf,
+      );
     }
 
     // Tuition target: PIX is always offered; Cartao only when the gateway can
@@ -662,6 +646,7 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
         // CPF form only when MP needs it AND none is saved; otherwise the PIX
         // generates in one tap from the saved CPF.
         requireCpf: needsCpf,
+        manualPixFallbackKey: manualPixFallbackKey,
         // MP forwards the (typed or saved) CPF; Asaas/AbacatePay ignore it.
         createPix: (cpf) => generate(cpf),
         onSettled: () {
@@ -678,10 +663,9 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
   /// model reflects the saved value.
   Future<void> _persistPayerCpf(Student payer, String cpf) async {
     try {
-      await StudentService(FirebaseService.academyId).update(
-        payer.id,
-        {'cpf': cpf},
-      );
+      await StudentService(
+        FirebaseService.academyId,
+      ).update(payer.id, {'cpf': cpf});
       if (!mounted) return;
       // Refresh whichever view this payer maps to.
       ref.invalidate(currentStudentProvider);
@@ -694,12 +678,24 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
   @override
   Widget build(BuildContext context) {
     final studentAsync = ref.watch(currentStudentProvider);
-    final pixInfoAsync = ref.watch(pixInfoProvider);
-    final gatewayAsync = ref.watch(abacatePayEnabledProvider);
-    final abacatePayEnabled = gatewayAsync.valueOrNull ?? false;
+    final settingsAsync = ref.watch(academySettingsProvider);
+    final paymentSettings = settingsAsync.valueOrNull;
+    final resolvedPaymentMode = resolveBillingPaymentMode(
+      preference:
+          paymentSettings?.billingPaymentPreference ??
+          BillingPaymentPreference.mercadoPago,
+      mercadoPagoAvailable:
+          paymentSettings?.mpConnected == true &&
+          paymentSettings?.mpNeedsReauth != true,
+      manualPixKey: paymentSettings?.pixKey,
+    );
+    final mercadoPagoEnabled =
+        resolvedPaymentMode == BillingPaymentPreference.mercadoPago;
     // Falha transitória ao resolver o gateway (≠ 'nada conectado'): mostra um
     // banner com retry em vez do aviso enganoso de 'pagamento indisponível'.
-    final gatewayError = gatewayAsync.hasError && !gatewayAsync.hasValue;
+    final gatewayError =
+        (settingsAsync.isLoading || settingsAsync.hasError) &&
+        !settingsAsync.hasValue;
 
     return studentAsync.when(
       data: (student) {
@@ -708,8 +704,10 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
         }
 
         final paymentsAsync = ref.watch(studentPaymentsProvider(student.id));
-        final pixInfo = pixInfoAsync.valueOrNull ?? {};
-        final pixKey = pixInfo['key'] ?? '';
+        final configuredManualPixKey = paymentSettings?.pixKey?.trim() ?? '';
+        final pixKey = resolvedPaymentMode == BillingPaymentPreference.manualPix
+            ? configuredManualPixKey
+            : '';
 
         return RefreshIndicator(
           color: Theme.of(context).colorScheme.primary,
@@ -720,11 +718,9 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
             // não se auto-recupera; sem isso o pull-to-refresh não a traz de volta).
             ref.invalidate(studentSubscriptionsProvider(student.id));
             ref.invalidate(dependentsProvider);
-            ref.invalidate(pixInfoProvider);
+            ref.invalidate(academySettingsProvider);
             // Raiz da resolução do gateway (a abacatePayEnabledProvider deriva
             // dela) — sem isso uma falha de rede ficaria cacheada como erro.
-            ref.invalidate(paymentGatewayProvider);
-            ref.invalidate(abacatePayEnabledProvider);
           },
           child: paymentsAsync.when(
             data: (payments) {
@@ -828,15 +824,17 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                           child: _PaymentCard(
                             payment: entry.value,
                             formatCurrency: _formatCurrency,
-                            showPayButton: abacatePayEnabled,
+                            showPayButton: mercadoPagoEnabled,
                             // Em erro de resolução, suprime o aviso enganoso de
                             // 'não conectado' (o banner acima já explica).
-                            gatewayConnected: abacatePayEnabled || gatewayError,
+                            gatewayConnected:
+                                mercadoPagoEnabled || gatewayError,
                             pixKey: pixKey,
                             onCopyPix: () => _copyPixKey(pixKey),
                             onPayPix: () => _showPixPaymentDialog(
                               entry.value,
                               student,
+                              configuredManualPixKey,
                             ),
                           ).entrance(index: entry.key),
                         ),
@@ -852,17 +850,23 @@ class _FinancialScreenState extends ConsumerState<FinancialScreen> {
                   ],
 
                   // Dependentes — cobrancas de alunos kids sob este responsavel
-                  ...ref.watch(dependentsProvider).maybeWhen(
+                  ...ref
+                      .watch(dependentsProvider)
+                      .maybeWhen(
                         data: (deps) => deps
                             .where((d) => d.id != student.id)
                             .map<Widget>(
                               (dep) => _DependentSection(
                                 dependent: dep,
-                                abacatePayEnabled: abacatePayEnabled,
+                                abacatePayEnabled: mercadoPagoEnabled,
                                 gatewayError: gatewayError,
+                                pixKey: pixKey,
                                 formatCurrency: _formatCurrency,
-                                onPayPix: (payment) =>
-                                    _showPixPaymentDialog(payment, dep),
+                                onPayPix: (payment) => _showPixPaymentDialog(
+                                  payment,
+                                  dep,
+                                  configuredManualPixKey,
+                                ),
                               ),
                             )
                             .toList(),
@@ -1137,7 +1141,11 @@ class _ManagedByResponsibleNotice extends StatelessWidget {
               color: AppTheme.info.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(LucideIcons.users, size: 24, color: AppTheme.info),
+            child: const Icon(
+              LucideIcons.users,
+              size: 24,
+              color: AppTheme.info,
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -1385,6 +1393,26 @@ class _PaymentCard extends StatelessWidget {
                         ],
                       ],
                     ),
+                    if (isPaid && payment.isManualPersonalPix) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(
+                            LucideIcons.badgeCheck,
+                            size: 12,
+                            color: AppTheme.success,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'PIX confirmado pela academia',
+                            style: AppTheme.labelSmall.copyWith(
+                              color: AppTheme.success,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1416,7 +1444,9 @@ class _PaymentCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: AppTheme.warning.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(6),
@@ -1475,7 +1505,9 @@ class _PaymentCard extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Pagamento online indisponivel. Fale com a recepcao para quitar.',
+                      pixKey.isNotEmpty
+                          ? 'Pague com a chave PIX da academia e envie o comprovante para a recepcao.'
+                          : 'Nenhuma forma de pagamento online esta disponivel. Fale com a recepcao para quitar.',
                       style: AppTheme.labelSmall.copyWith(
                         color: AppTheme.textSecondary,
                       ),
@@ -1498,8 +1530,11 @@ class _PaymentCard extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      Icon(LucideIcons.qrCode,
-                          size: 16, color: AppTheme.textSecondary),
+                      Icon(
+                        LucideIcons.qrCode,
+                        size: 16,
+                        color: AppTheme.textSecondary,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(
@@ -1521,8 +1556,11 @@ class _PaymentCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Icon(LucideIcons.copy,
-                          size: 16, color: AppTheme.textPrimary),
+                      Icon(
+                        LucideIcons.copy,
+                        size: 16,
+                        color: AppTheme.textPrimary,
+                      ),
                     ],
                   ),
                 ),
@@ -1530,7 +1568,9 @@ class _PaymentCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 'Pague pela chave acima e envie o comprovante; a baixa e feita na recepcao.',
-                style: AppTheme.labelSmall.copyWith(color: AppTheme.textDisabled),
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppTheme.textDisabled,
+                ),
               ),
             ],
           ],

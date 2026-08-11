@@ -3,8 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
+import '../models/billing_payment_preference.dart';
 import 'firebase_service.dart';
 import 'mercado_pago_service.dart';
+import 'settings_service.dart';
 
 /// Contact type for billing reminders
 enum ContactType { whatsapp, phone, email, inPerson, other }
@@ -550,12 +552,17 @@ class BillingReminderService {
     if (settings.messageTemplates != null) {
       data['messageTemplates'] = settings.messageTemplates!.toMap();
     }
-    await FirebaseFirestore.instance
+    final settingsRef = FirebaseFirestore.instance
         .collection('academies')
         .doc(academyId)
         .collection('settings')
-        .doc('billingReminders')
-        .set(data, SetOptions(merge: true));
+        .doc('billingReminders');
+    await settingsRef.set(data, SetOptions(merge: true));
+    // Remove personalizacoes antigas: WhatsApp agora usa apenas templates
+    // aprovados na Meta. E-mail continua personalizavel.
+    await settingsRef.update({
+      'messageTemplates.whatsapp': FieldValue.delete(),
+    });
   }
 
   // ============================================
@@ -657,24 +664,14 @@ class BillingReminderService {
 
       // PIX best-effort — mesma degradação graciosa de produção
       // (ensureValidPixForFinancial nunca lança: MP off/erro -> string vazia).
-      final pix = await notificationService.ensureValidPixForFinancial(
-        academyId: academyId,
+      final paymentInstruction =
+          await notificationService.resolvePaymentInstruction(
         financialId: docRef.id,
         amount: amount,
         studentId: testStudentId,
         studentName: testStudentName,
       );
-      final hasPix = pix.pixCode.isNotEmpty;
-
-      final message = notificationService.applyMessageTemplate(
-        BillingNotificationService.defaultWhatsAppTemplates['D+1']!,
-        testStudentName,
-        amount,
-        DateTime.now(),
-        1,
-        pixCode: hasPix ? pix.pixCode : null,
-        ticketUrl: hasPix ? pix.ticketUrl : null,
-      );
+      final hasPix = paymentInstruction.hasPayment;
 
       final result = await notificationService.sendWhatsApp(
         phone: phone,
@@ -685,7 +682,7 @@ class BillingReminderService {
         dueDate: DateTime.now(),
         daysOverdue: 1,
         stage: BillingStage.d1,
-        message: message,
+        paymentInstruction: paymentInstruction,
       );
 
       return TestBillingResult(
@@ -760,12 +757,10 @@ class StudentContact {
 // Billing Notification Settings
 // ============================================
 class BillingMessageTemplates {
-  final Map<String, String> whatsapp;
   final Map<String, String> emailSubject;
   final Map<String, String> emailBody;
 
   BillingMessageTemplates({
-    this.whatsapp = const {},
     this.emailSubject = const {},
     this.emailBody = const {},
   });
@@ -773,14 +768,12 @@ class BillingMessageTemplates {
   factory BillingMessageTemplates.fromMap(Map<String, dynamic>? data) {
     if (data == null) return BillingMessageTemplates();
     return BillingMessageTemplates(
-      whatsapp: Map<String, String>.from(data['whatsapp'] ?? {}),
       emailSubject: Map<String, String>.from(data['emailSubject'] ?? {}),
       emailBody: Map<String, String>.from(data['emailBody'] ?? {}),
     );
   }
 
   Map<String, dynamic> toMap() => {
-    'whatsapp': whatsapp,
     'emailSubject': emailSubject,
     'emailBody': emailBody,
   };
@@ -866,33 +859,31 @@ class BillingNotificationService {
   // ── WhatsApp Cloud API (Meta) — envio por template ──────────────────────
   // Rota /api/send-whatsapp-template no notification-server. Ver
   // PLANO_MIGRACAO_META.md e TEMPLATES_META.md. Se WHATSAPP_TEMPLATE_API_URL
-  // não vier, derivamos de _whatsappApiUrl. O uso REAL é opt-in via
-  // WHATSAPP_USE_TEMPLATES=true — enquanto false, o fluxo antigo (Baileys/texto
-  // livre) segue inalterado.
+  // não vier, derivamos de _whatsappApiUrl. Cobranças sempre usam a rota
+  // oficial; o fallback controlado para Baileys acontece apenas no servidor.
   static const String _templateApiUrlEnv =
       String.fromEnvironment('WHATSAPP_TEMPLATE_API_URL', defaultValue: '');
   static const String _templateLang =
       String.fromEnvironment('WHATSAPP_TEMPLATE_LANG', defaultValue: 'pt_BR');
-  static const bool _useTemplatesEnv =
-      bool.fromEnvironment('WHATSAPP_USE_TEMPLATES', defaultValue: true);
-
-  bool get hasWhatsAppApi => _whatsappApiUrl.isNotEmpty;
-  bool get hasEmailApi => _emailApiUrl.isNotEmpty;
+  bool get hasWhatsAppApi =>
+      hasTemplateApi && _whatsappApiKey.isNotEmpty;
+  bool get hasEmailApi => _emailApiUrl.isNotEmpty && _emailApiKey.isNotEmpty;
 
   String get _templateApiUrl {
     if (_templateApiUrlEnv.isNotEmpty) return _templateApiUrlEnv;
     if (_whatsappApiUrl.isNotEmpty) {
-      return _whatsappApiUrl.replaceAll(
-          '/api/send-whatsapp', '/api/send-whatsapp-template');
+      return _whatsappApiUrl.replaceFirst(
+        RegExp(r'/api/send-whatsapp/?$'),
+        '/api/send-whatsapp-template',
+      );
     }
     return '';
   }
 
   bool get hasTemplateApi => _templateApiUrl.isNotEmpty;
 
-  /// Quando true, cobranças saem por template Meta (canal oficial). Opt-in:
-  /// só liga com WHATSAPP_USE_TEMPLATES=true E URL de template disponível.
-  bool get useTemplates => _useTemplatesEnv && hasTemplateApi;
+  /// Cobranças podem ser enviadas quando a rota oficial está configurada.
+  bool get useTemplates => hasTemplateApi;
 
   String get _bulkApiUrl {
     if (_bulkApiUrlEnv.isNotEmpty) return _bulkApiUrlEnv;
@@ -909,6 +900,7 @@ class BillingNotificationService {
   BillingMessageTemplates? customTemplates;
   final _currencyFormat = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
   final _dateFormat = DateFormat('dd/MM/yyyy');
+  Future<AcademySettings?>? _academySettingsFuture;
 
   // Default templates with placeholders: {nome}, {valor}, {vencimento}, {dias}, {academia}.
   // Mirrors marcusjj/src/services/billingNotificationService.ts DEFAULT_*_TEMPLATES.
@@ -1002,6 +994,9 @@ class BillingNotificationService {
     final has = pixCode != null && pixCode.isNotEmpty;
     var out = text;
     if (has) {
+      if (ticketUrl == null || ticketUrl.isEmpty) {
+        out = out.replaceAll(RegExp(r'\n\nOu acesse: \{link\}'), '');
+      }
       out = out
           .replaceAll('{pix}', pixCode)
           .replaceAll('{link}', ticketUrl ?? '')
@@ -1053,6 +1048,58 @@ class BillingNotificationService {
     }
   }
 
+  /// Resolve a instrucao de pagamento respeitando a preferencia da academia.
+  /// Se a geracao no Mercado Pago falhar, continua para o PIX pessoal; se as
+  /// duas opcoes estiverem indisponiveis, usa o template sem pagamento.
+  Future<BillingPaymentInstruction> resolvePaymentInstruction({
+    required String financialId,
+    required double amount,
+    required String studentId,
+    required String studentName,
+    String? payerCpf,
+    bool includePayment = true,
+  }) async {
+    if (!includePayment) return const BillingPaymentInstruction.none();
+
+    final settings = await (_academySettingsFuture ??=
+        SettingsService(academyId).getAcademySettings());
+    final preference = settings?.billingPaymentPreference ??
+        BillingPaymentPreference.mercadoPago;
+    final manualPixKey = settings?.pixKey?.trim() ?? '';
+
+    for (final candidate in billingPaymentFallbackOrder(preference)) {
+      if (candidate == BillingPaymentPreference.none) {
+        return const BillingPaymentInstruction.none();
+      }
+      if (candidate == BillingPaymentPreference.manualPix) {
+        if (manualPixKey.isNotEmpty) {
+          return BillingPaymentInstruction.manualPix(manualPixKey);
+        }
+        continue;
+      }
+
+      final mercadoPagoConfigured = settings == null ||
+          (settings.mpConnected && !settings.mpNeedsReauth);
+      if (!mercadoPagoConfigured) continue;
+      final pix = await ensureValidPixForFinancial(
+        academyId: academyId,
+        financialId: financialId,
+        amount: amount,
+        studentId: studentId,
+        studentName: studentName,
+        payerCpf: payerCpf,
+      );
+      if (pix.pixCode.isNotEmpty) {
+        return BillingPaymentInstruction.mercadoPago(
+          pixCode: pix.pixCode,
+          ticketUrl: pix.ticketUrl,
+        );
+      }
+    }
+
+    return const BillingPaymentInstruction.none();
+  }
+
   // ============================================
   // Generate WhatsApp message per stage
   // ============================================
@@ -1070,9 +1117,7 @@ class BillingNotificationService {
     final stageKey = stage.value;
 
     final template =
-        customTemplates?.whatsapp[stageKey] ??
-        defaultWhatsAppTemplates[stageKey] ??
-        defaultWhatsAppTemplates['D+1']!;
+        defaultWhatsAppTemplates[stageKey] ?? defaultWhatsAppTemplates['D+1']!;
 
     final result = _applyTemplate(
       template,
@@ -1234,7 +1279,7 @@ class BillingNotificationService {
     required DateTime dueDate,
     required int daysOverdue,
     required BillingStage stage,
-    required String message,
+    required BillingPaymentInstruction paymentInstruction,
   }) async {
     if (!hasWhatsAppApi) {
       return NotificationResult(
@@ -1254,78 +1299,24 @@ class BillingNotificationService {
       );
     }
 
-    if (useTemplates) {
-      return sendWhatsAppTemplate(
-        phone: phone,
-        studentName: studentName,
-        studentId: studentId,
-        financialId: financialId,
-        amount: amount,
-        dueDate: dueDate,
-        daysOverdue: daysOverdue,
-        stage: stage,
-        fallbackMessage: message,
-      );
-    }
-    try {
-      final response = await http
-          .post(
-            Uri.parse(_whatsappApiUrl),
-            headers: {
-              'Content-Type': 'application/json',
-              if (_whatsappApiKey.isNotEmpty) 'x-api-key': _whatsappApiKey,
-            },
-            body: jsonEncode({
-              'phone': _normalizePhone(phone),
-              'studentName': studentName,
-              'studentId': studentId,
-              'financialId': financialId,
-              'academyId': academyId,
-              'academyName': academyName,
-              'amount': amount,
-              'amountFormatted': _currencyFormat.format(amount),
-              'dueDate': DateFormat('yyyy-MM-dd').format(dueDate),
-              'dueDateFormatted': _dateFormat.format(dueDate),
-              'daysOverdue': daysOverdue,
-              'stage': stage.value,
-              'message': message,
-              'type': 'billing_reminder',
-              'appId': _appId,
-            }),
-          )
-          .timeout(const Duration(seconds: 30));
-
-      return _parseResponse(
-        response: response,
-        studentName: studentName,
-        studentId: studentId,
-        defaultErrorMsg: 'Falha no envio da mensagem de WhatsApp',
-      );
-    } on http.ClientException {
-      return NotificationResult(
-        success: false,
-        studentName: studentName,
-        studentId: studentId,
-        error: 'Erro de conexao - verifique sua internet',
-      );
-    } catch (e) {
-      final isTimeout = e.toString().contains('TimeoutException');
-      return NotificationResult(
-        success: false,
-        studentName: studentName,
-        studentId: studentId,
-        error: isTimeout
-            ? 'Timeout: API demorou mais de 30 segundos'
-            : e.toString(),
-      );
-    }
+    return sendWhatsAppTemplate(
+      phone: phone,
+      studentName: studentName,
+      studentId: studentId,
+      financialId: financialId,
+      amount: amount,
+      dueDate: dueDate,
+      daysOverdue: daysOverdue,
+      stage: stage,
+      paymentInstruction: paymentInstruction,
+    );
   }
 
   // ============================================
   // Template name per stage (Meta Cloud API)
   // ============================================
-  /// Mapeia estágio → nome do template aprovado na Meta. `hasPix` escolhe a
-  /// variante com bloco PIX (nome base) ou sem (sufixo `_sempix`). Os nomes
+  /// Mapeia estágio e forma de pagamento para o template aprovado na Meta.
+  /// Os nomes
   /// DEVEM bater exatamente com os templates criados no WhatsApp Manager —
   /// ver TEMPLATES_META.md.
   static const Map<String, String> _stageTemplateBase = {
@@ -1337,9 +1328,20 @@ class BillingNotificationService {
     'D+30': 'cobranca_d30',
   };
 
-  String templateNameForStage(BillingStage stage, {required bool hasPix}) {
-    final base = _stageTemplateBase[stage.value] ?? 'cobranca_d1';
-    return hasPix ? base : '${base}_sempix';
+  String? templateNameForStage(
+    BillingStage stage, {
+    required BillingPaymentPreference paymentMode,
+  }) {
+    final base = _stageTemplateBase[stage.value];
+    if (base == null) return null;
+    switch (paymentMode) {
+      case BillingPaymentPreference.mercadoPago:
+        return base;
+      case BillingPaymentPreference.manualPix:
+        return '${base}_pix_manual';
+      case BillingPaymentPreference.none:
+        return '${base}_sempix';
+    }
   }
 
   // ============================================
@@ -1349,9 +1351,6 @@ class BillingNotificationService {
   /// não derruba o chip. Variáveis, em ordem fixa (ver TEMPLATES_META.md):
   ///   {{1}}=nome  {{2}}=academia  {{3}}=valor  {{4}}=vencimento  [{{5}}=pix]
   /// O `ticketUrl` vira o parâmetro do botão dinâmico (variante com PIX).
-  ///
-  /// `fallbackMessage` (texto livre já montado) é enviado ao servidor para o
-  /// fallback híbrido Baileys, caso a Meta recuse o envio.
   Future<NotificationResult> sendWhatsAppTemplate({
     required String phone,
     required String studentName,
@@ -1361,11 +1360,9 @@ class BillingNotificationService {
     required DateTime dueDate,
     required int daysOverdue,
     required BillingStage stage,
-    String? pixCode,
-    String? ticketUrl,
-    String? fallbackMessage,
+    required BillingPaymentInstruction paymentInstruction,
   }) async {
-    if (!hasTemplateApi) {
+    if (!hasWhatsAppApi) {
       return NotificationResult(
         success: false,
         studentName: studentName,
@@ -1383,8 +1380,21 @@ class BillingNotificationService {
       );
     }
 
-    final hasPix = pixCode != null && pixCode.isNotEmpty;
-    final templateName = templateNameForStage(stage, hasPix: hasPix);
+    final effectiveMode = paymentInstruction.hasPayment
+        ? paymentInstruction.mode
+        : BillingPaymentPreference.none;
+    final templateName = templateNameForStage(
+      stage,
+      paymentMode: effectiveMode,
+    );
+    if (templateName == null) {
+      return NotificationResult(
+        success: false,
+        studentName: studentName,
+        studentId: studentId,
+        error: 'Ainda nao existe template Meta aprovado para esta etapa',
+      );
+    }
 
     // Ordem das variáveis do corpo. PIX é a 5ª (só na variante com PIX).
     final variables = <String>[
@@ -1392,14 +1402,14 @@ class BillingNotificationService {
       academyName,
       _currencyFormat.format(amount),
       _dateFormat.format(dueDate),
-      // Condição auto-promotora (não depende de promoção via `hasPix`): dentro
-      // deste if o Dart garante pixCode não-nulo.
-      if (pixCode != null && pixCode.isNotEmpty) pixCode,
+      if (paymentInstruction.hasPayment) paymentInstruction.paymentValue,
     ];
 
     try {
       final body = <String, dynamic>{
         'appId': _appId,
+        'tenantId': academyId,
+        'academyId': academyId,
         'phone': _normalizePhone(phone),
         'templateName': templateName,
         'languageCode': _templateLang,
@@ -1409,15 +1419,11 @@ class BillingNotificationService {
         'stage': stage.value,
         'type': 'billing_reminder',
       };
-      // Botão dinâmico com o link do checkout (só variante com PIX).
-      if (hasPix && ticketUrl != null && ticketUrl.isNotEmpty) {
-        body['buttonUrl'] = ticketUrl;
+      // Botão dinâmico existe somente na variante Mercado Pago.
+      if (effectiveMode == BillingPaymentPreference.mercadoPago &&
+          paymentInstruction.ticketUrl.isNotEmpty) {
+        body['buttonUrl'] = paymentInstruction.ticketUrl;
       }
-      // Fallback híbrido → Baileys no servidor, se a Meta recusar.
-      if (fallbackMessage != null && fallbackMessage.isNotEmpty) {
-        body['fallbackMessage'] = fallbackMessage;
-      }
-
       final response = await http.post(
         Uri.parse(_templateApiUrl),
         headers: {
@@ -1601,15 +1607,13 @@ class BillingNotificationService {
         continue;
       }
 
-      final msg =
-          customMessage ??
-          generateWhatsAppMessage(
-            stage: stage,
-            studentName: studentName,
-            amount: amount,
-            dueDate: dueDate,
-            daysOverdue: daysOverdue,
-          );
+      final paymentInstruction = await resolvePaymentInstruction(
+        financialId: financialId,
+        amount: amount,
+        studentId: studentId,
+        studentName: studentName,
+        payerCpf: contact.effectiveCpf,
+      );
 
       final result = await sendWhatsApp(
         phone: phone,
@@ -1620,7 +1624,7 @@ class BillingNotificationService {
         dueDate: dueDate,
         daysOverdue: daysOverdue,
         stage: stage,
-        message: msg,
+        paymentInstruction: paymentInstruction,
       );
 
       results.add(result);
@@ -1726,9 +1730,7 @@ class BillingNotificationService {
   String generateGenericStageMessage(BillingStage stage) {
     final stageKey = stage.value;
     final template =
-        customTemplates?.whatsapp[stageKey] ??
-        defaultWhatsAppTemplates[stageKey] ??
-        defaultWhatsAppTemplates['D+1']!;
+        defaultWhatsAppTemplates[stageKey] ?? defaultWhatsAppTemplates['D+1']!;
     return template.replaceAll('{academia}', academyName);
   }
 

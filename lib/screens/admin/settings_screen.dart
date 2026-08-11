@@ -24,6 +24,7 @@ import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../core/access_control/turnstile_registry.dart';
 import '../../models/academy.dart' show AcademyProfileExtension;
+import '../../models/billing_payment_preference.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
@@ -76,6 +77,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _storeMinAmountController = TextEditingController();
 
   PixKeyType? _pixKeyType;
+  BillingPaymentPreference _billingPaymentPreference =
+      BillingPaymentPreference.mercadoPago;
   bool _asaasEnabled = false;
   bool _mpConnected = false;
   // Backend-set flag: MP auth repeatedly failed; admin must reconnect even
@@ -225,6 +228,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _storeMinAmountController.text,
       _autoGraduationAttendancesController.text,
       _pixKeyType?.value ?? '',
+      _billingPaymentPreference.value,
       _asaasEnabled,
       _storeEnabled,
       _storePublished,
@@ -317,6 +321,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           _storeMinAmountController.text =
               settings.storeMinOrderAmount?.toStringAsFixed(2) ?? '';
           _pixKeyType = settings.pixKeyType;
+          _billingPaymentPreference = settings.billingPaymentPreference;
           _asaasEnabled = settings.asaasEnabled;
           _mpConnected = settings.mpConnected;
           _mpNeedsReauth = settings.mpNeedsReauth;
@@ -542,6 +547,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           pixKey: _pixKeyController.text,
           pixKeyType: _pixKeyType,
         ),
+        service.updateBillingPaymentPreference(_billingPaymentPreference),
         service.updateBranding(
           portalSlogan:
               _sloganController.text.isEmpty ? null : _sloganController.text,
@@ -1245,6 +1251,39 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 8),
+
+          _SettingsCard(
+            title: 'Como receber cobranças',
+            icon: LucideIcons.wallet,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ModernDropdown<BillingPaymentPreference>(
+                  label: 'Método principal',
+                  value: _billingPaymentPreference,
+                  items: BillingPaymentPreference.values.map((preference) {
+                    return DropdownMenuItem(
+                      value: preference,
+                      child: Text(preference.label),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _billingPaymentPreference = value);
+                  },
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _billingPaymentPreference.description,
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
 
           // PIX Settings
           _SettingsCard(

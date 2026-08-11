@@ -313,14 +313,17 @@ class _AdminStudentDetailScreenState
     // Gate AppBar/menu actions by permission (admin passa em tudo via
     // hasPermission, mas mantemos isAdmin explícito por clareza).
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
-    final canEdit = currentUser != null &&
+    final canEdit =
+        currentUser != null &&
         (currentUser.isAdmin || currentUser.hasPermission('students:edit'));
-    final canPromote = currentUser != null &&
-        (currentUser.isAdmin ||
-            currentUser.hasPermission('graduation:manage'));
-    final canManage = currentUser != null &&
+    final canPromote =
+        currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('graduation:manage'));
+    final canManage =
+        currentUser != null &&
         (currentUser.isAdmin || currentUser.hasPermission('students:manage'));
-    final canDelete = currentUser != null &&
+    final canDelete =
+        currentUser != null &&
         (currentUser.isAdmin || currentUser.hasPermission('students:delete'));
 
     final menuItems = <PopupMenuEntry<String>>[
@@ -398,8 +401,10 @@ class _AdminStudentDetailScreenState
             children: [
               Icon(Icons.delete_forever, color: Colors.red),
               SizedBox(width: 8),
-              Text('Apagar definitivamente',
-                  style: TextStyle(color: Colors.red)),
+              Text(
+                'Apagar definitivamente',
+                style: TextStyle(color: Colors.red),
+              ),
             ],
           ),
         ),
@@ -440,10 +445,7 @@ class _AdminStudentDetailScreenState
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                _headerColor(),
-                _headerColor().withValues(alpha: 0.7),
-              ],
+              colors: [_headerColor(), _headerColor().withValues(alpha: 0.7)],
             ),
           ),
           child: SafeArea(
@@ -459,20 +461,20 @@ class _AdminStudentDetailScreenState
                       Hero(
                         tag: 'student-avatar-${_student!.id}',
                         child: ProfilePhotoPicker(
-                        // Use the authoritative academy context (same source the
-                        // rest of this screen uses to load the student). The
-                        // selectedAcademyIdProvider can be null here, which made
-                        // the upload path academies//students/... → Storage denied.
-                        academyId: FirebaseService.academyId,
-                        studentId: _student!.id,
-                        photoUrl: _student!.photoUrl,
-                        fullName: _student!.fullName,
-                        currentBelt: _student!.currentBelt,
-                        editable: true,
-                        size: 96.0,
-                        onPhotoUpdated: () {
-                          _loadData();
-                        },
+                          // Use the authoritative academy context (same source the
+                          // rest of this screen uses to load the student). The
+                          // selectedAcademyIdProvider can be null here, which made
+                          // the upload path academies//students/... → Storage denied.
+                          academyId: FirebaseService.academyId,
+                          studentId: _student!.id,
+                          photoUrl: _student!.photoUrl,
+                          fullName: _student!.fullName,
+                          currentBelt: _student!.currentBelt,
+                          editable: true,
+                          size: 96.0,
+                          onPhotoUpdated: () {
+                            _loadData();
+                          },
                         ),
                       ),
                       const SizedBox(width: 20),
@@ -620,7 +622,9 @@ class _AdminStudentDetailScreenState
                         Container(
                           margin: const EdgeInsets.only(right: 6),
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: Brand.blood.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(4),
@@ -640,7 +644,9 @@ class _AdminStudentDetailScreenState
                       if (r.bluesRisk)
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: AppTheme.info.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(4),
@@ -689,8 +695,9 @@ class _AdminStudentDetailScreenState
   /// Concluir = remover o campo (meta cumprida sai da ficha e do hub do aluno).
   Future<void> _completeGoal() async {
     try {
-      await StudentService(FirebaseService.academyId)
-          .update(_student!.id, {'activeGoal': FieldValue.delete()});
+      await StudentService(
+        FirebaseService.academyId,
+      ).update(_student!.id, {'activeGoal': FieldValue.delete()});
       if (!mounted) return;
       context.showSuccess('Meta concluída 👊');
       _loadData();
@@ -756,9 +763,7 @@ class _AdminStudentDetailScreenState
             const SizedBox(height: 4),
             Text(
               [...metaParts, 'o aluno vê como missão no app'].join(' · '),
-              style: AppTheme.bodySmall.copyWith(
-                color: AppTheme.textSecondary,
-              ),
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
             ),
             const SizedBox(height: 14),
             Row(
@@ -807,8 +812,10 @@ class _AdminStudentDetailScreenState
         belt: grade?.currentGrade ?? 'white',
         stripes: grade?.currentStripes ?? 0,
         sportId: primarySport,
-        muaythaiVariant:
-            ref.read(academySettingsProvider).valueOrNull?.muaythaiGradeSystem,
+        muaythaiVariant: ref
+            .read(academySettingsProvider)
+            .valueOrNull
+            ?.muaythaiGradeSystem,
         size: BeltSize.medium,
         highlight: true,
       ),
@@ -1011,12 +1018,12 @@ class _AdminStudentDetailScreenState
             eligible
                 ? '${e.currentClasses}/${e.requiredClasses} $unit — pronto para a proxima graduacao.'
                 : (e.skillRequired &&
-                        !e.skillMet &&
-                        e.requiredClasses > 0 &&
-                        e.currentClasses >= e.requiredClasses)
-                    // Presenca ja atingida, mas a politica de tecnicas bloqueia.
-                    ? e.message
-                    : 'Faltam ${e.missingClasses} $unit (${e.currentClasses}/${e.requiredClasses})',
+                      !e.skillMet &&
+                      e.requiredClasses > 0 &&
+                      e.currentClasses >= e.requiredClasses)
+                // Presenca ja atingida, mas a politica de tecnicas bloqueia.
+                ? e.message
+                : 'Faltam ${e.missingClasses} $unit (${e.currentClasses}/${e.requiredClasses})',
             style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
           ),
           if ((e.skillTotal != null && e.skillTotal! > 0) ||
@@ -1032,13 +1039,14 @@ class _AdminStudentDetailScreenState
                     'Tecnicas ${e.skillDone}/${e.skillTotal}'
                     '${e.skillPct != null ? ' (${e.skillPct!.round()}%)' : ''}'
                     '${e.skillRequired ? ' • exigido' : ''}',
-                    (e.skillRequired && !e.skillMet)
-                        ? AppTheme.error
-                        : color,
+                    (e.skillRequired && !e.skillMet) ? AppTheme.error : color,
                   ),
                 if (e.daysInBelt != null)
                   _factorChip(
-                      LucideIcons.clock, _timeInBelt(e.daysInBelt!), color),
+                    LucideIcons.clock,
+                    _timeInBelt(e.daysInBelt!),
+                    color,
+                  ),
               ],
             ),
           ],
@@ -1048,23 +1056,24 @@ class _AdminStudentDetailScreenState
   }
 
   Widget _factorChip(IconData icon, String text, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: color.withValues(alpha: 0.3)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 12, color: color),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 12, color: color),
-            const SizedBox(width: 4),
-            Text(text,
-                style: AppTheme.labelSmall
-                    .copyWith(color: AppTheme.textSecondary)),
-          ],
-        ),
-      );
+      ],
+    ),
+  );
 
   String _timeInBelt(int days) {
     if (days < 30) return '$days d na faixa';
@@ -1085,24 +1094,26 @@ class _AdminStudentDetailScreenState
             subtitle: 'Toque em "Nova avaliação" para registrar a primeira.',
           )
         else
-          Builder(builder: (context) {
-            final overdue = _reassessmentOverdue();
-            final offset = overdue ? 1 : 0;
-            return ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-              itemCount: _physicalAssessments.length + offset,
-              itemBuilder: (context, index) {
-                if (overdue && index == 0) return _reassessmentBanner();
-                final i = index - offset;
-                final a = _physicalAssessments[i];
-                // Lista é desc (mais recente primeiro) → "anterior" é o próximo.
-                final prev = i + 1 < _physicalAssessments.length
-                    ? _physicalAssessments[i + 1]
-                    : null;
-                return _assessmentCard(a, prev);
-              },
-            );
-          }),
+          Builder(
+            builder: (context) {
+              final overdue = _reassessmentOverdue();
+              final offset = overdue ? 1 : 0;
+              return ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+                itemCount: _physicalAssessments.length + offset,
+                itemBuilder: (context, index) {
+                  if (overdue && index == 0) return _reassessmentBanner();
+                  final i = index - offset;
+                  final a = _physicalAssessments[i];
+                  // Lista é desc (mais recente primeiro) → "anterior" é o próximo.
+                  final prev = i + 1 < _physicalAssessments.length
+                      ? _physicalAssessments[i + 1]
+                      : null;
+                  return _assessmentCard(a, prev);
+                },
+              );
+            },
+          ),
         Positioned(
           right: 16,
           bottom: 16,
@@ -1232,30 +1243,35 @@ class _AdminStudentDetailScreenState
                   children: [
                     Text(
                       DateFormat('dd/MM/yyyy').format(a.date),
-                      style: AppTheme.bodyMedium
-                          .copyWith(fontWeight: FontWeight.w600),
+                      style: AppTheme.bodyMedium.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       parts.isEmpty ? 'Sem medidas' : parts.join('  ·  '),
-                      style: AppTheme.labelSmall
-                          .copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                   ],
                 ),
               ),
               if (deltaW != null) ...[
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.surfaceVariant,
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
                     deltaW,
-                    style: AppTheme.labelSmall
-                        .copyWith(fontWeight: FontWeight.w600),
+                    style: AppTheme.labelSmall.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1267,8 +1283,11 @@ class _AdminStudentDetailScreenState
                 visualDensity: VisualDensity.compact,
                 onPressed: () => _exportAssessmentPdf(a),
               ),
-              Icon(LucideIcons.chevronRight,
-                  size: 16, color: AppTheme.textSecondary),
+              Icon(
+                LucideIcons.chevronRight,
+                size: 16,
+                color: AppTheme.textSecondary,
+              ),
             ],
           ),
         ),
@@ -1386,9 +1405,9 @@ class _AdminStudentDetailScreenState
           // Turmas section — visible to admins and users with students:manage
           Builder(
             builder: (context) {
-              final currentUser =
-                  ref.watch(currentUserProvider).valueOrNull;
-              final canManage = currentUser != null &&
+              final currentUser = ref.watch(currentUserProvider).valueOrNull;
+              final canManage =
+                  currentUser != null &&
                   currentUser.hasPermission('students:manage');
               if (!canManage) return const SizedBox.shrink();
               return Card(
@@ -1479,8 +1498,9 @@ class _AdminStudentDetailScreenState
               subtitle: Text(
                 'Ative para vincular um aluno adulto (com conta) como '
                 'responsavel financeiro deste aluno.',
-                style: AppTheme.bodySmall
-                    .copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
               value: _student!.responsibleTrainsHere || hasResp,
               onChanged: _toggleResponsibleTrainsHere,
@@ -1491,8 +1511,9 @@ class _AdminStudentDetailScreenState
                 hasResp
                     ? 'As cobrancas deste aluno aparecem para ${_student!.responsibleName} no app, que pode paga-las.'
                     : 'Escolha um aluno adulto (com conta) para receber e pagar as cobrancas deste aluno.',
-                style:
-                    AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
               const SizedBox(height: 12),
               Row(
@@ -1553,14 +1574,17 @@ class _AdminStudentDetailScreenState
     // Only adults with a linked account can be responsible — they need a login
     // to see and pay the kid's charges. Category is filtered client-side to
     // avoid requiring a (status + category) composite index.
-    adults = adults
-        .where((a) =>
-            a.category == StudentCategory.adult &&
-            a.linkedUserId != null &&
-            a.linkedUserId!.isNotEmpty &&
-            a.id != _student!.id)
-        .toList()
-      ..sort((a, b) => a.fullName.compareTo(b.fullName));
+    adults =
+        adults
+            .where(
+              (a) =>
+                  a.category == StudentCategory.adult &&
+                  a.linkedUserId != null &&
+                  a.linkedUserId!.isNotEmpty &&
+                  a.id != _student!.id,
+            )
+            .toList()
+          ..sort((a, b) => a.fullName.compareTo(b.fullName));
     if (!mounted) return;
     if (adults.isEmpty) {
       context.showError('Nenhum aluno adulto com conta vinculada disponivel.');
@@ -1594,8 +1618,9 @@ class _AdminStudentDetailScreenState
                   alignment: Alignment.centerLeft,
                   child: Text(
                     'Escolher responsavel',
-                    style: AppTheme.titleMedium
-                        .copyWith(fontWeight: FontWeight.bold),
+                    style: AppTheme.titleMedium.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
@@ -1607,7 +1632,9 @@ class _AdminStudentDetailScreenState
                     final a = adults[i];
                     return ListTile(
                       leading: CircleAvatar(
-                        backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
+                        backgroundColor: AppTheme.primary.withValues(
+                          alpha: 0.1,
+                        ),
                         child: Text(
                           a.fullName.isNotEmpty
                               ? a.fullName[0].toUpperCase()
@@ -1622,8 +1649,8 @@ class _AdminStudentDetailScreenState
                       subtitle: (a.email != null && a.email!.isNotEmpty)
                           ? Text(a.email!)
                           : (a.phone != null && a.phone!.isNotEmpty)
-                              ? Text(formatPhone(a.phone))
-                              : null,
+                          ? Text(formatPhone(a.phone))
+                          : null,
                       onTap: () => _assignResponsible(a, sheetCtx),
                     );
                   },
@@ -1639,8 +1666,9 @@ class _AdminStudentDetailScreenState
 
   Future<void> _assignResponsible(Student adult, BuildContext sheetCtx) async {
     try {
-      await StudentService(FirebaseService.academyId)
-          .setResponsible(_student!.id, adult);
+      await StudentService(
+        FirebaseService.academyId,
+      ).setResponsible(_student!.id, adult);
       if (!mounted) return;
       Navigator.pop(sheetCtx);
       context.showSuccess('Responsavel definido: ${adult.fullName}');
@@ -1672,8 +1700,9 @@ class _AdminStudentDetailScreenState
     );
     if (confirm != true) return;
     try {
-      await StudentService(FirebaseService.academyId)
-          .removeResponsible(_student!.id);
+      await StudentService(
+        FirebaseService.academyId,
+      ).removeResponsible(_student!.id);
       if (!mounted) return;
       context.showSuccess('Responsavel removido');
       _loadData();
@@ -1813,7 +1842,8 @@ class _AdminStudentDetailScreenState
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
     // Presence-only professors (extra permission 'attendance:take') and admins
     // can grant a manual presence. This is decoupled from any charge.
-    final canTakeAttendance = currentUser != null &&
+    final canTakeAttendance =
+        currentUser != null &&
         (currentUser.isAdmin || currentUser.hasPermission('attendance:take'));
 
     if (_attendances.isEmpty) {
@@ -1840,8 +1870,8 @@ class _AdminStudentDetailScreenState
     final filtered = _attendanceSportFilter == null
         ? _attendances
         : _attendances
-            .where((a) => (a.sport ?? 'bjj') == _attendanceSportFilter!.value)
-            .toList();
+              .where((a) => (a.sport ?? 'bjj') == _attendanceSportFilter!.value)
+              .toList();
 
     // Group by month
     final grouped = <String, List<Attendance>>{};
@@ -1861,59 +1891,61 @@ class _AdminStudentDetailScreenState
             child: Center(child: Text('Nenhuma presença neste esporte.')),
           ),
         ...grouped.entries.map((entry) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                children: [
-                  Text(
-                    entry.key,
-                    style: AppTheme.titleSmall.copyWith(
-                      fontWeight: FontWeight.bold,
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Text(
+                      entry.key,
+                      style: AppTheme.titleSmall.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${entry.value.length} presenças',
+                        style: TextStyle(color: AppTheme.primary, fontSize: 12),
+                      ),
                     ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '${entry.value.length} presenças',
-                      style: TextStyle(color: AppTheme.primary, fontSize: 12),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            ...entry.value.map(
-              (a) => Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.green.shade100,
-                    child: const Icon(Icons.check, color: Colors.green),
-                  ),
-                  title: Text(a.className),
-                  subtitle: Text(DateFormat('EEEE, d', 'pt_BR').format(a.date)),
-                  trailing: Text(
-                    DateFormat('HH:mm').format(a.createdAt),
-                    style: AppTheme.bodySmall.copyWith(
-                      color: AppTheme.textSecondary,
+              ...entry.value.map(
+                (a) => Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.green.shade100,
+                      child: const Icon(Icons.check, color: Colors.green),
+                    ),
+                    title: Text(a.className),
+                    subtitle: Text(
+                      DateFormat('EEEE, d', 'pt_BR').format(a.date),
+                    ),
+                    trailing: Text(
+                      DateFormat('HH:mm').format(a.createdAt),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        );
+              const SizedBox(height: 8),
+            ],
+          );
         }),
       ],
     );
@@ -1928,8 +1960,7 @@ class _AdminStudentDetailScreenState
         child: ChoiceChip(
           label: Text(label),
           selected: selected,
-          onSelected: (_) =>
-              setState(() => _attendanceSportFilter = value),
+          onSelected: (_) => setState(() => _attendanceSportFilter = value),
         ),
       );
     }
@@ -1991,14 +2022,16 @@ class _AdminStudentDetailScreenState
                     Text(
                       'Registra uma presença manual para o aluno, sem gerar '
                       'cobrança.',
-                      style: AppTheme.bodySmall
-                          .copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Text(
                       'Data',
-                      style: AppTheme.bodySmall
-                          .copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     InkWell(
@@ -2006,8 +2039,9 @@ class _AdminStudentDetailScreenState
                         final picked = await showDatePicker(
                           context: ctx,
                           initialDate: selectedDate,
-                          firstDate: DateTime.now()
-                              .subtract(const Duration(days: 365)),
+                          firstDate: DateTime.now().subtract(
+                            const Duration(days: 365),
+                          ),
                           lastDate: DateTime.now(),
                         );
                         if (picked != null) {
@@ -2016,15 +2050,20 @@ class _AdminStudentDetailScreenState
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 12),
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
                         decoration: BoxDecoration(
                           border: Border.all(color: AppTheme.divider),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Row(
                           children: [
-                            const Icon(LucideIcons.calendar,
-                                size: 16, color: AppTheme.textSecondary),
+                            const Icon(
+                              LucideIcons.calendar,
+                              size: 16,
+                              color: AppTheme.textSecondary,
+                            ),
                             const SizedBox(width: 8),
                             Text(
                               DateFormat('dd/MM/yyyy').format(selectedDate),
@@ -2038,8 +2077,9 @@ class _AdminStudentDetailScreenState
                       const SizedBox(height: 16),
                       Text(
                         'Esporte',
-                        style: AppTheme.bodySmall
-                            .copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                       const SizedBox(height: 8),
                       Wrap(
@@ -2048,8 +2088,7 @@ class _AdminStudentDetailScreenState
                           return ChoiceChip(
                             label: Text(getSport(s).label),
                             selected: sport == s,
-                            onSelected: (_) =>
-                                setDialogState(() => sport = s),
+                            onSelected: (_) => setDialogState(() => sport = s),
                           );
                         }).toList(),
                       ),
@@ -2073,12 +2112,14 @@ class _AdminStudentDetailScreenState
                 FilledButton(
                   onPressed: () async {
                     Navigator.of(dialogContext).pop();
-                    final currentUser =
-                        ref.read(currentUserProvider).valueOrNull;
+                    final currentUser = ref
+                        .read(currentUserProvider)
+                        .valueOrNull;
                     final note = noteController.text.trim();
                     try {
-                      await AttendanceService(FirebaseService.academyId)
-                          .markManualPresence(
+                      await AttendanceService(
+                        FirebaseService.academyId,
+                      ).markManualPresence(
                         studentId: widget.studentId,
                         studentName: _student?.fullName ?? '',
                         verifiedBy: currentUser?.id ?? '',
@@ -2125,18 +2166,21 @@ class _AdminStudentDetailScreenState
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancelar')),
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Marcar pago')),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Marcar pago'),
+          ),
         ],
       ),
     );
     if (ok != true) return;
     try {
-      await PaymentService(FirebaseService.academyId)
-          .markAsPaid(payment.id, method: PaymentMethod.cash);
+      await PaymentService(
+        FirebaseService.academyId,
+      ).markAsPaid(payment.id, method: PaymentMethod.cash);
       if (mounted) {
         context.showSuccess('Cobrança marcada como paga.');
         _loadData();
@@ -2159,8 +2203,9 @@ class _AdminStudentDetailScreenState
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Voltar')),
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Voltar'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
             onPressed: () => Navigator.pop(c, true),
@@ -2187,11 +2232,13 @@ class _AdminStudentDetailScreenState
     // 'financial:create' extra permission (admins always allowed). A
     // presence-only professor can still grant presences from the attendance
     // tab, but never opens a charge dialog from here.
-    final canCreateCharge = currentUser != null &&
+    final canCreateCharge =
+        currentUser != null &&
         (currentUser.isAdmin || currentUser.hasPermission('financial:create'));
 
-    final aulasParticulares =
-        _payments.where((p) => p.isPrivateLesson).toList();
+    final aulasParticulares = _payments
+        .where((p) => p.isPrivateLesson)
+        .toList();
     final mensalidades = _payments
         .where((p) => p.type != 'avulsa' && !p.isPrivateLesson)
         .toList();
@@ -2371,8 +2418,11 @@ class _AdminStudentDetailScreenState
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(LucideIcons.plus,
-                        size: 14, color: AppTheme.primary),
+                    const Icon(
+                      LucideIcons.plus,
+                      size: 14,
+                      color: AppTheme.primary,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       'Adicionar',
@@ -2396,14 +2446,15 @@ class _AdminStudentDetailScreenState
             ),
           )
         else ...[
-          ...avulsas.map((payment) => _PaymentCard(
-                payment: payment,
-                onMarkPaid: canCreateCharge
-                    ? () => _markChargePaidCash(payment)
-                    : null,
-                onCancel:
-                    canCreateCharge ? () => _cancelCharge(payment) : null,
-              )),
+          ...avulsas.map(
+            (payment) => _PaymentCard(
+              payment: payment,
+              onMarkPaid: canCreateCharge
+                  ? () => _markChargePaidCash(payment)
+                  : null,
+              onCancel: canCreateCharge ? () => _cancelCharge(payment) : null,
+            ),
+          ),
           const SizedBox(height: 16),
         ],
         // Private lessons (aula particular) — cobrança avulsa que concede uma
@@ -2425,8 +2476,11 @@ class _AdminStudentDetailScreenState
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(LucideIcons.plus,
-                        size: 14, color: AppTheme.primary),
+                    const Icon(
+                      LucideIcons.plus,
+                      size: 14,
+                      color: AppTheme.primary,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       'Aula Particular',
@@ -2450,10 +2504,12 @@ class _AdminStudentDetailScreenState
             ),
           )
         else ...[
-          ...aulasParticulares.map((payment) => _PrivateLessonCard(
-                payment: payment,
-                onGrantPresence: () => _grantPrivateLessonPresence(payment),
-              )),
+          ...aulasParticulares.map(
+            (payment) => _PrivateLessonCard(
+              payment: payment,
+              onGrantPresence: () => _grantPrivateLessonPresence(payment),
+            ),
+          ),
           const SizedBox(height: 16),
         ],
         // Tuition payments
@@ -2467,14 +2523,15 @@ class _AdminStudentDetailScreenState
             ),
           ),
           const SizedBox(height: 8),
-          ...mensalidades.map((payment) => _PaymentCard(
-                payment: payment,
-                onMarkPaid: canCreateCharge
-                    ? () => _markChargePaidCash(payment)
-                    : null,
-                onCancel:
-                    canCreateCharge ? () => _cancelCharge(payment) : null,
-              )),
+          ...mensalidades.map(
+            (payment) => _PaymentCard(
+              payment: payment,
+              onMarkPaid: canCreateCharge
+                  ? () => _markChargePaidCash(payment)
+                  : null,
+              onCancel: canCreateCharge ? () => _cancelCharge(payment) : null,
+            ),
+          ),
         ],
         // Store orders
         if (_storeOrders.isNotEmpty) ...[
@@ -2523,7 +2580,9 @@ class _AdminStudentDetailScreenState
                     const SizedBox(height: 16),
                     TextField(
                       controller: valueController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       decoration: const InputDecoration(
                         labelText: 'Valor',
                         prefixText: 'R\$ ',
@@ -2533,7 +2592,9 @@ class _AdminStudentDetailScreenState
                     const SizedBox(height: 16),
                     Text(
                       'Vencimento',
-                      style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     InkWell(
@@ -2541,22 +2602,33 @@ class _AdminStudentDetailScreenState
                         final picked = await showDatePicker(
                           context: ctx,
                           initialDate: selectedDate,
-                          firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                          lastDate: DateTime.now().add(const Duration(days: 730)),
+                          firstDate: DateTime.now().subtract(
+                            const Duration(days: 365),
+                          ),
+                          lastDate: DateTime.now().add(
+                            const Duration(days: 730),
+                          ),
                         );
                         if (picked != null) {
                           setDialogState(() => selectedDate = picked);
                         }
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
                         decoration: BoxDecoration(
                           border: Border.all(color: AppTheme.divider),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Row(
                           children: [
-                            const Icon(LucideIcons.calendar, size: 16, color: AppTheme.textSecondary),
+                            const Icon(
+                              LucideIcons.calendar,
+                              size: 16,
+                              color: AppTheme.textSecondary,
+                            ),
                             const SizedBox(width: 8),
                             Text(
                               DateFormat('dd/MM/yyyy').format(selectedDate),
@@ -2569,8 +2641,9 @@ class _AdminStudentDetailScreenState
                     const SizedBox(height: 16),
                     Text(
                       'Formas de pagamento',
-                      style: AppTheme.bodySmall
-                          .copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Wrap(
@@ -2603,7 +2676,9 @@ class _AdminStudentDetailScreenState
                         : descController.text.trim();
                     Navigator.of(dialogContext).pop();
 
-                    final currentUser = ref.read(currentUserProvider).valueOrNull;
+                    final currentUser = ref
+                        .read(currentUserProvider)
+                        .valueOrNull;
                     final academyId = FirebaseService.academyId;
                     try {
                       final paymentService = PaymentService(academyId);
@@ -2676,7 +2751,8 @@ class _AdminStudentDetailScreenState
                     TextField(
                       controller: valueController,
                       keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true),
+                        decimal: true,
+                      ),
                       decoration: const InputDecoration(
                         labelText: 'Valor',
                         prefixText: 'R\$ ',
@@ -2686,8 +2762,9 @@ class _AdminStudentDetailScreenState
                     const SizedBox(height: 16),
                     Text(
                       'Data da aula',
-                      style: AppTheme.bodySmall
-                          .copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     InkWell(
@@ -2695,10 +2772,12 @@ class _AdminStudentDetailScreenState
                         final picked = await showDatePicker(
                           context: ctx,
                           initialDate: lessonDate,
-                          firstDate: DateTime.now()
-                              .subtract(const Duration(days: 365)),
-                          lastDate:
-                              DateTime.now().add(const Duration(days: 730)),
+                          firstDate: DateTime.now().subtract(
+                            const Duration(days: 365),
+                          ),
+                          lastDate: DateTime.now().add(
+                            const Duration(days: 730),
+                          ),
                         );
                         if (picked != null) {
                           setDialogState(() => lessonDate = picked);
@@ -2706,15 +2785,20 @@ class _AdminStudentDetailScreenState
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 12),
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
                         decoration: BoxDecoration(
                           border: Border.all(color: AppTheme.divider),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Row(
                           children: [
-                            const Icon(LucideIcons.calendar,
-                                size: 16, color: AppTheme.textSecondary),
+                            const Icon(
+                              LucideIcons.calendar,
+                              size: 16,
+                              color: AppTheme.textSecondary,
+                            ),
                             const SizedBox(width: 8),
                             Text(
                               DateFormat('dd/MM/yyyy').format(lessonDate),
@@ -2731,8 +2815,9 @@ class _AdminStudentDetailScreenState
                       children: [
                         Text(
                           'Conta como',
-                          style: AppTheme.bodySmall
-                              .copyWith(color: AppTheme.textSecondary),
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
                         ),
                         const Spacer(),
                         IconButton(
@@ -2743,8 +2828,9 @@ class _AdminStudentDetailScreenState
                         ),
                         Text(
                           '${weight.toInt()} presença${weight > 1 ? 's' : ''}',
-                          style: AppTheme.bodyMedium
-                              .copyWith(fontWeight: FontWeight.w600),
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         IconButton(
                           icon: const Icon(LucideIcons.plus, size: 18),
@@ -2758,8 +2844,9 @@ class _AdminStudentDetailScreenState
                       const SizedBox(height: 8),
                       Text(
                         'Esporte',
-                        style: AppTheme.bodySmall
-                            .copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                       const SizedBox(height: 8),
                       Wrap(
@@ -2768,8 +2855,7 @@ class _AdminStudentDetailScreenState
                           return ChoiceChip(
                             label: Text(getSport(s).label),
                             selected: sport == s,
-                            onSelected: (_) =>
-                                setDialogState(() => sport = s),
+                            onSelected: (_) => setDialogState(() => sport = s),
                           );
                         }).toList(),
                       ),
@@ -2777,8 +2863,9 @@ class _AdminStudentDetailScreenState
                     const SizedBox(height: 16),
                     Text(
                       'Formas de pagamento',
-                      style: AppTheme.bodySmall
-                          .copyWith(color: AppTheme.textSecondary),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Wrap(
@@ -2787,8 +2874,7 @@ class _AdminStudentDetailScreenState
                         return ChoiceChip(
                           label: Text(p.label),
                           selected: policy == p,
-                          onSelected: (_) =>
-                              setDialogState(() => policy = p),
+                          onSelected: (_) => setDialogState(() => policy = p),
                         );
                       }).toList(),
                     ),
@@ -2811,8 +2897,9 @@ class _AdminStudentDetailScreenState
                         : descController.text.trim();
                     Navigator.of(dialogContext).pop();
 
-                    final currentUser =
-                        ref.read(currentUserProvider).valueOrNull;
+                    final currentUser = ref
+                        .read(currentUserProvider)
+                        .valueOrNull;
                     try {
                       await PaymentService(FirebaseService.academyId).create(
                         studentId: widget.studentId,
@@ -2833,7 +2920,9 @@ class _AdminStudentDetailScreenState
                       );
                     } catch (e) {
                       if (parentContext.mounted) {
-                        parentContext.showError('Erro ao criar aula particular');
+                        parentContext.showError(
+                          'Erro ao criar aula particular',
+                        );
                       }
                       return;
                     }
@@ -2863,10 +2952,12 @@ class _AdminStudentDetailScreenState
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Conceder presença'),
-        content: Text(isPaid
-            ? 'Confirmar a presença desta aula particular para '
-                '${_student?.fullName ?? 'o aluno'}?'
-            : 'A cobrança ainda não foi paga. Como deseja conceder a presença?'),
+        content: Text(
+          isPaid
+              ? 'Confirmar a presença desta aula particular para '
+                    '${_student?.fullName ?? 'o aluno'}?'
+              : 'A cobrança ainda não foi paga. Como deseja conceder a presença?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
@@ -3089,7 +3180,10 @@ class _AdminStudentDetailScreenState
             child: Material(
               color: Colors.transparent,
               child: PopupMenuButton<String>(
-                icon: Icon(LucideIcons.settings2, color: AppTheme.textSecondary),
+                icon: Icon(
+                  LucideIcons.settings2,
+                  color: AppTheme.textSecondary,
+                ),
                 tooltip: 'Ações em massa',
                 onSelected: (value) {
                   switch (value) {
@@ -3193,7 +3287,8 @@ class _AdminStudentDetailScreenState
       var skipped = 0;
       for (final a in _achievements) {
         if (a.isPublic == isPublic) continue;
-        final beltBound = a.type == AchievementType.graduation ||
+        final beltBound =
+            a.type == AchievementType.graduation ||
             a.type == AchievementType.stripe;
         if (beltBound && !canGraduate) {
           skipped++;
@@ -3225,9 +3320,9 @@ class _AdminStudentDetailScreenState
       final result = await Fns.functions
           .httpsCallable('recomputeStudentMilestones')
           .call({
-        'academyId': FirebaseService.academyId,
-        'studentId': widget.studentId,
-      });
+            'academyId': FirebaseService.academyId,
+            'studentId': widget.studentId,
+          });
       final created = (result.data?['created'] as num?)?.toInt() ?? 0;
       if (parentContext.mounted) {
         parentContext.showSuccess(
@@ -3256,7 +3351,8 @@ class _AdminStudentDetailScreenState
   bool _canManageAchievement(Achievement achievement) {
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     if (currentUser == null) return false;
-    final beltBound = achievement.type == AchievementType.graduation ||
+    final beltBound =
+        achievement.type == AchievementType.graduation ||
         achievement.type == AchievementType.stripe;
     if (beltBound) {
       return currentUser.isAdmin ||
@@ -3301,11 +3397,14 @@ class _AdminStudentDetailScreenState
           final grades = getGradesForSport(
             selectedSport,
             category: _student?.category.value ?? 'adult',
-            muaythaiVariant:
-                selectedSport == SportId.muaythai ? muaythaiVariant : null,
+            muaythaiVariant: selectedSport == SportId.muaythai
+                ? muaythaiVariant
+                : null,
           );
           final maxStripesForSport = grades.fold<int>(
-              0, (m, g) => g.maxStripes > m ? g.maxStripes : m);
+            0,
+            (m, g) => g.maxStripes > m ? g.maxStripes : m,
+          );
           final stripeMax = maxStripesForSport > 0 ? maxStripesForSport : 4;
           if (selectedBelt != null &&
               !grades.any((g) => g.id == selectedBelt)) {
@@ -3361,8 +3460,7 @@ class _AdminStudentDetailScreenState
                         selectedType = value!;
                         // Visibility default follows the owner decision:
                         // streak/ranking → public; PR → private; others public.
-                        isPublic =
-                            selectedType != AchievementType.trainingPr;
+                        isPublic = selectedType != AchievementType.trainingPr;
                       });
                     },
                   ),
@@ -3493,9 +3591,7 @@ class _AdminStudentDetailScreenState
                     TextField(
                       controller: streakDaysController,
                       keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
                         hintText: 'Ex: 30',
@@ -3521,9 +3617,7 @@ class _AdminStudentDetailScreenState
                     TextField(
                       controller: rankingRankController,
                       keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
                         hintText: 'Ex: 1',
@@ -3558,7 +3652,8 @@ class _AdminStudentDetailScreenState
                                 controller: prValueController,
                                 keyboardType:
                                     const TextInputType.numberWithOptions(
-                                        decimal: true),
+                                      decimal: true,
+                                    ),
                                 decoration: const InputDecoration(
                                   border: OutlineInputBorder(),
                                   hintText: 'Ex: 120',
@@ -3628,7 +3723,9 @@ class _AdminStudentDetailScreenState
                         context: dialogContext,
                         initialDate: selectedDate,
                         firstDate: DateTime(2000),
-                        lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
+                        lastDate: DateTime.now().add(
+                          const Duration(days: 365 * 5),
+                        ),
                         locale: const Locale('pt', 'BR'),
                       );
                       if (picked != null) {
@@ -3687,15 +3784,15 @@ class _AdminStudentDetailScreenState
                 onPressed: () async {
                   // Permission gate: belt-bound types need graduation:manage;
                   // generic/gamification markers need staff.
-                  final currentUser =
-                      ref.read(currentUserProvider).valueOrNull;
+                  final currentUser = ref.read(currentUserProvider).valueOrNull;
                   final beltBound =
                       selectedType == AchievementType.graduation ||
-                          selectedType == AchievementType.stripe;
-                  final allowed = currentUser != null &&
+                      selectedType == AchievementType.stripe;
+                  final allowed =
+                      currentUser != null &&
                       (beltBound
                           ? (currentUser.isAdmin ||
-                              currentUser.hasPermission('graduation:manage'))
+                                currentUser.hasPermission('graduation:manage'))
                           : currentUser.isInstructor);
                   if (!allowed) {
                     parentContext.showError(
@@ -3753,34 +3850,39 @@ class _AdminStudentDetailScreenState
                       toStripes: selectedType == AchievementType.stripe
                           ? selectedStripes
                           : null,
-                      sport: (selectedType == AchievementType.graduation ||
+                      sport:
+                          (selectedType == AchievementType.graduation ||
                               selectedType == AchievementType.stripe)
                           ? selectedSport.value
                           : null,
-                      streakDays: selectedType ==
-                              AchievementType.attendanceStreak
+                      streakDays:
+                          selectedType == AchievementType.attendanceStreak
                           ? int.tryParse(streakDaysController.text.trim())
                           : null,
                       rankingScope:
                           selectedType == AchievementType.rankingPosition &&
-                                  rankingScopeController.text.trim().isNotEmpty
-                              ? rankingScopeController.text.trim()
-                              : null,
-                      rankingRank: selectedType ==
-                              AchievementType.rankingPosition
+                              rankingScopeController.text.trim().isNotEmpty
+                          ? rankingScopeController.text.trim()
+                          : null,
+                      rankingRank:
+                          selectedType == AchievementType.rankingPosition
                           ? int.tryParse(rankingRankController.text.trim())
                           : null,
                       prMetric:
                           selectedType == AchievementType.trainingPr &&
-                                  prMetricController.text.trim().isNotEmpty
-                              ? prMetricController.text.trim()
-                              : null,
+                              prMetricController.text.trim().isNotEmpty
+                          ? prMetricController.text.trim()
+                          : null,
                       prValue: selectedType == AchievementType.trainingPr
                           ? num.tryParse(
-                              prValueController.text.trim().replaceAll(',', '.'),
+                              prValueController.text.trim().replaceAll(
+                                ',',
+                                '.',
+                              ),
                             )
                           : null,
-                      prUnit: selectedType == AchievementType.trainingPr &&
+                      prUnit:
+                          selectedType == AchievementType.trainingPr &&
                               prUnitController.text.trim().isNotEmpty
                           ? prUnitController.text.trim()
                           : null,
@@ -3819,12 +3921,14 @@ class _AdminStudentDetailScreenState
     DateTime selectedDate = achievement.date;
     bool isPublic = achievement.isPublic;
     final titleController = TextEditingController(text: achievement.title);
-    final descriptionController =
-        TextEditingController(text: achievement.description ?? '');
+    final descriptionController = TextEditingController(
+      text: achievement.description ?? '',
+    );
 
     // Graduation/stripe titles are derived from belt/stripe data — keep the
     // title read-only for those; description/date/visibility remain editable.
-    final isBeltBound = achievement.type == AchievementType.graduation ||
+    final isBeltBound =
+        achievement.type == AchievementType.graduation ||
         achievement.type == AchievementType.stripe;
 
     // Store parent context before dialog
@@ -3938,8 +4042,7 @@ class _AdminStudentDetailScreenState
               ),
               FilledButton(
                 onPressed: () async {
-                  if (!isBeltBound &&
-                      titleController.text.trim().isEmpty) {
+                  if (!isBeltBound && titleController.text.trim().isEmpty) {
                     parentContext.showError('Informe o título');
                     return;
                   }
@@ -3955,8 +4058,8 @@ class _AdminStudentDetailScreenState
                       'isPublic': isPublic,
                       'description':
                           descriptionController.text.trim().isNotEmpty
-                              ? descriptionController.text.trim()
-                              : null,
+                          ? descriptionController.text.trim()
+                          : null,
                     };
                     // Only persist a custom title for non-derived types.
                     if (!isBeltBound) {
@@ -4517,9 +4620,9 @@ class _AdminStudentDetailScreenState
     // evento errado — grau dado sem querer, resultado lançado errado. Some da
     // ficha E da Jornada do aluno (que lê estas mesmas coleções).
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
-    final canFixHistory = currentUser != null &&
-        (currentUser.isAdmin ||
-            currentUser.hasPermission('graduation:manage'));
+    final canFixHistory =
+        currentUser != null &&
+        (currentUser.isAdmin || currentUser.hasPermission('graduation:manage'));
 
     // Add progressions
     for (final p in _progressions) {
@@ -4592,11 +4695,12 @@ class _AdminStudentDetailScreenState
                 ? null
                 : IconButton(
                     icon: Icon(
-                        item.progression != null
-                            ? LucideIcons.pencil
-                            : LucideIcons.trash2,
-                        size: 18,
-                        color: AppTheme.textSecondary),
+                      item.progression != null
+                          ? LucideIcons.pencil
+                          : LucideIcons.trash2,
+                      size: 18,
+                      color: AppTheme.textSecondary,
+                    ),
                     tooltip: item.progression != null
                         ? 'Corrigir / reverter graduação'
                         : 'Remover registro',
@@ -4650,8 +4754,9 @@ class _AdminStudentDetailScreenState
   }
 
   Future<void> _deleteProgression(BeltProgression p) async {
-    await BeltProgressionService(FirebaseService.academyId)
-        .deleteProgression(p.id);
+    await BeltProgressionService(
+      FirebaseService.academyId,
+    ).deleteProgression(p.id);
     await _hideProgressionFeedPost(p);
   }
 
@@ -4665,7 +4770,9 @@ class _AdminStudentDetailScreenState
           FeedPost.gradId(uid, p.promotionDate, p.newBelt, p.newStripes),
           true,
         );
-      } catch (_) {/* post pode nem existir */}
+      } catch (_) {
+        /* post pode nem existir */
+      }
     }
   }
 
@@ -4683,7 +4790,8 @@ class _AdminStudentDetailScreenState
     if (!_ensurePermission('graduation:manage')) return;
     final sport = p.getSport();
     final grade = _student?.getGrade(sport);
-    final isCurrentStanding = grade != null &&
+    final isCurrentStanding =
+        grade != null &&
         grade.currentGrade == p.newBelt &&
         grade.currentStripes == p.newStripes;
     final prevStamp = _gradeStamp(sport, p.previousBelt, p.previousStripes);
@@ -4713,16 +4821,20 @@ class _AdminStudentDetailScreenState
                 ),
               ),
               const SizedBox(height: 16),
-              Text('Corrigir graduação',
-                  style: AppTheme.titleLarge
-                      .copyWith(fontWeight: FontWeight.w700)),
+              Text(
+                'Corrigir graduação',
+                style: AppTheme.titleLarge.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 4),
               Text(
                 p.isBeltChange
                     ? 'Registro: $prevStamp → $newStamp'
                     : 'Registro: $newStamp',
-                style:
-                    AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
               const SizedBox(height: 16),
               if (isCurrentStanding) ...[
@@ -4730,18 +4842,24 @@ class _AdminStudentDetailScreenState
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(LucideIcons.undo2, color: AppTheme.warning),
                   title: const Text('Reverter faixa'),
-                  subtitle: Text('Volta o aluno para $prevStamp e apaga este '
-                      'registro.'),
+                  subtitle: Text(
+                    'Volta o aluno para $prevStamp e apaga este '
+                    'registro.',
+                  ),
                   onTap: () => Navigator.pop(ctx, 'revert'),
                 ),
                 const Divider(height: 8),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading:
-                      Icon(LucideIcons.trash2, color: AppTheme.textSecondary),
+                  leading: Icon(
+                    LucideIcons.trash2,
+                    color: AppTheme.textSecondary,
+                  ),
                   title: const Text('Remover só do histórico'),
-                  subtitle: Text('Mantém a faixa atual ($newStamp); apaga só o '
-                      'registro.'),
+                  subtitle: Text(
+                    'Mantém a faixa atual ($newStamp); apaga só o '
+                    'registro.',
+                  ),
                   onTap: () => Navigator.pop(ctx, 'history'),
                 ),
               ] else ...[
@@ -4760,8 +4878,9 @@ class _AdminStudentDetailScreenState
                           'A faixa atual do aluno não é mais esta (ele foi '
                           'graduado depois). Dá para remover este registro '
                           'antigo do histórico.',
-                          style: AppTheme.bodySmall
-                              .copyWith(color: AppTheme.textSecondary),
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
                         ),
                       ),
                     ],
@@ -4770,8 +4889,10 @@ class _AdminStudentDetailScreenState
                 const SizedBox(height: 12),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading:
-                      Icon(LucideIcons.trash2, color: AppTheme.textSecondary),
+                  leading: Icon(
+                    LucideIcons.trash2,
+                    color: AppTheme.textSecondary,
+                  ),
                   title: const Text('Remover do histórico'),
                   onTap: () => Navigator.pop(ctx, 'history'),
                 ),
@@ -4785,13 +4906,16 @@ class _AdminStudentDetailScreenState
     if (action == null || !mounted) return;
     try {
       if (action == 'revert') {
-        final reverted = await BeltProgressionService(FirebaseService.academyId)
-            .undoProgression(p);
+        final reverted = await BeltProgressionService(
+          FirebaseService.academyId,
+        ).undoProgression(p);
         await _hideProgressionFeedPost(p);
         if (mounted) {
-          context.showSuccess(reverted
-              ? 'Graduação desfeita. Aluno voltou para $prevStamp.'
-              : 'Registro removido. A faixa atual não foi alterada.');
+          context.showSuccess(
+            reverted
+                ? 'Graduação desfeita. Aluno voltou para $prevStamp.'
+                : 'Registro removido. A faixa atual não foi alterada.',
+          );
           _loadData();
         }
       } else if (action == 'history') {
@@ -4816,7 +4940,9 @@ class _AdminStudentDetailScreenState
           FeedPost.compId(uid, a.date, name),
           true,
         );
-      } catch (_) {/* post pode nem existir */}
+      } catch (_) {
+        /* post pode nem existir */
+      }
     }
   }
 
@@ -4824,7 +4950,8 @@ class _AdminStudentDetailScreenState
   /// mesmo que o item de menu já tenha sido gateado na UI.
   bool _ensurePermission(String permission) {
     final currentUser = ref.read(currentUserProvider).valueOrNull;
-    final allowed = currentUser != null &&
+    final allowed =
+        currentUser != null &&
         (currentUser.isAdmin || currentUser.hasPermission(permission));
     if (!allowed && mounted) {
       context.showError('Você não tem permissão para esta ação.');
@@ -4880,15 +5007,19 @@ class _AdminStudentDetailScreenState
                   const SizedBox(height: 16),
                   Row(
                     children: [
-                      const Icon(Icons.info_outline,
-                          size: 18, color: AppTheme.textSecondary),
+                      const Icon(
+                        Icons.info_outline,
+                        size: 18,
+                        color: AppTheme.textSecondary,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'A modalidade ${getSport(selectedSport).label} '
                           'não possui sistema de graduação.',
-                          style: AppTheme.bodySmall
-                              .copyWith(color: AppTheme.textSecondary),
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
                         ),
                       ),
                     ],
@@ -4918,57 +5049,69 @@ class _AdminStudentDetailScreenState
                 // pela escada correta da categoria).
                 if (hasGrades) ...[
                   const SizedBox(height: 16),
-                  Builder(builder: (context) {
-                    final bool asStripe = isStripe && hasStripes;
-                    final nextGrade =
-                        asStripe ? currentGrade : _getNextGrade(selectedSport, currentGrade);
-                    final maxStripes =
-                        getGradeDefinition(selectedSport, currentGrade)?.maxStripes ?? 0;
-                    final atStripeCap = asStripe && currentStripes >= maxStripes;
-                    final atBeltCap = !asStripe && nextGrade == currentGrade;
-                    final blocked = atStripeCap || atBeltCap;
-                    final label = asStripe
-                        ? '${currentStripes + 1}º grau • ${getGradeLabel(selectedSport, currentGrade)}'
-                        : 'Faixa ${getGradeLabel(selectedSport, nextGrade)}';
-                    return Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: (blocked ? AppTheme.error : AppTheme.success)
-                            .withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
+                  Builder(
+                    builder: (context) {
+                      final bool asStripe = isStripe && hasStripes;
+                      final nextGrade = asStripe
+                          ? currentGrade
+                          : _getNextGrade(selectedSport, currentGrade);
+                      final maxStripes =
+                          getGradeDefinition(
+                            selectedSport,
+                            currentGrade,
+                          )?.maxStripes ??
+                          0;
+                      final atStripeCap =
+                          asStripe && currentStripes >= maxStripes;
+                      final atBeltCap = !asStripe && nextGrade == currentGrade;
+                      final blocked = atStripeCap || atBeltCap;
+                      final label = asStripe
+                          ? '${currentStripes + 1}º grau • ${getGradeLabel(selectedSport, currentGrade)}'
+                          : 'Faixa ${getGradeLabel(selectedSport, nextGrade)}';
+                      return Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: (blocked ? AppTheme.error : AppTheme.success)
+                              .withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
                             color: (blocked ? AppTheme.error : AppTheme.success)
-                                .withValues(alpha: 0.3)),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            blocked
-                                ? LucideIcons.alertTriangle
-                                : LucideIcons.arrowRight,
-                            size: 16,
-                            color: blocked ? AppTheme.error : AppTheme.success,
+                                .withValues(alpha: 0.3),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
                               blocked
-                                  ? (atStripeCap
-                                      ? 'Já está no máximo de graus — troque para "Faixa".'
-                                      : 'Já é a última faixa da modalidade.')
-                                  : label,
-                              style: AppTheme.bodySmall.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color:
-                                    blocked ? AppTheme.error : AppTheme.success,
+                                  ? LucideIcons.alertTriangle
+                                  : LucideIcons.arrowRight,
+                              size: 16,
+                              color: blocked
+                                  ? AppTheme.error
+                                  : AppTheme.success,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                blocked
+                                    ? (atStripeCap
+                                          ? 'Já está no máximo de graus — troque para "Faixa".'
+                                          : 'Já é a última faixa da modalidade.')
+                                    : label,
+                                style: AppTheme.bodySmall.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: blocked
+                                      ? AppTheme.error
+                                      : AppTheme.success,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ],
             ),
@@ -4977,67 +5120,75 @@ class _AdminStudentDetailScreenState
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Cancelar'),
               ),
-              Builder(builder: (context) {
-              // Bloqueia confirmar quando não há o que graduar: sem sistema de
-              // faixa, no teto de graus, ou já na última faixa (evita gravar
-              // uma "graduação" no-op que ainda soltava confete + registro).
-              final bool asStripe = isStripe && hasStripes;
-              final maxStripes =
-                  getGradeDefinition(selectedSport, currentGrade)?.maxStripes ?? 0;
-              final atStripeCap = asStripe && currentStripes >= maxStripes;
-              final atBeltCap =
-                  !asStripe && _getNextGrade(selectedSport, currentGrade) == currentGrade;
-              final canConfirm = hasGrades && !atStripeCap && !atBeltCap;
-              return FilledButton(
-                onPressed: !canConfirm
-                    ? null
-                    : () async {
-                  try {
-                    final service = BeltProgressionService(
-                      FirebaseService.academyId,
-                    );
-
-                    if (isStripe && hasStripes) {
-                      await service.addStripe(
-                        studentId: _student!.id,
-                        studentName: _student!.fullName,
-                        promotedBy: 'admin',
-                        promotedByName: 'Administrador',
-                        sportId: selectedSport,
-                      );
-                    } else if (hasGrades) {
-                      final nextGrade = _getNextGrade(
+              Builder(
+                builder: (context) {
+                  // Bloqueia confirmar quando não há o que graduar: sem sistema de
+                  // faixa, no teto de graus, ou já na última faixa (evita gravar
+                  // uma "graduação" no-op que ainda soltava confete + registro).
+                  final bool asStripe = isStripe && hasStripes;
+                  final maxStripes =
+                      getGradeDefinition(
                         selectedSport,
                         currentGrade,
-                      );
-                      await service.changeBelt(
-                        studentId: _student!.id,
-                        studentName: _student!.fullName,
-                        newBelt: nextGrade,
-                        promotedBy: 'admin',
-                        promotedByName: 'Administrador',
-                        sportId: selectedSport,
-                      );
-                    }
+                      )?.maxStripes ??
+                      0;
+                  final atStripeCap = asStripe && currentStripes >= maxStripes;
+                  final atBeltCap =
+                      !asStripe &&
+                      _getNextGrade(selectedSport, currentGrade) ==
+                          currentGrade;
+                  final canConfirm = hasGrades && !atStripeCap && !atBeltCap;
+                  return FilledButton(
+                    onPressed: !canConfirm
+                        ? null
+                        : () async {
+                            try {
+                              final service = BeltProgressionService(
+                                FirebaseService.academyId,
+                              );
 
-                    if (mounted) {
-                      Navigator.pop(context);
-                      // Genuine win — celebrate the promotion.
-                      Celebration.confetti(this.context);
-                      this.context.showSuccess(
-                        'Graduação realizada com sucesso!',
-                      );
-                      _loadData();
-                    }
-                  } catch (e) {
-                    if (mounted) {
-                      this.context.showError('Erro: $e');
-                    }
-                  }
+                              if (isStripe && hasStripes) {
+                                await service.addStripe(
+                                  studentId: _student!.id,
+                                  studentName: _student!.fullName,
+                                  promotedBy: 'admin',
+                                  promotedByName: 'Administrador',
+                                  sportId: selectedSport,
+                                );
+                              } else if (hasGrades) {
+                                final nextGrade = _getNextGrade(
+                                  selectedSport,
+                                  currentGrade,
+                                );
+                                await service.changeBelt(
+                                  studentId: _student!.id,
+                                  studentName: _student!.fullName,
+                                  newBelt: nextGrade,
+                                  promotedBy: 'admin',
+                                  promotedByName: 'Administrador',
+                                  sportId: selectedSport,
+                                );
+                              }
+
+                              if (mounted) {
+                                Navigator.pop(context);
+                                // Genuine win — celebrate the promotion.
+                                Celebration.confetti(this.context);
+                                this.context.showSuccess(
+                                  'Graduação realizada com sucesso!',
+                                );
+                                _loadData();
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                this.context.showError('Erro: $e');
+                              }
+                            }
+                          },
+                    child: const Text('Confirmar'),
+                  );
                 },
-                child: const Text('Confirmar'),
-              );
-              }),
+              ),
             ],
           );
         },
@@ -5052,8 +5203,9 @@ class _AdminStudentDetailScreenState
     final grades = getGradesForSport(
       sportId,
       category: _student?.category.value ?? 'adult',
-      muaythaiVariant:
-          sportId == SportId.muaythai ? resolveMuaythaiVariant(current) : null,
+      muaythaiVariant: sportId == SportId.muaythai
+          ? resolveMuaythaiVariant(current)
+          : null,
     );
     final index = grades.indexWhere((g) => g.id == current);
     if (index >= 0 && index < grades.length - 1) {
@@ -5486,7 +5638,8 @@ class _PaymentCard extends StatelessWidget {
     };
     // Só cobranças NÃO terminais (pendente/vencida) e não-reembolso podem ser
     // marcadas/canceladas. Pago/cancelado são estados finais.
-    final canAct = (onMarkPaid != null || onCancel != null) &&
+    final canAct =
+        (onMarkPaid != null || onCancel != null) &&
         !payment.isOvercharge &&
         payment.status != PaymentStatus.paid &&
         payment.status != PaymentStatus.cancelled;
@@ -5511,6 +5664,16 @@ class _PaymentCard extends StatelessWidget {
                 'Pago em: ${DateFormat('dd/MM/yyyy').format(payment.paidAt!)}',
                 style: const TextStyle(color: Colors.green),
               ),
+            if (payment.isManualPersonalPix)
+              Text(
+                'PIX pessoal confirmado por '
+                '${payment.manualPaymentConfirmedByName ?? 'Administrador'} '
+                'em ${DateFormat('dd/MM/yyyy HH:mm').format(payment.manualPaymentConfirmedAt!)}',
+                style: const TextStyle(
+                  color: Colors.green,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             // Cobrança indevida de assinatura — dinheiro a devolver, não
             // receita; destacada para o professor não confundir com 'Pago'.
             if (payment.isOvercharge)
@@ -5533,13 +5696,17 @@ class _PaymentCard extends StatelessWidget {
               children: [
                 Text(
                   'R\$ ${payment.value.toStringAsFixed(2)}',
-                  style:
-                      const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: statusColors[payment.status]?.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
@@ -5567,22 +5734,32 @@ class _PaymentCard extends StatelessWidget {
                   if (onMarkPaid != null)
                     const PopupMenuItem(
                       value: 'paid',
-                      child: Row(children: [
-                        Icon(Icons.check_circle_outline,
-                            size: 18, color: Colors.green),
-                        SizedBox(width: 10),
-                        Text('Marcar como pago (dinheiro)'),
-                      ]),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            size: 18,
+                            color: Colors.green,
+                          ),
+                          SizedBox(width: 10),
+                          Text('Marcar como pago (dinheiro)'),
+                        ],
+                      ),
                     ),
                   if (onCancel != null)
                     const PopupMenuItem(
                       value: 'cancel',
-                      child: Row(children: [
-                        Icon(Icons.cancel_outlined,
-                            size: 18, color: Colors.red),
-                        SizedBox(width: 10),
-                        Text('Cancelar cobrança'),
-                      ]),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.cancel_outlined,
+                            size: 18,
+                            color: Colors.red,
+                          ),
+                          SizedBox(width: 10),
+                          Text('Cancelar cobrança'),
+                        ],
+                      ),
                     ),
                 ],
               ),
@@ -5626,10 +5803,12 @@ class _PrivateLessonCard extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 18,
-                  backgroundColor:
-                      AppTheme.primary.withValues(alpha: 0.15),
-                  child: const Icon(LucideIcons.userCheck,
-                      size: 18, color: AppTheme.primary),
+                  backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
+                  child: const Icon(
+                    LucideIcons.userCheck,
+                    size: 18,
+                    color: AppTheme.primary,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -5642,8 +5821,9 @@ class _PrivateLessonCard extends StatelessWidget {
                       ),
                       Text(
                         'Aula: ${DateFormat('dd/MM/yyyy').format(payment.dueDate)}',
-                        style: AppTheme.bodySmall
-                            .copyWith(color: AppTheme.textSecondary),
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
                     ],
                   ),
@@ -5654,15 +5834,20 @@ class _PrivateLessonCard extends StatelessWidget {
                     Text(
                       'R\$ ${payment.value.toStringAsFixed(2)}',
                       style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 14),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
-                        color: statusColors[payment.status]
-                            ?.withValues(alpha: 0.2),
+                        color: statusColors[payment.status]?.withValues(
+                          alpha: 0.2,
+                        ),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -5683,8 +5868,7 @@ class _PrivateLessonCard extends StatelessWidget {
             if (granted)
               Row(
                 children: [
-                  const Icon(LucideIcons.check,
-                      size: 14, color: Colors.green),
+                  const Icon(LucideIcons.check, size: 14, color: Colors.green),
                   const SizedBox(width: 4),
                   Text(
                     'Presença concedida',
@@ -5704,7 +5888,9 @@ class _PrivateLessonCard extends StatelessWidget {
                   label: const Text('Conceder presença'),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 4),
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
                     visualDensity: VisualDensity.compact,
                   ),
                 ),
