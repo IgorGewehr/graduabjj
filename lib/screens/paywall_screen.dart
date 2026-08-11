@@ -399,7 +399,7 @@ class _Header extends StatelessWidget {
       children: [
         // Logo
         Image.asset(
-          'assets/images/mydojo_logo.png',
+          'assets/images/mydojo_logo_vertical.png',
           height: 80,
         ),
         const SizedBox(height: 20),

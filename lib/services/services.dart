@@ -4,6 +4,7 @@ export 'global_user_service.dart';
 export 'student_service.dart';
 export 'attendance_service.dart';
 export 'qr_attendance_service.dart';
+export 'fixed_academy_qr_service.dart';
 export 'musculacao_checkin_service.dart';
 export 'achievement_service.dart';
 export 'assessment_service.dart';

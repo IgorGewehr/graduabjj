@@ -40,6 +40,9 @@ class AppUpdateService {
       if (Platform.isIOS) {
         return await _checkAppStore();
       }
+      if (Platform.isWindows) {
+        return await _checkWindowsUpdate();
+      }
     } catch (_) {
       // fail-safe: qualquer erro = não avisa.
     }
@@ -69,6 +72,31 @@ class AppUpdateService {
       available: _isNewer(storeVersion, pkg.version),
       storeUrl: storeUrl.isNotEmpty ? storeUrl : null,
     );
+  }
+
+  /// Windows Desktop: consulta manifesto de versão para obter a versão mais recente
+  /// e o link para o instalador GraduaBJJ-Setup.exe.
+  static Future<AppUpdateStatus> _checkWindowsUpdate() async {
+    try {
+      final pkg = await PackageInfo.fromPlatform();
+      final uri = Uri.parse(
+        'https://raw.githubusercontent.com/IgorGewehr/graduabjj/b2c/docs/windows_version.json',
+      );
+      final res = await http.get(uri).timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) return AppUpdateStatus.none;
+
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final latestVersion = (body['version'] ?? '').toString();
+      final setupUrl = (body['setupUrl'] ?? '').toString();
+      if (latestVersion.isEmpty) return AppUpdateStatus.none;
+
+      return AppUpdateStatus(
+        available: _isNewer(latestVersion, pkg.version),
+        storeUrl: setupUrl.isNotEmpty ? setupUrl : null,
+      );
+    } catch (_) {
+      return AppUpdateStatus.none;
+    }
   }
 
   /// True se [store] for maior que [installed] comparando campo a campo

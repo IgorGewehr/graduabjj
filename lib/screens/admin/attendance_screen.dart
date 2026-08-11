@@ -13,8 +13,10 @@ import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../services/checkin_service.dart';
 import '../../widgets/checkin_confirm_dialog.dart';
+import '../../widgets/common/debounced_search_field.dart';
 import '../../widgets/onboarding/quick_create_class_form.dart';
 import '../../widgets/polish/polish.dart';
+import 'widgets/attendance_student_filter.dart';
 
 /// Admin Attendance Screen - Mobile-optimized matching webapp UX
 class AdminAttendanceScreen extends ConsumerStatefulWidget {
@@ -292,10 +294,11 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   Future<void> _showAddStudentDialog() async {
     if (_selectedClass == null) return;
 
-    final outsiders = _students
-        .where((s) => !_selectedClass!.studentIds.contains(s.id))
-        .toList()
-      ..sort((a, b) => a.fullName.compareTo(b.fullName));
+    final outsiders =
+        _students
+            .where((s) => !_selectedClass!.studentIds.contains(s.id))
+            .toList()
+          ..sort((a, b) => a.fullName.compareTo(b.fullName));
 
     final result = await showModalBottomSheet<_AddStudentResult>(
       context: context,
@@ -330,7 +333,10 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
 
       // Enroll in the class (adds to studentIds + seeds the sport's grade),
       // so the student becomes part of the roster and can graduate in it.
-      final updated = await classService.addStudent(_selectedClass!.id, student.id);
+      final updated = await classService.addStudent(
+        _selectedClass!.id,
+        student.id,
+      );
 
       // Mark present for this session right away.
       if (!_presentStudentIds.contains(student.id)) {
@@ -360,7 +366,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
       }
     } catch (e) {
       if (mounted) {
-        context.showError('Erro: ${e.toString().replaceAll('Exception: ', '')}');
+        context.showError(
+          'Erro: ${e.toString().replaceAll('Exception: ', '')}',
+        );
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -579,41 +587,13 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   }
 
   List<Student> _getFilteredStudents() {
-    var filteredStudents = _students;
-
-    // Filter by search
-    if (_searchQuery.isNotEmpty) {
-      filteredStudents = filteredStudents
-          .where(
-            (s) =>
-                s.fullName.toLowerCase().contains(_searchQuery) ||
-                (s.nickname?.toLowerCase().contains(_searchQuery) ?? false),
-          )
-          .toList();
-    }
-
-    // Filter by class students
-    if (_selectedClass != null) {
-      filteredStudents = filteredStudents
-          .where((s) => _selectedClass!.studentIds.contains(s.id))
-          .toList();
-    }
-
-    // Filter by presence status
-    if (_filterMode == 'present') {
-      filteredStudents = filteredStudents
-          .where((s) => _presentStudentIds.contains(s.id))
-          .toList();
-    } else if (_filterMode == 'absent') {
-      filteredStudents = filteredStudents
-          .where((s) => !_presentStudentIds.contains(s.id))
-          .toList();
-    }
-
-    // Sort alphabetically
-    filteredStudents.sort((a, b) => a.fullName.compareTo(b.fullName));
-
-    return filteredStudents;
+    return filterAttendanceStudents(
+      students: _students,
+      searchQuery: _searchQuery,
+      classStudentIds: _selectedClass?.studentIds.toSet(),
+      presentStudentIds: _presentStudentIds,
+      filterMode: _filterMode,
+    );
   }
 
   int get _totalCount {
@@ -681,7 +661,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                                 color: AppTheme.primary.withValues(alpha: 0.08),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: AppTheme.primary.withValues(alpha: 0.2),
+                                  color: AppTheme.primary.withValues(
+                                    alpha: 0.2,
+                                  ),
                                 ),
                               ),
                               child: Row(
@@ -870,45 +852,12 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   }
 
   Widget _buildSearchBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: TextField(
-        controller: _searchController,
-        decoration: InputDecoration(
-          hintText: 'Buscar aluno...',
-          hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.textDisabled),
-          prefixIcon: Icon(
-            LucideIcons.search,
-            color: AppTheme.textSecondary,
-            size: 20,
-          ),
-          suffixIcon: _searchQuery.isNotEmpty
-              ? IconButton(
-                  icon: Icon(
-                    LucideIcons.x,
-                    color: AppTheme.textSecondary,
-                    size: 18,
-                  ),
-                  onPressed: () {
-                    _searchController.clear();
-                    setState(() => _searchQuery = '');
-                  },
-                )
-              : null,
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 14,
-          ),
-        ),
-        onChanged: (value) {
-          setState(() => _searchQuery = value.toLowerCase());
-        },
-      ),
+    return DebouncedSearchField(
+      controller: _searchController,
+      hintText: 'Buscar aluno...',
+      onChanged: (value) {
+        setState(() => _searchQuery = value.toLowerCase());
+      },
     );
   }
 
@@ -1216,6 +1165,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           final isPresent = _presentStudentIds.contains(student.id);
 
           return _AttendanceStudentCard(
+            key: ValueKey(student.id),
             student: student,
             isPresent: isPresent,
             onTap: () => _toggleAttendance(student),
@@ -1535,6 +1485,7 @@ class _AttendanceStudentCard extends StatelessWidget {
   final VoidCallback onTap;
 
   const _AttendanceStudentCard({
+    super.key,
     required this.student,
     required this.isPresent,
     required this.onTap,
@@ -1640,7 +1591,10 @@ class _AttendanceStudentCard extends StatelessWidget {
   }
 
   Widget _buildBeltIndicator() {
-    final beltColor = _getBeltColor(student.currentBelt, sportId: student.getPrimarySport());
+    final beltColor = _getBeltColor(
+      student.currentBelt,
+      sportId: student.getPrimarySport(),
+    );
     final stripes = student.currentStripes.clamp(0, 4);
 
     return Row(
@@ -1691,9 +1645,7 @@ class _AddStudentResult {
   final Student? student;
   final bool createNew;
   const _AddStudentResult.existing(this.student) : createNew = false;
-  const _AddStudentResult.create()
-      : student = null,
-        createNew = true;
+  const _AddStudentResult.create() : student = null, createNew = true;
 }
 
 /// Bottom sheet that lists active students not yet in the selected class,
@@ -1722,12 +1674,12 @@ class _AddStudentSheetState extends State<_AddStudentSheet> {
     final filtered = _query.isEmpty
         ? widget.outsiders
         : widget.outsiders
-            .where(
-              (s) =>
-                  s.fullName.toLowerCase().contains(_query) ||
-                  (s.nickname?.toLowerCase().contains(_query) ?? false),
-            )
-            .toList();
+              .where(
+                (s) =>
+                    s.fullName.toLowerCase().contains(_query) ||
+                    (s.nickname?.toLowerCase().contains(_query) ?? false),
+              )
+              .toList();
 
     return DraggableScrollableSheet(
       initialChildSize: 0.7,
@@ -1786,9 +1738,7 @@ class _AddStudentSheetState extends State<_AddStudentSheet> {
               const SizedBox(height: 8),
               Expanded(
                 child: filtered.isEmpty
-                    ? const Center(
-                        child: Text('Nenhum aluno fora da turma.'),
-                      )
+                    ? const Center(child: Text('Nenhum aluno fora da turma.'))
                     : ListView.builder(
                         controller: scrollController,
                         itemCount: filtered.length,
@@ -1805,8 +1755,8 @@ class _AddStudentSheetState extends State<_AddStudentSheet> {
                             title: Text(s.fullName),
                             subtitle:
                                 (s.nickname != null && s.nickname!.isNotEmpty)
-                                    ? Text(s.nickname!)
-                                    : null,
+                                ? Text(s.nickname!)
+                                : null,
                             trailing: const Icon(LucideIcons.plus, size: 18),
                             onTap: () => Navigator.pop(
                               context,

@@ -18,7 +18,7 @@ class _C {
   static const bone = Color(0xFFF4F3EF);
   static const card = Color(0xFFFFFFFF);
   static const ink = Color(0xFF0A0A0A);
-  static const blood = Color(0xFFE0301E);
+  static const blood = Color(0xFFB91C1C);
   static const smoke = Color(0xFF6E6E68);
   static const ash = Color(0xFF9A9A93);
 }
@@ -176,9 +176,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   // Logo da marca
                   Center(
                     child: Image.asset(
-                      'assets/images/mydojo_logo.png',
-                      width: 140,
-                      height: 140,
+                      'assets/images/mydojo_logo_horizontal.png',
+                      width: 260,
+                      height: 78,
+                      fit: BoxFit.contain,
                     ),
                   ),
 

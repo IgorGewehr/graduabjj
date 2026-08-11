@@ -94,9 +94,14 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/images/mydojo_logo.png"
+  windows:
+    generate: true
+    image_path: "assets/images/mydojo_app_icon.png"
+    icon_size: 256
+  image_path: "assets/images/mydojo_app_icon.png"
   adaptive_icon_background: "#F4F3EF"
-  adaptive_icon_foreground: "assets/images/mydojo_logo.png"
+  adaptive_icon_foreground: "assets/images/mydojo_mark_foreground.png"
+  adaptive_icon_foreground_inset: 0
 
 flutter:
   uses-material-design: true

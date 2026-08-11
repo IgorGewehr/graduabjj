@@ -504,7 +504,8 @@ service cloud.firestore {
       // server-only) só DEPOIS que o app novo estiver publicado na Apple.
       allow update: if (isAcademyOwner(academyId) || isAcademyAdmin(academyId))
                     && !request.resource.data.diff(resource.data).affectedKeys()
-                        .hasAny(['ownerId', 'createdAt', 'subscription']);
+                        .hasAny(['ownerId', 'createdAt', 'subscription',
+                                 'fixedAttendanceQr']);
 
       // Allow academy creation - user must be setting themselves as owner
       allow create: if isAuthenticated()

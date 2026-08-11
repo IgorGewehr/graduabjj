@@ -15,6 +15,8 @@ topo do próprio arquivo. Esta faxina não tocou em código, só em `.md`.
 
 | Arquivo | O que traz |
 |---|---|
+| [`docs/arquitetura/README.md`](arquitetura/README.md) | Auditoria e plano geral de modernização: fronteiras Flutter/Functions, decomposição dos maiores arquivos, dados/Rules, performance, testes, CI, roadmap e Definition of Done. |
+| [`docs/arquitetura-pagamentos/README.md`](arquitetura-pagamentos/README.md) | Plano completo para links de pagamento sem login, modularização do Flutter/Firebase Functions, segurança, rollout, testes e Definition of Done. |
 | [`/CLAUDE.md`](../CLAUDE.md) | Guia de convenções para qualquer dev/agente no repo — branches, estrutura de pastas, padrões vivos. Extraído do código real. |
 | [`docs/guias/BUILD_WINDOWS.md`](guias/BUILD_WINDOWS.md) | Pipeline de build do app Windows de balcão (GitHub Actions) + camada de compatibilidade mobile/desktop. |
 | [`docs/guias/CATRACAS.md`](guias/CATRACAS.md) | Integração com catracas por fabricante (Control iD/ZKTeco/Intelbras). |

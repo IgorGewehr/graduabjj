@@ -2446,6 +2446,17 @@ exports.trialExpiryReminder = onSchedule(
 // ============================================================
 exports.ingestAccessEvent = require('./access_control/ingest').ingestAccessEvent;
 
+// QR fixo e imprimivel da academia. O payload nunca carrega turma/data: as
+// opcoes elegiveis e a presenca sao resolvidas server-side a cada leitura.
+Object.assign(
+  exports,
+  require('./fixed_academy_qr').createFixedAcademyQrFunctions({
+    db,
+    requireAuth,
+    isAdmin,
+  }),
+);
+
 // ============================================================
 // F2c — TETO das auto-graduações (selfGraduations). Defesa em profundidade:
 // onWrite que replica a ordenação das escadas de graus (espelho de

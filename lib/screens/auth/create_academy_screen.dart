@@ -545,7 +545,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         ),
         padding: const EdgeInsets.all(8),
         child: Image.asset(
-          'assets/images/mydojo_logo.png',
+          'assets/images/mydojo_logo_vertical.png',
           fit: BoxFit.contain,
         ),
       ),

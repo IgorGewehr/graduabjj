@@ -52,7 +52,7 @@ class RegisterScreen extends StatelessWidget {
                     // Logo
                     Center(
                       child: Image.asset(
-                        'assets/images/mydojo_logo.png',
+                        'assets/images/mydojo_logo_vertical.png',
                         width: 96,
                         height: 96,
                       ),
