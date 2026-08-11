@@ -19,6 +19,7 @@ import '../../widgets/cached_image.dart';
 import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/common/billing_automation_banner.dart';
 import '../../widgets/polish/polish.dart';
+import 'widgets/billing_payment_actions.dart';
 
 /// Admin Billing Reminders Screen ("Cobrança").
 ///
@@ -1098,6 +1099,99 @@ class _AdminBillingRemindersScreenState
     final hasEmail = _notificationService?.hasEmailApi ?? false;
     final photoUrl = contact?.photoUrl;
 
+    final whatsappAction = phone != null && phone.isNotEmpty
+        ? ElevatedButton.icon(
+            onPressed: hasWhatsApp
+                ? () => _showSendDialog(
+                    mode: 'whatsapp',
+                    financialItem: item,
+                    stage: stage,
+                    contact: contact!,
+                  )
+                : () => FeedbackUtils.showInfo(
+                    context,
+                    'WhatsApp indisponivel neste build. Reinicie o app com a configuracao do notification server.',
+                  ),
+            icon: const Icon(LucideIcons.messageCircle, size: 16),
+            label: const Text('Cobrar aluno'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: hasWhatsApp
+                  ? AppTheme.success
+                  : AppTheme.textDisabled,
+              foregroundColor: Colors.white,
+              visualDensity: VisualDensity.compact,
+            ),
+          )
+        : null;
+    final emailAction = email != null && email.isNotEmpty
+        ? IconButton(
+            onPressed: hasEmail
+                ? () => _showSendDialog(
+                    mode: 'email',
+                    financialItem: item,
+                    stage: stage,
+                    contact: contact!,
+                  )
+                : () => FeedbackUtils.showInfo(
+                    context,
+                    'E-mail indisponivel neste build. Reinicie o app com a configuracao do notification server.',
+                  ),
+            icon: const Icon(LucideIcons.mail, size: 20),
+            color: hasEmail ? AppTheme.info : AppTheme.textDisabled,
+            tooltip: 'Enviar cobranca individual por e-mail',
+            constraints: const BoxConstraints(),
+            padding: const EdgeInsets.all(8),
+          )
+        : null;
+    final secondaryActions = <Widget>[
+      if (phone != null && phone.isNotEmpty)
+        IconButton(
+          onPressed: () async {
+            final digits = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+            final uri = Uri.parse('tel:$digits');
+            if (await launchUrl(uri)) return;
+            if (!mounted) return;
+            FeedbackUtils.showInfo(context, 'Ligar para $studentName: $phone');
+          },
+          icon: const Icon(LucideIcons.phone, size: 20),
+          color: AppTheme.textSecondary,
+          tooltip: 'Telefone',
+          constraints: const BoxConstraints(),
+          padding: const EdgeInsets.all(8),
+        ),
+      IconButton(
+        onPressed: () => _showContactDialog(
+          financialId: financialId,
+          studentId: studentId,
+          studentName: studentName,
+          stage: stage,
+          daysOverdue: daysOverdue,
+        ),
+        icon: const Icon(LucideIcons.clipboardList, size: 20),
+        color: AppTheme.textSecondary,
+        tooltip: 'Registrar Contato',
+        constraints: const BoxConstraints(),
+        padding: const EdgeInsets.all(8),
+      ),
+      if (canConfirmManualPix)
+        IconButton(
+          onPressed: () => _confirmManualPixPayment(item),
+          icon: const Icon(LucideIcons.badgeCheck, size: 20),
+          color: AppTheme.success,
+          tooltip: 'Confirmar PIX pessoal recebido',
+          constraints: const BoxConstraints(),
+          padding: const EdgeInsets.all(8),
+        ),
+      IconButton(
+        onPressed: () => _confirmDelete(item),
+        icon: const Icon(LucideIcons.trash2, size: 20),
+        color: AppTheme.error,
+        tooltip: 'Excluir Cobrança',
+        constraints: const BoxConstraints(),
+        padding: const EdgeInsets.all(8),
+      ),
+    ];
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
@@ -1206,109 +1300,10 @@ class _AdminBillingRemindersScreenState
 
             const SizedBox(height: 8),
 
-            // Action buttons
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                // Send WhatsApp
-                if (phone != null && phone.isNotEmpty)
-                  ElevatedButton.icon(
-                    onPressed: hasWhatsApp
-                        ? () => _showSendDialog(
-                            mode: 'whatsapp',
-                            financialItem: item,
-                            stage: stage,
-                            contact: contact!,
-                          )
-                        : () => FeedbackUtils.showInfo(
-                            context,
-                            'WhatsApp indisponivel neste build. Reinicie o app com a configuracao do notification server.',
-                          ),
-                    icon: const Icon(LucideIcons.messageCircle, size: 16),
-                    label: const Text('Cobrar aluno'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: hasWhatsApp
-                          ? AppTheme.success
-                          : AppTheme.textDisabled,
-                      foregroundColor: Colors.white,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                // Send Email
-                if (email != null && email.isNotEmpty)
-                  IconButton(
-                    onPressed: hasEmail
-                        ? () => _showSendDialog(
-                            mode: 'email',
-                            financialItem: item,
-                            stage: stage,
-                            contact: contact!,
-                          )
-                        : () => FeedbackUtils.showInfo(
-                            context,
-                            'E-mail indisponivel neste build. Reinicie o app com a configuracao do notification server.',
-                          ),
-                    icon: const Icon(LucideIcons.mail, size: 20),
-                    color: hasEmail ? AppTheme.info : AppTheme.textDisabled,
-                    tooltip: 'Enviar cobranca individual por e-mail',
-                    constraints: const BoxConstraints(),
-                    padding: const EdgeInsets.all(8),
-                  ),
-                // Phone
-                if (phone != null && phone.isNotEmpty)
-                  IconButton(
-                    onPressed: () async {
-                      final digits = phone.replaceAll(RegExp(r'[^0-9+]'), '');
-                      final uri = Uri.parse('tel:$digits');
-                      if (!await launchUrl(uri) && context.mounted) {
-                        FeedbackUtils.showInfo(
-                          context,
-                          'Ligar para $studentName: $phone',
-                        );
-                      }
-                    },
-                    icon: const Icon(LucideIcons.phone, size: 20),
-                    color: AppTheme.textSecondary,
-                    tooltip: 'Telefone',
-                    constraints: const BoxConstraints(),
-                    padding: const EdgeInsets.all(8),
-                  ),
-                // Manual contact log
-                IconButton(
-                  onPressed: () => _showContactDialog(
-                    financialId: financialId,
-                    studentId: studentId,
-                    studentName: studentName,
-                    stage: stage,
-                    daysOverdue: daysOverdue,
-                  ),
-                  icon: const Icon(LucideIcons.clipboardList, size: 20),
-                  color: AppTheme.textSecondary,
-                  tooltip: 'Registrar Contato',
-                  constraints: const BoxConstraints(),
-                  padding: const EdgeInsets.all(8),
-                ),
-                // PIX pessoal nao possui webhook: somente o administrador pode
-                // confirmar o recebimento, pelo callable auditavel.
-                if (canConfirmManualPix)
-                  IconButton(
-                    onPressed: () => _confirmManualPixPayment(item),
-                    icon: const Icon(LucideIcons.badgeCheck, size: 20),
-                    color: AppTheme.success,
-                    tooltip: 'Confirmar PIX pessoal recebido',
-                    constraints: const BoxConstraints(),
-                    padding: const EdgeInsets.all(8),
-                  ),
-                // Delete Charge
-                IconButton(
-                  onPressed: () => _confirmDelete(item),
-                  icon: const Icon(LucideIcons.trash2, size: 20),
-                  color: AppTheme.error,
-                  tooltip: 'Excluir Cobrança',
-                  constraints: const BoxConstraints(),
-                  padding: const EdgeInsets.all(8),
-                ),
-              ],
+            BillingPaymentActions(
+              primaryAction: whatsappAction,
+              emailAction: emailAction,
+              secondaryActions: secondaryActions,
             ),
           ],
         ),
