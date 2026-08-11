@@ -71,6 +71,8 @@ arquivos de código correspondentes.
 ### Runbooks de teste manual (QA)
 
 Ainda válidos — as features e telas que descrevem continuam existindo no app:
+[`ROTEIRO_TESTES_POS_MERGE_UX_COBRANCAS.md`](ROTEIRO_TESTES_POS_MERGE_UX_COBRANCAS.md) ·
+[`ROTEIRO_TESTES_COBRANCAS_META_PIX.md`](ROTEIRO_TESTES_COBRANCAS_META_PIX.md) ·
 [`roteiro-teste-completo.md`](roteiro-teste-completo.md) ·
 [`roteiro-teste-avaliacao-fisica.md`](roteiro-teste-avaliacao-fisica.md) ·
 [`roteiro-teste-graduacao-pedagogica.md`](roteiro-teste-graduacao-pedagogica.md) ·
