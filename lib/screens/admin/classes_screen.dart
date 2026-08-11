@@ -13,6 +13,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/common/debounced_search_field.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/sport_chip.dart';
 import '../../widgets/polish/polish.dart';
@@ -104,10 +105,9 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
     var filtered = _classes;
 
     if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
       filtered = filtered
-          .where(
-            (c) => c.name.toLowerCase().contains(_searchQuery.toLowerCase()),
-          )
+          .where((c) => c.name.toLowerCase().contains(query))
           .toList();
     }
 
@@ -122,59 +122,63 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // O getter filtra/aloca uma lista. Calcular uma vez evita repetir o mesmo
+    // trabalho para empty-state, itemBuilder e childCount no mesmo frame.
+    final filteredClasses = _filteredClasses;
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: ContentBounded(
         maxWidth: kContentMaxWidthList,
         child: RefreshIndicator(
-        onRefresh: _loadClasses,
-        child: CustomScrollView(
-          slivers: [
-            // Header
-            SliverToBoxAdapter(child: _buildHeader()),
+          onRefresh: _loadClasses,
+          child: CustomScrollView(
+            slivers: [
+              // Header
+              SliverToBoxAdapter(child: _buildHeader()),
 
-            // Stats Cards
-            SliverToBoxAdapter(child: _buildStatsCards()),
+              // Stats Cards
+              SliverToBoxAdapter(child: _buildStatsCards()),
 
-            // Search & Filter
-            SliverToBoxAdapter(child: _buildSearchAndFilter()),
+              // Search & Filter
+              SliverToBoxAdapter(child: _buildSearchAndFilter()),
 
-            // Category Chips
-            SliverToBoxAdapter(child: _buildCategoryChips()),
+              // Category Chips
+              SliverToBoxAdapter(child: _buildCategoryChips()),
 
-            // Class List
-            _isLoading
-                ? SliverToBoxAdapter(
-                    child: Padding(
+              // Class List
+              _isLoading
+                  ? SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: PolishSkeleton.list(count: 5, itemHeight: 120),
+                      ),
+                    )
+                  : filteredClasses.isEmpty
+                  ? SliverFillRemaining(child: _buildEmptyState())
+                  : SliverPadding(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: PolishSkeleton.list(count: 5, itemHeight: 120),
+                      sliver: SliverList(
+                        delegate: SliverChildBuilderDelegate((context, index) {
+                          final cls = filteredClasses[index];
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _ClassCard(
+                              key: ValueKey(cls.id),
+                              bjjClass: cls,
+                              onTap: () => _showClassDetails(cls),
+                              onEdit: () => _showEditClassSheet(cls),
+                              onDelete: () => _showDeleteConfirmation(cls),
+                            ).entrance(index: index),
+                          );
+                        }, childCount: filteredClasses.length),
+                      ),
                     ),
-                  )
-                : _filteredClasses.isEmpty
-                ? SliverFillRemaining(child: _buildEmptyState())
-                : SliverPadding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    sliver: SliverList(
-                      delegate: SliverChildBuilderDelegate((context, index) {
-                        final cls = _filteredClasses[index];
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _ClassCard(
-                            bjjClass: cls,
-                            onTap: () => _showClassDetails(cls),
-                            onEdit: () => _showEditClassSheet(cls),
-                            onDelete: () => _showDeleteConfirmation(cls),
-                          ).entrance(index: index),
-                        );
-                      }, childCount: _filteredClasses.length),
-                    ),
-                  ),
 
-            // Bottom padding
-            const SliverToBoxAdapter(child: SizedBox(height: 100)),
-          ],
+              // Bottom padding
+              const SliverToBoxAdapter(child: SizedBox(height: 100)),
+            ],
+          ),
         ),
-      ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showCreateClassSheet,
@@ -300,43 +304,18 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
   Widget _buildSearchAndFilter() {
     return Padding(
       padding: const EdgeInsets.all(20),
-      child: Container(
-        height: 48,
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.divider),
-        ),
-        child: Row(
-          children: [
-            const SizedBox(width: 12),
-            Icon(LucideIcons.search, color: AppTheme.textSecondary, size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                onChanged: (value) => setState(() => _searchQuery = value),
-                decoration: InputDecoration(
-                  hintText: 'Buscar turma...',
-                  hintStyle: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.textDisabled,
-                  ),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-              ),
-            ),
-            Container(width: 1, height: 24, color: AppTheme.divider),
-            IconButton(
-              icon: Icon(
-                LucideIcons.slidersHorizontal,
-                color: _selectedCategory != null
-                    ? AppTheme.primary
-                    : AppTheme.textSecondary,
-                size: 20,
-              ),
-              onPressed: _showFilterSheet,
-            ),
-          ],
+      child: DebouncedSearchField(
+        hintText: 'Buscar turma...',
+        onChanged: (value) => setState(() => _searchQuery = value),
+        trailing: IconButton(
+          icon: Icon(
+            LucideIcons.slidersHorizontal,
+            color: _selectedCategory != null
+                ? AppTheme.primary
+                : AppTheme.textSecondary,
+            size: 20,
+          ),
+          onPressed: _showFilterSheet,
         ),
       ),
     );
@@ -1745,6 +1724,7 @@ class _ClassCard extends StatelessWidget {
   final VoidCallback onDelete;
 
   const _ClassCard({
+    super.key,
     required this.bjjClass,
     required this.onTap,
     required this.onEdit,
@@ -2147,8 +2127,9 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     if (currentUser?.academyId == null) return;
 
-    final candidates =
-        _visibleStudents.where((s) => !_enrolledIds.contains(s.id)).toList();
+    final candidates = _visibleStudents
+        .where((s) => !_enrolledIds.contains(s.id))
+        .toList();
     if (candidates.isEmpty) return;
 
     final cap = widget.bjjClass.maxStudents;
@@ -2196,8 +2177,9 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     if (currentUser?.academyId == null) return;
 
-    final candidates =
-        _visibleStudents.where((s) => _enrolledIds.contains(s.id)).toList();
+    final candidates = _visibleStudents
+        .where((s) => _enrolledIds.contains(s.id))
+        .toList();
     if (candidates.isEmpty) return;
     final ids = candidates.map((s) => s.id).toList();
 
@@ -2230,6 +2212,7 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
     final accent = sportChipColors[classSport] ?? AppTheme.primary;
     final maxedOut =
         cls.maxStudents != null && _enrolledIds.length >= cls.maxStudents!;
+    final visibleStudents = _visibleStudents;
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.92,
@@ -2306,31 +2289,10 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
             ],
           ),
           const SizedBox(height: 16),
-          Container(
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.divider),
-            ),
-            child: TextField(
-              onChanged: (v) => setState(() => _searchQuery = v),
-              decoration: InputDecoration(
-                hintText: 'Buscar aluno...',
-                hintStyle: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.textDisabled,
-                ),
-                prefixIcon: Icon(
-                  LucideIcons.search,
-                  color: AppTheme.textSecondary,
-                  size: 20,
-                ),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 14,
-                ),
-              ),
-            ),
+          DebouncedSearchField(
+            hintText: 'Buscar aluno...',
+            backgroundColor: AppTheme.surfaceVariant,
+            onChanged: (value) => setState(() => _searchQuery = value),
           ),
           const SizedBox(height: 10),
           Row(
@@ -2375,7 +2337,7 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
               TextButton.icon(
                 onPressed:
                     _pendingIds.isNotEmpty ||
-                        _visibleStudents.every(
+                        visibleStudents.every(
                           (s) => _enrolledIds.contains(s.id),
                         )
                     ? null
@@ -2391,7 +2353,7 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
               TextButton.icon(
                 onPressed:
                     _pendingIds.isNotEmpty ||
-                        _visibleStudents.every(
+                        visibleStudents.every(
                           (s) => !_enrolledIds.contains(s.id),
                         )
                     ? null
@@ -2410,7 +2372,7 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
           Expanded(
             child: _isLoading
                 ? PolishSkeleton.list(count: 6)
-                : _visibleStudents.isEmpty
+                : visibleStudents.isEmpty
                 ? PolishedEmptyState(
                     icon: LucideIcons.userX,
                     title: _showOnlyEnrolled
@@ -2418,15 +2380,16 @@ class _ManageStudentsSheetState extends ConsumerState<_ManageStudentsSheet> {
                         : 'Nenhum aluno encontrado',
                   )
                 : ListView.separated(
-                    itemCount: _visibleStudents.length,
+                    itemCount: visibleStudents.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (_, i) {
-                      final s = _visibleStudents[i];
+                      final s = visibleStudents[i];
                       final isEnrolled = _enrolledIds.contains(s.id);
                       final isPending = _pendingIds.contains(s.id);
                       final practicesSport = s.getSports().contains(classSport);
                       final blockedByCap = !isEnrolled && maxedOut;
                       return _StudentRow(
+                        key: ValueKey(s.id),
                         student: s,
                         classSport: classSport,
                         enrolled: isEnrolled,
@@ -2490,6 +2453,7 @@ class _StudentRow extends StatelessWidget {
   final VoidCallback? onTap;
 
   const _StudentRow({
+    super.key,
     required this.student,
     required this.classSport,
     required this.enrolled,

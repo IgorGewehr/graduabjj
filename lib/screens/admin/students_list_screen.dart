@@ -22,9 +22,11 @@ import '../../services/analytics_service.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/academy_page_header.dart';
+import '../../widgets/common/debounced_search_field.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/sport_chip.dart';
 import '../../widgets/polish/polish.dart';
+import 'widgets/student_list_filter.dart';
 
 /// Students List Screen - Fintech style matching webapp
 class StudentsListScreen extends ConsumerStatefulWidget {
@@ -112,8 +114,9 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   /// não aparecem).
   Future<void> _loadEligibilityInBackground(String academyId) async {
     try {
-      final snapshot =
-          await BeltProgressionService(academyId).getEligibilitySnapshot();
+      final snapshot = await BeltProgressionService(
+        academyId,
+      ).getEligibilitySnapshot();
       if (!mounted) return;
       setState(() {
         _eligibilityByStudent = {for (final e in snapshot) e.studentId: e};
@@ -125,140 +128,18 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   }
 
   void _applyFilters() {
-    var filtered = _students.toList();
-
-    // Search filter
-    if (_searchQuery.isNotEmpty) {
-      final query = _searchQuery.toLowerCase();
-      filtered = filtered
-          .where(
-            (s) =>
-                s.fullName.toLowerCase().contains(query) ||
-                (s.nickname?.toLowerCase().contains(query) ?? false) ||
-                (s.email?.toLowerCase().contains(query) ?? false),
-          )
-          .toList();
-    }
-
-    // Status filter
-    if (_statusFilter != null) {
-      filtered = filtered.where((s) => s.status == _statusFilter).toList();
-    } else {
-      // Sem filtro explícito: ex-alunos TRANSFERIDOS não poluem o roster ativo.
-      // Eles continuam acessíveis (com todo o histórico) ao selecionar o filtro
-      // "Transferido" — que já aparece porque o sheet itera StudentStatus.values.
-      filtered = filtered
-          .where((s) => s.status != StudentStatus.transferred)
-          .toList();
-    }
-
-    // Category filter
-    if (_categoryFilter != null) {
-      filtered = filtered.where((s) => s.category == _categoryFilter).toList();
-    }
-
-    // Sport filter — student must practice this modality
-    if (_sportFilter != null) {
-      filtered = filtered
-          .where((s) => s.getSports().contains(_sportFilter))
-          .toList();
-    }
-
-    // Belt filter — sport-aware. If a sport is selected, match the grade
-    // for that sport; otherwise fall back to the legacy BJJ field for backward
-    // compatibility with single-sport academies.
-    if (_beltFilter != null) {
-      filtered = filtered.where((s) {
-        final sport = _sportFilter ?? s.getPrimarySport();
-        final grade = s.getGrade(sport);
-        return grade?.currentGrade == _beltFilter;
-      }).toList();
-    }
-
-    // Account filter
-    if (_accountFilter != null) {
-      if (_accountFilter!) {
-        filtered = filtered
-            .where((s) => s.linkedUserId != null && s.linkedUserId!.isNotEmpty)
-            .toList();
-      } else {
-        filtered = filtered
-            .where((s) => s.linkedUserId == null || s.linkedUserId!.isEmpty)
-            .toList();
-      }
-    }
-
-    // Inactivity filter (Retenção §3.3) — só faz sentido para alunos ativos.
-    if (_inactivityFilter != null) {
-      final n = _inactivityFilter!;
-      filtered = filtered.where((s) {
-        if (s.status != StudentStatus.active) return false;
-        final days = s.daysSinceLastAttendance;
-        if (days == null) return n >= 30; // nunca treinou → só na banda 30+
-        return days >= n;
-      }).toList();
-    }
-
-    // Sorting
-    switch (_sortBy) {
-      case 'name':
-        filtered.sort((a, b) => a.fullName.compareTo(b.fullName));
-        break;
-      case 'attendance':
-        filtered.sort(
-          (a, b) => b.totalAttendanceCount.compareTo(a.totalAttendanceCount),
-        );
-        break;
-      case 'belt':
-        filtered.sort((a, b) {
-          final sportA = _sportFilter ?? a.getPrimarySport();
-          final sportB = _sportFilter ?? b.getPrimarySport();
-          final gradeA = a.getGrade(sportA)?.currentGrade ?? 'white';
-          final gradeB = b.getGrade(sportB)?.currentGrade ?? 'white';
-          final gradesA = getGradesForSport(
-            sportA,
-            category: a.category.value,
-            muaythaiVariant: sportA == SportId.muaythai
-                ? resolveMuaythaiVariant(gradeA)
-                : null,
-          );
-          final gradesB = getGradesForSport(
-            sportB,
-            category: b.category.value,
-            muaythaiVariant: sportB == SportId.muaythai
-                ? resolveMuaythaiVariant(gradeB)
-                : null,
-          );
-          final aIndex = gradesA.indexWhere((g) => g.id == gradeA);
-          final bIndex = gradesB.indexWhere((g) => g.id == gradeB);
-          if (aIndex != bIndex) return bIndex.compareTo(aIndex);
-          final stripesA = a.getGrade(sportA)?.currentStripes ?? 0;
-          final stripesB = b.getGrade(sportB)?.currentStripes ?? 0;
-          return stripesB.compareTo(stripesA);
-        });
-        break;
-      case 'eligible_first':
-        // Eligible students float to the top, then closest-to-eligible by
-        // progress fraction, then alphabetical as tiebreaker.
-        filtered.sort((a, b) {
-          final ea = _eligibilityByStudent[a.id];
-          final eb = _eligibilityByStudent[b.id];
-          final ael = ea?.eligible == true ? 1 : 0;
-          final bel = eb?.eligible == true ? 1 : 0;
-          if (ael != bel) return bel - ael;
-          final aProg = (ea != null && ea.requiredClasses > 0)
-              ? ea.currentClasses / ea.requiredClasses
-              : 0.0;
-          final bProg = (eb != null && eb.requiredClasses > 0)
-              ? eb.currentClasses / eb.requiredClasses
-              : 0.0;
-          if (aProg != bProg) return bProg.compareTo(aProg);
-          return a.fullName.compareTo(b.fullName);
-        });
-        break;
-    }
-
-    setState(() => _filteredStudents = filtered);
+    _filteredStudents = filterStudentsForAdminList(
+      students: _students,
+      searchQuery: _searchQuery,
+      statusFilter: _statusFilter,
+      categoryFilter: _categoryFilter,
+      sportFilter: _sportFilter,
+      beltFilter: _beltFilter,
+      accountFilter: _accountFilter,
+      inactivityFilter: _inactivityFilter,
+      sortBy: _sortBy,
+      eligibilityByStudent: _eligibilityByStudent,
+    );
   }
 
   bool _hasActiveFilters() {
@@ -343,7 +224,10 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                         // infinita ao filho — ListView scrollável aqui quebra
                         // o layout da tela inteira (viewport unbounded).
                         child: PolishSkeleton.list(
-                            count: 6, itemHeight: 88, scrollable: false),
+                          count: 6,
+                          itemHeight: 88,
+                          scrollable: false,
+                        ),
                       ),
                     )
                   : _filteredStudents.isEmpty
@@ -488,7 +372,9 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                 if (has)
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(999),
@@ -502,8 +388,11 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                     ),
                   )
                 else
-                  Icon(LucideIcons.chevronRight,
-                      size: 18, color: AppTheme.textSecondary),
+                  Icon(
+                    LucideIcons.chevronRight,
+                    size: 18,
+                    color: AppTheme.textSecondary,
+                  ),
               ],
             ),
           ),
@@ -519,53 +408,15 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         children: [
           // Search field
           Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.divider),
-              ),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Buscar aluno...',
-                  hintStyle: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.textDisabled,
-                  ),
-                  prefixIcon: Icon(
-                    LucideIcons.search,
-                    color: AppTheme.textSecondary,
-                    size: 20,
-                  ),
-                  suffixIcon: _searchQuery.isNotEmpty
-                      ? IconButton(
-                          icon: Icon(
-                            LucideIcons.x,
-                            color: AppTheme.textSecondary,
-                            size: 18,
-                          ),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {
-                              _searchQuery = '';
-                              _applyFilters();
-                            });
-                          },
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
-                  ),
-                ),
-                onChanged: (value) {
-                  setState(() {
-                    _searchQuery = value;
-                    _applyFilters();
-                  });
-                },
-              ),
+            child: DebouncedSearchField(
+              controller: _searchController,
+              hintText: 'Buscar aluno...',
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                  _applyFilters();
+                });
+              },
             ),
           ),
           const SizedBox(width: 12),
@@ -694,6 +545,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         delegate: SliverChildBuilderDelegate((context, index) {
           final student = _filteredStudents[index];
           return _StudentCard(
+            key: ValueKey(student.id),
             student: student,
             eligibility: _eligibilityByStudent[student.id],
             musculacaoEnabled: musculacaoEnabled,
@@ -840,6 +692,7 @@ class _StudentCard extends StatelessWidget {
   final bool musculacaoEnabled;
 
   const _StudentCard({
+    super.key,
     required this.student,
     this.onTap,
     this.eligibility,
@@ -1273,8 +1126,9 @@ class _StaffCheckinActionState extends ConsumerState<_StaffCheckinAction> {
         if (mounted) context.showError('Sessão inválida — entre novamente.');
         return;
       }
-      await AttendanceService(FirebaseService.academyId)
-          .markStaffScheduleLessPresence(
+      await AttendanceService(
+        FirebaseService.academyId,
+      ).markStaffScheduleLessPresence(
         studentId: widget.student.id,
         studentName: widget.student.fullName,
         sport: sport.value,

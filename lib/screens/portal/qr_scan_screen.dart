@@ -9,8 +9,10 @@ import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/student_provider.dart';
 import '../../services/analytics_service.dart';
+import '../../services/fixed_academy_qr_service.dart';
 import '../../services/qr_attendance_service.dart';
 import '../../widgets/polish/polish.dart';
+import 'widgets/fixed_qr_class_selection.dart';
 
 /// QR Scan Screen (Student Portal)
 ///
@@ -39,6 +41,10 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
   String? _statusMessage;
   bool _statusIsError = false;
   QrAttendanceResult? _success;
+  FixedAcademyQrPayload? _fixedPayload;
+  FixedAcademyQrSession? _fixedSession;
+  String? _selectedFixedClassId;
+  String? _fixedError;
 
   @override
   void dispose() {
@@ -47,7 +53,7 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
   }
 
   Future<void> _handleDetection(BarcodeCapture capture) async {
-    if (_isProcessing || _success != null) return;
+    if (_isProcessing || _success != null || _fixedSession != null) return;
     final raw = capture.barcodes
         .map((b) => b.rawValue)
         .whereType<String>()
@@ -62,6 +68,19 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
     });
 
     try {
+      final fixedPayload = FixedAcademyQrPayload.tryParse(raw);
+      if (fixedPayload != null) {
+        final session = await FixedAcademyQrService().resolve(fixedPayload);
+        await _controller?.stop();
+        if (!mounted) return;
+        setState(() {
+          _fixedPayload = fixedPayload;
+          _fixedSession = session;
+          _isProcessing = false;
+        });
+        return;
+      }
+
       final user = await ref.read(currentUserProvider.future);
       final student = await ref.read(currentStudentProvider.future);
       final academyId = user?.academyId;
@@ -88,6 +107,14 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
         _success = result;
         _isProcessing = false;
       });
+    } on FixedAcademyQrException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = e.message;
+        _statusIsError = true;
+        _isProcessing = false;
+      });
+      _scheduleStatusReset();
     } on QrAttendanceException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -120,10 +147,43 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
   void _retry() {
     setState(() {
       _success = null;
+      _fixedPayload = null;
+      _fixedSession = null;
+      _selectedFixedClassId = null;
+      _fixedError = null;
       _statusMessage = null;
       _statusIsError = false;
     });
     _controller?.start();
+  }
+
+  Future<void> _checkInFixedClass(FixedAcademyQrClass cls) async {
+    final payload = _fixedPayload;
+    if (payload == null || _isProcessing) return;
+    setState(() {
+      _isProcessing = true;
+      _selectedFixedClassId = cls.id;
+      _fixedError = null;
+    });
+    try {
+      final result = await FixedAcademyQrService().checkIn(
+        payload: payload,
+        classId: cls.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        _success = result;
+        _fixedSession = null;
+        _isProcessing = false;
+      });
+    } on FixedAcademyQrException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _fixedError = error.message;
+        _selectedFixedClassId = null;
+        _isProcessing = false;
+      });
+    }
   }
 
   @override
@@ -145,6 +205,7 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
       );
     }
     final success = _success;
+    final fixedSession = _fixedSession;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -153,21 +214,31 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
         elevation: 0,
         title: const Text('Check-in por QR'),
         actions: [
-          IconButton(
-            icon: ValueListenableBuilder<MobileScannerState>(
-              valueListenable: _controller,
-              builder: (context, state, _) {
-                final on = state.torchState == TorchState.on;
-                return Icon(on ? LucideIcons.zapOff : LucideIcons.zap);
-              },
+          if (success == null && fixedSession == null)
+            IconButton(
+              icon: ValueListenableBuilder<MobileScannerState>(
+                valueListenable: _controller,
+                builder: (context, state, _) {
+                  final on = state.torchState == TorchState.on;
+                  return Icon(on ? LucideIcons.zapOff : LucideIcons.zap);
+                },
+              ),
+              tooltip: 'Lanterna',
+              onPressed: () => _controller.toggleTorch(),
             ),
-            tooltip: 'Lanterna',
-            onPressed: () => _controller.toggleTorch(),
-          ),
         ],
       ),
       body: success != null
           ? _SuccessView(result: success, onScanAnother: _retry)
+          : fixedSession != null
+          ? FixedQrClassSelection(
+              session: fixedSession,
+              selectedClassId: _selectedFixedClassId,
+              errorMessage: _fixedError,
+              isSubmitting: _isProcessing,
+              onSelected: _checkInFixedClass,
+              onScanAgain: _retry,
+            )
           : Stack(
               children: [
                 MobileScanner(
@@ -259,7 +330,7 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
                               Text(
                                 _isProcessing
                                     ? 'Validando...'
-                                    : 'Aponte para o QR exibido pelo professor',
+                                    : 'Aponte para o QR da academia ou da turma',
                                 style: AppTheme.labelMedium.copyWith(
                                   color: Colors.white,
                                 ),

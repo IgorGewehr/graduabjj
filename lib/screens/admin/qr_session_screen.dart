@@ -10,6 +10,8 @@ import '../../core/theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/services.dart';
 import '../../widgets/polish/polish.dart';
+import 'fixed_academy_qr_screen.dart';
+import 'widgets/fixed_academy_qr_card.dart';
 
 /// Admin Attendance QR Screen
 ///
@@ -69,7 +71,9 @@ class _AdminQrSessionScreenState extends ConsumerState<AdminQrSessionScreen> {
           }
         }
       }
-      entries.sort((a, b) => a.schedule.startTime.compareTo(b.schedule.startTime));
+      entries.sort(
+        (a, b) => a.schedule.startTime.compareTo(b.schedule.startTime),
+      );
 
       setState(() {
         _classes = entries;
@@ -91,6 +95,14 @@ class _AdminQrSessionScreenState extends ConsumerState<AdminQrSessionScreen> {
           endTime: entry.schedule.endTime,
         ),
         fullscreenDialog: true,
+      ),
+    );
+  }
+
+  void _openFixedQr(String academyId) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FixedAcademyQrScreen(academyId: academyId),
       ),
     );
   }
@@ -125,38 +137,43 @@ class _AdminQrSessionScreenState extends ConsumerState<AdminQrSessionScreen> {
               ),
             )
           : academyId == null
-              ? Center(
-                  child: Text(
-                    'Academia nao encontrada',
-                    style: AppTheme.bodyMedium.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _IntroCard(weekdayLabel: _weekdayLabels[dayOfWeek])
-                            .fadeInQuick(),
-                        const SizedBox(height: 16),
-                        if (_classes.isEmpty)
-                          _EmptyState()
-                        else
-                          ..._classes.asMap().entries.map(
-                            (e) => _ClassTile(
-                              entry: e.value,
-                              onTap: () => _openQr(e.value, academyId),
-                            ).entrance(index: e.key),
-                          ),
-                      ],
-                    ),
-                  ),
+          ? Center(
+              child: Text(
+                'Academia nao encontrada',
+                style: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.textSecondary,
                 ),
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _IntroCard(
+                      weekdayLabel: _weekdayLabels[dayOfWeek],
+                    ).fadeInQuick(),
+                    const SizedBox(height: 16),
+                    if (user?.isAdmin == true)
+                      FixedAcademyQrCard(
+                        onTap: () => _openFixedQr(academyId),
+                      ).fadeInQuick(),
+                    if (_classes.isEmpty)
+                      _EmptyState()
+                    else
+                      ..._classes.asMap().entries.map(
+                        (e) => _ClassTile(
+                          entry: e.value,
+                          onTap: () => _openQr(e.value, academyId),
+                        ).entrance(index: e.key),
+                      ),
+                  ],
+                ),
+              ),
+            ),
     );
   }
 }
@@ -178,7 +195,7 @@ class _IntroCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.infoLight,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.info.withOpacity(0.25)),
+        border: Border.all(color: AppTheme.info.withValues(alpha: 0.25)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -189,10 +206,7 @@ class _IntroCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Turmas de $weekdayLabel',
-                  style: AppTheme.titleMedium,
-                ),
+                Text('Turmas de $weekdayLabel', style: AppTheme.titleMedium),
                 const SizedBox(height: 4),
                 Text(
                   'Selecione a turma para mostrar o QR. Os alunos matriculados podem escanear para registrar presenca dentro da janela de horario (30min antes ate 1h depois).',
@@ -482,10 +496,8 @@ class _RotationIndicatorState extends State<_RotationIndicator>
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: widget.interval,
-    )..forward();
+    _controller = AnimationController(vsync: this, duration: widget.interval)
+      ..forward();
   }
 
   @override
@@ -527,4 +539,3 @@ class _RotationIndicatorState extends State<_RotationIndicator>
     );
   }
 }
-
