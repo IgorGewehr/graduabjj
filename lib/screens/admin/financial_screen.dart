@@ -48,6 +48,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   List<Student> _students = [];
   Map<String, dynamic>? _monthlySummary;
   bool _isLoading = true;
+  String? _loadError;
 
   /// Escrever (criar/gerar/editar plano, gerar mensalidades) exige admin OU
   /// financial:create. Sem isso, o Financeiro mostrava botões que só levavam a
@@ -122,7 +123,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   String get _currentMonthKey => DateFormat('yyyy-MM').format(_selectedMonth);
 
   Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _loadError = null;
+      });
+    }
 
     try {
       // Resolve the academy from the authenticated user (not the mutable global
@@ -130,42 +136,98 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
       final user = await ref.read(currentUserProvider.future);
       final academyId = user?.academyId ?? FirebaseService.academyId;
       final paymentService = PaymentService(academyId);
+      final failures = <String>[];
+
+      Future<T?> loadSection<T>(
+        String label,
+        Future<T> Function() loader,
+      ) async {
+        try {
+          return await loader();
+        } catch (error, stackTrace) {
+          failures.add(label);
+          debugPrint(
+            '[Financeiro] Falha em $label (academyId=$academyId): $error',
+          );
+          debugPrintStack(stackTrace: stackTrace);
+          return null;
+        }
+      }
 
       // Reconcile overdue statuses before reading. Without this, dueDate-passed
       // records remain "pending" in Firestore and downstream queries that filter
       // by status alone (notifications, reports) miss them.
-      await paymentService.markOverduePayments();
+      // This maintenance call is deliberately non-fatal: the financial lists
+      // must remain available even when Functions/App Check/network is down.
+      await loadSection('atualização de vencidos', () {
+        return paymentService.markOverduePayments();
+      });
 
-      final results = await Future.wait([
-        paymentService.getByMonth(_currentMonthKey),
-        PlanService(academyId).list(),
-        StudentService(academyId).getActive(),
-        paymentService.getMonthlySummary(_currentMonthKey),
-      ]);
+      // Start independent reads together. One malformed/denied collection no
+      // longer erases the successful results from the other sections.
+      final paymentsFuture = loadSection(
+        'pagamentos',
+        () => paymentService.getByMonth(_currentMonthKey),
+      );
+      final plansFuture = loadSection(
+        'planos',
+        () => PlanService(academyId).list(),
+      );
+      final studentsFuture = loadSection(
+        'alunos ativos',
+        () => StudentService(academyId).getActive(),
+      );
+
+      final payments = await paymentsFuture;
+      final plans = await plansFuture;
+      final students = await studentsFuture;
 
       if (!mounted) return;
       setState(() {
-        _allPayments = results[0] as List<Payment>;
-        _plans = results[1] as List<Plan>;
-        _students = results[2] as List<Student>;
-        _monthlySummary = results[3] as Map<String, dynamic>;
+        if (payments != null) {
+          _allPayments = payments;
+          _monthlySummary = _summaryFromPayments(payments);
+        }
+        if (plans != null) _plans = plans;
+        if (students != null) _students = students;
+        _loadError = failures.isEmpty
+            ? null
+            : 'Não foi possível atualizar ${failures.join(', ')}.';
         _isLoading = false;
       });
 
       // Live updates: reflect a webhook flip to `paid` in real time (the
       // one-shot read above could otherwise show a just-paid charge as open).
-      _paymentsSub?.cancel();
-      _paymentsSub = paymentService.streamByMonth(_currentMonthKey).listen((
-        payments,
-      ) {
-        if (!mounted) return;
-        setState(() {
-          _allPayments = payments;
-          _monthlySummary = _summaryFromPayments(payments);
-        });
+      if (payments != null) {
+        _paymentsSub?.cancel();
+        _paymentsSub = paymentService
+            .streamByMonth(_currentMonthKey)
+            .listen(
+              (payments) {
+                if (!mounted) return;
+                setState(() {
+                  _allPayments = payments;
+                  _monthlySummary = _summaryFromPayments(payments);
+                });
+              },
+              onError: (Object error, StackTrace stackTrace) {
+                debugPrint('[Financeiro] Falha no fluxo de pagamentos: $error');
+                debugPrintStack(stackTrace: stackTrace);
+                if (!mounted) return;
+                setState(() {
+                  _loadError = 'Os pagamentos podem estar desatualizados.';
+                });
+              },
+            );
+      }
+    } catch (error, stackTrace) {
+      debugPrint('[Financeiro] Falha geral ao carregar: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (!mounted) return;
+      setState(() {
+        _loadError = 'Não foi possível carregar o financeiro.';
+        _isLoading = false;
       });
-    } catch (e) {
-      setState(() => _isLoading = false);
     }
   }
 
@@ -248,6 +310,8 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   child: CustomScrollView(
                     slivers: [
                       SliverToBoxAdapter(child: _buildMonthSelector()),
+                      if (_loadError != null)
+                        SliverToBoxAdapter(child: _buildLoadError()),
                       SliverToBoxAdapter(child: _buildBillingShortcut()),
 
                       // Tab Bar
@@ -264,6 +328,34 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                   ),
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildLoadError() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 4, 20, 6),
+      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      decoration: BoxDecoration(
+        color: AppTheme.error.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.error.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        children: [
+          const Icon(LucideIcons.alertCircle, size: 17, color: AppTheme.error),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _loadError!,
+              style: AppTheme.labelSmall.copyWith(color: AppTheme.error),
+            ),
+          ),
+          TextButton(
+            onPressed: _loadData,
+            child: const Text('Tentar novamente'),
+          ),
+        ],
       ),
     );
   }

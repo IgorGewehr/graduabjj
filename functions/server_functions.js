@@ -2470,13 +2470,11 @@ exports.scheduledGamificationMilestones = functions.pubsub
  * local here because that helper is not exported across modules.
  */
 async function isAcademyStaff(uid, academyId) {
-  if (!uid || !academyId) return false;
-  const snap = await db.collection('userAcademyMapping').doc(uid).get();
-  if (!snap.exists) return false;
-  const data = snap.data() || {};
-  const details = data.academyDetails || {};
-  const entry = details[academyId];
-  return !!(entry && (entry.role === 'admin' || entry.role === 'instructor'));
+  const membership = await getUserAcademyMembership(uid, academyId);
+  return !!(
+    membership &&
+    (membership.role === 'admin' || membership.role === 'instructor')
+  );
 }
 
 /**

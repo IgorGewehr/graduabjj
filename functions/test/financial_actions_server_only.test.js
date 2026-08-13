@@ -35,6 +35,17 @@ test('financial mutations are exported as authenticated backend actions', () => 
   }
 });
 
+test('staff authorization supports legacy academy-scoped user roles', () => {
+  assert.match(
+    serverSource,
+    /async function isAcademyStaff\(uid, academyId\) \{[^]*?getUserAcademyMembership\(uid, academyId\)[^]*?membership\.role === 'admin'[^]*?membership\.role === 'instructor'[^]*?\n\}/
+  );
+  assert.match(
+    serverSource,
+    /async function getUserAcademyMembership\(uid, academyId\) \{[^]*?collection\('users'\)\.doc\(uid\)\.get\(\)/
+  );
+});
+
 test('distributed build contains no notification credential defines', () => {
   assert.doesNotMatch(
     buildSource,
