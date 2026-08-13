@@ -60,24 +60,23 @@ void main() {
   });
 
   group('RankingService.periodRange', () {
-    test('week starts on Monday 00:00', () {
-      // 2026-06-03 is a Wednesday.
+    test('week is a rolling seven-day window', () {
       final now = DateTime(2026, 6, 3, 14, 30);
       final (start, end) = RankingService.periodRange(RankingPeriod.week, now);
-      expect(start, DateTime(2026, 6, 1)); // Monday
+      expect(start, DateTime(2026, 5, 28));
       expect(end, now);
     });
 
-    test('week on a Monday returns that Monday 00:00', () {
-      final now = DateTime(2026, 6, 1, 9); // Monday
+    test('week remains rolling when today is Monday', () {
+      final now = DateTime(2026, 6, 1, 9);
       final (start, _) = RankingService.periodRange(RankingPeriod.week, now);
-      expect(start, DateTime(2026, 6, 1));
+      expect(start, DateTime(2026, 5, 26));
     });
 
-    test('month starts on day 1 00:00', () {
+    test('month is a rolling thirty-day window', () {
       final now = DateTime(2026, 6, 17, 8);
       final (start, end) = RankingService.periodRange(RankingPeriod.month, now);
-      expect(start, DateTime(2026, 6, 1));
+      expect(start, DateTime(2026, 5, 19));
       expect(end, now);
     });
   });

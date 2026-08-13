@@ -3,10 +3,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'fns.dart';
 
 import 'firebase_service.dart';
-import 'mercado_pago_service.dart';
-import 'notification_dispatcher.dart';
 import 'plan_service.dart';
-import 'student_service.dart';
 
 /// Payment Status
 enum PaymentStatus { pending, paid, overdue, cancelled }
@@ -288,13 +285,9 @@ class Payment {
 class PaymentService {
   final String academyId;
   late final Collections _collections;
-  late final NotificationDispatcher _notificationDispatcher;
-  late final StudentService _studentService;
 
   PaymentService(this.academyId) {
     _collections = Collections(academyId);
-    _notificationDispatcher = NotificationDispatcher(academyId);
-    _studentService = StudentService(academyId);
   }
 
   CollectionReference get _paymentsRef => _collections.payments;
@@ -583,57 +576,43 @@ class PaymentService {
     String? instructorName,
   }) async {
     final isPrivateLesson = type == 'private_lesson';
-    final docRef = await _paymentsRef.add({
-      'academyId': academyId,
-      'studentId': studentId,
-      'studentName': studentName,
-      'amount': value,
-      'type': type,
-      'dueDate': Timestamp.fromDate(dueDate),
-      'status': PaymentStatus.pending.value,
-      'description': description ?? 'Mensalidade',
-      'referenceMonth': referenceMonth,
-      'planId': planId,
-      'paymentMethodPolicy': paymentMethodPolicy.value,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'createdBy': createdBy,
-      if (isPrivateLesson) ...{
-        'lessonDate': Timestamp.fromDate(lessonDate ?? dueDate),
-        'lessonWeight': lessonWeight ?? 1.0,
-        'lessonSport': lessonSport ?? 'bjj',
-        'instructorId': instructorId,
-        'instructorName': instructorName,
-        // O backend vira true ao conceder a presença (grantPrivateLessonAttendance).
-        'attendanceGranted': false,
-      },
-    });
-
-    final doc = await docRef.get();
-    final payment = Payment.fromFirestore(doc);
-
-    // Send notification to student if they have a linked account
-    if (sendNotification && (type == 'monthly_tuition' || isPrivateLesson)) {
-      try {
-        final student = await _studentService.getById(studentId);
-        // Route to the responsible adult (kids) when set, else the student's
-        // own account.
-        final notifyUserId =
-            student?.responsibleUserId ?? student?.linkedUserId;
-        if (student != null && notifyUserId != null) {
-          await _notificationDispatcher.notifyNewTuition(
-            userId: notifyUserId,
-            studentName: studentName,
-            amount: (value * 100).toInt(), // Convert to cents
-            dueDate: dueDate,
-            financialId: payment.id,
-          );
-        }
-      } catch (e) {
-        print('Failed to send new tuition notification: $e');
-      }
+    final result = await Fns.functions
+        .httpsCallable('createFinancialCharge')
+        .call({
+          'academyId': academyId,
+          'studentId': studentId,
+          'studentName': studentName,
+          'amount': value,
+          'type': type,
+          'dueDate': dueDate.toUtc().toIso8601String(),
+          'description': description ?? 'Mensalidade',
+          'referenceMonth': referenceMonth,
+          'planId': planId,
+          'paymentMethodPolicy': paymentMethodPolicy.value,
+          'sendNotification': sendNotification,
+          if (isPrivateLesson) ...{
+            'lessonDate': (lessonDate ?? dueDate).toUtc().toIso8601String(),
+            'lessonWeight': lessonWeight ?? 1.0,
+            'lessonSport': lessonSport ?? 'bjj',
+            'instructorId': instructorId,
+            'instructorName': instructorName,
+          },
+        });
+    final data = result.data is Map
+        ? Map<String, dynamic>.from(result.data as Map)
+        : const <String, dynamic>{};
+    final financialId = data['financialId']?.toString() ?? '';
+    if (financialId.isEmpty) {
+      throw PaymentOperationException(
+        'O backend nao retornou a cobranca criada.',
+      );
     }
-
+    final payment = await getById(financialId);
+    if (payment == null) {
+      throw PaymentOperationException(
+        'A cobranca foi criada, mas nao foi possivel recarregar os dados.',
+      );
+    }
     return payment;
   }
 
@@ -656,16 +635,6 @@ class PaymentService {
     });
   }
 
-  // ============================================
-  // Update Payment
-  // ============================================
-  Future<Payment> update(String id, Map<String, dynamic> data) async {
-    data['updatedAt'] = FieldValue.serverTimestamp();
-    await _paymentsRef.doc(id).update(data);
-    final doc = await _paymentsRef.doc(id).get();
-    return Payment.fromFirestore(doc);
-  }
-
   /// Edita os termos de uma cobrança ainda aberta. Qualquer PIX já emitido
   /// deixa de representar o novo valor/vencimento, então ele é invalidado e
   /// será recriado no próximo envio. Os marcadores da régua também são limpos
@@ -677,48 +646,14 @@ class PaymentService {
   }) async {
     if (value <= 0) throw ArgumentError.value(value, 'value');
 
-    final current = await getById(id);
-    if (current == null) throw StateError('Pagamento nao encontrado');
-    if (current.status == PaymentStatus.paid) {
-      throw StateError('Pagamentos ja quitados nao podem ser editados');
-    }
-
-    String? gatewayPaymentId = current.gatewayPaymentId;
-    final paymentGateway = current.paymentGateway;
-    final today = DateTime.now();
-    final todayStart = DateTime(today.year, today.month, today.day);
-    final dueStart = DateTime(dueDate.year, dueDate.month, dueDate.day);
-    final status = dueStart.isBefore(todayStart)
-        ? PaymentStatus.overdue
-        : PaymentStatus.pending;
-
-    final updated = await update(id, {
+    await Fns.functions.httpsCallable('updateFinancialTerms').call({
+      'academyId': academyId,
+      'financialId': id,
       'amount': value,
-      'dueDate': Timestamp.fromDate(dueDate),
-      'status': status.value,
-      'gatewayPaymentId': FieldValue.delete(),
-      'pixCode': FieldValue.delete(),
-      'pixQrCode': FieldValue.delete(),
-      'pixTicketUrl': FieldValue.delete(),
-      'pixExpiresAt': FieldValue.delete(),
-      'lastReminderStage': FieldValue.delete(),
-      'lastReminderAt': FieldValue.delete(),
-      'lastDueSoonStage': FieldValue.delete(),
-      'lastDueSoonAt': FieldValue.delete(),
+      'dueDate': dueDate.toUtc().toIso8601String(),
     });
-
-    if (gatewayPaymentId != null &&
-        gatewayPaymentId.isNotEmpty &&
-        paymentGateway == 'mercadopago') {
-      try {
-        await Fns.functions.httpsCallable('cancelMpPix').call({
-          'academyId': academyId,
-          'paymentId': gatewayPaymentId,
-        });
-      } catch (e) {
-        print('[PaymentService] cancelMpPix on terms edit failed: $e');
-      }
-    }
+    final updated = await getById(id);
+    if (updated == null) throw StateError('Pagamento nao encontrado');
     return updated;
   }
 
@@ -756,60 +691,14 @@ class PaymentService {
     PaymentMethod method = PaymentMethod.pix,
     DateTime? paymentDate,
   }) async {
-    final paidAt = paymentDate ?? DateTime.now();
-
-    // Read the live gateway payment id BEFORE we strip the pix fields, so we
-    // can best-effort cancel the open MP PIX (otherwise the already-sent link
-    // stays payable -> double payment).
-    String? gatewayPaymentId;
-    String? paymentGateway;
-    try {
-      final snap = await _paymentsRef.doc(id).get();
-      final data = snap.data() as Map<String, dynamic>?;
-      gatewayPaymentId = data?['gatewayPaymentId'] as String?;
-      paymentGateway = data?['paymentGateway'] as String?;
-    } catch (_) {
-      // non-fatal: proceed with the mark-paid regardless
-    }
-
-    final payment = await update(id, {
-      'status': PaymentStatus.paid.value,
+    await Fns.functions.httpsCallable('markFinancialPaidManual').call({
+      'academyId': academyId,
+      'financialId': id,
       'method': method.value,
-      // Offline mark-paid has no settling gateway integration — tag it 'manual'
-      // (canonical field, read by the Payment model). The pre-read above still
-      // holds the prior gateway/charge id for the PIX cancellation below.
-      'paymentGateway': 'manual',
-      // Auditoria MP (double-charge silencioso): apaga o gatewayPaymentId do PIX
-      // original. Se o cancelMpPix abaixo falhar (best-effort) e a família pagar
-      // o PIX ainda em aberto depois, o webhook NÃO pode achar o doc 'paid' com
-      // o MESMO charge id e tratar como no-op idempotente — sem o id, o settle
-      // (server_functions.js:5783/5793) cai no caminho de duplicidade/conciliação
-      // e alerta o admin para reembolsar, em vez de creditar 2x em silêncio.
-      'gatewayPaymentId': FieldValue.delete(),
-      'paymentDate': Timestamp.fromDate(paidAt),
-      // Kill the live PIX on the doc (mirrors mpMktSettle): an admin marking
-      // the charge paid offline must invalidate the already-sent code.
-      'pixCode': FieldValue.delete(),
-      'pixQrCode': FieldValue.delete(),
-      'pixTicketUrl': FieldValue.delete(),
-      'pixExpiresAt': FieldValue.delete(),
+      'paymentDate': (paymentDate ?? DateTime.now()).toUtc().toIso8601String(),
     });
-
-    // Best-effort: cancel the open MP PIX so it can no longer be paid. Never
-    // block the mark-paid if cancellation fails.
-    if (gatewayPaymentId != null &&
-        gatewayPaymentId.isNotEmpty &&
-        paymentGateway == 'mercadopago') {
-      try {
-        await Fns.functions.httpsCallable('cancelMpPix').call({
-          'academyId': academyId,
-          'paymentId': gatewayPaymentId,
-        });
-      } catch (e) {
-        print('[PaymentService] cancelMpPix failed (non-fatal): $e');
-      }
-    }
-
+    final payment = await getById(id);
+    if (payment == null) throw StateError('Pagamento nao encontrado');
     return payment;
   }
 
@@ -817,45 +706,12 @@ class PaymentService {
   // Cancel Payment
   // ============================================
   Future<Payment> cancel(String id) async {
-    // Auditoria MP (cobrança fantasma): cancelar NÃO pode deixar o PIX vivo
-    // pagável — senão a família paga uma cobrança que o admin deu por cancelada.
-    // Espelha markAsPaid: pré-lê o gatewayPaymentId ANTES de apagar os campos
-    // pix, invalida o PIX no doc e cancela o PIX no MP (best-effort).
-    // (Assinatura recorrente é cancelada por ação própria — UI de assinatura —,
-    // não por cancelar uma cobrança avulsa do mês.)
-    String? gatewayPaymentId;
-    String? paymentGateway;
-    try {
-      final snap = await _paymentsRef.doc(id).get();
-      final data = snap.data() as Map<String, dynamic>?;
-      gatewayPaymentId = data?['gatewayPaymentId'] as String?;
-      paymentGateway = data?['paymentGateway'] as String?;
-    } catch (_) {
-      // non-fatal: segue o cancel mesmo assim.
-    }
-
-    final payment = await update(id, {
-      'status': PaymentStatus.cancelled.value,
-      'gatewayPaymentId': FieldValue.delete(),
-      'pixCode': FieldValue.delete(),
-      'pixQrCode': FieldValue.delete(),
-      'pixTicketUrl': FieldValue.delete(),
-      'pixExpiresAt': FieldValue.delete(),
+    await Fns.functions.httpsCallable('cancelFinancialCharge').call({
+      'academyId': academyId,
+      'financialId': id,
     });
-
-    if (gatewayPaymentId != null &&
-        gatewayPaymentId.isNotEmpty &&
-        paymentGateway == 'mercadopago') {
-      try {
-        await Fns.functions.httpsCallable('cancelMpPix').call({
-          'academyId': academyId,
-          'paymentId': gatewayPaymentId,
-        });
-      } catch (e) {
-        print('[PaymentService] cancelMpPix on cancel failed (non-fatal): $e');
-      }
-    }
-
+    final payment = await getById(id);
+    if (payment == null) throw StateError('Pagamento nao encontrado');
     return payment;
   }
 
@@ -863,32 +719,23 @@ class PaymentService {
   // Reactivate Cancelled Payment
   // ============================================
   Future<Payment> reactivate(String id) async {
+    await Fns.functions.httpsCallable('reactivateFinancialCharge').call({
+      'academyId': academyId,
+      'financialId': id,
+    });
     final payment = await getById(id);
-    if (payment == null) {
-      throw Exception('Payment not found');
-    }
-
-    // Determine new status based on due date
-    final today = DateTime.now();
-    final todayStart = DateTime(today.year, today.month, today.day);
-    final dueDate = DateTime(
-      payment.dueDate.year,
-      payment.dueDate.month,
-      payment.dueDate.day,
-    );
-
-    final newStatus = dueDate.isBefore(todayStart)
-        ? PaymentStatus.overdue
-        : PaymentStatus.pending;
-
-    return update(id, {'status': newStatus.value});
+    if (payment == null) throw StateError('Pagamento nao encontrado');
+    return payment;
   }
 
   // ============================================
   // Delete Payment
   // ============================================
   Future<void> delete(String id) async {
-    await _paymentsRef.doc(id).delete();
+    await Fns.functions.httpsCallable('deleteFinancialCharge').call({
+      'academyId': academyId,
+      'financialId': id,
+    });
   }
 
   // ============================================
@@ -1022,14 +869,9 @@ class PaymentService {
       studentList = students;
     } else {
       final planService = PlanService(academyId);
-      List<Plan> plansToProcess;
-
-      if (planId != null) {
-        final plan = await planService.getById(planId);
-        plansToProcess = plan != null && plan.isActive ? [plan] : [];
-      } else {
-        plansToProcess = await planService.getActive();
-      }
+      final allActivePlans = await planService.getActive();
+      final selectedPlanIds = planId == null ? null : <String>{planId};
+      final plansById = {for (final plan in allActivePlans) plan.id: plan};
 
       final entries =
           <
@@ -1042,7 +884,9 @@ class PaymentService {
             })
           >[];
 
-      for (final plan in plansToProcess) {
+      // Build from every active plan even when the user selected one plan.
+      // This lets us detect an accidental cross-plan overlap before charging.
+      for (final plan in allActivePlans) {
         planPolicies[plan.id] = plan.paymentMethodPolicy;
         for (final studentId in plan.studentIds) {
           entries.add((
@@ -1070,47 +914,86 @@ class PaymentService {
         }
       }
 
-      studentList = entries
+      final eligibleEntries = entries
           .where((e) => activeStudentMap.containsKey(e.studentId))
           .map((e) {
             final data = activeStudentMap[e.studentId]!;
+            final effectiveDueDay = data['tuitionDay'] as int? ?? e.dueDay;
+            final plan = plansById[e.planId]!;
             return (
               id: e.studentId,
               name: data['fullName'] as String? ?? '',
               value: e.value,
-              dueDay: data['tuitionDay'] as int? ?? e.dueDay,
+              dueDay: effectiveDueDay,
               planId: e.planId as String?,
               billingPeriod: e.billingPeriod,
+              eligible: plan.isStudentEligibleForMonth(
+                e.studentId,
+                year: year,
+                month: month,
+                dueDay: effectiveDueDay,
+              ),
             );
           })
-          .where((s) => s.value > 0)
+          .where((entry) => entry.value > 0 && entry.eligible)
+          .toList();
+
+      final monthlyPlanIdsByStudent = <String, Set<String>>{};
+      for (final entry in eligibleEntries.where(
+        (entry) => entry.billingPeriod == BillingPeriod.monthly,
+      )) {
+        monthlyPlanIdsByStudent
+            .putIfAbsent(entry.id, () => <String>{})
+            .add(entry.planId!);
+      }
+      final conflictingStudentIds = monthlyPlanIdsByStudent.entries
+          .where((entry) => entry.value.length > 1)
+          .map((entry) => entry.key)
+          .toSet();
+
+      studentList = eligibleEntries
+          .where(
+            (entry) =>
+                !conflictingStudentIds.contains(entry.id) &&
+                !plansById[entry.planId]!.isRecurring &&
+                (selectedPlanIds == null ||
+                    selectedPlanIds.contains(entry.planId)),
+          )
+          .map(
+            (entry) => (
+              id: entry.id,
+              name: entry.name,
+              value: entry.value,
+              dueDay: entry.dueDay,
+              planId: entry.planId,
+              billingPeriod: entry.billingPeriod,
+            ),
+          )
           .toList();
     }
 
     // Prefetch this month's charges ONCE for the monthly-plan dedup, instead of
     // one Firestore query per student (the N+1 that made bulk generation hang).
     // Non-monthly plans still use the per-student period check below.
-    final monthCharges = (await getByMonth(
-      referenceMonth,
-    )).where((p) => p.status != PaymentStatus.cancelled).toList();
+    // Cancelled is terminal too: generation must not recreate tomorrow a
+    // charge that an admin deliberately cancelled. Reactivation is explicit.
+    final monthCharges = await getByMonth(referenceMonth);
 
     for (final student in studentList) {
       final period = student.billingPeriod;
       bool shouldGenerate;
 
+      // One tuition document per student/month, regardless of plan/status.
+      if (monthCharges.any(
+        (payment) =>
+            payment.studentId == student.id &&
+            payment.type == 'monthly_tuition',
+      )) {
+        continue;
+      }
+
       if (period == BillingPeriod.monthly) {
-        // Skip if an active charge already exists this month for this student
-        // (matched against the plan, mirroring the prior per-student query).
-        final activeExisting = monthCharges
-            .where((p) => p.studentId == student.id)
-            .toList();
-        if (student.planId != null) {
-          shouldGenerate = !activeExisting.any(
-            (p) => p.planId == student.planId,
-          );
-        } else {
-          shouldGenerate = !activeExisting.any((p) => p.planId == null);
-        }
+        shouldGenerate = true;
       } else {
         // Non-monthly: skip if student was already charged within the billing period
         shouldGenerate = await _isDueForPeriod(
@@ -1147,6 +1030,7 @@ class PaymentService {
       );
 
       results.add(payment);
+      monthCharges.add(payment);
     }
 
     return results;
@@ -1156,47 +1040,13 @@ class PaymentService {
   // Mark Overdue Payments (batch job)
   // ============================================
   Future<int> markOverduePayments({bool sendNotifications = true}) async {
-    // Only scan pending payments server-side (single-field index, auto-created)
-    // instead of reading the whole payments history. Overdue is then derived in
-    // memory from dueDate. Cuts this from a full-collection scan to just the
-    // open charges — the dominant cost when opening the financial screen.
-    final snapshot = await _paymentsRef
-        .where('status', isEqualTo: PaymentStatus.pending.value)
-        .get();
-    int count = 0;
-
-    for (final doc in snapshot.docs) {
-      final payment = Payment.fromFirestore(doc);
-      if (payment.status == PaymentStatus.pending && payment.isOverdue) {
-        await doc.reference.update({
-          'status': PaymentStatus.overdue.value,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-        count++;
-
-        // Send overdue notification to student
-        if (sendNotifications) {
-          try {
-            final student = await _studentService.getById(payment.studentId);
-            final notifyUserId =
-                student?.responsibleUserId ?? student?.linkedUserId;
-            if (student != null && notifyUserId != null) {
-              await _notificationDispatcher.notifyOverdueTuition(
-                userId: notifyUserId,
-                studentName: payment.studentName,
-                amount: (payment.value * 100).toInt(),
-                daysOverdue: payment.daysOverdue,
-                financialId: payment.id,
-              );
-            }
-          } catch (e) {
-            print('Failed to send overdue notification: $e');
-          }
-        }
-      }
-    }
-
-    return count;
+    final result = await Fns.functions
+        .httpsCallable('refreshOverdueFinancials')
+        .call({'academyId': academyId});
+    final data = result.data is Map
+        ? Map<String, dynamic>.from(result.data as Map)
+        : const <String, dynamic>{};
+    return (data['updated'] as num?)?.toInt() ?? 0;
   }
 
   // ============================================
@@ -1256,12 +1106,8 @@ class PaymentService {
   // ============================================
   // Get WhatsApp Reminder Link
   // ============================================
-  /// [pixCode]/[ticketUrl] are optional — when present (MP conectado e PIX
-  /// gerado com sucesso), o lembrete manual ganha o mesmo copia-e-cola/link
-  /// que o canal automático de cobrança já anexa (ver
-  /// [generateReminderPix] e BillingNotificationService.injectPaymentInfo).
-  /// Sem eles (default), a mensagem sai IDÊNTICA à de antes — assinatura
-  /// compatível com todo caller existente.
+  /// [pixCode]/[ticketUrl] são mantidos apenas para compatibilidade com links
+  /// manuais antigos. Os lembretes oficiais usam o Pay Link estável do backend.
   String getWhatsAppReminderLink({
     required String phone,
     required String studentName,
@@ -1294,37 +1140,6 @@ class PaymentService {
     );
 
     return 'https://wa.me/$phoneWithCountry?text=$message';
-  }
-
-  // ============================================
-  // Best-effort PIX for the manual WhatsApp reminder
-  // ============================================
-  /// Mirrors BillingNotificationService.ensureValidPixForFinancial (o canal
-  /// de cobrança automático) para o lembrete manual desta tela. NUNCA lança —
-  /// qualquer falha (MP desconectado, erro de rede, CF) retorna vazio e o
-  /// lembrete manual segue sem link, como antes.
-  Future<({String pixCode, String ticketUrl})> generateReminderPix({
-    required String financialId,
-    required String studentId,
-    required String studentName,
-    required double amount,
-    String? cpf,
-  }) async {
-    try {
-      final mp = MercadoPagoService(academyId);
-      if (!await mp.isEnabled()) return (pixCode: '', ticketUrl: '');
-      final link = await mp.createPixPayment(
-        amount: amount,
-        financialId: financialId,
-        studentId: studentId,
-        studentName: studentName,
-        cpf: cpf,
-      );
-      if (link == null) return (pixCode: '', ticketUrl: '');
-      return (pixCode: link.pixCode, ticketUrl: link.ticketUrl ?? '');
-    } catch (_) {
-      return (pixCode: '', ticketUrl: '');
-    }
   }
 }
 

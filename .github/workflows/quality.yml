@@ -1,0 +1,50 @@
+name: Quality
+
+on:
+  pull_request: {}
+  push:
+    branches: [main, b2c, ux-ativacao]
+
+jobs:
+  functions:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.5'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter test
+
+  client-secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject notification credentials in distributed clients
+        shell: bash
+        run: |
+          if grep -RInE --exclude-dir=build --exclude='*.md' \
+            '(WHATSAPP_API_KEY|EMAIL_API_KEY|NOTIFICATION_API_KEY)[[:space:]]*=' \
+            build.sh lib site; then
+            echo 'Notification credential found in a distributed client.' >&2
+            exit 1
+          fi

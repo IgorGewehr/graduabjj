@@ -4,9 +4,9 @@ Guia de convenções para qualquer dev/agente trabalhando neste repo. Extraído
 do código real (não de intenção) — se algo aqui parecer desatualizado em
 relação ao código, o código é a fonte da verdade; atualize este arquivo.
 
-Guias técnicos aprofundados: [Build Windows](docs/guias/BUILD_WINDOWS.md) ·
-[Catracas por fabricante](docs/guias/CATRACAS.md) ·
-[Catraca Gateway](docs/guias/CATRACA_GATEWAY.md).
+Referências operacionais: [Windows](docs/WINDOWS.md) ·
+[Catracas](functions/access_control/README.md) ·
+[Pagamentos](docs/arquitetura-pagamentos/README.md).
 
 ## Arquitetura
 
@@ -40,7 +40,7 @@ tenants para resolver quem é quem entre academias.
 
 **Frontend:** Flutter (`lib/`), mobile-first histórico, desktop aditivo
 (Windows via `lib/services/fns.dart` + `lib/core/platform_support.dart` —
-ver [BUILD_WINDOWS.md](docs/guias/BUILD_WINDOWS.md)). Navegação
+ver [WINDOWS.md](docs/WINDOWS.md)). Navegação
 catalog-driven (`kAdminNavCatalog`/`kPortalNavCatalog`) — trocar o shell
 adapta o app inteiro sem reescrever tela por tela.
 
@@ -158,7 +158,7 @@ adapta o app inteiro sem reescrever tela por tela.
   embutidos no script — não rodar `flutter build` direto para release sem
   eles.
 - Build Windows é workflow **separado** no GitHub Actions — ver
-  [BUILD_WINDOWS.md](docs/guias/BUILD_WINDOWS.md) (não é um target do
+  [WINDOWS.md](docs/WINDOWS.md) (não é um target do
   `build.sh`).
 - **GOTCHAS aprendidos (evitar repetir):**
   1. **Nunca use `--no-codesign`** para rodar no simulador iOS — mata o

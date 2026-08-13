@@ -27,7 +27,7 @@ class Subscription {
   final bool needsReauth;
   final String? mpPreapprovalId;
 
-  // ---- Resilience / dunning fields (see recorrencia-mp-contract.md) --------
+  // ---- Resilience / dunning fields (contract lives with this service) ------
 
   /// `createdAt + months` (when `months>0`); `null` = open-ended. Set in
   /// `createMpSubscription`. Legacy docs may be missing it — callers should

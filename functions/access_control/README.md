@@ -155,8 +155,8 @@ https://us-central1-arpjj-76350.cloudfunctions.net/ingestAccessEvent
 | `k` / `pushcommkey` / `key` | token fraco quando não há HMAC (= `device.secret`). |
 
 > Se o firmware exigir path base fixo (ex.: ZKTeco `/iclock/`), use um **rewrite
-> do Firebase Hosting** ou um **proxy edge** mapeando para a CF e injetando os
-> headers/query.
+> do Firebase Hosting** mapeando para a Firebase Function. Não introduza um
+> proxy/backend externo para essa adaptação.
 
 ---
 

@@ -14,21 +14,13 @@
 
 set -euo pipefail
 
-# INTERNAL_API_KEY do notification-server (espelha o que marcusjj/.env usa
-# em WHATSAPP_API_KEY e EMAIL_API_KEY — mesmo valor para ambos canais).
-NOTIFICATION_INTERNAL_KEY='c3d85c618a412a93034bd9cf6fcb20536fbd54cc73385ba6b369846ff87db119'
-
 # Common --dart-define flags reused by every build target.
+# Only public configuration belongs in a distributed Flutter binary. Billing
+# notifications are dispatched by authenticated Cloud Functions; notification
+# server credentials must be configured in Firebase Secret Manager.
 DEFINES=(
-  --dart-define=APP_BASE_URL=https://bjjeasy.netlify.app
-  --dart-define=API_BASE_URL=https://bjjeasy.netlify.app/api
-  --dart-define=WHATSAPP_API_URL=https://notification.tensorroot.com/api/send-whatsapp
-  --dart-define=WHATSAPP_TEMPLATE_API_URL=https://notification.tensorroot.com/api/send-whatsapp-template
-  --dart-define=EMAIL_API_URL=https://notification.tensorroot.com/api/send-email
-  --dart-define=WHATSAPP_API_KEY="$NOTIFICATION_INTERNAL_KEY"
-  --dart-define=EMAIL_API_KEY="$NOTIFICATION_INTERNAL_KEY"
-  --dart-define=NOTIFICATION_API_KEY="$NOTIFICATION_INTERNAL_KEY"
-  --dart-define=NOTIFICATION_BULK_API_URL=https://notification.tensorroot.com/api/send-bulk
+  --dart-define=APP_BASE_URL=https://arpjj-76350.web.app
+  --dart-define=API_BASE_URL=https://arpjj-76350.web.app/api
 )
 
 # Parse `version: X.Y.Z+N` from pubspec.yaml.

@@ -1,7 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_service.dart';
-import 'payment_service.dart' show PaymentMethodPolicy, PaymentMethodPolicyExtension;
+import 'payment_service.dart'
+    show PaymentMethodPolicy, PaymentMethodPolicyExtension;
 
 enum BillingPeriod {
   monthly,
@@ -10,32 +11,32 @@ enum BillingPeriod {
   annual;
 
   int get months => switch (this) {
-        BillingPeriod.monthly => 1,
-        BillingPeriod.quarterly => 3,
-        BillingPeriod.semiannual => 6,
-        BillingPeriod.annual => 12,
-      };
+    BillingPeriod.monthly => 1,
+    BillingPeriod.quarterly => 3,
+    BillingPeriod.semiannual => 6,
+    BillingPeriod.annual => 12,
+  };
 
   String get label => switch (this) {
-        BillingPeriod.monthly => 'Mensal',
-        BillingPeriod.quarterly => 'Trimestral',
-        BillingPeriod.semiannual => 'Semestral',
-        BillingPeriod.annual => 'Anual',
-      };
+    BillingPeriod.monthly => 'Mensal',
+    BillingPeriod.quarterly => 'Trimestral',
+    BillingPeriod.semiannual => 'Semestral',
+    BillingPeriod.annual => 'Anual',
+  };
 
   String get periodLabel => switch (this) {
-        BillingPeriod.monthly => 'mês',
-        BillingPeriod.quarterly => 'trimestre',
-        BillingPeriod.semiannual => 'semestre',
-        BillingPeriod.annual => 'ano',
-      };
+    BillingPeriod.monthly => 'mês',
+    BillingPeriod.quarterly => 'trimestre',
+    BillingPeriod.semiannual => 'semestre',
+    BillingPeriod.annual => 'ano',
+  };
 
   static BillingPeriod fromString(String? value) => switch (value) {
-        'quarterly' => BillingPeriod.quarterly,
-        'semiannual' => BillingPeriod.semiannual,
-        'annual' => BillingPeriod.annual,
-        _ => BillingPeriod.monthly,
-      };
+    'quarterly' => BillingPeriod.quarterly,
+    'semiannual' => BillingPeriod.semiannual,
+    'annual' => BillingPeriod.annual,
+    _ => BillingPeriod.monthly,
+  };
 }
 
 /// Plan Model
@@ -52,15 +53,23 @@ class Plan {
   final bool isActive;
   final Map<String, double> customValues;
   final Map<String, int> customDueDays;
+
+  /// When each student entered this plan. Missing entries are legacy
+  /// memberships and remain billable for backward compatibility.
+  final Map<String, DateTime> studentAddedAt;
+
   /// Which payment methods this plan accepts (PIX e Cartão / Somente PIX /
   /// Somente Cartão). Absent on legacy plans → [PaymentMethodPolicy.both].
   final PaymentMethodPolicy paymentMethodPolicy;
+
   /// For recurring (monthly + card-only) plans: how many months the
   /// subscription lasts. Null/0 = no end (open-ended).
   final int? recurringMonths;
+
   /// For recurring plans: the day of month (1–28) the card is auto-charged.
   /// Null falls back to [defaultDueDay] (clamped to 28).
   final int? billingDay;
+
   /// Sport id this plan applies to ('bjj', 'muaythai', ...). Null = legacy
   /// "any modality" plan from before the field existed.
   final String? sport;
@@ -80,6 +89,7 @@ class Plan {
     this.isActive = true,
     this.customValues = const {},
     this.customDueDays = const {},
+    this.studentAddedAt = const {},
     this.paymentMethodPolicy = PaymentMethodPolicy.both,
     this.recurringMonths,
     this.billingDay,
@@ -106,6 +116,29 @@ class Plan {
   int getStudentDueDay(String studentId) =>
       customDueDays[studentId] ?? defaultDueDay;
 
+  bool isStudentEligibleForMonth(
+    String studentId, {
+    required int year,
+    required int month,
+    required int dueDay,
+  }) {
+    final lastDay = DateTime(year, month + 1, 0).day;
+    final safeDueDay = dueDay.clamp(1, lastDay);
+    final dueDate = DateTime(year, month, safeDueDay);
+    final planDate = DateTime(createdAt.year, createdAt.month, createdAt.day);
+    if (planDate.isAfter(dueDate)) return false;
+    final addedAt = studentAddedAt[studentId];
+    if (addedAt == null) return true;
+    return !DateTime(addedAt.year, addedAt.month, addedAt.day).isAfter(dueDate);
+  }
+
+  Iterable<String> activeStudentIds(Set<String> activeIds) =>
+      studentIds.toSet().where(activeIds.contains);
+
+  double expectedPeriodRevenue(Set<String> activeIds) => activeStudentIds(
+    activeIds,
+  ).fold(0.0, (total, studentId) => total + getStudentValue(studentId));
+
   Plan copyWith({
     String? id,
     String? name,
@@ -119,6 +152,7 @@ class Plan {
     bool? isActive,
     Map<String, double>? customValues,
     Map<String, int>? customDueDays,
+    Map<String, DateTime>? studentAddedAt,
     PaymentMethodPolicy? paymentMethodPolicy,
     int? recurringMonths,
     int? billingDay,
@@ -139,6 +173,7 @@ class Plan {
       isActive: isActive ?? this.isActive,
       customValues: customValues ?? this.customValues,
       customDueDays: customDueDays ?? this.customDueDays,
+      studentAddedAt: studentAddedAt ?? this.studentAddedAt,
       paymentMethodPolicy: paymentMethodPolicy ?? this.paymentMethodPolicy,
       recurringMonths: recurringMonths ?? this.recurringMonths,
       billingDay: billingDay ?? this.billingDay,
@@ -166,23 +201,38 @@ class Plan {
       customValues: data['customValues'] != null
           ? Map<String, double>.from(
               (data['customValues'] as Map).map(
-                (key, value) => MapEntry(key.toString(), (value as num).toDouble()),
+                (key, value) =>
+                    MapEntry(key.toString(), (value as num).toDouble()),
               ),
             )
           : {},
       customDueDays: data['customDueDays'] != null
           ? Map<String, int>.from(
               (data['customDueDays'] as Map).map(
-                (key, value) => MapEntry(key.toString(), (value as num).toInt()),
+                (key, value) =>
+                    MapEntry(key.toString(), (value as num).toInt()),
               ),
             )
           : {},
-      paymentMethodPolicy:
-          PaymentMethodPolicyExtension.fromString(data['paymentMethodPolicy']),
+      studentAddedAt: data['studentAddedAt'] != null
+          ? Map<String, DateTime>.from(
+              (data['studentAddedAt'] as Map).map(
+                (key, value) =>
+                    MapEntry(key.toString(), (value as Timestamp).toDate()),
+              ),
+            )
+          : {},
+      paymentMethodPolicy: PaymentMethodPolicyExtension.fromString(
+        data['paymentMethodPolicy'],
+      ),
       recurringMonths: (data['recurringMonths'] as num?)?.toInt(),
       billingDay: (data['billingDay'] as num?)?.toInt(),
       sport: data['sport'] as String?,
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      // Legacy plans without createdAt predate this safety rule and must not
+      // suddenly become ineligible for the current month.
+      createdAt:
+          (data['createdAt'] as Timestamp?)?.toDate() ??
+          DateTime.fromMillisecondsSinceEpoch(0),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
@@ -330,6 +380,7 @@ class PlanService {
   Future<Plan> addStudent(String planId, String studentId) async {
     await _collections.plan(planId).update({
       'studentIds': FieldValue.arrayUnion([studentId]),
+      'studentAddedAt.$studentId': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
@@ -345,6 +396,7 @@ class PlanService {
       'studentIds': FieldValue.arrayRemove([studentId]),
       'customValues.$studentId': FieldValue.delete(),
       'customDueDays.$studentId': FieldValue.delete(),
+      'studentAddedAt.$studentId': FieldValue.delete(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
@@ -369,7 +421,11 @@ class PlanService {
   // ============================================
   // Set Custom Value for Student
   // ============================================
-  Future<Plan> setCustomValue(String planId, String studentId, double value) async {
+  Future<Plan> setCustomValue(
+    String planId,
+    String studentId,
+    double value,
+  ) async {
     await _plansRef.doc(planId).update({
       'customValues.$studentId': value,
       'updatedAt': FieldValue.serverTimestamp(),

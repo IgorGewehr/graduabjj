@@ -2,10 +2,13 @@
   "name": "graduabjj-functions",
   "description": "Cloud Functions for GraduaBJJ — role/membership operations that need admin privilege",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "main": "index.js",
   "scripts": {
+    "check": "node --check index.js && node --check server_functions.js && node --check billing_tuition_rules.js && node --check billing_payment_resolver.js && node --check billing_whatsapp_templates.js && node --check manual_pix_confirmation.js && node --check public_payment_link.js",
+    "test": "node scripts/run_node_tests.js",
+    "test:unit": "node scripts/run_node_tests.js",
     "serve": "firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log"

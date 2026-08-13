@@ -112,6 +112,15 @@
       ]
     },
     {
+      "//": "MyDojo Pay: reconciliador varre tentativas prontas/pendentes da academia da mais antiga para a mais recente, sem perder uma baixa se o webhook falhar.",
+      "collectionGroup": "paymentAttempts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "linkCodes",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
@@ -272,6 +281,13 @@
     }
   ],
   "fieldOverrides": [
+    {
+      "//": "MyDojo Pay: contadores de rate limit expiram automaticamente; o campo sequencial nao precisa de indice de consulta.",
+      "collectionGroup": "publicPaymentRateLimits",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
     {
       "//": "Retenção (§9.1): streakRiskCheck varre alunos com conta vinculada via collectionGroup('students').where('linkedUserId','!=',null) — single-field automático só cobre COLLECTION, então o override habilita COLLECTION_GROUP. ATENÇÃO: override SUBSTITUI o auto-index do campo — COLLECTION ASC precisa ficar listado p/ as queries por academia existentes (student_service.dart:53, index.js:553); nada ordena linkedUserId DESC (equality e != funcionam no ASC).",
       "collectionGroup": "students",

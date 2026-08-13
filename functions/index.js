@@ -1650,7 +1650,7 @@ exports.selfCheckin = onCall(async (request) => {
 //   CAKTO_OFFER_MENSAL, CAKTO_OFFER_TRIMESTRAL, CAKTO_OFFER_ANUAL
 // ============================================================
 exports.caktoWebhook = onRequest(
-  {cors: false, secrets: ['CAKTO_WEBHOOK_SECRET']},
+  {cors: false, invoker: 'public', secrets: ['CAKTO_WEBHOOK_SECRET']},
   async (req, res) => {
     if (req.method !== 'POST') {
       return res.status(405).send('Method Not Allowed');
@@ -2100,7 +2100,7 @@ async function mpHandlePreapproval(pre, res) {
 }
 
 exports.mercadoPagoWebhook = onRequest(
-  {cors: false, secrets: ['MP_WEBHOOK_SECRET', 'MERCADOPAGO_ACCESS_TOKEN']},
+  {cors: false, invoker: 'public', secrets: ['MP_WEBHOOK_SECRET', 'MERCADOPAGO_ACCESS_TOKEN']},
   async (req, res) => {
     if (req.method !== 'POST') {
       return res.status(405).send('Method Not Allowed');
@@ -2230,7 +2230,7 @@ exports.createMercadoPagoCheckout = onCall(
     const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
     const email = (await getAuth().getUser(uid)).email || undefined;
     const externalReference = `${academyId}:${plan}`;
-    const appUrl = process.env.APP_BASE_URL || 'https://bjjeasy.netlify.app';
+    const appUrl = process.env.APP_BASE_URL || 'https://arpjj-76350.web.app';
     const backUrl = `${appUrl}/obrigado`;
 
     let endpoint;

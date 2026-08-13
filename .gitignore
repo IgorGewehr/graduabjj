@@ -64,3 +64,4 @@ functions/.runtimeconfig.json
 functions/.env
 firebase-debug.log
 firebase-debug.*.log
+.firebase/

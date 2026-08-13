@@ -31,7 +31,11 @@ class _C {
 }
 
 TextStyle _eyebrow(Color c, double s) => TextStyle(
-    color: c, fontSize: s, fontWeight: FontWeight.w800, letterSpacing: 1.4);
+  color: c,
+  fontSize: s,
+  fontWeight: FontWeight.w800,
+  letterSpacing: 1.4,
+);
 
 /// Document type for registration
 enum _DocumentType { cpf, cnpj }
@@ -41,7 +45,8 @@ class CreateAcademyScreen extends ConsumerStatefulWidget {
   const CreateAcademyScreen({super.key});
 
   @override
-  ConsumerState<CreateAcademyScreen> createState() => _CreateAcademyScreenState();
+  ConsumerState<CreateAcademyScreen> createState() =>
+      _CreateAcademyScreenState();
 }
 
 class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
@@ -96,7 +101,7 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
   // Open terms URL
   Future<void> _openTermsUrl() async {
-    final uri = Uri.parse('https://bjjeasy.netlify.app/termsofservice');
+    final uri = Uri.parse('https://arpjj-76350.web.app/termsofservice');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
@@ -122,8 +127,10 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   String _formatCpf(String value) {
     final digits = value.replaceAll(RegExp(r'\D'), '');
     if (digits.length <= 3) return digits;
-    if (digits.length <= 6) return '${digits.substring(0, 3)}.${digits.substring(3)}';
-    if (digits.length <= 9) return '${digits.substring(0, 3)}.${digits.substring(3, 6)}.${digits.substring(6)}';
+    if (digits.length <= 6)
+      return '${digits.substring(0, 3)}.${digits.substring(3)}';
+    if (digits.length <= 9)
+      return '${digits.substring(0, 3)}.${digits.substring(3, 6)}.${digits.substring(6)}';
     return '${digits.substring(0, 3)}.${digits.substring(3, 6)}.${digits.substring(6, 9)}-${digits.substring(9, digits.length.clamp(0, 11))}';
   }
 
@@ -131,9 +138,12 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
   String _formatCnpj(String value) {
     final digits = value.replaceAll(RegExp(r'\D'), '');
     if (digits.length <= 2) return digits;
-    if (digits.length <= 5) return '${digits.substring(0, 2)}.${digits.substring(2)}';
-    if (digits.length <= 8) return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5)}';
-    if (digits.length <= 12) return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8)}';
+    if (digits.length <= 5)
+      return '${digits.substring(0, 2)}.${digits.substring(2)}';
+    if (digits.length <= 8)
+      return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5)}';
+    if (digits.length <= 12)
+      return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8)}';
     return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8, 12)}-${digits.substring(12, digits.length.clamp(0, 14))}';
   }
 
@@ -255,7 +265,8 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
 
       if (!_acceptedTerms) {
         setState(() {
-          _errorMessage = 'Você precisa aceitar os Termos de Serviço para continuar.';
+          _errorMessage =
+              'Você precisa aceitar os Termos de Serviço para continuar.';
         });
         return;
       }
@@ -280,7 +291,10 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
       container.read(creatingAccountStudentNameProvider.notifier).state = '';
       container.read(isCreatingAccountProvider.notifier).state = true;
 
-      final documentDigits = _documentController.text.replaceAll(RegExp(r'\D'), '');
+      final documentDigits = _documentController.text.replaceAll(
+        RegExp(r'\D'),
+        '',
+      );
 
       final resolvedProfile = _academyProfile ?? AcademyProfile.fight;
       final authService = ref.read(authServiceProvider);
@@ -353,7 +367,8 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
       return 'Email inválido';
     } else if (msg.contains('weak-password')) {
       return 'Senha muito fraca. Use pelo menos 6 caracteres.';
-    } else if (msg.contains('permission-denied') || msg.contains('permission denied')) {
+    } else if (msg.contains('permission-denied') ||
+        msg.contains('permission denied')) {
       return 'Erro de permissão. Entre em contato com o suporte.';
     } else if (msg.contains('network')) {
       return 'Erro de conexão. Verifique sua internet.';
@@ -371,9 +386,9 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
     Widget? suffix,
   }) {
     OutlineInputBorder line(Color c, double w) => OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: c, width: w),
-        );
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(color: c, width: w),
+    );
     return InputDecoration(
       labelText: label,
       hintText: hint,
@@ -382,34 +397,47 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
       filled: true,
       fillColor: _C.fieldFill,
       labelStyle: const TextStyle(
-          color: _C.smoke, fontSize: 14, fontWeight: FontWeight.w600),
+        color: _C.smoke,
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+      ),
       floatingLabelStyle: const TextStyle(
-          color: _C.blood, fontSize: 13, fontWeight: FontWeight.w800),
+        color: _C.blood,
+        fontSize: 13,
+        fontWeight: FontWeight.w800,
+      ),
       hintStyle: const TextStyle(
-          color: _C.ash, fontSize: 14, fontWeight: FontWeight.w500),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        color: _C.ash,
+        fontSize: 14,
+        fontWeight: FontWeight.w500,
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       border: line(Colors.transparent, 0),
       enabledBorder: line(_C.hairline, 1),
       focusedBorder: line(_C.blood, 1.5),
       errorBorder: line(_C.blood.withValues(alpha: 0.6), 1),
       focusedErrorBorder: line(_C.blood, 1.5),
       errorStyle: const TextStyle(
-          color: _C.blood, fontSize: 12, fontWeight: FontWeight.w600),
+        color: _C.blood,
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+      ),
     );
   }
 
   ButtonStyle _ctaStyle(Color bg) => ElevatedButton.styleFrom(
-        backgroundColor: bg,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        disabledBackgroundColor: bg.withValues(alpha: 0.45),
-        disabledForegroundColor: Colors.white,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14)),
-        textStyle: const TextStyle(
-            fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: 1.0),
-      );
+    backgroundColor: bg,
+    foregroundColor: Colors.white,
+    elevation: 0,
+    disabledBackgroundColor: bg.withValues(alpha: 0.45),
+    disabledForegroundColor: Colors.white,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    textStyle: const TextStyle(
+      fontSize: 15,
+      fontWeight: FontWeight.w900,
+      letterSpacing: 1.0,
+    ),
+  );
 
   // ============================================
   // Build Methods
@@ -493,7 +521,11 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                     ),
                     child: Center(
                       child: isCompleted
-                          ? const Icon(LucideIcons.check, size: 16, color: Colors.white)
+                          ? const Icon(
+                              LucideIcons.check,
+                              size: 16,
+                              color: Colors.white,
+                            )
                           : Text(
                               '${index + 1}',
                               style: TextStyle(
@@ -550,31 +582,34 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
         ),
       ),
     ).animate().scale(
-        begin: const Offset(0.8, 0.8), duration: 400.ms, curve: Curves.easeOut);
+      begin: const Offset(0.8, 0.8),
+      duration: 400.ms,
+      curve: Curves.easeOut,
+    );
   }
 
   Widget _heroTitle(String text) => Text(
-        text.toUpperCase(),
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: _C.ink,
-          fontSize: 26,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 0.5,
-          height: 1.05,
-        ),
-      ).animate().fadeIn(duration: 300.ms);
+    text.toUpperCase(),
+    textAlign: TextAlign.center,
+    style: const TextStyle(
+      color: _C.ink,
+      fontSize: 26,
+      fontWeight: FontWeight.w900,
+      letterSpacing: 0.5,
+      height: 1.05,
+    ),
+  ).animate().fadeIn(duration: 300.ms);
 
   Widget _heroSub(String text) => Text(
-        text,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: _C.smoke,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          height: 1.4,
-        ),
-      ).animate().fadeIn(delay: 100.ms);
+    text,
+    textAlign: TextAlign.center,
+    style: const TextStyle(
+      color: _C.smoke,
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+      height: 1.4,
+    ),
+  ).animate().fadeIn(delay: 100.ms);
 
   // ============================================
   // Step 1 - Professor Data
@@ -602,7 +637,8 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             // Error message
             if (_errorMessage != null && _currentStep == 0)
               _buildErrorBanner().animate().fadeIn().shake(),
-            if (_errorMessage != null && _currentStep == 0) const SizedBox(height: 16),
+            if (_errorMessage != null && _currentStep == 0)
+              const SizedBox(height: 16),
 
             // Name field
             TextFormField(
@@ -611,7 +647,10 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               textInputAction: TextInputAction.next,
               textCapitalization: TextCapitalization.words,
               style: const TextStyle(
-                  color: _C.ink, fontSize: 15, fontWeight: FontWeight.w600),
+                color: _C.ink,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
               decoration: _dec(
                 label: 'Nome completo',
                 hint: 'Seu nome',
@@ -619,7 +658,8 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               ),
               validator: (value) {
                 if (value == null || value.isEmpty) return 'Informe seu nome';
-                if (value.trim().length < 3) return 'Nome deve ter pelo menos 3 caracteres';
+                if (value.trim().length < 3)
+                  return 'Nome deve ter pelo menos 3 caracteres';
                 return null;
               },
             ).animate().fadeIn(delay: 200.ms).slideX(begin: -0.1),
@@ -632,7 +672,10 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
               style: const TextStyle(
-                  color: _C.ink, fontSize: 15, fontWeight: FontWeight.w600),
+                color: _C.ink,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
               decoration: _dec(
                 label: 'Email',
                 hint: 'seu@email.com',
@@ -653,7 +696,10 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               obscureText: _obscurePassword,
               textInputAction: TextInputAction.next,
               style: const TextStyle(
-                  color: _C.ink, fontSize: 15, fontWeight: FontWeight.w600),
+                color: _C.ink,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
               decoration: _dec(
                 label: 'Senha',
                 hint: 'Mínimo 6 caracteres',
@@ -664,12 +710,14 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                     size: 20,
                     color: _C.smoke,
                   ),
-                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
                 ),
               ),
               validator: (value) {
                 if (value == null || value.isEmpty) return 'Informe uma senha';
-                if (value.length < 6) return 'A senha deve ter pelo menos 6 caracteres';
+                if (value.length < 6)
+                  return 'A senha deve ter pelo menos 6 caracteres';
                 return null;
               },
             ).animate().fadeIn(delay: 400.ms).slideX(begin: -0.1),
@@ -683,23 +731,31 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               textInputAction: TextInputAction.done,
               onFieldSubmitted: (_) => _handleNext(),
               style: const TextStyle(
-                  color: _C.ink, fontSize: 15, fontWeight: FontWeight.w600),
+                color: _C.ink,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
               decoration: _dec(
                 label: 'Confirmar senha',
                 hint: 'Repita a senha',
                 prefix: LucideIcons.lock,
                 suffix: IconButton(
                   icon: Icon(
-                    _obscureConfirmPassword ? LucideIcons.eyeOff : LucideIcons.eye,
+                    _obscureConfirmPassword
+                        ? LucideIcons.eyeOff
+                        : LucideIcons.eye,
                     size: 20,
                     color: _C.smoke,
                   ),
-                  onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                  onPressed: () => setState(
+                    () => _obscureConfirmPassword = !_obscureConfirmPassword,
+                  ),
                 ),
               ),
               validator: (value) {
                 if (value == null || value.isEmpty) return 'Confirme sua senha';
-                if (value != _passwordController.text) return 'As senhas não coincidem';
+                if (value != _passwordController.text)
+                  return 'As senhas não coincidem';
                 return null;
               },
             ).animate().fadeIn(delay: 500.ms).slideX(begin: -0.1),
@@ -732,9 +788,10 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                 const Text(
                   'Já tem uma conta? ',
                   style: TextStyle(
-                      color: _C.smoke,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600),
+                    color: _C.smoke,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 TextButton(
                   onPressed: () => context.go('/login'),
@@ -744,11 +801,14 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                     minimumSize: const Size(0, 0),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
-                  child: const Text('ENTRAR',
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.8)),
+                  child: const Text(
+                    'ENTRAR',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
                 ),
               ],
             ).animate().fadeIn(delay: 700.ms),
@@ -784,7 +844,8 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             // Error message
             if (_errorMessage != null && _currentStep == 1)
               _buildErrorBanner().animate().fadeIn().shake(),
-            if (_errorMessage != null && _currentStep == 1) const SizedBox(height: 16),
+            if (_errorMessage != null && _currentStep == 1)
+              const SizedBox(height: 16),
 
             // Academy name field
             TextFormField(
@@ -793,15 +854,20 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               textInputAction: TextInputAction.next,
               textCapitalization: TextCapitalization.words,
               style: const TextStyle(
-                  color: _C.ink, fontSize: 15, fontWeight: FontWeight.w600),
+                color: _C.ink,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
               decoration: _dec(
                 label: 'Nome da Academia',
                 hint: 'Ex: Team Alpha Jiu-Jitsu',
                 prefix: LucideIcons.graduationCap,
               ),
               validator: (value) {
-                if (value == null || value.isEmpty) return 'Informe o nome da academia';
-                if (value.trim().length < 3) return 'Nome deve ter pelo menos 3 caracteres';
+                if (value == null || value.isEmpty)
+                  return 'Informe o nome da academia';
+                if (value.trim().length < 3)
+                  return 'Nome deve ter pelo menos 3 caracteres';
                 return null;
               },
             ).animate().fadeIn(delay: 200.ms).slideX(begin: -0.1),
@@ -943,18 +1009,23 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               keyboardType: TextInputType.number,
               textInputAction: TextInputAction.done,
               style: const TextStyle(
-                  color: _C.ink,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  fontFeatures: _C.tab),
+                color: _C.ink,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                fontFeatures: _C.tab,
+              ),
               inputFormatters: [
                 FilteringTextInputFormatter.allow(RegExp(r'[\d.\-/]')),
-                LengthLimitingTextInputFormatter(_documentType == _DocumentType.cpf ? 14 : 18),
+                LengthLimitingTextInputFormatter(
+                  _documentType == _DocumentType.cpf ? 14 : 18,
+                ),
               ],
               onChanged: _onDocumentChanged,
               decoration: _dec(
                 label: _documentType == _DocumentType.cpf ? 'CPF' : 'CNPJ',
-                hint: _documentType == _DocumentType.cpf ? '000.000.000-00' : '00.000.000/0000-00',
+                hint: _documentType == _DocumentType.cpf
+                    ? '000.000.000-00'
+                    : '00.000.000/0000-00',
                 prefix: LucideIcons.fileText,
               ),
               validator: _validateDocument,
@@ -977,13 +1048,15 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               checkColor: Colors.white,
               side: BorderSide(color: _C.hairline, width: 1.5),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(5)),
+                borderRadius: BorderRadius.circular(5),
+              ),
               title: RichText(
                 text: TextSpan(
                   style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: _C.smoke),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _C.smoke,
+                  ),
                   children: [
                     const TextSpan(text: 'Aceito os '),
                     TextSpan(
@@ -1015,7 +1088,9 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                         height: 20,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
                         ),
                       )
                     : const Text('CRIAR ACADEMIA'),
@@ -1046,9 +1121,11 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               borderRadius: BorderRadius.circular(22),
             ),
             child: const Icon(LucideIcons.check, size: 44, color: _C.blood),
-          )
-              .animate()
-              .scale(begin: const Offset(0, 0), duration: 600.ms, curve: Curves.elasticOut),
+          ).animate().scale(
+            begin: const Offset(0, 0),
+            duration: 600.ms,
+            curve: Curves.elasticOut,
+          ),
 
           const SizedBox(height: 28),
 
@@ -1069,16 +1146,19 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             textAlign: TextAlign.center,
             text: TextSpan(
               style: const TextStyle(
-                  color: _C.smoke,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  height: 1.4),
+                color: _C.smoke,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+              ),
               children: [
                 const TextSpan(text: 'Sua academia '),
                 TextSpan(
                   text: _academyNameController.text,
                   style: const TextStyle(
-                      fontWeight: FontWeight.w900, color: _C.ink),
+                    fontWeight: FontWeight.w900,
+                    color: _C.ink,
+                  ),
                 ),
                 const TextSpan(text: ' está pronta para uso.'),
               ],
@@ -1099,10 +1179,11 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             child: const Text(
               'Você já pode acessar o painel e começar a cadastrar seus alunos.',
               style: TextStyle(
-                  color: _C.smoke,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  height: 1.4),
+                color: _C.smoke,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+              ),
               textAlign: TextAlign.center,
             ),
           ).animate().fadeIn(delay: 500.ms).slideY(begin: 0.1),
@@ -1116,8 +1197,9 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             child: ElevatedButton(
               onPressed: () {
                 final userAsync = ref.read(currentUserProvider);
-                final isAdminReady = userAsync.value?.isAdmin == true
-                    && userAsync.value?.academyId != null;
+                final isAdminReady =
+                    userAsync.value?.isAdmin == true &&
+                    userAsync.value?.academyId != null;
                 context.go(isAdminReady ? '/admin' : '/login');
               },
               style: _ctaStyle(_C.ink),
@@ -1163,10 +1245,11 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
             child: Text(
               _errorMessage!,
               style: const TextStyle(
-                  color: _C.blood,
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w600,
-                  height: 1.35),
+                color: _C.blood,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
             ),
           ),
         ],

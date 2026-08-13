@@ -490,6 +490,16 @@ service cloud.firestore {
     // ============================================
     // Academies Collection
     // ============================================
+    // O token publico de pagamento nunca e resolvido diretamente pelo cliente.
+    // Somente o Admin SDK das Cloud Functions pode ler ou gravar estes links.
+    match /publicPaymentLinks/{linkHash} {
+      allow read, write: if false;
+    }
+
+    match /publicPaymentRateLimits/{counterId} {
+      allow read, write: if false;
+    }
+
     match /academies/{academyId} {
       // Anyone who belongs to the academy can read academy info
       allow read: if belongsToAcademy(academyId);
@@ -897,7 +907,14 @@ service cloud.firestore {
         allow create: if (isAcademyAdmin(academyId)
                           || (isAcademyInstructor(academyId) && hasExtraPermission(academyId, 'financial:create')))
                       && request.resource.data.academyId == academyId
-                      && isPositiveAmount(request.resource.data.amount);
+                      && isPositiveAmount(request.resource.data.amount)
+                      // Mensalidades sao exclusivamente server-side para que a
+                      // chave unica aluno+mes seja aplicada ate em apps antigos.
+                      && request.resource.data.type in ['avulsa', 'private_lesson']
+                      && !request.resource.data.keys().hasAny([
+                        'publicPaymentLinkHash', 'publicPaymentEnabled',
+                        'lastCheckoutAttemptId'
+                      ]);
 
         // Staff can update financials, but:
         //  - Cannot touch payment-gateway audit fields
@@ -916,7 +933,9 @@ service cloud.firestore {
                       && !request.resource.data.diff(resource.data).affectedKeys()
                           .hasAny([
                             'paidViaAbacatePay', 'abacatePayTransactionId',
-                            'manualPaymentAudit'
+                            'manualPaymentAudit', 'financialVersion',
+                            'publicPaymentLinkHash', 'publicPaymentEnabled',
+                            'lastCheckoutAttemptId'
                           ])
                       && !(
                         (resource.data.status == 'paid'
@@ -941,6 +960,26 @@ service cloud.firestore {
       match /paymentAuditLogs/{auditId} {
         allow read: if isAcademyAdmin(academyId);
         allow write: if false;
+      }
+
+      // Auditoria tecnica de tentativas de checkout. O app administrativo pode
+      // observar uma projecao segura, mas nenhum cliente cria ou altera dados do
+      // gateway.
+      match /paymentAttempts/{attemptId} {
+        allow read: if isAcademyAdmin(academyId);
+        allow write: if false;
+      }
+
+      // Jobs de envio sao criados/processados no backend; a equipe somente
+      // acompanha progresso e falhas.
+      match /billingDispatchJobs/{jobId} {
+        allow read: if isAcademyStaff(academyId);
+        allow write: if false;
+
+        match /items/{itemId} {
+          allow read: if isAcademyStaff(academyId);
+          allow write: if false;
+        }
       }
 
       // ============================================

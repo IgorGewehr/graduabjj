@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex,nofollow,noarchive">
+    <meta name="referrer" content="no-referrer">
+    <title>Pagamento seguro | MyDojo</title>
+    <link rel="stylesheet" href="/pay/pay.css">
+  </head>
+  <body>
+    <main class="page">
+      <section class="card" aria-live="polite">
+        <header class="brand">
+          <div class="mark" aria-hidden="true">M</div>
+          <div>
+            <p class="eyebrow">MYDOJO PAY</p>
+            <h1 id="title">Pagamento seguro</h1>
+          </div>
+        </header>
+
+        <div id="loading" class="state">
+          <span class="spinner" aria-hidden="true"></span>
+          <p>Carregando cobrança…</p>
+        </div>
+
+        <div id="content" hidden>
+          <div class="academy">
+            <img id="academy-logo" alt="" hidden>
+            <div>
+              <span>Academia</span>
+              <strong id="academy-name"></strong>
+            </div>
+          </div>
+
+          <dl class="summary">
+            <div><dt>Aluno</dt><dd id="student-name"></dd></div>
+            <div><dt>Descrição</dt><dd id="description"></dd></div>
+            <div><dt>Vencimento</dt><dd id="due-date"></dd></div>
+            <div class="amount"><dt>Valor</dt><dd id="amount"></dd></div>
+          </dl>
+
+          <div id="status-box" class="status-box"></div>
+          <button id="pay-button" class="primary" type="button" hidden>
+            Pagar agora
+          </button>
+
+          <section id="pix-panel" class="pix" hidden>
+            <h2>PIX pronto para pagamento</h2>
+            <p>Escaneie o QR Code ou copie o código abaixo.</p>
+            <img id="pix-qr" alt="QR Code PIX" hidden>
+            <label for="pix-code">PIX copia e cola</label>
+            <textarea id="pix-code" rows="4" readonly></textarea>
+            <button id="copy-pix" class="secondary" type="button">Copiar código PIX</button>
+            <a id="open-pix" class="link-button" target="_blank" rel="noopener noreferrer" hidden>
+              Abrir instruções do PIX
+            </a>
+            <small id="pix-expiry"></small>
+          </section>
+
+          <button id="refresh-button" class="text-button" type="button">
+            Atualizar situação
+          </button>
+        </div>
+
+        <footer>
+          O pagamento é processado pela conta Mercado Pago da academia.
+          O MyDojo não armazena dados de cartão.
+        </footer>
+      </section>
+    </main>
+    <script src="/pay/pay.js" defer></script>
+  </body>
+</html>

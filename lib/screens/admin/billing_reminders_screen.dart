@@ -1458,9 +1458,6 @@ class _AdminBillingRemindersScreenState
     final amount = (financialItem['amount'] as num?)?.toDouble() ?? 0;
     final dueDate = financialItem['dueDate'] as DateTime;
     final daysOverdue = financialItem['daysOverdue'] as int? ?? 0;
-    final financialId = financialItem['id'] as String? ?? '';
-    final studentId = financialItem['studentId'] as String? ?? '';
-    final status = financialItem['status'] as String? ?? '';
 
     String message;
     String subject = '';
@@ -1468,43 +1465,14 @@ class _AdminBillingRemindersScreenState
         const BillingPaymentInstruction.none();
 
     if (mode == 'whatsapp') {
-      // PIX gate: only attach a payment link when the setting is on, the
-      // charge is NOT already paid, and we are sending via WhatsApp.
-      final pixGate =
-          (_notificationSettings?.includePaymentLink ?? false) &&
-          status != 'paid';
-
-      String? pixCode;
-      String? ticketUrl;
-      if (pixGate) {
-        paymentInstruction = await _notificationService!
-            .resolvePaymentInstruction(
-              financialId: financialId,
-              amount: amount,
-              studentId: studentId,
-              studentName: studentName,
-              payerCpf: contact.effectiveCpf,
-            );
-        if (paymentInstruction.hasPayment) {
-          pixCode = paymentInstruction.paymentValue;
-          ticketUrl = paymentInstruction.ticketUrl;
-        } else if (mounted) {
-          // MP off / no PIX / error: send without link, but let the admin know.
-          FeedbackUtils.showInfo(
-            context,
-            'Nenhuma forma de pagamento disponivel — enviando apenas o lembrete.',
-          );
-        }
-      }
-
+      // Preview is read-only: payment data is resolved only by the backend at
+      // send time, so opening this dialog never creates a PIX attempt.
       message = _notificationService!.generateWhatsAppMessage(
         stage: stage,
         studentName: studentName,
         amount: amount,
         dueDate: dueDate,
         daysOverdue: daysOverdue,
-        pixCode: pixCode,
-        ticketUrl: ticketUrl,
       );
     } else {
       final content = _notificationService!.generateEmailContent(
@@ -2162,57 +2130,10 @@ class _AdminBillingRemindersScreenState
     if (items.isEmpty) return outcome;
     outcome.hadItemsToSend = true;
 
-    // ---- PIX pre-generation (bounded concurrency) ----
-    // For every WhatsApp-eligible, unpaid item (when the setting is on) we
-    // generate a PIX up front, with at most 5 concurrent CF calls. Results
-    // are keyed by financialId; a missing/empty entry => send without PIX.
-    final paymentByFinancialId = <String, BillingPaymentInstruction>{};
+    // Payment instructions are resolved server-side per financial at send
+    // time. Listing/previewing a batch must never pre-generate PIX attempts.
     final includePix = _notificationSettings?.includePaymentLink ?? false;
     final whatsappOn = _notificationSettings?.whatsappEnabled ?? false;
-
-    if (includePix && whatsappOn) {
-      final eligible = items.where((item) {
-        final studentId = item['studentId'] as String? ?? '';
-        final contact = _studentContacts[studentId];
-        final phone = contact?.effectivePhone;
-        final status = item['status'] as String? ?? '';
-        return contact != null &&
-            phone != null &&
-            phone.isNotEmpty &&
-            status != 'paid';
-      }).toList();
-
-      const concurrency = 5;
-      for (var i = 0; i < eligible.length; i += concurrency) {
-        final chunk = eligible.sublist(
-          i,
-          (i + concurrency) > eligible.length
-              ? eligible.length
-              : i + concurrency,
-        );
-        final results = await Future.wait(
-          chunk.map((item) async {
-            final financialId = item['id'] as String? ?? '';
-            final studentId = item['studentId'] as String? ?? '';
-            final contact = _studentContacts[studentId];
-            final payment = await _notificationService!
-                .resolvePaymentInstruction(
-                  financialId: financialId,
-                  amount: (item['amount'] as num?)?.toDouble() ?? 0,
-                  studentId: studentId,
-                  studentName: item['studentName'] as String? ?? '',
-                  payerCpf: contact?.effectiveCpf,
-                );
-            return MapEntry(financialId, payment);
-          }),
-        );
-        for (final entry in results) {
-          if (entry.value.hasPayment) {
-            paymentByFinancialId[entry.key] = entry.value;
-          }
-        }
-      }
-    }
 
     for (final item in items) {
       final studentId = item['studentId'] as String? ?? '';
@@ -2241,11 +2162,7 @@ class _AdminBillingRemindersScreenState
         daysOverdue,
       );
 
-      // WhatsApp message: inject the pre-generated PIX (if any) for this
-      // financial. When absent, the [[PIX]] block strips to a clean message.
-      final paymentInstruction =
-          paymentByFinancialId[financialId] ??
-          const BillingPaymentInstruction.none();
+      const paymentInstruction = BillingPaymentInstruction.none();
 
       // Send WhatsApp (only if enabled in settings)
       final phone = contact.effectivePhone;
@@ -2266,17 +2183,11 @@ class _AdminBillingRemindersScreenState
         );
         if (result.success) {
           outcome.waSent++;
-          // L3: only meaningful when a link was actually intended (PIX setting
-          // on + WhatsApp on). Otherwise neither counter moves.
+          // The exact payment mode is selected server-side. Until the dispatch
+          // job projection exposes it, count the intent without claiming that
+          // a link was attached.
           if (includePix && whatsappOn) {
-            if (paymentInstruction.hasPayment) {
-              outcome.waWithLink++;
-            } else {
-              outcome.waWithoutLink++;
-              if ((contact.effectiveCpf ?? '').trim().isEmpty) {
-                outcome.missingCpfNames.add(studentName);
-              }
-            }
+            outcome.waWithoutLink++;
           }
         } else {
           outcome.waFailed++;
@@ -3097,60 +3008,39 @@ class _AdminBillingRemindersScreenState
                           final parsedAmount = double.tryParse(
                             amountController.text.replaceAll(',', '.'),
                           );
-                          if (parsedAmount == null || parsedAmount < 0) {
+                          if (parsedAmount == null || parsedAmount <= 0) {
                             FeedbackUtils.showError(
                               ctx,
-                              'Informe um valor válido maior ou igual a zero.',
+                              'Informe um valor válido maior que zero.',
                             );
                             return;
                           }
 
                           try {
-                            final now = DateTime.now();
-                            final todayStart = DateTime(
-                              now.year,
-                              now.month,
-                              now.day,
-                            );
-                            final dueStart = DateTime(
-                              selectedDueDate.year,
-                              selectedDueDate.month,
-                              selectedDueDate.day,
-                            );
-
-                            final isOverdue = dueStart.isBefore(todayStart);
-                            final statusStr = isOverdue ? 'overdue' : 'pending';
-
                             final refMonth =
                                 '${selectedDueDate.year}-${selectedDueDate.month.toString().padLeft(2, '0')}';
 
-                            await FirebaseFirestore.instance
-                                .collection('academies')
-                                .doc(academyId)
-                                .collection('financials')
-                                .add({
-                                  'academyId': academyId,
-                                  'studentId': selectedStudent.studentId,
-                                  'studentName': selectedStudent.studentName,
-                                  'amount': parsedAmount,
-                                  'value': parsedAmount,
-                                  'dueDate': Timestamp.fromDate(
-                                    selectedDueDate,
-                                  ),
-                                  'status': statusStr,
-                                  'type': chargeType,
-                                  'planId': chargeType == 'monthly_tuition'
-                                      ? selectedPlanId
-                                      : null,
-                                  'description':
-                                      descController.text.trim().isNotEmpty
-                                      ? descController.text.trim()
-                                      : (chargeType == 'monthly_tuition'
-                                            ? 'Mensalidade do Plano'
-                                            : 'Cobrança Avulsa'),
-                                  'referenceMonth': refMonth,
-                                  'createdAt': Timestamp.fromDate(now),
-                                });
+                            await PaymentService(academyId).create(
+                              studentId: selectedStudent.studentId,
+                              studentName: selectedStudent.studentName,
+                              value: parsedAmount,
+                              dueDate: selectedDueDate,
+                              type: chargeType,
+                              planId: chargeType == 'monthly_tuition'
+                                  ? selectedPlanId
+                                  : null,
+                              description: descController.text.trim().isNotEmpty
+                                  ? descController.text.trim()
+                                  : (chargeType == 'monthly_tuition'
+                                        ? 'Mensalidade do Plano'
+                                        : 'Cobrança Avulsa'),
+                              referenceMonth: refMonth,
+                              paymentMethodPolicy:
+                                  chargeType == 'monthly_tuition'
+                                  ? (selectedPlan?.paymentMethodPolicy ??
+                                        PaymentMethodPolicy.both)
+                                  : PaymentMethodPolicy.both,
+                            );
 
                             if (ctx.mounted) {
                               Navigator.pop(ctx);
@@ -3422,7 +3312,7 @@ class _AdminBillingRemindersScreenState
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
-                        children: [7, 3, 1, 0].map((days) {
+                        children: [7, 3, 2, 1, 0].map((days) {
                           return FilterChip(
                             label: Text(
                               days == 0

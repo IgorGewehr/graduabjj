@@ -198,13 +198,33 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     for (final student in _students) student.id: student,
   };
 
+  Set<String> get _billingConflictStudentIds {
+    final activeStudentIds = _students.map((student) => student.id).toSet();
+    final planIdsByStudent = <String, Set<String>>{};
+    for (final plan in _plans.where((plan) => plan.isActive)) {
+      for (final studentId in plan.activeStudentIds(activeStudentIds)) {
+        if (plan.getStudentValue(studentId) <= 0) continue;
+        planIdsByStudent.putIfAbsent(studentId, () => <String>{}).add(plan.id);
+      }
+    }
+    return planIdsByStudent.entries
+        .where((entry) => entry.value.length > 1)
+        .map((entry) => entry.key)
+        .toSet();
+  }
+
   double get _expectedRevenue {
     double total = 0;
+    final activeStudentIds = _students.map((student) => student.id).toSet();
+    final conflicts = _billingConflictStudentIds;
     for (final plan in _plans.where((p) => p.isActive)) {
-      final periodRevenue = plan.studentIds.fold(
-        0.0,
-        (sum, sid) => sum + plan.getStudentValue(sid),
-      );
+      final periodRevenue = plan
+          .activeStudentIds(activeStudentIds)
+          .where((studentId) => !conflicts.contains(studentId))
+          .fold(
+            0.0,
+            (value, studentId) => value + plan.getStudentValue(studentId),
+          );
       total += periodRevenue / plan.billingPeriod.months;
     }
     return total;
@@ -502,6 +522,28 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
             ],
           ),
 
+          if (_billingConflictStudentIds.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.warning.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: AppTheme.warning.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Text(
+                '${_billingConflictStudentIds.length} aluno${_billingConflictStudentIds.length == 1 ? '' : 's'} em mais de um plano. Eles nao entram na receita esperada nem na geracao automatica ate a revisao.',
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.warning,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+
           const SizedBox(height: 20),
 
           // Plan Cards
@@ -510,6 +552,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
               padding: const EdgeInsets.only(bottom: 12),
               child: _PlanCard(
                 plan: entry.value,
+                activeStudentIds: _students
+                    .map((student) => student.id)
+                    .toSet(),
+                conflictStudentIds: _billingConflictStudentIds,
                 formatCurrency: _formatCurrency,
                 onEdit: () => _showEditPlanDialog(entry.value),
                 onDelete: () => _showDeletePlanDialog(entry.value),
@@ -1271,8 +1317,8 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     );
   }
 
-  void _showManageStudentsDialog(Plan plan) {
-    showModalBottomSheet(
+  Future<void> _showManageStudentsDialog(Plan plan) async {
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1281,10 +1327,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         students: _students,
         onClose: () {
           Navigator.pop(context);
-          _loadData();
         },
       ),
     );
+    if (mounted) await _loadData();
   }
 
   void _showMarkPaidDialog(Payment payment) {
@@ -1710,6 +1756,8 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
 
 class _PlanCard extends StatelessWidget {
   final Plan plan;
+  final Set<String> activeStudentIds;
+  final Set<String> conflictStudentIds;
   final String Function(double) formatCurrency;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -1717,6 +1765,8 @@ class _PlanCard extends StatelessWidget {
 
   const _PlanCard({
     required this.plan,
+    required this.activeStudentIds,
+    required this.conflictStudentIds,
     required this.formatCurrency,
     required this.onEdit,
     required this.onDelete,
@@ -1725,10 +1775,31 @@ class _PlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final expectedRevenue = plan.studentIds.fold(
+    final billableStudentIds = plan.activeStudentIds(activeStudentIds).toList();
+    final conflictingIds = billableStudentIds
+        .where(conflictStudentIds.contains)
+        .toList();
+    final includedIds = billableStudentIds
+        .where((studentId) => !conflictStudentIds.contains(studentId))
+        .toList();
+    final customIds = includedIds.where(plan.customValues.containsKey).toList();
+    final standardCount = includedIds.length - customIds.length;
+    final customTotal = customIds.fold(
       0.0,
-      (sum, sid) => sum + plan.getStudentValue(sid),
+      (total, studentId) => total + plan.getStudentValue(studentId),
     );
+    final expectedRevenue =
+        (standardCount * plan.effectivePeriodValue) + customTotal;
+
+    final equationParts = <String>[
+      if (standardCount > 0)
+        '$standardCount × ${formatCurrency(plan.effectivePeriodValue)}',
+      if (customIds.isNotEmpty)
+        '${customIds.length} personalizado${customIds.length == 1 ? '' : 's'} (${formatCurrency(customTotal)})',
+    ];
+    final calculationText = equationParts.isEmpty
+        ? 'Nenhum aluno ativo considerado no cálculo'
+        : '${equationParts.join(' + ')} = ${formatCurrency(expectedRevenue)}';
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1773,22 +1844,46 @@ class _PlanCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              GestureDetector(
-                onTap: onEdit,
-                child: const Icon(
-                  LucideIcons.pencil,
-                  size: 18,
+              PopupMenuButton<String>(
+                tooltip: 'Ações do plano',
+                icon: const Icon(
+                  LucideIcons.moreVertical,
+                  size: 20,
                   color: AppTheme.textSecondary,
                 ),
-              ),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: onDelete,
-                child: const Icon(
-                  LucideIcons.trash2,
-                  size: 18,
-                  color: AppTheme.textSecondary,
-                ),
+                onSelected: (value) {
+                  if (value == 'edit') onEdit();
+                  if (value == 'delete') onDelete();
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(LucideIcons.pencil, size: 17),
+                        SizedBox(width: 10),
+                        Text('Editar plano'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(
+                          LucideIcons.trash2,
+                          size: 17,
+                          color: AppTheme.error,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Excluir plano',
+                          style: TextStyle(color: AppTheme.error),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1816,32 +1911,67 @@ class _PlanCard extends StatelessWidget {
               _InfoChip(
                 icon: LucideIcons.users,
                 label:
-                    '${plan.studentCount} aluno${plan.studentCount != 1 ? 's' : ''}',
+                    '${billableStudentIds.length} aluno${billableStudentIds.length != 1 ? 's' : ''} ativo${billableStudentIds.length != 1 ? 's' : ''}',
               ),
-              if (plan.customValues.isNotEmpty)
-                _InfoChip(
-                  icon: LucideIcons.tag,
-                  label: '${plan.customValues.length} c/ valor personalizado',
-                ),
             ],
           ),
           const SizedBox(height: 16),
 
-          // Expected revenue
-          Text(
-            'Receita Esperada/${plan.billingPeriod.periodLabel.capitalize()}',
-            style: AppTheme.labelSmall.copyWith(
-              color: AppTheme.success,
-              fontWeight: FontWeight.w600,
+          // Audit-friendly expected revenue calculation.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppTheme.success.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: AppTheme.success.withValues(alpha: 0.18),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'RECEITA ESPERADA POR ${plan.billingPeriod.periodLabel.toUpperCase()}',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.success,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  calculationText,
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
           ),
-          Text(
-            formatCurrency(expectedRevenue),
-            style: AppTheme.titleMedium.copyWith(
-              fontWeight: FontWeight.w700,
-              color: AppTheme.success,
+          if (customIds.isNotEmpty || conflictingIds.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (customIds.isNotEmpty)
+                  _PlanExceptionBadge(
+                    icon: LucideIcons.tag,
+                    label:
+                        '${customIds.length} valor${customIds.length == 1 ? '' : 'es'} personalizado${customIds.length == 1 ? '' : 's'}',
+                    color: AppTheme.textSecondary,
+                  ),
+                if (conflictingIds.isNotEmpty)
+                  _PlanExceptionBadge(
+                    icon: LucideIcons.alertTriangle,
+                    label:
+                        '${conflictingIds.length} conflito${conflictingIds.length == 1 ? '' : 's'} fora do cálculo',
+                    color: AppTheme.warning,
+                  ),
+              ],
             ),
-          ),
+          ],
           const SizedBox(height: 16),
 
           // Manage students button
@@ -1858,6 +1988,44 @@ class _PlanCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlanExceptionBadge extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _PlanExceptionBadge({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: AppTheme.labelSmall.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -2744,14 +2912,52 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
   String? _selectedPlanId;
   bool _generating = false;
 
-  List<Plan> get _activePlans => widget.plans.where((p) => p.isActive).toList();
+  List<Plan> get _allActivePlans =>
+      widget.plans.where((plan) => plan.isActive).toList();
+
+  List<Plan> get _activePlans => _allActivePlans
+      .where((plan) => plan.isActive && !plan.isRecurring)
+      .toList();
 
   // Calculate stats based on filter
-  ({int totalInPlans, int alreadyHave, int willReceive}) get _stats {
+  ({
+    int totalInPlans,
+    int alreadyHave,
+    int willReceive,
+    int conflicts,
+    int deferred,
+  })
+  get _stats {
     // Get students who already have tuition for this month
     final studentsWithTuition = widget.payments
         .where((p) => p.referenceMonth == widget.monthKey)
         .map((p) => p.studentId)
+        .toSet();
+
+    final activeStudentsById = {
+      for (final student in widget.students)
+        if (student.status == StudentStatus.active) student.id: student,
+    };
+    final eligiblePlanIdsByStudent = <String, Set<String>>{};
+    for (final plan in _allActivePlans) {
+      for (final studentId in plan.studentIds) {
+        final student = activeStudentsById[studentId];
+        if (student == null || plan.getStudentValue(studentId) <= 0) continue;
+        if (plan.isStudentEligibleForMonth(
+          studentId,
+          year: widget.month.year,
+          month: widget.month.month,
+          dueDay: student.tuitionDay,
+        )) {
+          eligiblePlanIdsByStudent
+              .putIfAbsent(studentId, () => <String>{})
+              .add(plan.id);
+        }
+      }
+    }
+    final conflictingStudentIds = eligiblePlanIdsByStudent.entries
+        .where((entry) => entry.value.length > 1)
+        .map((entry) => entry.key)
         .toSet();
 
     // Get plans to process based on filter
@@ -2761,16 +2967,20 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
 
     final studentsInPlans = <String>{};
     final studentsToGenerate = <String>{};
+    final deferredStudentIds = <String>{};
+    final conflictingInSelection = <String>{};
 
     for (final plan in plansToProcess) {
       for (final studentId in plan.studentIds) {
-        final student = widget.students.cast<Student?>().firstWhere(
-          (s) => s?.id == studentId && s?.status == StudentStatus.active,
-          orElse: () => null,
-        );
+        final student = activeStudentsById[studentId];
         if (student != null) {
           studentsInPlans.add(studentId);
-          if (!studentsWithTuition.contains(studentId)) {
+          if (conflictingStudentIds.contains(studentId)) {
+            conflictingInSelection.add(studentId);
+          } else if (!(eligiblePlanIdsByStudent[studentId]?.contains(plan.id) ??
+              false)) {
+            deferredStudentIds.add(studentId);
+          } else if (!studentsWithTuition.contains(studentId)) {
             studentsToGenerate.add(studentId);
           }
         }
@@ -2779,8 +2989,10 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
 
     return (
       totalInPlans: studentsInPlans.length,
-      alreadyHave: studentsInPlans.length - studentsToGenerate.length,
+      alreadyHave: studentsInPlans.where(studentsWithTuition.contains).length,
       willReceive: studentsToGenerate.length,
+      conflicts: conflictingInSelection.length,
+      deferred: deferredStudentIds.length,
     );
   }
 
@@ -3031,6 +3243,21 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
                       ),
                     ],
                   ),
+                  if (stats.conflicts > 0 || stats.deferred > 0) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      [
+                        if (stats.conflicts > 0)
+                          '${stats.conflicts} bloqueado${stats.conflicts == 1 ? '' : 's'} por vinculo em mais de um plano',
+                        if (stats.deferred > 0)
+                          '${stats.deferred} adiado${stats.deferred == 1 ? '' : 's'} para o proximo mes por entrada apos o vencimento',
+                      ].join(' · '),
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.warning,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

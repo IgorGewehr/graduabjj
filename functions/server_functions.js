@@ -24,6 +24,19 @@ const crypto = require('crypto');
 const db = admin.firestore();
 const messaging = admin.messaging();
 
+// Gen1 triggers/schedules that create stable links must opt in to the link
+// secret explicitly. WhatsApp stays disabled until its provider credential is
+// explicitly provisioned; an absent optional channel must not block a safe
+// deployment of settlement, email and Pay Link code.
+const BILLING_NOTIFICATION_SECRETS = [
+  'PUBLIC_PAY_TOKEN_SECRET',
+];
+const PUBLIC_PAY_SECRETS = [
+  'MP_OAUTH_CLIENT_ID',
+  'MP_OAUTH_CLIENT_SECRET',
+  'PUBLIC_PAY_TOKEN_SECRET',
+];
+
 // ---- Catraca / ingestão de acesso (Arquitetura C) --------------------------
 // A CF `ingestAccessEvent` é exportada por index.js a partir de
 // ./access_control/ingest.js (implementação ÚNICA, com check-in por turma + gate
@@ -38,6 +51,12 @@ const {
   resolveBillingPaymentInstruction,
 } = require('./billing_payment_resolver');
 const {
+  billingDateAtStartOfDay,
+  datePartsInBillingTimeZone,
+  findConflictingStudentIds,
+  isMembershipEligibleForMonth,
+} = require('./billing_tuition_rules');
+const {
   buildBillingTemplatePayload,
   normalizeTemplateStage,
 } = require('./billing_whatsapp_templates');
@@ -46,6 +65,19 @@ const {
   classifyManualPixConfirmation,
   classifyMercadoPagoCancellation,
 } = require('./manual_pix_confirmation');
+const {
+  CHECKOUT_TTL_MS,
+  decryptPublicToken,
+  encryptPublicToken,
+  generatePublicToken,
+  hashPublicToken,
+  isReusableAttempt,
+  isValidPublicToken,
+  isValidRequestId,
+  publicAvailableMethods,
+  publicAttemptStatusFromProvider,
+  publicChargeStatus,
+} = require('./public_payment_link');
 
 // ============================================
 // Helper Functions
@@ -411,96 +443,133 @@ function formatBrDate(date) {
 // compartilhado access_control/overdue_util.js — fonte ÚNICA da verdade com o
 // gate de inadimplência da catraca. Importadas no topo deste arquivo.
 
-// ---- 5. Best-effort PIX for a reminder (graceful degradation) ------------
-// GATES on the academy having mpConnected AND the financial unpaid. Sources the
-// payer CPF from the student doc (kids -> guardian.cpf, else cpf), mirroring the
-// Dart effectiveCpf. Reuses a still-valid PIX (idempotent), otherwise creates
-// one via createMpPix and persists pixCode/pixTicketUrl/pixExpiresAt (mirroring
-// createMpPixPayment). NEVER throws: returns empty strings on any failure/gate.
-//
-// `financial` must include { id, amount (centavos), studentId, status,
-// description, gatewayPaymentId?, pixCode?, pixExpiresAt? }.
-async function generateReminderPix(academyId, financial) {
-  try {
-    if (!financial || financial.status === 'paid') {
-      return { pixCode: '', ticketUrl: '' };
-    }
+// ---- 5. Stable MyDojo payment link ---------------------------------------
+// Reminder delivery creates only this opaque URL. Mercado
+// Pago is contacted exclusively by startPublicCheckout after a human click.
+function publicPayBaseUrl() {
+  return String(
+    process.env.PUBLIC_PAY_BASE_URL ||
+    process.env.APP_BASE_URL ||
+    'https://arpjj-76350.web.app'
+  ).replace(/\/$/, '');
+}
 
-    // Gate: academy must have Mercado Pago connected.
-    const acadSnap = await db.doc(`academies/${academyId}`).get();
-    if (!acadSnap.exists || acadSnap.data()?.mpConnected !== true) {
-      return { pixCode: '', ticketUrl: '' };
-    }
-
-    const financialId = financial.id;
-    if (!financialId) return { pixCode: '', ticketUrl: '' };
-
-    // Idempotency: reuse a still-valid PIX (same code for everyone, no double
-    // charge) — mirrors createMpPixPayment.
-    const existingExpiry =
-      financial.pixExpiresAt && typeof financial.pixExpiresAt.toMillis === 'function'
-        ? financial.pixExpiresAt.toMillis()
-        : 0;
-    if (financial.gatewayPaymentId && financial.pixCode && existingExpiry > Date.now()) {
-      return {
-        pixCode: financial.pixCode,
-        ticketUrl: financial.pixTicketUrl || '',
-      };
-    }
-
-    // Source payer info (CPF + email + name) from the student doc.
-    let payerCpf = '';
-    let payerEmail;
-    let payerName = financial.studentName || '';
-    try {
-      const stuSnap = await db
-        .collection('academies').doc(academyId)
-        .collection('students').doc(financial.studentId)
-        .get();
-      if (stuSnap.exists) {
-        const stu = stuSnap.data() || {};
-        const isKids = stu.category === 'kids';
-        // Kids: CPF do responsável, com FALLBACK pro CPF próprio do aluno
-        // (o MP só precisa de um CPF válido pra identificar o pagador). Espelha
-        // o effectiveCpf do app.
-        payerCpf = (isKids ? (stu.guardian?.cpf || stu.cpf) : stu.cpf) || '';
-        payerEmail = (isKids ? stu.guardian?.email : stu.email) || undefined;
-        payerName = stu.fullName || payerName;
-      }
-    } catch (_) {
-      // fall through with whatever we have
-    }
-
-    // financials.amount is stored in REAIS (canonical); createMpPix takes REAIS.
-    const pix = await createMpPix({
-      academyId,
-      transactionAmount: Number(financial.amount) || 0,
-      description: financial.description || 'Mensalidade',
-      externalReference: `${academyId}:fin:${financialId}`,
-      payer: { email: payerEmail, cpf: payerCpf, name: payerName },
-    });
-
-    // Persist for reuse (mirrors createMpPixPayment).
-    try {
-      const finRef = db.doc(`academies/${academyId}/financials/${financialId}`);
-      await finRef.update({
-        pixCode: pix.pixCode || null,
-        pixQrCode: pix.qrCodeBase64 || null,
-        pixTicketUrl: pix.ticketUrl || null,
-        gatewayPaymentId: pix.paymentId,
-        paymentGateway: 'mercadopago',
-        pixExpiresAt: admin.firestore.Timestamp.fromDate(pix.expiresAt),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    } catch (_) {
-      // persistence failure is non-fatal: we still have the code to send now
-    }
-
-    return { pixCode: pix.pixCode || '', ticketUrl: pix.ticketUrl || '' };
-  } catch (e) {
-    console.error('[S7] generateReminderPix failed:', e && e.message);
-    return { pixCode: '', ticketUrl: '' };
+function publicPaySecret() {
+  const secret = process.env.PUBLIC_PAY_TOKEN_SECRET || '';
+  if (secret.length < 32) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Pagamento publico nao configurado no backend.'
+    );
   }
+  return secret;
+}
+
+async function loadActivePublicPaymentToken(linkHash) {
+  if (!/^[a-f0-9]{64}$/.test(String(linkHash || ''))) return null;
+  const snapshot = await db.doc(`publicPaymentLinks/${linkHash}`).get();
+  if (!snapshot.exists || snapshot.data()?.status !== 'active') return null;
+  try {
+    const rawToken = decryptPublicToken(snapshot.data(), publicPaySecret());
+    if (!isValidPublicToken(rawToken) || hashPublicToken(rawToken) !== linkHash) {
+      return null;
+    }
+    return { rawToken, record: snapshot.data() };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function getOrCreatePublicPaymentLink(academyId, financialId) {
+  assertSafeDocumentId(academyId, 'academyId');
+  assertSafeDocumentId(financialId, 'financialId');
+  const financialRef = db.doc(
+    `academies/${academyId}/financials/${financialId}`
+  );
+  const firstSnapshot = await financialRef.get();
+  if (!firstSnapshot.exists) {
+    throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+  }
+  const first = firstSnapshot.data() || {};
+  if (!['pending', 'overdue'].includes(first.status) ||
+      first.publicPaymentEnabled === false) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Esta cobranca nao aceita pagamento publico.'
+    );
+  }
+
+  const previousHash = String(first.publicPaymentLinkHash || '');
+  const previous = await loadActivePublicPaymentToken(previousHash);
+  if (previous && previous.record.academyId === academyId &&
+      previous.record.targetId === financialId) {
+    return {
+      rawToken: previous.rawToken,
+      linkHash: previousHash,
+      url: `${publicPayBaseUrl()}/p/${previous.rawToken}`,
+    };
+  }
+
+  const rawToken = generatePublicToken();
+  const linkHash = hashPublicToken(rawToken);
+  const encrypted = encryptPublicToken(rawToken, publicPaySecret());
+  const linkRef = db.doc(`publicPaymentLinks/${linkHash}`);
+  const selectedHash = await db.runTransaction(async (tx) => {
+    const liveSnapshot = await tx.get(financialRef);
+    if (!liveSnapshot.exists) {
+      throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+    }
+    const live = liveSnapshot.data() || {};
+    if (!['pending', 'overdue'].includes(live.status) ||
+        live.publicPaymentEnabled === false) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Esta cobranca nao aceita pagamento publico.'
+      );
+    }
+    const concurrentHash = String(live.publicPaymentLinkHash || '');
+    if (concurrentHash && concurrentHash !== previousHash) return concurrentHash;
+
+    tx.create(linkRef, {
+      academyId,
+      targetType: 'financial',
+      targetId: financialId,
+      status: 'active',
+      financialVersion: Number(live.financialVersion) || 1,
+      ...encrypted,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    tx.update(financialRef, {
+      publicPaymentLinkHash: linkHash,
+      publicPaymentEnabled: true,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    if (previous && previous.record.academyId === academyId &&
+        previous.record.targetId === financialId &&
+        previousHash !== linkHash) {
+      tx.set(db.doc(`publicPaymentLinks/${previousHash}`), {
+        status: 'revoked',
+        revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+    return linkHash;
+  });
+
+  if (selectedHash === linkHash) {
+    return { rawToken, linkHash, url: `${publicPayBaseUrl()}/p/${rawToken}` };
+  }
+  const concurrent = await loadActivePublicPaymentToken(selectedHash);
+  if (!concurrent || concurrent.record.academyId !== academyId ||
+      concurrent.record.targetId !== financialId) {
+    throw new HttpsError('aborted', 'Tente gerar o link novamente.');
+  }
+  return {
+    rawToken: concurrent.rawToken,
+    linkHash: selectedHash,
+    url: `${publicPayBaseUrl()}/p/${concurrent.rawToken}`,
+  };
 }
 
 // ---- 6. Orchestrator: resolve + send one Meta billing template -----------
@@ -516,10 +585,12 @@ async function sendBillingReminderWhatsApp(
   billingSettings,
   financial,
   stage,
-  daysOverdue
+  daysOverdue,
+  options = {}
 ) {
   try {
     const settings = billingSettings || {};
+    const manual = options.manual === true;
     // AUDITORIA (opt-in explícito): o gate era `=== false`, o que trata o
     // doc AUSENTE (settings/billingReminders nunca salvo) como LIGADO. O
     // cliente (BillingReminderService.getNotificationSettings) faz o oposto:
@@ -529,23 +600,29 @@ async function sendBillingReminderWhatsApp(
     // academias sem settings salvos passariam a receber WhatsApp automático
     // sem nunca terem optado. `!== true` alinha o server com o default do
     // cliente: só envia para quem opt-in explicitamente.
-    if (settings.whatsappEnabled !== true) return;
+    if (!manual && settings.whatsappEnabled !== true) {
+      return { sent: false, skipped: 'automation_disabled' };
+    }
 
     // Resolve recipient phone from the student doc (effectivePhone semantics).
     // Auditoria (LGPD): respeita o opt-out POR ALUNO (whatsappOptOut===true) —
     // o gate por academia (settings.whatsappEnabled) continua acima; este é o
     // consentimento individual do aluno. Quando o aluno pediu para não receber
     // WhatsApp, não envia (o push/notificação interna continua no cron).
-    let phone;
+    let phone = options.phoneOverride || '';
     try {
-      const stuSnap = await db
-        .collection('academies').doc(academyId)
-        .collection('students').doc(financial.studentId)
-        .get();
-      if (stuSnap.exists) {
-        const stu = stuSnap.data() || {};
-        if (stu.whatsappOptOut === true) return; // LGPD: opt-out do aluno
-        phone = stu.category === 'kids' ? stu.guardian?.phone : stu.phone;
+      if (!phone) {
+        const stuSnap = await db
+          .collection('academies').doc(academyId)
+          .collection('students').doc(financial.studentId)
+          .get();
+        if (stuSnap.exists) {
+          const stu = stuSnap.data() || {};
+          if (stu.whatsappOptOut === true) {
+            return { sent: false, skipped: 'recipient_opt_out' };
+          }
+          phone = stu.category === 'kids' ? stu.guardian?.phone : stu.phone;
+        }
       }
     } catch (_) {
       // no phone -> gate below
@@ -553,20 +630,22 @@ async function sendBillingReminderWhatsApp(
     // Auditoria (LOW): normaliza no servidor (dígitos + prefixo 55) antes de
     // mandar ao proxy, em vez de confiar no formato gravado no cadastro.
     phone = normalizePhoneServer(phone);
-    if (!phone) return;
+    if (!phone) return { sent: false, skipped: 'missing_phone' };
 
     // Stage-level dedup: each reminder stage (D+0, D+1, D+3, ...) goes out at
     // most once per charge, so a charge sitting overdue (or due-soon) for days
     // doesn't WhatsApp the student every single day the cron runs. Only an
     // actual send marks the stage as covered (below), so an INERT run with no
     // WHATSAPP_API_KEY still delivers once the key is later configured.
-    if (financial.lastReminderStage === stage) return;
+    if (!manual && financial.lastReminderStage === stage) {
+      return { sent: false, skipped: 'already_sent' };
+    }
 
     // Only stages with approved Meta templates may use this official path.
     // Creation and due-soon (>0) continue through push/internal notifications.
     if (!normalizeTemplateStage(stage)) {
       console.log(`[S7] WhatsApp skipped: no approved Meta template for stage=${stage}`);
-      return;
+      return { sent: false, skipped: 'template_unavailable' };
     }
 
     const dueDate = financial.dueDate && typeof financial.dueDate.toDate === 'function'
@@ -584,10 +663,39 @@ async function sendBillingReminderWhatsApp(
 
     let paymentInstruction = { mode: BillingPaymentMode.NONE };
     if (settings.includePaymentLink !== false) {
-      paymentInstruction = await resolveBillingPaymentInstruction({
-        academy,
-        generateMercadoPagoPix: () => generateReminderPix(academyId, financial),
-      });
+      const canUsePublicPay = academy.mpConnected === true &&
+        academy.publicPaymentLinksEnabled === true &&
+        academy.mpNeedsReauth !== true &&
+        financial.paymentMethodPolicy !== 'card_only' &&
+        financial.id &&
+        ['pending', 'overdue'].includes(financial.status);
+      if (canUsePublicPay) {
+        try {
+          const publicLink = await getOrCreatePublicPaymentLink(
+            academyId,
+            financial.id
+          );
+          // Existing approved templates already accept a fifth variable and a
+          // URL button. They now receive the durable MyDojo URL instead of a
+          // disposable PIX code/MP ticket. No provider object is created here.
+          paymentInstruction = {
+            mode: BillingPaymentMode.MERCADO_PAGO,
+            pixCode: publicLink.url,
+            ticketUrl: publicLink.url,
+          };
+        } catch (error) {
+          console.error(
+            '[billing] stable public link unavailable',
+            financial.id,
+            error && error.message
+          );
+        }
+      }
+      if (paymentInstruction.mode === BillingPaymentMode.NONE) {
+        // Preserve personal PIX as a non-provider fallback, but deliberately do
+        // not pass a Mercado Pago generator: reminders must never mint payments.
+        paymentInstruction = await resolveBillingPaymentInstruction({ academy });
+      }
     }
 
     // The approved Meta template matrix is selected only by stage and payment
@@ -600,7 +708,9 @@ async function sendBillingReminderWhatsApp(
       amountFormatted: valor,
       dueDateFormatted: vencimento,
     });
-    if (!templatePayload) return;
+    if (!templatePayload) {
+      return { sent: false, skipped: 'template_unavailable' };
+    }
 
     console.log(
       `[S7] WhatsApp billing mode=${templatePayload.paymentMode} ` +
@@ -623,9 +733,159 @@ async function sendBillingReminderWhatsApp(
         // best-effort: the dedup marker is non-critical.
       }
     }
+    return result || { sent: false, skipped: 'unknown' };
   } catch (e) {
     console.error('[S7] sendBillingReminderWhatsApp failed:', e && e.message);
+    return { sent: false, skipped: 'internal' };
   }
+}
+
+function isValidBillingEmail(email) {
+  const clean = String(email || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return false;
+  const domain = clean.split('@').pop().toLowerCase();
+  return !['email.com', 'teste.com', 'test.com', 'exemplo.com', 'example.com']
+    .includes(domain);
+}
+
+function buildBillingEmailContent(
+  stage,
+  financial,
+  academyName,
+  daysOverdue,
+  paymentUrl = ''
+) {
+  const studentName = String(financial.studentName || 'Aluno');
+  const amount = formatBrlAmount(Number(financial.amount) || 0);
+  const dueDate = financial.dueDate &&
+    typeof financial.dueDate.toDate === 'function'
+    ? financial.dueDate.toDate() : new Date();
+  const due = formatBrDate(dueDate);
+  const subjects = {
+    'CREATED': `Nova cobranca disponivel - ${academyName}`,
+    'UPCOMING': `Sua cobranca vence em breve - ${academyName}`,
+    'D+0': `Lembrete: sua cobranca vence hoje - ${academyName}`,
+    'D+1': `Lembrete de pagamento - ${academyName}`,
+    'D+3': `Pagamento atrasado - ${academyName}`,
+    'D+7': `Pagamento pendente - ${academyName}`,
+    'D+15': `Aviso de pagamento pendente - ${academyName}`,
+    'D+30': `Situacao de pagamento pendente - ${academyName}`,
+  };
+  const timing = stage === 'D+0'
+    ? `vence hoje (${due})`
+    : daysOverdue > 0
+      ? `venceu em ${due} e esta ha ${daysOverdue} dia(s) em aberto`
+      : `vence em ${due}`;
+  return {
+    subject: subjects[stage] || `Lembrete de pagamento - ${academyName}`,
+    message: `Ola ${studentName},\n\nSua cobranca de ${amount} da ${academyName} ${timing}.\n\n` +
+      (paymentUrl ? `Pague com seguranca: ${paymentUrl}\n\n` : '') +
+      'Se o pagamento ja foi realizado, desconsidere esta mensagem.\n\n' +
+      `Atenciosamente,\n${academyName}`,
+  };
+}
+
+async function sendBillingEmailServer(email, academyId, payload) {
+  const key = process.env.NOTIFICATION_API_KEY;
+  if (!key) return { sent: false, skipped: 'no_key' };
+  const url = process.env.NOTIFICATION_API_URL ||
+    'https://notification.tensorroot.com/api/send-email';
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+      body: JSON.stringify({
+        appId: process.env.NOTIFICATION_APP_ID || 'gestao-raiz',
+        tenantId: academyId,
+        academyId,
+        email,
+        subject: payload.subject,
+        message: payload.message,
+        studentId: payload.studentId,
+        financialId: payload.financialId,
+        stage: payload.stage,
+        type: 'billing_reminder',
+      }),
+      signal: AbortSignal.timeout(30 * 1000),
+    });
+    if (!response.ok) return { sent: false, skipped: 'provider_error' };
+    const body = await response.json().catch(() => null);
+    if (body && (body.success === true || body.sent === true || body.status === 'sent')) {
+      return { sent: true, provider: body.provider || 'email' };
+    }
+    return { sent: false, skipped: 'not_confirmed' };
+  } catch (error) {
+    console.error('[billing] sendBillingEmailServer failed:', error && error.message);
+    return { sent: false, skipped: 'provider_error' };
+  }
+}
+
+async function sendBillingReminderEmail(
+  academyId,
+  academyName,
+  financial,
+  stage,
+  daysOverdue
+) {
+  let email = '';
+  try {
+    const studentSnapshot = await db
+      .collection('academies').doc(academyId)
+      .collection('students').doc(financial.studentId)
+      .get();
+    if (studentSnapshot.exists) {
+      const student = studentSnapshot.data() || {};
+      email = student.category === 'kids'
+        ? (student.guardian?.email || student.email)
+        : student.email;
+    }
+  } catch (_) {
+    // Missing recipient is handled below.
+  }
+  if (!isValidBillingEmail(email)) {
+    return { sent: false, skipped: 'missing_email' };
+  }
+  let paymentUrl = '';
+  let publicPayAvailable = false;
+  try {
+    const academySnapshot = await db.doc(`academies/${academyId}`).get();
+    const academy = academySnapshot.exists ? (academySnapshot.data() || {}) : {};
+    publicPayAvailable = academy.mpConnected === true &&
+      academy.publicPaymentLinksEnabled === true &&
+      academy.mpNeedsReauth !== true &&
+      financial.paymentMethodPolicy !== 'card_only';
+  } catch (_) {
+    publicPayAvailable = false;
+  }
+  if (publicPayAvailable && financial.id &&
+      ['pending', 'overdue'].includes(financial.status)) {
+    try {
+      const publicLink = await getOrCreatePublicPaymentLink(
+        academyId,
+        financial.id
+      );
+      paymentUrl = publicLink.url;
+    } catch (error) {
+      console.error(
+        '[billing] email public link unavailable',
+        financial.id,
+        error && error.message
+      );
+    }
+  }
+  const content = buildBillingEmailContent(
+    stage,
+    financial,
+    academyName,
+    daysOverdue,
+    paymentUrl
+  );
+  return sendBillingEmailServer(email, academyId, {
+    ...content,
+    studentId: financial.studentId,
+    financialId: financial.id,
+    stage,
+  });
 }
 
 // Reads the per-academy billingReminders settings doc once. Returns {} when
@@ -641,6 +901,137 @@ async function getBillingReminderSettings(academyId) {
     return {};
   }
 }
+
+// Manual billing dispatch. The client identifies the charge and channel only;
+// recipient, amount, due date, template and payment instruction are resolved
+// from authoritative server data. Notification credentials never reach Flutter.
+exports.sendBillingReminder = onCall(
+  {
+    secrets: [
+      'NOTIFICATION_API_KEY',
+      'PUBLIC_PAY_TOKEN_SECRET',
+    ],
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Login required.');
+    }
+    const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
+    const financialId = assertSafeDocumentId(
+      request.data?.financialId, 'financialId'
+    );
+    const channel = String(request.data?.channel || '').trim();
+    if (!['whatsapp', 'email'].includes(channel)) {
+      throw new HttpsError(
+        'invalid-argument',
+        'academyId, financialId e channel valido sao obrigatorios.'
+      );
+    }
+    if (!(await isAcademyStaff(request.auth.uid, academyId))) {
+      throw new HttpsError(
+        'permission-denied',
+        'Apenas a equipe da academia pode enviar cobrancas.'
+      );
+    }
+
+    const financialRef = db.doc(
+      `academies/${academyId}/financials/${financialId}`
+    );
+    const [financialSnapshot, academySnapshot] = await Promise.all([
+      financialRef.get(),
+      db.doc(`academies/${academyId}`).get(),
+    ]);
+    if (!financialSnapshot.exists) {
+      throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+    }
+    if (!academySnapshot.exists) {
+      throw new HttpsError('not-found', 'Academia nao encontrada.');
+    }
+
+    const financial = { id: financialId, ...financialSnapshot.data() };
+    if (financial.academyId && financial.academyId !== academyId) {
+      throw new HttpsError('permission-denied', 'Cobranca de outro tenant.');
+    }
+    if (!['pending', 'overdue', 'test'].includes(financial.status)) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Somente cobrancas abertas podem ser enviadas.'
+      );
+    }
+
+    const dueDate = financial.dueDate &&
+      typeof financial.dueDate.toDate === 'function'
+      ? financial.dueDate.toDate() : new Date();
+    const now = new Date();
+    const daysOverdue = daysOverdueBR(dueDate, now);
+    const requestedStage = String(request.data?.stage || '');
+    const dueDay = new Date(
+      dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate()
+    ).getTime();
+    const today = new Date(
+      now.getFullYear(), now.getMonth(), now.getDate()
+    ).getTime();
+    const liveStage = dueDay > today ? 'UPCOMING' : resolveStage(daysOverdue);
+    const stage = financial.status === 'test' && normalizeTemplateStage(requestedStage)
+      ? requestedStage
+      : liveStage;
+    const academy = academySnapshot.data() || {};
+    const academyName = academy.name || academy.academyName || 'Academia';
+
+    let result;
+    if (channel === 'whatsapp') {
+      let phoneOverride = '';
+      if (request.data?.recipientOverride) {
+        if (financial.status !== 'test') {
+          throw new HttpsError(
+            'invalid-argument',
+            'Destinatario manual so e permitido para cobranca de teste.'
+          );
+        }
+        await requireAdminOf(request, academyId);
+        phoneOverride = String(request.data.recipientOverride);
+      }
+      const settings = await getBillingReminderSettings(academyId);
+      result = await sendBillingReminderWhatsApp(
+        academyId,
+        academyName,
+        settings,
+        financial,
+        stage,
+        daysOverdue,
+        { manual: true, phoneOverride }
+      );
+    } else {
+      result = await sendBillingReminderEmail(
+        academyId,
+        academyName,
+        financial,
+        stage,
+        daysOverdue
+      );
+    }
+
+    if (!result || !result.sent) {
+      const reason = result?.skipped || 'unknown';
+      if (reason === 'no_key') {
+        throw new HttpsError(
+          'failed-precondition',
+          'Canal de notificacao nao configurado no backend.'
+        );
+      }
+      throw new HttpsError(
+        'unavailable',
+        `Nao foi possivel enviar a cobranca (${reason}).`
+      );
+    }
+    return {
+      success: true,
+      channel,
+      provider: result.provider || channel,
+      stage,
+    };
+  }
+);
 
 // ============================================
 // Internal Notification Helper
@@ -721,7 +1112,9 @@ exports.notifyAdminCF = notifyAdminCF;
  * Trigger: New financial record created
  * Action: Notify student about new payment due
  */
-exports.onFinancialCreated = functions.firestore
+exports.onFinancialCreated = functions
+  .runWith({ secrets: BILLING_NOTIFICATION_SECRETS })
+  .firestore
   .document('academies/{academyId}/financials/{financialId}')
   .onCreate(async (snapshot, context) => {
     const { academyId, financialId } = context.params;
@@ -1071,7 +1464,9 @@ exports.PUBLIC_PROFILE_SAFE_FIELDS = PUBLIC_PROFILE_SAFE_FIELDS;
  * Scheduled: Daily at 9:00 AM (Brasilia Time)
  * Action: Check for overdue payments and notify admins
  */
-exports.scheduledOverdueCheck = functions.pubsub
+exports.scheduledOverdueCheck = functions
+  .runWith({ secrets: BILLING_NOTIFICATION_SECRETS })
+  .pubsub
   .schedule('0 9 * * *')
   .timeZone('America/Sao_Paulo')
   .onRun(async () => {
@@ -1235,7 +1630,9 @@ exports.scheduledOverdueCheck = functions.pubsub
  * Scheduled: Daily at 8:00 AM (Brasilia Time)
  * Action: Check for payments due soon (3 days before) and notify students
  */
-exports.scheduledDueSoonReminder = functions.pubsub
+exports.scheduledDueSoonReminder = functions
+  .runWith({ secrets: BILLING_NOTIFICATION_SECRETS })
+  .pubsub
   .schedule('0 8 * * *')
   .timeZone('America/Sao_Paulo')
   .onRun(async () => {
@@ -1262,7 +1659,7 @@ exports.scheduledDueSoonReminder = functions.pubsub
         // positivos e ordena desc para deduplicar pelo MAIOR offset elegível.
         const rawOffsets = Array.isArray(billingSettings.dueSoonOffsets)
           ? billingSettings.dueSoonOffsets
-          : [7, 3, 1, 0];
+          : [7, 3, 2, 1, 0];
         const offsets = Array.from(new Set(
           rawOffsets.map((n) => Math.trunc(Number(n))).filter((n) => n >= 0)
         )).sort((a, b) => b - a);
@@ -1370,7 +1767,8 @@ exports.scheduledDueSoonReminder = functions.pubsub
 // 'inadimplentes', furando toda a régua de cobrança acima.
 //
 // Esta CF espelha a lógica do cliente no servidor, é IDEMPOTENTE por
-// (academyId, studentId, referenceMonth) e (planId), e roda diariamente para
+// (academyId, studentId, referenceMonth), independentemente do plano. A chave
+// transacional tambem protege a corrida entre botao manual e job agendado.
 // pegar a virada do mês em qualquer fuso/horário.
 //
 // SEGURO POR PADRÃO: só gera para academias com settings.billing.autoTuitionEnabled
@@ -1379,6 +1777,38 @@ exports.scheduledDueSoonReminder = functions.pubsub
 // manual continua existindo. REVISAR MODELO DE COBRANÇA ANTES DE HABILITAR.
 
 // Mapeia o número de meses de cada período (espelha BillingPeriod.months).
+function tuitionGenerationGuardRef(academyId, referenceMonth, studentId) {
+  return db.doc(
+    `academies/${academyId}/billingGenerationGuards/` +
+    `${referenceMonth}_${studentId}`
+  );
+}
+
+async function createTuitionWithGuard({
+  academyId,
+  referenceMonth,
+  studentId,
+  financialRef,
+  payload,
+}) {
+  const guardRef = tuitionGenerationGuardRef(
+    academyId, referenceMonth, studentId
+  );
+  return db.runTransaction(async (tx) => {
+    const guard = await tx.get(guardRef);
+    if (guard.exists) return false;
+    tx.create(financialRef, payload);
+    tx.create(guardRef, {
+      academyId,
+      studentId,
+      referenceMonth,
+      financialId: financialRef.id,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return true;
+  });
+}
+
 function billingPeriodMonths(value) {
   switch (value) {
     case 'quarterly': return 3;
@@ -1390,8 +1820,9 @@ function billingPeriodMonths(value) {
 
 // referenceMonth canônico 'YYYY-MM' a partir de um Date (wall-clock BR).
 function referenceMonthKey(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const parts = datePartsInBillingTimeZone(d);
+  const y = parts.year;
+  const m = String(parts.month).padStart(2, '0');
   return `${y}-${m}`;
 }
 
@@ -1402,8 +1833,9 @@ function referenceMonthKey(d) {
 async function generateAcademyTuitions(academyId, refDate) {
   const acadRef = db.collection('academies').doc(academyId);
   const referenceMonth = referenceMonthKey(refDate);
-  const refYear = refDate.getFullYear();
-  const refMonth = refDate.getMonth() + 1; // 1-12
+  const referenceParts = datePartsInBillingTimeZone(refDate);
+  const refYear = referenceParts.year;
+  const refMonth = referenceParts.month; // 1-12 in America/Sao_Paulo
   let created = 0;
 
   // Planos ativos da academia.
@@ -1434,12 +1866,59 @@ async function generateAcademyTuitions(academyId, refDate) {
       .get();
     for (const f of fSnap.docs) {
       const d = f.data() || {};
-      if (d.status === 'cancelled') continue;
-      monthCharges.push({ studentId: d.studentId, planId: d.planId || null });
+      monthCharges.push({
+        studentId: d.studentId,
+        planId: d.planId || null,
+        type: d.type || 'monthly_tuition',
+        status: d.status,
+      });
     }
   } catch (e) {
     console.error(`[autoTuition] financials(month) read failed ${academyId}`, e && e.message);
     return 0;
+  }
+
+  // Fail closed when a student is billable by more than one monthly plan.
+  // Choosing whichever Firestore document appears first would be arbitrary.
+  const monthlyCandidates = [];
+  for (const planDoc of plansSnap.docs) {
+    const plan = planDoc.data() || {};
+    const planId = planDoc.id;
+    const periodValue = plan.billingPeriod || 'monthly';
+    // Card-only recurring plans also participate in conflict detection. They
+    // are not invoiced here, but another monthly plan must not create a second
+    // charge alongside their subscription.
+    if (periodValue !== 'monthly') continue;
+    const customValues = plan.customValues || {};
+    const customDueDays = plan.customDueDays || {};
+    const studentAddedAt = plan.studentAddedAt || {};
+    const effectiveValue = (plan.periodValue != null ? plan.periodValue : plan.monthlyValue) || 0;
+    const defaultDueDay = plan.defaultDueDay != null ? plan.defaultDueDay : 10;
+    const studentIds = Array.isArray(plan.studentIds) ? plan.studentIds : [];
+    for (const studentId of studentIds) {
+      const stu = activeStudents.get(studentId);
+      if (!stu) continue;
+      const value = customValues[studentId] != null ? customValues[studentId] : effectiveValue;
+      if (!(Number(value) > 0)) continue;
+      const dueDay = stu.tuitionDay != null
+        ? stu.tuitionDay
+        : (customDueDays[studentId] != null ? customDueDays[studentId] : defaultDueDay);
+      if (!isMembershipEligibleForMonth({
+        planCreatedAt: plan.createdAt,
+        studentAddedAt: studentAddedAt[studentId],
+        referenceYear: refYear,
+        referenceMonth: refMonth,
+        dueDay,
+      })) continue;
+      monthlyCandidates.push({ studentId, planId });
+    }
+  }
+  const conflictingStudentIds = findConflictingStudentIds(monthlyCandidates);
+  if (conflictingStudentIds.size > 0) {
+    console.warn(
+      `[autoTuition] academy ${academyId}: ${conflictingStudentIds.size} student(s) ` +
+      'in multiple monthly plans; automatic generation blocked for them'
+    );
   }
 
   for (const planDoc of plansSnap.docs) {
@@ -1455,6 +1934,7 @@ async function generateAcademyTuitions(academyId, refDate) {
 
     const customValues = plan.customValues || {};
     const customDueDays = plan.customDueDays || {};
+    const studentAddedAt = plan.studentAddedAt || {};
     const effectiveValue = (plan.periodValue != null ? plan.periodValue : plan.monthlyValue) || 0;
     const defaultDueDay = plan.defaultDueDay != null ? plan.defaultDueDay : 10;
     const studentIds = Array.isArray(plan.studentIds) ? plan.studentIds : [];
@@ -1464,12 +1944,23 @@ async function generateAcademyTuitions(academyId, refDate) {
       if (!stu) continue; // só alunos ativos
 
       const value = customValues[studentId] != null ? customValues[studentId] : effectiveValue;
+      const rawDueDay = (stu.tuitionDay != null ? stu.tuitionDay
+        : (customDueDays[studentId] != null ? customDueDays[studentId] : defaultDueDay));
+      if (!isMembershipEligibleForMonth({
+        planCreatedAt: plan.createdAt,
+        studentAddedAt: studentAddedAt[studentId],
+        referenceYear: refYear,
+        referenceMonth: refMonth,
+        dueDay: rawDueDay,
+      })) continue;
       if (!(Number(value) > 0)) continue; // espelha .where((s) => s.value > 0)
 
       // Dedup / elegibilidade do período.
+      const alreadyThisMonth = monthCharges.some((c) =>
+        c.studentId === studentId && c.type === 'monthly_tuition');
+      if (alreadyThisMonth) continue;
       if (periodValue === 'monthly') {
-        const already = monthCharges.some((c) => c.studentId === studentId && c.planId === planId);
-        if (already) continue;
+        if (conflictingStudentIds.has(studentId)) continue;
       } else {
         // Não-mensal: só cobra se passou o intervalo desde o último vencimento.
         let due = true;
@@ -1502,10 +1993,8 @@ async function generateAcademyTuitions(academyId, refDate) {
       // Vencimento: dia do aluno (tuitionDay > custom > default), clampado ao
       // último dia do mês de referência (espelha o cliente).
       const lastDayOfMonth = new Date(refYear, refMonth, 0).getDate();
-      const rawDueDay = (stu.tuitionDay != null ? stu.tuitionDay
-        : (customDueDays[studentId] != null ? customDueDays[studentId] : defaultDueDay));
       const clampedDay = rawDueDay > lastDayOfMonth ? lastDayOfMonth : rawDueDay;
-      const dueDate = new Date(refYear, refMonth - 1, clampedDay);
+      const dueDate = billingDateAtStartOfDay(refYear, refMonth, clampedDay);
 
       const description = periodValue === 'monthly'
         ? 'Mensalidade'
@@ -1513,25 +2002,33 @@ async function generateAcademyTuitions(academyId, refDate) {
 
       try {
         // financials.amount é REAIS (canônico). Espelha PaymentService.create.
-        await acadRef.collection('financials').add({
+        const financialRef = acadRef.collection('financials').doc();
+        const wasCreated = await createTuitionWithGuard({
           academyId,
-          studentId,
-          studentName: stu.fullName || stu.name || '',
-          amount: Number(value),
-          type: 'monthly_tuition',
-          dueDate: admin.firestore.Timestamp.fromDate(dueDate),
-          status: 'pending',
-          description,
           referenceMonth,
-          planId,
-          paymentMethodPolicy: policy,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          createdBy: 'system:autoTuition',
+          studentId,
+          financialRef,
+          payload: {
+            academyId,
+            studentId,
+            studentName: stu.fullName || stu.name || '',
+            amount: Number(value),
+            type: 'monthly_tuition',
+            dueDate: admin.firestore.Timestamp.fromDate(dueDate),
+            status: 'pending',
+            description,
+            referenceMonth,
+            planId,
+            paymentMethodPolicy: policy,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdBy: 'system:autoTuition',
+          },
         });
+        if (!wasCreated) continue;
         // Atualiza o cache em memória para não duplicar dentro do mesmo run se
         // o aluno aparecer em mais de um plano (defensivo).
-        monthCharges.push({ studentId, planId });
+        monthCharges.push({ studentId, planId, type: 'monthly_tuition' });
         created++;
       } catch (e) {
         console.error(`[autoTuition] create failed ${academyId}/${studentId}`, e && e.message);
@@ -3170,6 +3667,7 @@ exports.checkPixStatus = onCall(async (request) => {
 // ============================================================
 const MP_API_BASE = 'https://api.mercadopago.com';
 const MP_MKT_SECRETS = ['MP_OAUTH_CLIENT_ID', 'MP_OAUTH_CLIENT_SECRET'];
+const MP_MKT_WEBHOOK_SECRETS = [...MP_MKT_SECRETS, 'MP_MKT_WEBHOOK_SECRET'];
 
 function mpOAuthRedirect() {
   return process.env.MP_OAUTH_REDIRECT ||
@@ -3394,7 +3892,7 @@ exports.startMercadoPagoConnect = onCall({ secrets: MP_MKT_SECRETS }, async (req
 });
 
 // ---- OAuth: callback (exchanges code, stores tokens server-side) ----------
-exports.mercadoPagoOAuthCallback = onRequest({ secrets: MP_MKT_SECRETS }, async (req, res) => {
+exports.mercadoPagoOAuthCallback = onRequest({ invoker: 'public', secrets: MP_MKT_SECRETS }, async (req, res) => {
   const code = req.query.code;
   const state = String(req.query.state || '');
   const [academyId, nonce] = state.split(':');
@@ -3897,7 +4395,10 @@ async function orderEffectivePolicy(academyId, order) {
  */
 async function createMpPix({ academyId, transactionAmount, description, externalReference, payer }) {
   const token = await getMpAccessToken(academyId);
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  // O PIX legado precisa sobreviver a previews/reenvios e ao prazo minimo
+  // recomendado pelo Checkout Pro. O link publico futuro sera duradouro; ate
+  // la, mantemos a tentativa direta valida por tres dias.
+  const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
   const cpf = ((payer && payer.cpf) || '').replace(/\D/g, '');
   const nameParts = ((payer && payer.name) || '').trim().split(/\s+/);
   // Idempotency key must be UNIQUE per minted PIX: external_reference is FIXED
@@ -5957,6 +6458,1219 @@ exports.confirmManualPixPayment = onCall(
   }
 );
 
+// ---------------------------------------------------------------------------
+// Public MyDojo Pay API. Resolving a stable link is read-only. Mercado Pago is
+// contacted only by startPublicCheckout after an explicit user action.
+// ---------------------------------------------------------------------------
+function publicPayAllowedOrigins() {
+  const configured = String(process.env.PUBLIC_PAY_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const defaults = [new URL(publicPayBaseUrl()).origin];
+  if (process.env.FUNCTIONS_EMULATOR === 'true') {
+    defaults.push('http://localhost:8888', 'http://localhost:5000');
+  }
+  return new Set([...defaults, ...configured]);
+}
+
+function preparePublicPayResponse(req, res) {
+  const origin = String(req.get('origin') || '');
+  if (origin && publicPayAllowedOrigins().has(origin)) {
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Vary', 'Origin');
+  }
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Cache-Control', 'no-store, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  return !origin || publicPayAllowedOrigins().has(origin);
+}
+
+function publicPayRequestBody(req) {
+  if (!String(req.get('content-type') || '').toLowerCase()
+    .startsWith('application/json')) {
+    throw new HttpsError('invalid-argument', 'Conteudo invalido.');
+  }
+  const serializedLength = Buffer.byteLength(JSON.stringify(req.body || {}));
+  if (serializedLength > 4096 || !req.body || typeof req.body !== 'object') {
+    throw new HttpsError('invalid-argument', 'Conteudo invalido.');
+  }
+  return req.body;
+}
+
+async function enforcePublicPayRateLimit(req, linkHash, action, maximum) {
+  const forwarded = String(req.get('x-forwarded-for') || '').split(',')[0].trim();
+  const ip = forwarded || String(req.ip || 'unknown');
+  const ipHash = crypto.createHmac('sha256', publicPaySecret())
+    .update(ip).digest('hex').substring(0, 24);
+  const bucket = Math.floor(Date.now() / 60000);
+  const counterId = crypto.createHash('sha256')
+    .update(`${linkHash}:${action}:${bucket}:${ipHash}`)
+    .digest('hex');
+  const ref = db.doc(`publicPaymentRateLimits/${counterId}`);
+  const allowed = await db.runTransaction(async (tx) => {
+    const snapshot = await tx.get(ref);
+    const count = snapshot.exists ? Number(snapshot.data()?.count || 0) : 0;
+    if (count >= maximum) return false;
+    tx.set(ref, {
+      linkHash,
+      action,
+      count: count + 1,
+      expiresAt: admin.firestore.Timestamp.fromMillis(
+        Date.now() + 10 * 60 * 1000
+      ),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return true;
+  });
+  if (!allowed) {
+    throw new HttpsError('resource-exhausted', 'Muitas tentativas. Aguarde.');
+  }
+}
+
+async function resolvePublicPaymentContext(rawToken) {
+  if (!isValidPublicToken(rawToken)) return null;
+  const linkHash = hashPublicToken(rawToken);
+  const linkSnapshot = await db.doc(`publicPaymentLinks/${linkHash}`).get();
+  if (!linkSnapshot.exists) return null;
+  const link = linkSnapshot.data() || {};
+  if (link.status !== 'active' || link.targetType !== 'financial') return null;
+  const academyId = String(link.academyId || '');
+  const financialId = String(link.targetId || '');
+  if (!academyId || academyId.includes('/') ||
+      !financialId || financialId.includes('/')) return null;
+  const [financialSnapshot, academySnapshot] = await Promise.all([
+    db.doc(`academies/${academyId}/financials/${financialId}`).get(),
+    db.doc(`academies/${academyId}`).get(),
+  ]);
+  if (!financialSnapshot.exists || !academySnapshot.exists) return null;
+  const financial = financialSnapshot.data() || {};
+  if (financial.academyId && financial.academyId !== academyId) return null;
+  return {
+    rawToken,
+    linkHash,
+    linkRef: linkSnapshot.ref,
+    link,
+    academyId,
+    financialId,
+    financialRef: financialSnapshot.ref,
+    financial,
+    academy: academySnapshot.data() || {},
+  };
+}
+
+function publicStudentDisplayName(value) {
+  const first = String(value || 'Aluno').trim().split(/\s+/)[0] || 'Aluno';
+  return first.substring(0, 60);
+}
+
+function publicDueDate(value) {
+  const date = value && typeof value.toDate === 'function'
+    ? value.toDate() : null;
+  if (!date) return null;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-` +
+    String(date.getDate()).padStart(2, '0');
+}
+
+function safePublicLogoUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function publicChargePayload(context) {
+  const { financial, academy } = context;
+  const amount = Number(financial.amount) || 0;
+  const status = amount > 0 && academy.publicPaymentLinksEnabled === true
+    ? publicChargeStatus(financial) : 'unavailable';
+  return {
+    status,
+    academy: {
+      displayName: sanitizeString(
+        academy.name || academy.academyName || 'Academia'
+      ).substring(0, 120),
+      logoUrl: safePublicLogoUrl(academy.logoUrl || academy.logo),
+    },
+    charge: {
+      description: sanitizeString(financial.description || 'Mensalidade')
+        .substring(0, 160),
+      amount: Math.round(amount * 100) / 100,
+      currency: 'BRL',
+      dueDate: publicDueDate(financial.dueDate),
+      studentDisplayName: publicStudentDisplayName(financial.studentName),
+    },
+    availableMethods: publicAvailableMethods(financial, academy),
+    version: Number(financial.financialVersion) || 1,
+  };
+}
+
+function publicPayHttpError(res, error) {
+  const code = error instanceof HttpsError ? error.code : 'internal';
+  const status = {
+    'invalid-argument': 400,
+    'failed-precondition': 412,
+    'resource-exhausted': 429,
+    'aborted': 409,
+  }[code] || 500;
+  if (status >= 500) {
+    console.error('[public-pay] request failed', error && error.message);
+  }
+  return res.status(status).json({
+    status: 'error',
+    code,
+    message: status >= 500
+      ? 'Nao foi possivel processar o pagamento.'
+      : String(error.message || 'Nao foi possivel processar o pagamento.'),
+  });
+}
+
+exports.resolvePublicCharge = onRequest(
+  { cors: false, invoker: 'public', secrets: ['PUBLIC_PAY_TOKEN_SECRET'] },
+  async (req, res) => {
+    const originAllowed = preparePublicPayResponse(req, res);
+    if (req.method === 'OPTIONS') return res.status(originAllowed ? 204 : 403).send('');
+    if (req.method !== 'POST' || !originAllowed) {
+      return res.status(405).json({ status: 'unavailable' });
+    }
+    try {
+      const body = publicPayRequestBody(req);
+      const rawToken = String(body.token || '');
+      if (!isValidPublicToken(rawToken)) {
+        return res.status(200).json({ status: 'unavailable' });
+      }
+      const linkHash = hashPublicToken(rawToken);
+      await enforcePublicPayRateLimit(req, linkHash, 'resolve', 60);
+      const context = await resolvePublicPaymentContext(rawToken);
+      if (!context) return res.status(200).json({ status: 'unavailable' });
+      const lastResolvedMs = context.link.lastResolvedAt &&
+        typeof context.link.lastResolvedAt.toMillis === 'function'
+        ? context.link.lastResolvedAt.toMillis() : 0;
+      if (Date.now() - lastResolvedMs > 60 * 60 * 1000) {
+        context.linkRef.update({
+          lastResolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }).catch(() => {});
+      }
+      const payload = publicChargePayload(context);
+      return res.status(200).json(
+        payload.status === 'unavailable' ? { status: 'unavailable' } : payload
+      );
+    } catch (error) {
+      return publicPayHttpError(res, error);
+    }
+  }
+);
+
+function publicAttemptResponse(attemptId, attempt) {
+  const common = {
+    status: 'ready',
+    attemptId,
+    checkoutMode: attempt.mode,
+    expiresAt: attempt.expiresAt && typeof attempt.expiresAt.toDate === 'function'
+      ? attempt.expiresAt.toDate().toISOString()
+      : new Date(Number(attempt.expiresAtMs || 0)).toISOString(),
+  };
+  if (attempt.mode === 'pix') {
+    return {
+      ...common,
+      pixCode: attempt.pixCode,
+      qrCodeBase64: attempt.pixQrCode || '',
+      ticketUrl: attempt.pixTicketUrl || '',
+    };
+  }
+  return { ...common, redirectUrl: attempt.providerRedirectUrl };
+}
+
+async function createPublicCheckoutPreference(context, attemptId, expiresAt) {
+  const token = await getMpAccessToken(context.academyId);
+  const backUrl = `${publicPayBaseUrl()}/p/${context.rawToken}`;
+  const now = new Date();
+  const preference = await mpRequest('POST', '/checkout/preferences', {
+    token,
+    idempotencyKey: attemptId,
+    body: {
+      items: [{
+        id: 'financial',
+        title: sanitizeString(context.financial.description || 'Mensalidade')
+          .substring(0, 120),
+        currency_id: 'BRL',
+        quantity: 1,
+        unit_price: Number(Number(context.financial.amount).toFixed(2)),
+      }],
+      external_reference: `${context.academyId}:fin:${context.financialId}`,
+      notification_url: `${mpMktWebhookUrl()}?acad=` +
+        encodeURIComponent(context.academyId),
+      back_urls: { success: backUrl, pending: backUrl, failure: backUrl },
+      auto_return: 'approved',
+      expires: true,
+      expiration_date_from: now.toISOString(),
+      expiration_date_to: expiresAt.toISOString(),
+      date_of_expiration: expiresAt.toISOString(),
+      payment_methods: {
+        excluded_payment_types: [{ id: 'ticket' }, { id: 'atm' }],
+      },
+      metadata: { attempt_id: attemptId },
+    },
+  });
+  const redirectUrl = String(preference.init_point || preference.sandbox_init_point || '');
+  let redirectHost = '';
+  try { redirectHost = new URL(redirectUrl).hostname; } catch (_) { /* invalid */ }
+  if (!redirectUrl ||
+      (!redirectHost.endsWith('.mercadopago.com.br') &&
+       redirectHost !== 'mercadopago.com.br')) {
+    throw new Error('Mercado Pago returned an invalid checkout URL');
+  }
+  return {
+    providerPreferenceId: String(preference.id || ''),
+    providerRedirectUrl: redirectUrl,
+  };
+}
+
+async function publicPixPayer(context) {
+  const snapshot = await db.doc(
+    `academies/${context.academyId}/students/${context.financial.studentId}`
+  ).get();
+  const student = snapshot.exists ? (snapshot.data() || {}) : {};
+  const kids = student.category === 'kids';
+  const cpf = String(kids ? (student.guardian?.cpf || student.cpf) : student.cpf)
+    .replace(/\D/g, '');
+  const email = String(kids ? (student.guardian?.email || student.email) : student.email)
+    .trim();
+  if (!validateCPF(cpf) || !isValidBillingEmail(email)) {
+    throw new HttpsError(
+      'failed-precondition',
+      'CPF e e-mail validos sao necessarios para gerar o PIX.'
+    );
+  }
+  return {
+    cpf,
+    email,
+    name: student.fullName || context.financial.studentName || 'Aluno',
+  };
+}
+
+async function expirePublicPreferenceBestEffort(academyId, preferenceId) {
+  if (!preferenceId) return;
+  try {
+    const token = await getMpAccessToken(academyId);
+    const expiry = new Date(Date.now() + 60 * 1000).toISOString();
+    await mpRequest('PUT', `/checkout/preferences/${preferenceId}`, {
+      token,
+      body: {
+        expires: true,
+        expiration_date_to: expiry,
+        date_of_expiration: expiry,
+      },
+    });
+  } catch (error) {
+    console.error('[public-pay] preference expiration failed', preferenceId);
+  }
+}
+
+exports.startPublicCheckout = onRequest(
+  { cors: false, invoker: 'public', secrets: PUBLIC_PAY_SECRETS },
+  async (req, res) => {
+    const originAllowed = preparePublicPayResponse(req, res);
+    if (req.method === 'OPTIONS') return res.status(originAllowed ? 204 : 403).send('');
+    if (req.method !== 'POST' || !originAllowed) {
+      return res.status(405).json({ status: 'unavailable' });
+    }
+    let attemptRef;
+    let attemptId = '';
+    let context;
+    let ownsAttempt = false;
+    try {
+      const body = publicPayRequestBody(req);
+      const rawToken = String(body.token || '');
+      const requestId = String(body.requestId || '');
+      const expectedVersion = Number(body.expectedVersion);
+      if (!isValidPublicToken(rawToken) || !isValidRequestId(requestId) ||
+          !Number.isInteger(expectedVersion) || expectedVersion < 1) {
+        throw new HttpsError('invalid-argument', 'Solicitacao invalida.');
+      }
+      context = await resolvePublicPaymentContext(rawToken);
+      if (!context) {
+        return res.status(404).json({ status: 'unavailable' });
+      }
+      await enforcePublicPayRateLimit(req, context.linkHash, 'start', 10);
+      const status = publicChargeStatus(context.financial);
+      const methods = publicAvailableMethods(context.financial, context.academy);
+      if (status !== 'open' || methods.length === 0) {
+        throw new HttpsError(
+          'failed-precondition',
+          status === 'open'
+            ? 'Este metodo ainda nao esta disponivel no pagamento publico.'
+            : 'Esta cobranca nao esta disponivel para pagamento.'
+        );
+      }
+      const amount = Number(context.financial.amount);
+      if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) {
+        throw new HttpsError('failed-precondition', 'Valor da cobranca invalido.');
+      }
+      const mode = context.financial.paymentMethodPolicy === 'pix_only'
+        ? 'pix' : 'checkout_pro';
+      const requestIdHash = crypto.createHash('sha256').update(requestId).digest('hex');
+      attemptId = `attempt_${crypto.createHash('sha256')
+        .update(`${context.linkHash}:${requestId}`).digest('hex').substring(0, 40)}`;
+      attemptRef = db.doc(
+        `academies/${context.academyId}/paymentAttempts/${attemptId}`
+      );
+      const now = admin.firestore.Timestamp.now();
+      const expiresAt = admin.firestore.Timestamp.fromMillis(
+        Date.now() + CHECKOUT_TTL_MS
+      );
+      const expected = {
+        publicLinkHash: context.linkHash,
+        financialVersion: expectedVersion,
+        amount,
+        mode,
+        nowMs: Date.now(),
+      };
+      const lock = await db.runTransaction(async (tx) => {
+        const liveSnapshot = await tx.get(context.financialRef);
+        const requestSnapshot = await tx.get(attemptRef);
+        if (!liveSnapshot.exists) {
+          throw new HttpsError('failed-precondition', 'Cobranca indisponivel.');
+        }
+        const live = liveSnapshot.data() || {};
+        const liveVersion = Number(live.financialVersion) || 1;
+        if (!['pending', 'overdue'].includes(live.status) ||
+            liveVersion !== expectedVersion ||
+            Math.abs(Number(live.amount) - amount) > 0.01) {
+          throw new HttpsError(
+            'aborted',
+            'A cobranca mudou. Atualize os dados antes de pagar.'
+          );
+        }
+        const requested = requestSnapshot.exists ? requestSnapshot.data() : null;
+        if (isReusableAttempt(requested, expected)) {
+          return { reuse: requested, attemptId };
+        }
+        const creatingAtMs = requested?.updatedAt &&
+          typeof requested.updatedAt.toMillis === 'function'
+          ? requested.updatedAt.toMillis() : 0;
+        if (requested?.status === 'creating' &&
+            Date.now() - creatingAtMs < 60 * 1000) {
+          return { processing: true };
+        }
+
+        const lastAttemptId = String(live.lastCheckoutAttemptId || '');
+        if (lastAttemptId && lastAttemptId !== attemptId) {
+          const lastRef = db.doc(
+            `academies/${context.academyId}/paymentAttempts/${lastAttemptId}`
+          );
+          const lastSnapshot = await tx.get(lastRef);
+          const last = lastSnapshot.exists ? lastSnapshot.data() : null;
+          if (isReusableAttempt(last, expected)) {
+            return { reuse: last, attemptId: lastAttemptId };
+          }
+          const lastCreatingAtMs = last?.updatedAt &&
+            typeof last.updatedAt.toMillis === 'function'
+            ? last.updatedAt.toMillis() : 0;
+          if (last?.status === 'creating' &&
+              Date.now() - lastCreatingAtMs < 60 * 1000) {
+            return { processing: true };
+          }
+        }
+
+        tx.set(attemptRef, {
+          targetType: 'financial',
+          targetId: context.financialId,
+          publicLinkHash: context.linkHash,
+          financialVersion: expectedVersion,
+          provider: 'mercadopago',
+          mode,
+          requestIdHash,
+          amount: Math.round(amount * 100) / 100,
+          currency: 'BRL',
+          status: 'creating',
+          createdAt: requestSnapshot.exists
+            ? (requested.createdAt || now) : now,
+          expiresAt,
+          updatedAt: now,
+          failureCode: admin.firestore.FieldValue.delete(),
+        }, { merge: true });
+        tx.update(context.financialRef, {
+          lastCheckoutAttemptId: attemptId,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return { create: true, expiresAt };
+      });
+
+      if (lock.reuse) {
+        return res.status(200).json(
+          publicAttemptResponse(lock.attemptId, lock.reuse)
+        );
+      }
+      if (lock.processing) {
+        return res.status(409).json({ status: 'processing' });
+      }
+      ownsAttempt = true;
+
+      let providerData;
+      if (mode === 'pix') {
+        const payer = await publicPixPayer(context);
+        const pix = await createMpPix({
+          academyId: context.academyId,
+          transactionAmount: amount,
+          description: sanitizeString(context.financial.description) || 'Mensalidade',
+          externalReference: `${context.academyId}:fin:${context.financialId}`,
+          payer,
+        });
+        providerData = {
+          providerPaymentId: pix.paymentId,
+          pixCode: pix.pixCode,
+          pixQrCode: pix.qrCodeBase64 || '',
+          pixTicketUrl: pix.ticketUrl || '',
+        };
+      } else {
+        providerData = await createPublicCheckoutPreference(
+          context,
+          attemptId,
+          lock.expiresAt.toDate()
+        );
+      }
+
+      const finalized = await db.runTransaction(async (tx) => {
+        const liveSnapshot = await tx.get(context.financialRef);
+        if (!liveSnapshot.exists) return false;
+        const live = liveSnapshot.data() || {};
+        if (!['pending', 'overdue'].includes(live.status) ||
+            (Number(live.financialVersion) || 1) !== expectedVersion ||
+            String(live.lastCheckoutAttemptId || '') !== attemptId) {
+          tx.update(attemptRef, {
+            status: 'cancelled',
+            failureCode: 'financial_changed',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          return false;
+        }
+        tx.update(attemptRef, {
+          ...providerData,
+          status: 'ready',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        if (mode === 'pix') {
+          tx.update(context.financialRef, {
+            gatewayPaymentId: providerData.providerPaymentId,
+            paymentGateway: 'mercadopago',
+            pixCode: providerData.pixCode,
+            pixQrCode: providerData.pixQrCode,
+            pixTicketUrl: providerData.pixTicketUrl,
+            pixExpiresAt: lock.expiresAt,
+            pixAmount: Math.round(amount * 100) / 100,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+        return true;
+      });
+      if (!finalized) {
+        if (mode === 'pix') {
+          await mpCancelPixPayment(
+            context.academyId,
+            providerData.providerPaymentId,
+            {}
+          ).catch(() => {});
+        } else {
+          await expirePublicPreferenceBestEffort(
+            context.academyId,
+            providerData.providerPreferenceId
+          );
+        }
+        ownsAttempt = false;
+        throw new HttpsError(
+          'aborted',
+          'A cobranca mudou. Atualize os dados antes de pagar.'
+        );
+      }
+      ownsAttempt = false;
+      const readySnapshot = await attemptRef.get();
+      return res.status(200).json(
+        publicAttemptResponse(attemptId, readySnapshot.data())
+      );
+    } catch (error) {
+      if (attemptRef && ownsAttempt) {
+        await attemptRef.set({
+          status: 'failed',
+          failureCode: error instanceof HttpsError ? error.code : 'provider_error',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }).catch(() => {});
+      }
+      return publicPayHttpError(res, error);
+    }
+  }
+);
+
+async function invalidatePublicCheckoutAttemptBestEffort(
+  academyId,
+  attemptId,
+  reason
+) {
+  if (!attemptId) return;
+  try {
+    const ref = db.doc(`academies/${academyId}/paymentAttempts/${attemptId}`);
+    const snapshot = await ref.get();
+    if (!snapshot.exists) return;
+    const attempt = snapshot.data() || {};
+    if (!['creating', 'ready', 'pending'].includes(attempt.status)) return;
+    await ref.set({
+      status: 'cancelled',
+      failureCode: reason,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    if (attempt.mode === 'checkout_pro' && attempt.providerPreferenceId) {
+      await expirePublicPreferenceBestEffort(
+        academyId,
+        attempt.providerPreferenceId
+      );
+    }
+  } catch (error) {
+    console.error('[public-pay] attempt invalidation failed', attemptId);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Server-authoritative financial actions. These callables are additive so old
+// app versions keep working during rollout; Firestore Rules can become fully
+// read-only only after the minimum compatible app version is enforced.
+// ---------------------------------------------------------------------------
+function assertSafeDocumentId(value, fieldName) {
+  const clean = String(value || '').trim();
+  if (!clean || clean.includes('/') || clean.length > 200) {
+    throw new HttpsError('invalid-argument', `${fieldName} invalido.`);
+  }
+  return clean;
+}
+
+function parseFinancialDate(value, fieldName) {
+  const parsed = new Date(String(value || ''));
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new HttpsError('invalid-argument', `${fieldName} invalida.`);
+  }
+  return parsed;
+}
+
+function openStatusForDueDate(dueDate, now = new Date()) {
+  return isOverdueBR(dueDate, now) ? 'overdue' : 'pending';
+}
+
+function financialGatewayCleanup() {
+  const del = admin.firestore.FieldValue.delete();
+  return {
+    gatewayPaymentId: del,
+    pixCode: del,
+    pixQrCode: del,
+    pixTicketUrl: del,
+    pixExpiresAt: del,
+    pixAmount: del,
+    pixMintAt: del,
+    pixMintBy: del,
+    cardPendingPaymentId: del,
+    cardPendingStatus: del,
+    cardPendingExpiresAt: del,
+  };
+}
+
+function competingProviderPaymentIds(financial) {
+  const ids = new Set();
+  if (financial.gatewayPaymentId &&
+      (financial.paymentGateway === 'mercadopago' || financial.pixCode)) {
+    ids.add(String(financial.gatewayPaymentId));
+  }
+  if (financial.cardPendingPaymentId) {
+    ids.add(String(financial.cardPendingPaymentId));
+  }
+  return ids;
+}
+
+async function cancelCompetingPaymentsFailClosed(academyId, financial) {
+  const ids = competingProviderPaymentIds(financial);
+  const verified = new Set();
+  if (ids.size === 0) return verified;
+  const token = await getMpAccessToken(academyId);
+  for (const paymentId of ids) {
+    const cancelResult = await mpCancelPixPayment(
+      academyId, paymentId, { token }
+    );
+    const safety = classifyMercadoPagoCancellation(cancelResult);
+    if (!safety.safe && safety.reason === 'approved') {
+      throw new HttpsError(
+        'failed-precondition',
+        'O Mercado Pago ja aprovou este pagamento. Aguarde a baixa automatica.'
+      );
+    }
+    if (!safety.safe) {
+      throw new HttpsError(
+        'unavailable',
+        'Nao foi possivel invalidar a tentativa concorrente. Tente novamente.'
+      );
+    }
+    verified.add(paymentId);
+  }
+  return verified;
+}
+
+async function financialActorName(request) {
+  try {
+    const snapshot = await db.doc(`users/${request.auth.uid}`).get();
+    const user = snapshot.exists ? snapshot.data() : {};
+    const name = String(user.displayName || user.name || '').trim();
+    if (name) return name;
+  } catch (_) {
+    // Fall back to the auth token below.
+  }
+  return String(
+    request.auth.token?.name || request.auth.token?.email || 'Administrador'
+  ).trim();
+}
+
+exports.createFinancialCharge = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login obrigatorio.');
+  const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
+  const studentId = assertSafeDocumentId(request.data?.studentId, 'studentId');
+  if (!(await staffCanWithPermission(
+    request.auth.uid, academyId, 'financial:create'
+  ))) {
+    throw new HttpsError(
+      'permission-denied',
+      'Sem permissao para criar cobrancas nesta academia.'
+    );
+  }
+  const amount = Number(request.data?.amount);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) {
+    throw new HttpsError('invalid-argument', 'Valor da cobranca invalido.');
+  }
+  const dueDate = parseFinancialDate(request.data?.dueDate, 'dueDate');
+  const type = String(request.data?.type || 'monthly_tuition');
+  if (!['monthly_tuition', 'avulsa', 'private_lesson'].includes(type)) {
+    throw new HttpsError('invalid-argument', 'Tipo de cobranca invalido.');
+  }
+  const policy = String(request.data?.paymentMethodPolicy || 'both');
+  if (!['both', 'pix_only', 'card_only'].includes(policy)) {
+    throw new HttpsError('invalid-argument', 'Politica de pagamento invalida.');
+  }
+  const studentSnapshot = await db.doc(
+    `academies/${academyId}/students/${studentId}`
+  ).get();
+  if (!studentSnapshot.exists) {
+    throw new HttpsError('not-found', 'Aluno nao encontrado nesta academia.');
+  }
+  const student = studentSnapshot.data() || {};
+  const studentName = String(
+    student.fullName || student.name || 'Aluno'
+  ).trim().substring(0, 160);
+  let authoritativeAmount = Math.round(amount * 100) / 100;
+  let authoritativePolicy = policy;
+  let planId = sanitizeString(request.data?.planId) || null;
+  let referenceMonth = sanitizeString(request.data?.referenceMonth) || null;
+
+  if (type === 'monthly_tuition') {
+    if (!referenceMonth || !/^\d{4}-\d{2}$/.test(referenceMonth)) {
+      throw new HttpsError(
+        'invalid-argument', 'Mes de referencia da mensalidade invalido.'
+      );
+    }
+    const [referenceYear, referenceMonthNumber] = referenceMonth
+      .split('-').map(Number);
+    if (referenceMonthNumber < 1 || referenceMonthNumber > 12) {
+      throw new HttpsError(
+        'invalid-argument', 'Mes de referencia da mensalidade invalido.'
+      );
+    }
+    const dueParts = datePartsInBillingTimeZone(dueDate);
+    if (dueParts.year !== referenceYear ||
+        dueParts.month !== referenceMonthNumber) {
+      throw new HttpsError(
+        'invalid-argument',
+        'O vencimento precisa estar no mesmo mes da mensalidade.'
+      );
+    }
+
+    const existingSnapshot = await db
+      .collection(`academies/${academyId}/financials`)
+      .where('referenceMonth', '==', referenceMonth)
+      .get();
+    const existingTuition = existingSnapshot.docs.some((doc) => {
+      const financial = doc.data() || {};
+      return financial.studentId === studentId &&
+        (financial.type || 'monthly_tuition') === 'monthly_tuition';
+    });
+    if (existingTuition) {
+      throw new HttpsError(
+        'already-exists',
+        'Este aluno ja possui uma mensalidade neste mes, inclusive cancelada.'
+      );
+    }
+
+    const activePlansSnapshot = await db
+      .collection(`academies/${academyId}/plans`)
+      .where('isActive', '==', true)
+      .get();
+    const memberships = activePlansSnapshot.docs.filter((doc) => {
+      const plan = doc.data() || {};
+      const studentIds = Array.isArray(plan.studentIds) ? plan.studentIds : [];
+      const customValues = plan.customValues || {};
+      const planValue = customValues[studentId] != null
+        ? customValues[studentId]
+        : (plan.periodValue != null ? plan.periodValue : plan.monthlyValue);
+      return studentIds.includes(studentId) && Number(planValue) > 0;
+    });
+    if (memberships.length > 1) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Aluno vinculado a mais de um plano. Revise os planos antes de cobrar.'
+      );
+    }
+    if (planId) {
+      planId = assertSafeDocumentId(planId, 'planId');
+      const planDocument = activePlansSnapshot.docs.find(
+        (doc) => doc.id === planId
+      );
+      if (!planDocument) {
+        throw new HttpsError('not-found', 'Plano ativo nao encontrado.');
+      }
+      const plan = planDocument.data() || {};
+      if (!(Array.isArray(plan.studentIds) && plan.studentIds.includes(studentId))) {
+        throw new HttpsError(
+          'failed-precondition', 'Aluno nao esta vinculado ao plano informado.'
+        );
+      }
+      const periodValue = plan.billingPeriod || 'monthly';
+      const planPolicy = plan.paymentMethodPolicy || 'both';
+      if (periodValue === 'monthly' && planPolicy === 'cardOnly') {
+        throw new HttpsError(
+          'failed-precondition',
+          'Plano recorrente no cartao nao pode receber mensalidade avulsa.'
+        );
+      }
+      const customValues = plan.customValues || {};
+      const expectedAmount = Number(
+        customValues[studentId] != null
+          ? customValues[studentId]
+          : (plan.periodValue != null ? plan.periodValue : plan.monthlyValue)
+      );
+      if (!Number.isFinite(expectedAmount) || expectedAmount <= 0) {
+        throw new HttpsError('failed-precondition', 'Valor do plano invalido.');
+      }
+      if (Math.abs(expectedAmount - amount) > 0.005) {
+        throw new HttpsError(
+          'failed-precondition',
+          `O valor correto deste aluno no plano e R$ ${expectedAmount.toFixed(2)}.`
+        );
+      }
+      const customDueDays = plan.customDueDays || {};
+      const effectiveDueDay = student.tuitionDay != null
+        ? student.tuitionDay
+        : (customDueDays[studentId] != null
+          ? customDueDays[studentId]
+          : (plan.defaultDueDay != null ? plan.defaultDueDay : 10));
+      const studentAddedAt = plan.studentAddedAt || {};
+      if (!isMembershipEligibleForMonth({
+        planCreatedAt: plan.createdAt,
+        studentAddedAt: studentAddedAt[studentId],
+        referenceYear,
+        referenceMonth: referenceMonthNumber,
+        dueDay: effectiveDueDay,
+      })) {
+        throw new HttpsError(
+          'failed-precondition',
+          'Plano ou vinculo criado apos o vencimento; cobre a partir do proximo mes.'
+        );
+      }
+      authoritativeAmount = Math.round(expectedAmount * 100) / 100;
+      authoritativePolicy = planPolicy;
+    } else if (memberships.length > 0) {
+      throw new HttpsError(
+        'failed-precondition', 'Selecione o plano desta mensalidade.'
+      );
+    }
+  }
+  const now = admin.firestore.Timestamp.now();
+  const financialRef = db.collection(
+    `academies/${academyId}/financials`
+  ).doc();
+  const payload = {
+    academyId,
+    studentId,
+    studentName,
+    amount: authoritativeAmount,
+    type,
+    dueDate: admin.firestore.Timestamp.fromDate(dueDate),
+    status: openStatusForDueDate(dueDate),
+    description: sanitizeString(request.data?.description) || 'Mensalidade',
+    referenceMonth,
+    planId,
+    paymentMethodPolicy: authoritativePolicy,
+    financialVersion: 1,
+    publicPaymentEnabled: true,
+    createdAt: now,
+    updatedAt: now,
+    createdBy: request.auth.uid,
+  };
+  if (type === 'private_lesson') {
+    const actorName = await financialActorName(request);
+    const lessonDate = request.data?.lessonDate
+      ? parseFinancialDate(request.data.lessonDate, 'lessonDate') : dueDate;
+    const weight = Number(request.data?.lessonWeight ?? 1);
+    payload.lessonDate = admin.firestore.Timestamp.fromDate(lessonDate);
+    payload.lessonWeight = Number.isFinite(weight) && weight > 0 ? weight : 1;
+    payload.lessonSport = sanitizeString(request.data?.lessonSport) || 'bjj';
+    payload.instructorId = request.auth.uid;
+    payload.instructorName = actorName;
+    payload.attendanceGranted = false;
+  }
+  if (type === 'monthly_tuition') {
+    const wasCreated = await createTuitionWithGuard({
+      academyId,
+      referenceMonth,
+      studentId,
+      financialRef,
+      payload,
+    });
+    if (!wasCreated) {
+      throw new HttpsError(
+        'already-exists', 'Este aluno ja possui uma mensalidade neste mes.'
+      );
+    }
+  } else {
+    await financialRef.create(payload);
+  }
+  return { success: true, financialId: financialRef.id };
+});
+
+exports.updateFinancialTerms = onCall(
+  { secrets: MP_MKT_SECRETS }, async (request) => {
+    const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
+    const financialId = assertSafeDocumentId(
+      request.data?.financialId, 'financialId'
+    );
+    await requireAdminOf(request, academyId);
+    const amount = Number(request.data?.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) {
+      throw new HttpsError('invalid-argument', 'Valor da cobranca invalido.');
+    }
+    const dueDate = parseFinancialDate(request.data?.dueDate, 'dueDate');
+    const financialRef = db.doc(
+      `academies/${academyId}/financials/${financialId}`
+    );
+    const initialSnapshot = await financialRef.get();
+    if (!initialSnapshot.exists) {
+      throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+    }
+    const initial = initialSnapshot.data();
+    if (!['pending', 'overdue'].includes(initial.status)) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Cobranca liquidada nao pode ser editada.'
+      );
+    }
+    const verifiedIds = await cancelCompetingPaymentsFailClosed(
+      academyId, initial
+    );
+    const invalidatedAttemptId = await db.runTransaction(async (tx) => {
+      const liveSnapshot = await tx.get(financialRef);
+      if (!liveSnapshot.exists) {
+        throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+      }
+      const live = liveSnapshot.data();
+      if (!['pending', 'overdue'].includes(live.status)) {
+        throw new HttpsError('aborted', 'A cobranca mudou. Atualize a tela.');
+      }
+      const liveIds = competingProviderPaymentIds(live);
+      if ([...liveIds].some((id) => !verifiedIds.has(id))) {
+        throw new HttpsError(
+          'aborted',
+          'Uma nova tentativa de pagamento surgiu. Tente novamente.'
+        );
+      }
+      tx.update(financialRef, {
+        amount: Math.round(amount * 100) / 100,
+        dueDate: admin.firestore.Timestamp.fromDate(dueDate),
+        status: openStatusForDueDate(dueDate),
+        financialVersion: (Number(live.financialVersion) || 0) + 1,
+        ...financialGatewayCleanup(),
+        lastReminderStage: admin.firestore.FieldValue.delete(),
+        lastReminderAt: admin.firestore.FieldValue.delete(),
+        lastDueSoonStage: admin.firestore.FieldValue.delete(),
+        lastDueSoonAt: admin.firestore.FieldValue.delete(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      if (live.publicPaymentLinkHash) {
+        tx.set(db.doc(`publicPaymentLinks/${live.publicPaymentLinkHash}`), {
+          financialVersion: (Number(live.financialVersion) || 0) + 1,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+      return live.lastCheckoutAttemptId || '';
+    });
+    await invalidatePublicCheckoutAttemptBestEffort(
+      academyId,
+      invalidatedAttemptId,
+      'financial_changed'
+    );
+    return { success: true };
+  }
+);
+
+exports.markFinancialPaidManual = onCall(
+  { secrets: MP_MKT_SECRETS }, async (request) => {
+    const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
+    const financialId = assertSafeDocumentId(
+      request.data?.financialId, 'financialId'
+    );
+    await requireAdminOf(request, academyId);
+    const method = String(request.data?.method || 'pix');
+    if (!['pix', 'credit_card', 'debit_card', 'cash', 'bank_transfer']
+      .includes(method)) {
+      throw new HttpsError('invalid-argument', 'Metodo de pagamento invalido.');
+    }
+    const paymentDate = request.data?.paymentDate
+      ? parseFinancialDate(request.data.paymentDate, 'paymentDate') : new Date();
+    const financialRef = db.doc(
+      `academies/${academyId}/financials/${financialId}`
+    );
+    const initialSnapshot = await financialRef.get();
+    if (!initialSnapshot.exists) {
+      throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+    }
+    const initial = initialSnapshot.data();
+    if (!['pending', 'overdue'].includes(initial.status)) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Somente cobrancas abertas podem receber baixa manual.'
+      );
+    }
+    const verifiedIds = await cancelCompetingPaymentsFailClosed(
+      academyId, initial
+    );
+    const actorName = await financialActorName(request);
+    const auditRef = db.collection(
+      `academies/${academyId}/paymentAuditLogs`
+    ).doc();
+    const result = await db.runTransaction(async (tx) => {
+      const liveSnapshot = await tx.get(financialRef);
+      if (!liveSnapshot.exists) {
+        throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+      }
+      const live = liveSnapshot.data();
+      if (!['pending', 'overdue'].includes(live.status)) {
+        throw new HttpsError('aborted', 'A cobranca mudou. Atualize a tela.');
+      }
+      const liveIds = competingProviderPaymentIds(live);
+      if ([...liveIds].some((id) => !verifiedIds.has(id))) {
+        throw new HttpsError(
+          'aborted',
+          'Uma nova tentativa de pagamento surgiu. Tente novamente.'
+        );
+      }
+      const paidAt = admin.firestore.Timestamp.fromDate(paymentDate);
+      tx.update(financialRef, {
+        status: 'paid',
+        method,
+        paymentGateway: 'manual',
+        paymentDate: paidAt,
+        manualPaymentAudit: {
+          type: method,
+          source: 'admin_app',
+          confirmedByName: actorName,
+          confirmedAt: paidAt,
+        },
+        ...financialGatewayCleanup(),
+        updatedAt: paidAt,
+      });
+      tx.set(auditRef, {
+        action: 'mark_paid_manual',
+        academyId,
+        financialId,
+        studentId: live.studentId || '',
+        studentName: live.studentName || '',
+        amount: Number(live.amount) || 0,
+        method,
+        actorUid: request.auth.uid,
+        actorDisplayName: actorName,
+        beforeStatus: live.status,
+        afterStatus: 'paid',
+        createdAt: paidAt,
+      });
+      return live;
+    });
+    await invalidatePublicCheckoutAttemptBestEffort(
+      academyId,
+      result.lastCheckoutAttemptId,
+      'financial_paid_manual'
+    );
+    let attendanceGranted = result.attendanceGranted === true;
+    if (result.type === 'private_lesson' && !attendanceGranted) {
+      await grantPrivateLessonAttendance(
+        academyId, financialId, result,
+        { verifiedBy: request.auth.uid, verifiedByName: actorName }
+      );
+      attendanceGranted = true;
+    }
+    return { success: true, attendanceGranted };
+  }
+);
+
+exports.cancelFinancialCharge = onCall(
+  { secrets: MP_MKT_SECRETS }, async (request) => {
+    const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
+    const financialId = assertSafeDocumentId(
+      request.data?.financialId, 'financialId'
+    );
+    await requireAdminOf(request, academyId);
+    const financialRef = db.doc(
+      `academies/${academyId}/financials/${financialId}`
+    );
+    const initialSnapshot = await financialRef.get();
+    if (!initialSnapshot.exists) {
+      throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+    }
+    const initial = initialSnapshot.data();
+    if (initial.status === 'cancelled') return { success: true, alreadyCancelled: true };
+    if (!['pending', 'overdue'].includes(initial.status)) {
+      throw new HttpsError('failed-precondition', 'Cobranca liquidada nao pode ser cancelada.');
+    }
+    const verifiedIds = await cancelCompetingPaymentsFailClosed(
+      academyId, initial
+    );
+    const invalidatedAttemptId = await db.runTransaction(async (tx) => {
+      const liveSnapshot = await tx.get(financialRef);
+      if (!liveSnapshot.exists) {
+        throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+      }
+      const live = liveSnapshot.data();
+      if (!['pending', 'overdue'].includes(live.status)) {
+        throw new HttpsError('aborted', 'A cobranca mudou. Atualize a tela.');
+      }
+      const liveIds = competingProviderPaymentIds(live);
+      if ([...liveIds].some((id) => !verifiedIds.has(id))) {
+        throw new HttpsError('aborted', 'Nova tentativa detectada. Tente novamente.');
+      }
+      tx.update(financialRef, {
+        status: 'cancelled',
+        financialVersion: (Number(live.financialVersion) || 0) + 1,
+        ...financialGatewayCleanup(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return live.lastCheckoutAttemptId || '';
+    });
+    await invalidatePublicCheckoutAttemptBestEffort(
+      academyId,
+      invalidatedAttemptId,
+      'financial_cancelled'
+    );
+    return { success: true };
+  }
+);
+
+exports.reactivateFinancialCharge = onCall(async (request) => {
+  const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
+  const financialId = assertSafeDocumentId(
+    request.data?.financialId, 'financialId'
+  );
+  await requireAdminOf(request, academyId);
+  const financialRef = db.doc(
+    `academies/${academyId}/financials/${financialId}`
+  );
+  await db.runTransaction(async (tx) => {
+    const snapshot = await tx.get(financialRef);
+    if (!snapshot.exists) {
+      throw new HttpsError('not-found', 'Cobranca nao encontrada.');
+    }
+    const financial = snapshot.data();
+    if (financial.status !== 'cancelled') {
+      throw new HttpsError('failed-precondition', 'A cobranca nao esta cancelada.');
+    }
+    const dueDate = financial.dueDate?.toDate?.();
+    if (!dueDate) throw new HttpsError('failed-precondition', 'Vencimento invalido.');
+    tx.update(financialRef, {
+      status: openStatusForDueDate(dueDate),
+      financialVersion: (Number(financial.financialVersion) || 0) + 1,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+  return { success: true };
+});
+
+exports.refreshOverdueFinancials = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login obrigatorio.');
+  const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
+  if (!(await isAcademyStaff(request.auth.uid, academyId))) {
+    throw new HttpsError(
+      'permission-denied',
+      'Apenas a equipe da academia pode atualizar cobrancas vencidas.'
+    );
+  }
+  const snapshot = await db.collection(
+    `academies/${academyId}/financials`
+  ).where('status', '==', 'pending').get();
+  const now = new Date();
+  // Firestore batches accept at most 500 writes. Academies with a larger
+  // backlog must still be able to open Financeiro instead of failing the
+  // callable (and consequently the whole screen load).
+  let batch = db.batch();
+  let writesInBatch = 0;
+  let updated = 0;
+  for (const document of snapshot.docs) {
+    const financial = document.data() || {};
+    const dueDate = financial.dueDate?.toDate?.();
+    if (dueDate && isOverdueBR(dueDate, now)) {
+      batch.update(document.ref, {
+        status: 'overdue',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      updated++;
+      writesInBatch++;
+      if (writesInBatch === 500) {
+        await batch.commit();
+        batch = db.batch();
+        writesInBatch = 0;
+      }
+    }
+  }
+  if (writesInBatch > 0) await batch.commit();
+  return { success: true, updated };
+});
+
+exports.deleteFinancialCharge = onCall(async (request) => {
+  const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
+  const financialId = assertSafeDocumentId(
+    request.data?.financialId, 'financialId'
+  );
+  await requireAdminOf(request, academyId);
+  const financialRef = db.doc(
+    `academies/${academyId}/financials/${financialId}`
+  );
+  await db.runTransaction(async (tx) => {
+    const snapshot = await tx.get(financialRef);
+    if (!snapshot.exists) return;
+    const financial = snapshot.data();
+    if (!['pending', 'overdue', 'cancelled', 'test'].includes(financial.status) ||
+        competingProviderPaymentIds(financial).size > 0 ||
+        financial.paymentDate || financial.manualPaymentAudit) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Cobranca com historico financeiro nao pode ser excluida.'
+      );
+    }
+    if (financial.publicPaymentLinkHash) {
+      tx.set(db.doc(`publicPaymentLinks/${financial.publicPaymentLinkHash}`), {
+        status: 'revoked',
+        revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+    tx.delete(financialRef);
+  });
+  return { success: true };
+});
+
 /** Parses `${academyId}:fin:${id}` / `${academyId}:order:${id}`. */
 function mpMktParseRef(ref) {
   const parts = String(ref || '').split(':');
@@ -5964,9 +7678,177 @@ function mpMktParseRef(ref) {
   return { academyId: parts[0], type: parts[1], docId: parts.slice(2).join(':') };
 }
 
+function publicAttemptIdFromPayment(payment) {
+  const value = String(payment?.metadata?.attempt_id || '');
+  return /^attempt_[a-f0-9]{40}$/i.test(value) ? value : '';
+}
+
+async function publicAttemptRefsForPayment(academyId, payment) {
+  const refs = new Map();
+  const metadataAttemptId = publicAttemptIdFromPayment(payment);
+  if (metadataAttemptId) {
+    const ref = db.doc(
+      `academies/${academyId}/paymentAttempts/${metadataAttemptId}`
+    );
+    refs.set(ref.path, ref);
+  }
+
+  const paymentId = String(payment?.id || '');
+  if (paymentId) {
+    const matches = await db.collection(`academies/${academyId}/paymentAttempts`)
+      .where('providerPaymentId', '==', paymentId)
+      .limit(3)
+      .get();
+    matches.docs.forEach((snapshot) => refs.set(snapshot.ref.path, snapshot.ref));
+  }
+  return [...refs.values()];
+}
+
+/**
+ * Mirrors provider state into the server-only attempt audit trail. The financial
+ * remains the authoritative source: an approved provider payment is shown as
+ * `paid` only after it settled the matching financial with the same payment id.
+ */
+async function projectPublicPaymentAttempt(academyId, payment) {
+  const desiredStatus = publicAttemptStatusFromProvider(payment?.status);
+  const paymentId = String(payment?.id || '');
+  if (!desiredStatus || !paymentId) return;
+
+  const refs = await publicAttemptRefsForPayment(academyId, payment);
+  await Promise.all(refs.map(async (attemptRef) => {
+    const attemptSnapshot = await attemptRef.get();
+    if (!attemptSnapshot.exists) return;
+    const attempt = attemptSnapshot.data() || {};
+    if (attempt.targetType !== 'financial' || !attempt.targetId) return;
+
+    const update = {
+      providerPaymentId: paymentId,
+      providerStatus: String(payment.status || '').toLowerCase(),
+      providerStatusObservedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    const currentStatus = String(attempt.status || '');
+
+    if (desiredStatus === 'paid' || desiredStatus === 'reversed') {
+      const financialSnapshot = await db.doc(
+        `academies/${academyId}/financials/${attempt.targetId}`
+      ).get();
+      const financial = financialSnapshot.exists ? financialSnapshot.data() || {} : {};
+      const settledByThisPayment = financial.status === 'paid' &&
+        String(financial.gatewayPaymentId || '') === paymentId;
+      if (desiredStatus === 'paid' && settledByThisPayment) {
+        update.status = 'paid';
+        update.paidAt = admin.firestore.FieldValue.serverTimestamp();
+      } else if (desiredStatus === 'reversed' && currentStatus === 'paid') {
+        update.status = 'reversed';
+        update.reversedAt = admin.firestore.FieldValue.serverTimestamp();
+      } else if (desiredStatus === 'paid' &&
+          ['cancelled', 'failed', 'expired', 'reversed'].includes(currentStatus)) {
+        // Preserve local invalidation, but surface a late provider approval for
+        // staff reconciliation. Never revive an invalidated checkout.
+        update.lateProviderApprovalAt = admin.firestore.FieldValue.serverTimestamp();
+      }
+    } else if (!['paid', 'cancelled', 'failed', 'expired', 'reversed'].includes(currentStatus)) {
+      update.status = desiredStatus;
+      if (desiredStatus === 'failed' || desiredStatus === 'cancelled') {
+        update.failureCode = `provider_${String(payment.status || '').toLowerCase()}`;
+      }
+    }
+    await attemptRef.set(update, { merge: true });
+  }));
+}
+
+function publicAttemptTimestampMs(value) {
+  return value && typeof value.toMillis === 'function' ? value.toMillis() : 0;
+}
+
+function publicAttemptPaymentCandidate(payment, attempt) {
+  if (!payment || !MP_REVERSAL_STATUSES.includes(payment.status) &&
+      !['approved', 'pending', 'in_process', 'rejected', 'cancelled'].includes(payment.status)) {
+    return false;
+  }
+  if (Math.abs((Number(payment.transaction_amount) || 0) -
+      (Number(attempt.amount) || 0)) > 0.01) return false;
+  const createdAtMs = Date.parse(payment.date_created || payment.date_approved || '');
+  const startMs = publicAttemptTimestampMs(attempt.createdAt);
+  const endMs = publicAttemptTimestampMs(attempt.expiresAt);
+  return !Number.isFinite(createdAtMs) || !startMs || !endMs ||
+    (createdAtMs >= startMs - 5 * 60 * 1000 && createdAtMs <= endMs + 24 * 60 * 60 * 1000);
+}
+
+/**
+ * Replays recent public attempts through MP so a lost webhook cannot strand a
+ * paid financial. It is intentionally bounded per academy and idempotent:
+ * `mpMktSettle` remains the only code that flips money state.
+ */
+exports.scheduledPublicPaymentAttemptReconcile = onSchedule(
+  { schedule: '*/10 * * * *', timeZone: 'America/Sao_Paulo',
+    timeoutSeconds: 540, secrets: MP_MKT_SECRETS },
+  async () => {
+    const staleCutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    await forEachMpAcademy('public-attempt-reconcile', async (academyDoc) => {
+      const academyId = academyDoc.id;
+      const attempts = await db.collection(`academies/${academyId}/paymentAttempts`)
+        .where('status', 'in', ['ready', 'pending'])
+        .orderBy('updatedAt', 'asc')
+        .limit(50)
+        .get();
+      if (attempts.empty) return 'skipped';
+
+      let token;
+      for (const attemptDoc of attempts.docs) {
+        const attempt = attemptDoc.data() || {};
+        if (attempt.targetType !== 'financial' || !attempt.targetId) continue;
+        if (publicAttemptTimestampMs(attempt.expiresAt) < staleCutoffMs) {
+          await attemptDoc.ref.set({
+            status: 'expired',
+            failureCode: 'reconcile_expired',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          continue;
+        }
+        try {
+          if (!token) token = await getMpAccessToken(academyId);
+          const externalReference = `${academyId}:fin:${attempt.targetId}`;
+          let candidates = [];
+          if (attempt.providerPaymentId) {
+            candidates = [await mpRequest(
+              'GET', `/v1/payments/${encodeURIComponent(attempt.providerPaymentId)}`, { token }
+            )];
+          } else {
+            const search = await mpRequest('GET',
+              `/v1/payments/search?external_reference=${encodeURIComponent(externalReference)}` +
+              '&sort=date_created&criteria=desc&limit=20', { token });
+            candidates = (search?.results || search?.elements || [])
+              .filter((payment) => publicAttemptPaymentCandidate(payment, attempt));
+          }
+          for (const payment of candidates) {
+            if (payment.status === 'approved') {
+              await mpMktSettle({ academyId, type: 'fin', docId: attempt.targetId }, payment);
+            } else if (MP_REVERSAL_STATUSES.includes(payment.status)) {
+              await mpMktHandleReversal(
+                { academyId, type: 'fin', docId: attempt.targetId }, payment
+              );
+            }
+            await projectPublicPaymentAttempt(academyId, payment);
+          }
+        } catch (error) {
+          console.error('[public-attempt-reconcile] attempt failed', academyId,
+            attemptDoc.id, error && error.message);
+        }
+      }
+      return null;
+    });
+    return null;
+  }
+);
+
 // ---- Marketplace webhook (flips financials/storeOrders to paid) -----------
 exports.mercadoPagoMarketplaceWebhook = onRequest(
-  { cors: false, secrets: ['MP_MKT_WEBHOOK_SECRET'] },
+  // The webhook fetches the payment using the academy OAuth token. Bind both
+  // OAuth secrets as well as the HMAC secret: a token refresh must not fail just
+  // because a gen2 instance was cold-started without process-wide env vars.
+  { cors: false, invoker: 'public', secrets: MP_MKT_WEBHOOK_SECRETS },
   async (req, res) => {
     if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
@@ -6074,6 +7956,12 @@ exports.mercadoPagoMarketplaceWebhook = onRequest(
         if (payment.status === 'rejected' || payment.status === 'cancelled') {
           await mpClearCardPendingIfMatches(acad, parsed, String(payment.id));
         }
+        // This is only an audit projection. It never changes the financial and
+        // therefore must not make webhook acknowledgement depend on Firestore.
+        if (parsed.type === 'fin') {
+          await projectPublicPaymentAttempt(acad, payment).catch((error) =>
+            console.error('[mpMktWebhook] attempt projection failed', error.message));
+        }
         return res.status(200).json({ received: true, status: payment.status });
       }
       // Auditoria MP (estorno PARCIAL silencioso): o MP re-notifica o MESMO
@@ -6089,6 +7977,13 @@ exports.mercadoPagoMarketplaceWebhook = onRequest(
         return res.status(200).json({ success: true, kind: 'partial_refund' });
       }
       await mpMktSettle(parsed, payment);
+      if (parsed.type === 'fin') {
+        // Project approved only after the authoritative settle has run. A value
+        // mismatch or duplicate must stay visible as such instead of showing the
+        // public attempt as paid.
+        await projectPublicPaymentAttempt(acad, payment).catch((error) =>
+          console.error('[mpMktWebhook] attempt projection failed', error.message));
+      }
       return res.status(200).json({ success: true });
     } catch (e) {
       console.error('[mpMktWebhook] erro', e.message);

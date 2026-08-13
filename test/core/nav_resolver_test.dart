@@ -32,7 +32,6 @@ AcademySettings _settings({
     trainingVideosEnabled: trainingVideosEnabled,
   );
 }
-
 AppUser _user({
   required UserRole role,
   List<String> extraPermissions = const [],
@@ -410,12 +409,12 @@ void main() {
     test('storePublished: loja hidden until store published', () {
       final pub = resolvePortalCatalog(
         catalog: kPortalNavCatalog,
-        settings: _settings(),
+        settings: _settings(storeEnabled: true),
         ctx: ctx(storePublished: true),
       );
       final unpub = resolvePortalCatalog(
         catalog: kPortalNavCatalog,
-        settings: _settings(),
+        settings: _settings(storeEnabled: true),
         ctx: ctx(storePublished: false),
       );
       expect(_find(pub, 'portal_loja').state, NavEntryState.visible);

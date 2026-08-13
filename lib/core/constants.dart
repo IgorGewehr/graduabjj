@@ -12,23 +12,24 @@ class AppConstants {
 
   // ===========================================
   // URLs - configured via dart-define at build time
-  // flutter build appbundle --dart-define=APP_BASE_URL=https://bjjeasy.netlify.app
+  // flutter build appbundle --dart-define=APP_BASE_URL=https://arpjj-76350.web.app
   // ===========================================
   static const String appBaseUrl = String.fromEnvironment(
     'APP_BASE_URL',
-    defaultValue: 'https://bjjeasy.netlify.app',
+    defaultValue: 'https://arpjj-76350.web.app',
   );
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://bjjeasy.netlify.app/api',
+    defaultValue: 'https://arpjj-76350.web.app/api',
   );
 
   // ===========================================
   // Legal URLs
   // ===========================================
-  static const String privacyPolicyUrl = 'https://bjjeasy.netlify.app/privacy';
-  static const String termsOfServiceUrl = 'https://bjjeasy.netlify.app/termsofservice';
+  static const String privacyPolicyUrl = 'https://arpjj-76350.web.app/privacy';
+  static const String termsOfServiceUrl =
+      'https://arpjj-76350.web.app/termsofservice';
   static const String supportEmail = 'suporte@bjjeasy.com.br';
 
   // ===========================================
@@ -36,8 +37,10 @@ class AppConstants {
   // Produto "BJJEasy" (assinatura recorrente) — 3 ofertas do mesmo produto.
   // O e-mail do admin e o academyId (src) são anexados em runtime no paywall.
   // ===========================================
-  static const String caktoCheckoutMensal = 'https://pay.cakto.com.br/eo9omtc_889968';
-  static const String caktoCheckoutTrimestral = 'https://pay.cakto.com.br/xisui3m';
+  static const String caktoCheckoutMensal =
+      'https://pay.cakto.com.br/eo9omtc_889968';
+  static const String caktoCheckoutTrimestral =
+      'https://pay.cakto.com.br/xisui3m';
   static const String caktoCheckoutAnual = 'https://pay.cakto.com.br/38yfe5r';
   static const String supportWhatsApp = 'https://wa.me/5554996261166';
 
@@ -297,13 +300,5 @@ class DayOfWeekLabels {
     'Sab',
   ];
 
-  static const List<String> abbreviated = [
-    'D',
-    'S',
-    'T',
-    'Q',
-    'Q',
-    'S',
-    'S',
-  ];
+  static const List<String> abbreviated = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 }

@@ -468,7 +468,7 @@ function respond(res, vendor, { granted, message, online, device, externalUserId
 // THE PUBLIC ENDPOINT — ingestAccessEvent (generalizado p/ 3 fabricantes)
 // ---------------------------------------------------------------------------
 const ingestAccessEvent = onRequest(
-  { region: 'us-central1', cors: false, maxInstances: 10, timeoutSeconds: 15 },
+  { region: 'us-central1', cors: false, invoker: 'public', maxInstances: 10, timeoutSeconds: 15 },
   async (req, res) => {
     const nowMs = Date.now();
     // vendor pode ser desconhecido até carregar o device; default zkteco-ish

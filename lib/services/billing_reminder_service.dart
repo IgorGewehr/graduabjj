@@ -1,12 +1,9 @@
-import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 import '../models/billing_payment_preference.dart';
 import 'firebase_service.dart';
-import 'mercado_pago_service.dart';
-import 'settings_service.dart';
+import 'fns.dart';
 
 /// Contact type for billing reminders
 enum ContactType { whatsapp, phone, email, inPerson, other }
@@ -523,7 +520,7 @@ class BillingReminderService {
       includePaymentLink: data['includePaymentLink'] as bool? ?? true,
       notifyOnCreation: data['notifyOnCreation'] as bool? ?? false,
       dueSoonOffsets:
-          ((data['dueSoonOffsets'] as List?) ?? const [7, 3, 1, 0])
+          ((data['dueSoonOffsets'] as List?) ?? const [7, 3, 2, 1, 0])
               .map((value) => (value as num).toInt())
               .where((value) => value >= 0)
               .toSet()
@@ -662,17 +659,6 @@ class BillingReminderService {
         academyName: academyName,
       );
 
-      // PIX best-effort — mesma degradação graciosa de produção
-      // (ensureValidPixForFinancial nunca lança: MP off/erro -> string vazia).
-      final paymentInstruction =
-          await notificationService.resolvePaymentInstruction(
-        financialId: docRef.id,
-        amount: amount,
-        studentId: testStudentId,
-        studentName: testStudentName,
-      );
-      final hasPix = paymentInstruction.hasPayment;
-
       final result = await notificationService.sendWhatsApp(
         phone: phone,
         studentName: testStudentName,
@@ -682,12 +668,14 @@ class BillingReminderService {
         dueDate: DateTime.now(),
         daysOverdue: 1,
         stage: BillingStage.d1,
-        paymentInstruction: paymentInstruction,
+        paymentInstruction: const BillingPaymentInstruction.none(),
       );
 
       return TestBillingResult(
         success: result.success,
-        hasPix: hasPix,
+        // O backend escolhe a instrucao de pagamento; o cliente nao recebe
+        // nem pre-gera dados PIX durante o teste.
+        hasPix: false,
         error: result.error,
       );
     } catch (e) {
@@ -792,7 +780,7 @@ class BillingNotificationSettings {
     this.emailEnabled = false,
     this.includePaymentLink = true,
     this.notifyOnCreation = false,
-    this.dueSoonOffsets = const [7, 3, 1, 0],
+    this.dueSoonOffsets = const [7, 3, 2, 1, 0],
     this.messageTemplates,
   });
 
@@ -822,85 +810,20 @@ class BillingNotificationSettings {
 // Billing Notification Service
 // ============================================
 class BillingNotificationService {
-  static const String _whatsappApiUrl = String.fromEnvironment(
-    'WHATSAPP_API_URL',
-    defaultValue: '',
-  );
-  static const String _emailApiUrl = String.fromEnvironment(
-    'EMAIL_API_URL',
-    defaultValue: '',
-  );
-  // Matches marcusjj split: WHATSAPP_API_KEY + EMAIL_API_KEY are independent.
-  // NOTIFICATION_API_KEY remains as legacy fallback for older builds.
-  static const String _legacyApiKey = String.fromEnvironment(
-    'NOTIFICATION_API_KEY',
-    defaultValue: '',
-  );
-  static const String _whatsappApiKeyRaw = String.fromEnvironment(
-    'WHATSAPP_API_KEY',
-    defaultValue: '',
-  );
-  static const String _emailApiKeyRaw = String.fromEnvironment(
-    'EMAIL_API_KEY',
-    defaultValue: '',
-  );
-  static String get _whatsappApiKey =>
-      _whatsappApiKeyRaw.isNotEmpty ? _whatsappApiKeyRaw : _legacyApiKey;
-  static String get _emailApiKey =>
-      _emailApiKeyRaw.isNotEmpty ? _emailApiKeyRaw : _legacyApiKey;
-  static const String _bulkApiUrlEnv = String.fromEnvironment(
-    'NOTIFICATION_BULK_API_URL',
-    defaultValue: '',
-  );
-  // Marcusjj proxies stamp every notification payload with this appId so the
-  // notification server can route per-app. Match it for parity.
-  static const String _appId = 'gestao-raiz';
-
-  // ── WhatsApp Cloud API (Meta) — envio por template ──────────────────────
-  // Rota /api/send-whatsapp-template no notification-server. Ver
-  // PLANO_MIGRACAO_META.md e TEMPLATES_META.md. Se WHATSAPP_TEMPLATE_API_URL
-  // não vier, derivamos de _whatsappApiUrl. Cobranças sempre usam a rota
-  // oficial; o fallback controlado para Baileys acontece apenas no servidor.
-  static const String _templateApiUrlEnv =
-      String.fromEnvironment('WHATSAPP_TEMPLATE_API_URL', defaultValue: '');
-  static const String _templateLang =
-      String.fromEnvironment('WHATSAPP_TEMPLATE_LANG', defaultValue: 'pt_BR');
-  bool get hasWhatsAppApi =>
-      hasTemplateApi && _whatsappApiKey.isNotEmpty;
-  bool get hasEmailApi => _emailApiUrl.isNotEmpty && _emailApiKey.isNotEmpty;
-
-  String get _templateApiUrl {
-    if (_templateApiUrlEnv.isNotEmpty) return _templateApiUrlEnv;
-    if (_whatsappApiUrl.isNotEmpty) {
-      return _whatsappApiUrl.replaceFirst(
-        RegExp(r'/api/send-whatsapp/?$'),
-        '/api/send-whatsapp-template',
-      );
-    }
-    return '';
-  }
-
-  bool get hasTemplateApi => _templateApiUrl.isNotEmpty;
-
-  /// Cobranças podem ser enviadas quando a rota oficial está configurada.
-  bool get useTemplates => hasTemplateApi;
-
-  String get _bulkApiUrl {
-    if (_bulkApiUrlEnv.isNotEmpty) return _bulkApiUrlEnv;
-    if (_whatsappApiUrl.isNotEmpty) {
-      return _whatsappApiUrl.replaceAll('/api/send-whatsapp', '/api/send-bulk');
-    }
-    return '';
-  }
-
-  bool get hasBulkApi => _bulkApiUrl.isNotEmpty;
+  // O cliente conhece apenas a callable autenticada. URLs e credenciais do
+  // notification server vivem exclusivamente no backend.
+  final CallableClient _functions = Fns.functions;
+  bool get hasWhatsAppApi => true;
+  bool get hasEmailApi => true;
+  bool get hasTemplateApi => true;
+  bool get useTemplates => true;
+  bool get hasBulkApi => false;
 
   final String academyId;
   final String academyName;
   BillingMessageTemplates? customTemplates;
   final _currencyFormat = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
   final _dateFormat = DateFormat('dd/MM/yyyy');
-  Future<AcademySettings?>? _academySettingsFuture;
 
   // Default templates with placeholders: {nome}, {valor}, {vencimento}, {dias}, {academia}.
   // Mirrors marcusjj/src/services/billingNotificationService.ts DEFAULT_*_TEMPLATES.
@@ -1018,89 +941,6 @@ class BillingNotificationService {
   }
 
   // ============================================
-  // Ensure a valid PIX for a financial record (graceful degradation)
-  // ============================================
-  /// Best-effort PIX generation for a tuition record. NEVER throws: on any
-  /// failure (MP disconnected, CF error, network) returns empty strings so the
-  /// caller falls back to a PIX-less message.
-  Future<({String pixCode, String ticketUrl})> ensureValidPixForFinancial({
-    required String academyId,
-    required String financialId,
-    required double amount,
-    required String studentId,
-    required String studentName,
-    String? payerCpf,
-  }) async {
-    try {
-      final mp = MercadoPagoService(academyId);
-      if (!await mp.isEnabled()) return (pixCode: '', ticketUrl: '');
-      final link = await mp.createPixPayment(
-        amount: amount,
-        financialId: financialId,
-        studentId: studentId,
-        studentName: studentName,
-        cpf: payerCpf,
-      );
-      if (link == null) return (pixCode: '', ticketUrl: '');
-      return (pixCode: link.pixCode, ticketUrl: link.ticketUrl ?? '');
-    } catch (_) {
-      return (pixCode: '', ticketUrl: '');
-    }
-  }
-
-  /// Resolve a instrucao de pagamento respeitando a preferencia da academia.
-  /// Se a geracao no Mercado Pago falhar, continua para o PIX pessoal; se as
-  /// duas opcoes estiverem indisponiveis, usa o template sem pagamento.
-  Future<BillingPaymentInstruction> resolvePaymentInstruction({
-    required String financialId,
-    required double amount,
-    required String studentId,
-    required String studentName,
-    String? payerCpf,
-    bool includePayment = true,
-  }) async {
-    if (!includePayment) return const BillingPaymentInstruction.none();
-
-    final settings = await (_academySettingsFuture ??=
-        SettingsService(academyId).getAcademySettings());
-    final preference = settings?.billingPaymentPreference ??
-        BillingPaymentPreference.mercadoPago;
-    final manualPixKey = settings?.pixKey?.trim() ?? '';
-
-    for (final candidate in billingPaymentFallbackOrder(preference)) {
-      if (candidate == BillingPaymentPreference.none) {
-        return const BillingPaymentInstruction.none();
-      }
-      if (candidate == BillingPaymentPreference.manualPix) {
-        if (manualPixKey.isNotEmpty) {
-          return BillingPaymentInstruction.manualPix(manualPixKey);
-        }
-        continue;
-      }
-
-      final mercadoPagoConfigured = settings == null ||
-          (settings.mpConnected && !settings.mpNeedsReauth);
-      if (!mercadoPagoConfigured) continue;
-      final pix = await ensureValidPixForFinancial(
-        academyId: academyId,
-        financialId: financialId,
-        amount: amount,
-        studentId: studentId,
-        studentName: studentName,
-        payerCpf: payerCpf,
-      );
-      if (pix.pixCode.isNotEmpty) {
-        return BillingPaymentInstruction.mercadoPago(
-          pixCode: pix.pixCode,
-          ticketUrl: pix.ticketUrl,
-        );
-      }
-    }
-
-    return const BillingPaymentInstruction.none();
-  }
-
-  // ============================================
   // Generate WhatsApp message per stage
   // ============================================
   String generateWhatsAppMessage({
@@ -1195,8 +1035,9 @@ class BillingNotificationService {
   static bool _isValidEmail(String email) {
     final clean = email.trim();
     if (clean.isEmpty) return false;
-    final emailRegex =
-        RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+    final emailRegex = RegExp(
+      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+    );
     if (!emailRegex.hasMatch(clean)) return false;
     final domain = clean.split('@').last.toLowerCase();
     if (domain == 'email.com' ||
@@ -1207,64 +1048,6 @@ class BillingNotificationService {
       return false;
     }
     return true;
-  }
-
-  NotificationResult _parseResponse({
-    required http.Response response,
-    required String studentName,
-    required String studentId,
-    required String defaultErrorMsg,
-  }) {
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      try {
-        final data = jsonDecode(response.body);
-        if (data is Map<String, dynamic>) {
-          final isSuccess = data['success'] == true ||
-              data['sent'] == true ||
-              data['status'] == 'sent' ||
-              data['status'] == 'queued' ||
-              data['status'] == 'delivered';
-          final isExplicitFail = data['success'] == false ||
-              data['sent'] == false ||
-              data['status'] == 'failed' ||
-              data['skipped'] != null ||
-              data['error'] != null;
-
-          if (isExplicitFail && !isSuccess) {
-            final err = data['error']?.toString() ??
-                data['message']?.toString() ??
-                data['skipped']?.toString() ??
-                defaultErrorMsg;
-            return NotificationResult(
-              success: false,
-              studentName: studentName,
-              studentId: studentId,
-              error: err,
-            );
-          }
-        }
-      } catch (_) {}
-      return NotificationResult(
-        success: true,
-        studentName: studentName,
-        studentId: studentId,
-      );
-    } else {
-      String? errorDetail;
-      try {
-        final data = jsonDecode(response.body);
-        if (data is Map<String, dynamic>) {
-          errorDetail = data['error']?.toString() ?? data['message']?.toString();
-        }
-      } catch (_) {}
-
-      return NotificationResult(
-        success: false,
-        studentName: studentName,
-        studentId: studentId,
-        error: errorDetail ?? 'Erro do servidor (${response.statusCode})',
-      );
-    }
   }
 
   // ============================================
@@ -1380,14 +1163,11 @@ class BillingNotificationService {
       );
     }
 
-    final effectiveMode = paymentInstruction.hasPayment
-        ? paymentInstruction.mode
-        : BillingPaymentPreference.none;
-    final templateName = templateNameForStage(
-      stage,
-      paymentMode: effectiveMode,
-    );
-    if (templateName == null) {
+    if (templateNameForStage(
+          stage,
+          paymentMode: BillingPaymentPreference.none,
+        ) ==
+        null) {
       return NotificationResult(
         success: false,
         studentName: studentName,
@@ -1396,65 +1176,36 @@ class BillingNotificationService {
       );
     }
 
-    // Ordem das variáveis do corpo. PIX é a 5ª (só na variante com PIX).
-    final variables = <String>[
-      studentName,
-      academyName,
-      _currencyFormat.format(amount),
-      _dateFormat.format(dueDate),
-      if (paymentInstruction.hasPayment) paymentInstruction.paymentValue,
-    ];
-
     try {
       final body = <String, dynamic>{
-        'appId': _appId,
-        'tenantId': academyId,
         'academyId': academyId,
-        'phone': _normalizePhone(phone),
-        'templateName': templateName,
-        'languageCode': _templateLang,
-        'variables': variables,
-        'studentId': studentId,
         'financialId': financialId,
+        'channel': 'whatsapp',
         'stage': stage.value,
-        'type': 'billing_reminder',
       };
-      // Botão dinâmico existe somente na variante Mercado Pago.
-      if (effectiveMode == BillingPaymentPreference.mercadoPago &&
-          paymentInstruction.ticketUrl.isNotEmpty) {
-        body['buttonUrl'] = paymentInstruction.ticketUrl;
+      if (studentId == 'test-owner-preview') {
+        body['recipientOverride'] = phone;
       }
-      final response = await http.post(
-        Uri.parse(_templateApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          if (_whatsappApiKey.isNotEmpty) 'x-api-key': _whatsappApiKey,
-        },
-        body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 30));
-
-      return _parseResponse(
-        response: response,
-        studentName: studentName,
-        studentId: studentId,
-        defaultErrorMsg: 'Falha no envio do template de WhatsApp',
-      );
-    } on http.ClientException {
+      final response = await _functions
+          .httpsCallable('sendBillingReminder')
+          .call(body);
+      final data = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : const <String, dynamic>{};
       return NotificationResult(
-        success: false,
+        success: data['success'] == true,
         studentName: studentName,
         studentId: studentId,
-        error: 'Erro de conexao - verifique sua internet',
+        error: data['success'] == true
+            ? null
+            : 'Falha no envio do template de WhatsApp',
       );
     } catch (e) {
-      final isTimeout = e.toString().contains('TimeoutException');
       return NotificationResult(
         success: false,
         studentName: studentName,
         studentId: studentId,
-        error: isTimeout
-            ? 'Timeout: API demorou mais de 30 segundos'
-            : e.toString(),
+        error: e.toString(),
       );
     }
   }
@@ -1493,56 +1244,29 @@ class BillingNotificationService {
     }
 
     try {
-      final response = await http
-          .post(
-            Uri.parse(_emailApiUrl),
-            headers: {
-              'Content-Type': 'application/json',
-              if (_emailApiKey.isNotEmpty) 'x-api-key': _emailApiKey,
-            },
-            body: jsonEncode({
-              'email': email,
-              'studentName': studentName,
-              'studentId': studentId,
-              'financialId': financialId,
-              'academyId': academyId,
-              'academyName': academyName,
-              'amount': amount,
-              'amountFormatted': _currencyFormat.format(amount),
-              'dueDate': DateFormat('yyyy-MM-dd').format(dueDate),
-              'dueDateFormatted': _dateFormat.format(dueDate),
-              'daysOverdue': daysOverdue,
-              'stage': stage.value,
-              'subject': subject,
-              'message': message,
-              'type': 'billing_reminder',
-              'appId': _appId,
-            }),
-          )
-          .timeout(const Duration(seconds: 30));
-
-      return _parseResponse(
-        response: response,
-        studentName: studentName,
-        studentId: studentId,
-        defaultErrorMsg: 'Falha no envio do e-mail',
-      );
-    } on http.ClientException {
+      final response = await _functions
+          .httpsCallable('sendBillingReminder')
+          .call({
+            'academyId': academyId,
+            'financialId': financialId,
+            'channel': 'email',
+            'stage': stage.value,
+          });
+      final data = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : const <String, dynamic>{};
       return NotificationResult(
-        success: false,
+        success: data['success'] == true,
         studentName: studentName,
         studentId: studentId,
-        error: 'Erro de conexao - verifique sua internet',
+        error: data['success'] == true ? null : 'Falha no envio do e-mail',
       );
     } catch (e) {
-      final isTimeout = e.toString().contains('TimeoutException');
       return NotificationResult(
         success: false,
         studentName: studentName,
         studentId: studentId,
-        error: isTimeout
-            ? 'Timeout: API demorou mais de 30 segundos'
-            : e.toString(),
+        error: e.toString(),
       );
     }
   }
@@ -1559,12 +1283,8 @@ class BillingNotificationService {
     final results = <NotificationResult>[];
     int sent = 0, failed = 0, skipped = 0;
 
-    // AUDITORIA (idempotency): unifica o dedup por estágio com o cron
-    // server-side. O envio em massa pelo app antes NÃO lia nem gravava
-    // lastReminderStage, duplicando a cobrança com o cron e permitindo
-    // reenvio ilimitado do mesmo estágio. Agora lê o lastReminderStage atual
-    // de cada financial direto do Firestore e só envia/conta um estágio que
-    // ainda não foi coberto, gravando o marcador após o envio.
+    // O cliente lê o marcador apenas para evitar uma chamada redundante. A
+    // gravação autoritativa de dedup acontece dentro de sendBillingReminder.
     final financialsRef = FirebaseFirestore.instance
         .collection('academies')
         .doc(academyId)
@@ -1607,14 +1327,6 @@ class BillingNotificationService {
         continue;
       }
 
-      final paymentInstruction = await resolvePaymentInstruction(
-        financialId: financialId,
-        amount: amount,
-        studentId: studentId,
-        studentName: studentName,
-        payerCpf: contact.effectiveCpf,
-      );
-
       final result = await sendWhatsApp(
         phone: phone,
         studentName: studentName,
@@ -1624,25 +1336,12 @@ class BillingNotificationService {
         dueDate: dueDate,
         daysOverdue: daysOverdue,
         stage: stage,
-        paymentInstruction: paymentInstruction,
+        paymentInstruction: const BillingPaymentInstruction.none(),
       );
 
       results.add(result);
       if (result.success) {
         sent++;
-        // AUDITORIA (idempotency): grava o marcador de dedup só quando o envio
-        // de fato ocorreu, idêntico ao cron, para que o mesmo estágio não seja
-        // reenviado nem pelo app nem pelo cron no mesmo período.
-        if (financialId.isNotEmpty) {
-          try {
-            await financialsRef.doc(financialId).update({
-              'lastReminderStage': stage.value,
-              'lastReminderAt': Timestamp.fromDate(DateTime.now()),
-            });
-          } catch (_) {
-            // best-effort: marcador de dedup é não-crítico.
-          }
-        }
       } else {
         failed++;
       }
@@ -1823,52 +1522,10 @@ class BillingNotificationService {
     required List<String> emails,
     String? scheduledTime,
   }) async {
-    if (_bulkApiUrl.isEmpty) {
-      throw Exception('Bulk API URL nao configurada');
-    }
-
-    try {
-      final body = <String, dynamic>{
-        'message': message,
-        'phones': phones,
-        'emails': emails,
-        'appId': _appId,
-      };
-      if (subject != null && subject.isNotEmpty) body['subject'] = subject;
-      if (scheduledTime != null && scheduledTime.isNotEmpty) {
-        body['scheduledTime'] = scheduledTime;
-      }
-
-      // Bulk hits both channels; the notification server accepts either key.
-      // Prefer WhatsApp key (most builds use the same value anyway).
-      final bulkKey = _whatsappApiKey.isNotEmpty
-          ? _whatsappApiKey
-          : _emailApiKey;
-      final response = await http
-          .post(
-            Uri.parse(_bulkApiUrl),
-            headers: {
-              'Content-Type': 'application/json',
-              if (bulkKey.isNotEmpty) 'x-api-key': bulkKey,
-            },
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 120));
-
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        return BulkServerResult.fromJson(data);
-      } else {
-        throw Exception('Erro do servidor (${response.statusCode})');
-      }
-    } on http.ClientException {
-      throw Exception('Erro de conexao - verifique sua internet');
-    } catch (e) {
-      if (e.toString().contains('TimeoutException')) {
-        throw Exception('Timeout: API demorou mais de 120 segundos');
-      }
-      rethrow;
-    }
+    throw UnsupportedError(
+      'Envio generico por destinatarios foi desativado. Use cobrancas '
+      'identificadas pelo financialId para o backend resolver dados e permissoes.',
+    );
   }
 }
 

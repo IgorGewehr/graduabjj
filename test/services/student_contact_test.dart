@@ -27,7 +27,7 @@ void main() {
       expect(contact.effectiveCpf, '222');
     });
 
-    test('kids with null guardian cpf returns null (no fallback)', () {
+    test('kids falls back to the student cpf when guardian cpf is absent', () {
       final contact = StudentContact(
         studentId: 's3',
         studentName: 'Kid Student No Guardian',
@@ -36,7 +36,7 @@ void main() {
         guardianCpf: null,
       );
 
-      expect(contact.effectiveCpf, isNull);
+      expect(contact.effectiveCpf, '111');
     });
   });
 }
