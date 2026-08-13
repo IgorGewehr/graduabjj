@@ -154,15 +154,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         }
       }
 
-      // Reconcile overdue statuses before reading. Without this, dueDate-passed
-      // records remain "pending" in Firestore and downstream queries that filter
-      // by status alone (notifications, reports) miss them.
-      // This maintenance call is deliberately non-fatal: the financial lists
-      // must remain available even when Functions/App Check/network is down.
-      await loadSection('atualização de vencidos', () {
-        return paymentService.markOverduePayments();
-      });
-
       // Start independent reads together. One malformed/denied collection no
       // longer erases the successful results from the other sections.
       final paymentsFuture = loadSection(

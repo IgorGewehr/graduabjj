@@ -15,6 +15,10 @@ const paymentServiceSource = fs.readFileSync(
   path.join(repositoryRoot, 'lib', 'services', 'payment_service.dart'),
   'utf8'
 );
+const financialScreenSource = fs.readFileSync(
+  path.join(repositoryRoot, 'lib', 'screens', 'admin', 'financial_screen.dart'),
+  'utf8'
+);
 const buildSource = fs.readFileSync(
   path.join(repositoryRoot, 'build.sh'),
   'utf8'
@@ -44,6 +48,11 @@ test('staff authorization supports legacy academy-scoped user roles', () => {
     serverSource,
     /async function getUserAcademyMembership\(uid, academyId\) \{[^]*?collection\('users'\)\.doc\(uid\)\.get\(\)/
   );
+});
+
+test('opening Financeiro does not run overdue maintenance', () => {
+  assert.doesNotMatch(financialScreenSource, /markOverduePayments\(/);
+  assert.match(serverSource, /exports\.scheduledOverdueCheck\s*=/);
 });
 
 test('distributed build contains no notification credential defines', () => {
