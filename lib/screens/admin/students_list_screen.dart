@@ -18,10 +18,10 @@ import '../../models/student.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/join_request_providers.dart';
 import '../../providers/portal_providers.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../services/analytics_service.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
-import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/common/debounced_search_field.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/sport_chip.dart';
@@ -40,6 +40,7 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   List<Student> _students = [];
   List<Student> _filteredStudents = [];
   bool _isLoading = true;
+  bool _isGeneratingPdf = false;
 
   // Filters
   String _searchQuery = '';
@@ -183,27 +184,6 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           onRefresh: _loadStudents,
           child: CustomScrollView(
             slivers: [
-              // Multi-academy aware header — shows current academy + switcher
-              SliverToBoxAdapter(
-                child: AcademyPageHeader(
-                  icon: LucideIcons.users,
-                  title: 'Alunos',
-                  description: '${_students.length} alunos cadastrados',
-                  actions: [
-                    IconButton(
-                      onPressed: _exportStudents,
-                      icon: const Icon(Icons.download, size: 20),
-                      tooltip: 'Exportar CSV',
-                    ),
-                    IconButton(
-                      onPressed: _loadStudents,
-                      icon: const Icon(LucideIcons.refreshCw, size: 20),
-                      tooltip: 'Atualizar',
-                    ),
-                  ],
-                ),
-              ),
-
               // Solicitações de entrada (self-onboarding) — destaque verde.
               SliverToBoxAdapter(child: _buildRequestsButton()),
 
@@ -274,6 +254,108 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     } catch (_) {
       if (mounted) context.showError('Erro ao exportar.');
     }
+  }
+
+  Future<void> _exportStudentsPdf() async {
+    final students = List<Student>.unmodifiable(_filteredStudents);
+    if (students.isEmpty) {
+      context.showError('Nenhum aluno para incluir no relatório.');
+      return;
+    }
+
+    setState(() => _isGeneratingPdf = true);
+    try {
+      final settingsName = ref
+          .read(academySettingsProvider)
+          .valueOrNull
+          ?.name
+          .trim();
+      final cachedName = ref.read(currentAcademyInfoProvider)?.name.trim();
+      final academyName = settingsName?.isNotEmpty == true
+          ? settingsName!
+          : cachedName?.isNotEmpty == true
+          ? cachedName!
+          : 'Academia';
+      final isFiltered = _hasActiveFilters() || _searchQuery.trim().isNotEmpty;
+      await StudentReportPdfService().printOrSave(
+        students: students,
+        academyName: academyName,
+        scopeLabel: isFiltered ? 'Lista filtrada' : 'Todos os alunos',
+      );
+    } catch (error) {
+      debugPrint('[StudentsList] PDF export failed: $error');
+      if (mounted) {
+        context.showError('Não foi possível gerar o relatório em PDF.');
+      }
+    } finally {
+      if (mounted) setState(() => _isGeneratingPdf = false);
+    }
+  }
+
+  void _showListActions() {
+    final visibleCount = _filteredStudents.length;
+    final totalCount = _students.length;
+    final isFiltered = _hasActiveFilters() || _searchQuery.trim().isNotEmpty;
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.divider,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 10),
+              ListTile(
+                leading: const Icon(LucideIcons.fileText),
+                title: const Text('Relatório em PDF'),
+                subtitle: Text(
+                  isFiltered
+                      ? '$visibleCount alunos da lista filtrada'
+                      : '$totalCount alunos • imprimir ou salvar',
+                ),
+                enabled: visibleCount > 0 && !_isGeneratingPdf,
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _exportStudentsPdf();
+                },
+              ),
+              ListTile(
+                leading: const Icon(LucideIcons.download),
+                title: const Text('Exportar CSV'),
+                subtitle: Text('$totalCount alunos • planilha e backup'),
+                enabled: totalCount > 0,
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _exportStudents();
+                },
+              ),
+              ListTile(
+                leading: const Icon(LucideIcons.refreshCw),
+                title: const Text('Atualizar lista'),
+                subtitle: const Text('Buscar os dados mais recentes'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _loadStudents();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   /// Chips rápidos de inatividade (Retenção §3.3) — 1 toque para achar quem
@@ -404,47 +486,98 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   Widget _buildSearchAndFilters() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-      child: Row(
+      child: Column(
         children: [
-          // Search field
-          Expanded(
-            child: DebouncedSearchField(
-              controller: _searchController,
-              hintText: 'Buscar aluno...',
-              onChanged: (value) {
-                setState(() {
-                  _searchQuery = value;
-                  _applyFilters();
-                });
-              },
-            ),
-          ),
-          const SizedBox(width: 12),
-          // Filter button
-          GestureDetector(
-            onTap: _showFilterBottomSheet,
-            child: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: _hasActiveFilters()
-                    ? AppTheme.primary
-                    : AppTheme.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: _hasActiveFilters()
-                      ? AppTheme.primary
-                      : AppTheme.divider,
+          Row(
+            children: [
+              Text(
+                _hasActiveFilters() || _searchQuery.trim().isNotEmpty
+                    ? '${_filteredStudents.length} de ${_students.length} alunos'
+                    : '${_students.length} alunos',
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              child: Icon(
-                LucideIcons.sliders,
-                size: 20,
-                color: _hasActiveFilters()
-                    ? Colors.white
-                    : AppTheme.textSecondary,
+              const Spacer(),
+              Material(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(10),
+                child: InkWell(
+                  onTap: _isGeneratingPdf ? null : _showListActions,
+                  borderRadius: BorderRadius.circular(10),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_isGeneratingPdf)
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        else
+                          const Icon(LucideIcons.menu, size: 17),
+                        const SizedBox(width: 7),
+                        Text(
+                          _isGeneratingPdf ? 'Gerando PDF' : 'Opções',
+                          style: AppTheme.labelMedium.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: DebouncedSearchField(
+                  controller: _searchController,
+                  hintText: 'Buscar aluno...',
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                      _applyFilters();
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              GestureDetector(
+                onTap: _showFilterBottomSheet,
+                child: Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: _hasActiveFilters()
+                        ? AppTheme.primary
+                        : AppTheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _hasActiveFilters()
+                          ? AppTheme.primary
+                          : AppTheme.divider,
+                    ),
+                  ),
+                  child: Icon(
+                    LucideIcons.sliders,
+                    size: 20,
+                    color: _hasActiveFilters()
+                        ? Colors.white
+                        : AppTheme.textSecondary,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

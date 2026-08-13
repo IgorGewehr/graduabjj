@@ -101,3 +101,19 @@ test('source canary: manual tuition uses the same transactional guard', () => {
     /request\.resource\.data\.type in \['avulsa', 'private_lesson'\]/
   );
 });
+
+test('source canary: one-off charges always receive their due-date month', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '..', 'server_functions.js'),
+    'utf8'
+  );
+  const start = source.indexOf('exports.createFinancialCharge = onCall');
+  const end = source.indexOf('exports.updateFinancialTerms', start);
+  const createCharge = source.slice(start, end);
+
+  assert.match(createCharge, /if \(type !== 'monthly_tuition'\)/);
+  assert.match(
+    createCharge,
+    /referenceMonth = `\$\{dueParts\.year\}-\$\{String\(dueParts\.month\)\.padStart\(2, '0'\)\}`/
+  );
+});

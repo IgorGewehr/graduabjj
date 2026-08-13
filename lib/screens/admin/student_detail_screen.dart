@@ -33,6 +33,7 @@ import '../../widgets/shared/week_strip.dart';
 import 'physical_assessment_form_screen.dart';
 import 'student_syllabus_tab.dart';
 import 'student_cartel_tab.dart';
+import 'widgets/student_journey_utils.dart';
 import 'widgets/technical_goal_dialog.dart';
 
 /// Admin Student Detail Screen - View and manage student
@@ -66,21 +67,21 @@ class _AdminStudentDetailScreenState
   List<({SportId sport, EligibilityResult result})> _eligibilityBySport = [];
   bool _autoGradEnabled = false;
 
-  // Aba "Currículo" (índice 7) é construída só na 1ª visita — evita ler
+  // Aba "Currículo" (índice 6) é construída só na 1ª visita — evita ler
   // currículo+progresso ao abrir o aluno sem nunca abrir a aba.
   bool _syllabusVisited = false;
-  // Aba "Cartel" (índice 8) também é lazy.
+  // Aba "Cartel" (índice 7) também é lazy.
   bool _cartelVisited = false;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 9, vsync: this);
+    _tabController = TabController(length: 8, vsync: this);
     _tabController.addListener(() {
-      if (_tabController.index == 7 && !_syllabusVisited) {
+      if (_tabController.index == 6 && !_syllabusVisited) {
         setState(() => _syllabusVisited = true);
       }
-      if (_tabController.index == 8 && !_cartelVisited) {
+      if (_tabController.index == 7 && !_cartelVisited) {
         setState(() => _cartelVisited = true);
       }
     });
@@ -241,16 +242,9 @@ class _AdminStudentDetailScreenState
                         ),
                         Tab(
                           child: _TabWithBadge(
-                            icon: LucideIcons.trophy,
-                            label: 'Conquistas',
-                            count: _achievements.length,
-                          ),
-                        ),
-                        Tab(
-                          child: _TabWithBadge(
-                            icon: LucideIcons.history,
-                            label: 'Histórico',
-                            count: _progressions.length + _achievements.length,
+                            icon: LucideIcons.sparkles,
+                            label: 'Jornada',
+                            count: _journeyItemCount,
                           ),
                         ),
                         Tab(
@@ -291,8 +285,7 @@ class _AdminStudentDetailScreenState
                         _buildAttendanceTab(),
                         _buildFinancialTab(),
                         _buildBehaviorTab(),
-                        _buildAchievementsTab(),
-                        _buildHistoryTab(),
+                        _buildJourneyTab(),
                         _buildPhysicalAssessmentTab(),
                         (_student == null || !_syllabusVisited)
                             ? const SizedBox()
@@ -1985,13 +1978,11 @@ class _AdminStudentDetailScreenState
   Widget _buildAddPresenceButton() {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: SizedBox(
-        width: double.infinity,
-        child: OutlinedButton.icon(
-          onPressed: _showAddPresenceDialog,
-          icon: const Icon(LucideIcons.plus, size: 16),
-          label: const Text('Adicionar presença'),
-        ),
+      child: _StudentProfileAction(
+        icon: LucideIcons.clipboardCheck,
+        title: 'Registrar presença',
+        subtitle: 'Adicionar um treino sem gerar cobrança',
+        onTap: _showAddPresenceDialog,
       ),
     );
   }
@@ -2005,6 +1996,7 @@ class _AdminStudentDetailScreenState
     final noteController = TextEditingController();
     final sports = _student?.getSports() ?? [SportId.bjj];
     SportId sport = _student?.getPrimarySport() ?? SportId.bjj;
+    bool isSaving = false;
     final parentContext = context;
 
     showDialog(
@@ -2013,7 +2005,7 @@ class _AdminStudentDetailScreenState
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return AlertDialog(
-              title: const Text('Adicionar presença'),
+              title: const Text('Registrar presença'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -2066,8 +2058,14 @@ class _AdminStudentDetailScreenState
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              DateFormat('dd/MM/yyyy').format(selectedDate),
+                              'Data: ${DateFormat('dd/MM/yyyy').format(selectedDate)}',
                               style: AppTheme.bodyMedium,
+                            ),
+                            const Spacer(),
+                            const Icon(
+                              LucideIcons.chevronDown,
+                              size: 16,
+                              color: AppTheme.textSecondary,
                             ),
                           ],
                         ),
@@ -2106,40 +2104,62 @@ class _AdminStudentDetailScreenState
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  onPressed: isSaving
+                      ? null
+                      : () => Navigator.of(dialogContext).pop(),
                   child: const Text('Cancelar'),
                 ),
                 FilledButton(
-                  onPressed: () async {
-                    Navigator.of(dialogContext).pop();
-                    final currentUser = ref
-                        .read(currentUserProvider)
-                        .valueOrNull;
-                    final note = noteController.text.trim();
-                    try {
-                      await AttendanceService(
-                        FirebaseService.academyId,
-                      ).markManualPresence(
-                        studentId: widget.studentId,
-                        studentName: _student?.fullName ?? '',
-                        verifiedBy: currentUser?.id ?? '',
-                        verifiedByName: currentUser?.displayName ?? '',
-                        date: selectedDate,
-                        sport: sport.value,
-                        note: note.isEmpty ? null : note,
-                      );
-                    } catch (e) {
-                      if (parentContext.mounted) {
-                        parentContext.showError('Erro ao registrar presença');
-                      }
-                      return;
-                    }
-                    if (parentContext.mounted) {
-                      parentContext.showSuccess('Presença registrada');
-                    }
-                    _loadData();
-                  },
-                  child: const Text('Registrar'),
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          setDialogState(() => isSaving = true);
+                          final currentUser = ref
+                              .read(currentUserProvider)
+                              .valueOrNull;
+                          final note = noteController.text.trim();
+                          try {
+                            await AttendanceService(
+                              currentUser?.academyId ??
+                                  FirebaseService.academyId,
+                            ).markManualPresence(
+                              studentId: widget.studentId,
+                              studentName: _student?.fullName ?? '',
+                              verifiedBy: currentUser?.id ?? '',
+                              verifiedByName: currentUser?.displayName ?? '',
+                              date: selectedDate,
+                              sport: sport.value,
+                              note: note.isEmpty ? null : note,
+                            );
+                          } catch (e) {
+                            if (dialogContext.mounted) {
+                              setDialogState(() => isSaving = false);
+                            }
+                            if (parentContext.mounted) {
+                              parentContext.showError(
+                                'Erro ao registrar presença',
+                              );
+                            }
+                            return;
+                          }
+                          if (dialogContext.mounted) {
+                            Navigator.of(dialogContext).pop();
+                          }
+                          if (parentContext.mounted) {
+                            parentContext.showSuccess('Presença registrada');
+                          }
+                          _loadData();
+                        },
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Registrar'),
                 ),
               ],
             );
@@ -2251,7 +2271,7 @@ class _AdminStudentDetailScreenState
         subtitle: canCreateCharge
             ? 'Crie uma cobrança avulsa para começar.'
             : 'As cobranças do aluno aparecerão aqui.',
-        actionLabel: canCreateCharge ? 'Cobrança Avulsa' : null,
+        actionLabel: canCreateCharge ? 'Criar cobrança avulsa' : null,
         onAction: canCreateCharge ? _showAvulsaPaymentDialog : null,
       );
     }
@@ -2259,6 +2279,33 @@ class _AdminStudentDetailScreenState
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (canCreateCharge) ...[
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  onPressed: _showAvulsaPaymentDialog,
+                  icon: const Icon(LucideIcons.receipt, size: 17),
+                  label: const Text('Cobrança avulsa'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _showPrivateLessonDialog,
+                  icon: const Icon(LucideIcons.userCheck, size: 17),
+                  label: const Text('Aula particular'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'A cobrança criada aparece em Financeiro e Cobranças.',
+            style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 18),
+        ],
         // Plan and value section
         if (_studentPlans.isNotEmpty) ...[
           Text(
@@ -2400,7 +2447,7 @@ class _AdminStudentDetailScreenState
           }),
           const SizedBox(height: 16),
         ],
-        // Avulsa charges header with add button
+        // Avulsa charges
         Row(
           children: [
             Text(
@@ -2411,29 +2458,6 @@ class _AdminStudentDetailScreenState
                 letterSpacing: 0.5,
               ),
             ),
-            const Spacer(),
-            if (canCreateCharge)
-              GestureDetector(
-                onTap: _showAvulsaPaymentDialog,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      LucideIcons.plus,
-                      size: 14,
-                      color: AppTheme.primary,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Adicionar',
-                      style: AppTheme.labelSmall.copyWith(
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
           ],
         ),
         const SizedBox(height: 8),
@@ -2469,29 +2493,6 @@ class _AdminStudentDetailScreenState
                 letterSpacing: 0.5,
               ),
             ),
-            const Spacer(),
-            if (canCreateCharge)
-              GestureDetector(
-                onTap: _showPrivateLessonDialog,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      LucideIcons.plus,
-                      size: 14,
-                      color: AppTheme.primary,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Aula Particular',
-                      style: AppTheme.labelSmall.copyWith(
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
           ],
         ),
         const SizedBox(height: 8),
@@ -2556,6 +2557,7 @@ class _AdminStudentDetailScreenState
     final descController = TextEditingController(text: 'Cobrança Avulsa');
     DateTime selectedDate = DateTime.now().add(const Duration(days: 5));
     PaymentMethodPolicy avulsaPolicy = PaymentMethodPolicy.both;
+    bool isSaving = false;
     final parentContext = context;
 
     showDialog(
@@ -2564,12 +2566,20 @@ class _AdminStudentDetailScreenState
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return AlertDialog(
-              title: const Text('Nova Cobrança Avulsa'),
+              title: const Text('Criar cobrança avulsa'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text(
+                      'Será adicionada ao Financeiro e ficará disponível em '
+                      'Cobranças para envio ao aluno.',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     TextField(
                       controller: descController,
                       decoration: const InputDecoration(
@@ -2631,8 +2641,14 @@ class _AdminStudentDetailScreenState
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              DateFormat('dd/MM/yyyy').format(selectedDate),
+                              'Vence em ${DateFormat('dd/MM/yyyy').format(selectedDate)}',
                               style: AppTheme.bodyMedium,
+                            ),
+                            const Spacer(),
+                            const Icon(
+                              LucideIcons.chevronDown,
+                              size: 16,
+                              color: AppTheme.textSecondary,
                             ),
                           ],
                         ),
@@ -2662,50 +2678,80 @@ class _AdminStudentDetailScreenState
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  onPressed: isSaving
+                      ? null
+                      : () => Navigator.of(dialogContext).pop(),
                   child: const Text('Cancelar'),
                 ),
                 FilledButton(
-                  onPressed: () async {
-                    final value = double.tryParse(
-                      valueController.text.replaceAll(',', '.'),
-                    );
-                    if (value == null || value <= 0) return;
-                    final desc = descController.text.trim().isEmpty
-                        ? 'Cobrança Avulsa'
-                        : descController.text.trim();
-                    Navigator.of(dialogContext).pop();
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final value = double.tryParse(
+                            valueController.text.replaceAll(',', '.'),
+                          );
+                          if (value == null || value <= 0) {
+                            parentContext.showError(
+                              'Informe um valor maior que zero.',
+                            );
+                            return;
+                          }
+                          final desc = descController.text.trim().isEmpty
+                              ? 'Cobrança Avulsa'
+                              : descController.text.trim();
+                          setDialogState(() => isSaving = true);
 
-                    final currentUser = ref
-                        .read(currentUserProvider)
-                        .valueOrNull;
-                    final academyId = FirebaseService.academyId;
-                    try {
-                      final paymentService = PaymentService(academyId);
-                      await paymentService.create(
-                        studentId: widget.studentId,
-                        studentName: _student?.fullName ?? '',
-                        value: value,
-                        dueDate: selectedDate,
-                        description: desc,
-                        type: 'avulsa',
-                        planId: null,
-                        paymentMethodPolicy: avulsaPolicy,
-                        sendNotification: false,
-                        createdBy: currentUser?.id,
-                      );
-                    } catch (e) {
-                      if (parentContext.mounted) {
-                        parentContext.showError('Erro ao criar cobrança');
-                      }
-                      return;
-                    }
-                    if (parentContext.mounted) {
-                      parentContext.showSuccess('Cobrança avulsa criada');
-                    }
-                    _loadData();
-                  },
-                  child: const Text('Criar'),
+                          final currentUser = ref
+                              .read(currentUserProvider)
+                              .valueOrNull;
+                          final academyId =
+                              currentUser?.academyId ??
+                              FirebaseService.academyId;
+                          try {
+                            final paymentService = PaymentService(academyId);
+                            await paymentService.create(
+                              studentId: widget.studentId,
+                              studentName: _student?.fullName ?? '',
+                              value: value,
+                              dueDate: selectedDate,
+                              description: desc,
+                              type: 'avulsa',
+                              planId: null,
+                              paymentMethodPolicy: avulsaPolicy,
+                              sendNotification: false,
+                              createdBy: currentUser?.id,
+                            );
+                          } catch (e) {
+                            if (dialogContext.mounted) {
+                              setDialogState(() => isSaving = false);
+                            }
+                            if (parentContext.mounted) {
+                              parentContext.showError(
+                                'Não foi possível criar a cobrança. Tente novamente.',
+                              );
+                            }
+                            return;
+                          }
+                          if (dialogContext.mounted) {
+                            Navigator.of(dialogContext).pop();
+                          }
+                          if (parentContext.mounted) {
+                            parentContext.showSuccess(
+                              'Cobrança criada em Financeiro e Cobranças.',
+                            );
+                          }
+                          _loadData();
+                        },
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Criar cobrança'),
                 ),
               ],
             );
@@ -2901,7 +2947,9 @@ class _AdminStudentDetailScreenState
                         .read(currentUserProvider)
                         .valueOrNull;
                     try {
-                      await PaymentService(FirebaseService.academyId).create(
+                      await PaymentService(
+                        currentUser?.academyId ?? FirebaseService.academyId,
+                      ).create(
                         studentId: widget.studentId,
                         studentName: _student?.fullName ?? '',
                         value: value,
@@ -3138,116 +3186,6 @@ class _AdminStudentDetailScreenState
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildAchievementsTab() {
-    final currentUser = ref.watch(currentUserProvider).valueOrNull;
-    // Generic milestones / gamification markers are managed by any staff member
-    // (instructor/admin). Belt-bound achievements (graduation/stripe) require
-    // graduation:manage — enforced per-action in the edit/add flows.
-    final isStaff = currentUser?.isInstructor ?? false;
-
-    return Stack(
-      children: [
-        _achievements.isEmpty
-            ? const PolishedEmptyState(
-                icon: LucideIcons.trophy,
-                title: 'Nenhuma conquista ainda',
-                subtitle:
-                    'Registre as conquistas e marcos importantes do aluno. Toque em + para adicionar.',
-                accent: Color(0xFFF59E0B),
-              )
-            : ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                itemCount: _achievements.length,
-                itemBuilder: (context, index) {
-                  final achievement = _achievements[index];
-                  return _AchievementCard(
-                    achievement: achievement,
-                    onEdit: () => _showEditAchievementDialog(achievement),
-                    onDelete: () =>
-                        _showDeleteAchievementConfirmation(achievement),
-                    onTogglePublic: () => _toggleAchievementPublic(achievement),
-                  ).entrance(index: index);
-                },
-              ),
-        // Bulk actions (staff only) — top-right overlay menu.
-        if (isStaff)
-          Positioned(
-            top: 8,
-            right: 8,
-            child: Material(
-              color: Colors.transparent,
-              child: PopupMenuButton<String>(
-                icon: Icon(
-                  LucideIcons.settings2,
-                  color: AppTheme.textSecondary,
-                ),
-                tooltip: 'Ações em massa',
-                onSelected: (value) {
-                  switch (value) {
-                    case 'all_public':
-                      _bulkSetPublic(true);
-                      break;
-                    case 'all_private':
-                      _bulkSetPublic(false);
-                      break;
-                    case 'recompute':
-                      _recomputeMilestones();
-                      break;
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'all_public',
-                    child: Row(
-                      children: [
-                        Icon(LucideIcons.eye, size: 20),
-                        SizedBox(width: 8),
-                        Text('Tornar todos públicos'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'all_private',
-                    child: Row(
-                      children: [
-                        Icon(LucideIcons.eyeOff, size: 20),
-                        SizedBox(width: 8),
-                        Text('Tornar todos privados'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'recompute',
-                    child: Row(
-                      children: [
-                        Icon(LucideIcons.refreshCw, size: 20),
-                        SizedBox(width: 8),
-                        Text('Recalcular marcos'),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        // FAB to add achievement
-        Positioned(
-          bottom: 16,
-          right: 16,
-          child: FloatingActionButton.extended(
-            onPressed: _showAddAchievementDialog,
-            backgroundColor: AppTheme.primary,
-            icon: const Icon(Icons.add, color: Colors.white),
-            label: const Text(
-              'Adicionar',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ),
-      ],
     );
   }
 
@@ -4614,7 +4552,16 @@ class _AdminStudentDetailScreenState
     return 'Precisa Melhorar';
   }
 
-  Widget _buildHistoryTab() {
+  int get _journeyItemCount =>
+      _progressions.length +
+      _achievements
+          .where(
+            (achievement) =>
+                !isMirroredProgressionAchievement(achievement, _progressions),
+          )
+          .length;
+
+  Widget _buildJourneyTab() {
     final allHistory = <_HistoryItem>[];
     // Correção de histórico (pedido do produto): professor pode REMOVER um
     // evento errado — grau dado sem querer, resultado lançado errado. Some da
@@ -4635,6 +4582,7 @@ class _AdminStudentDetailScreenState
           subtitle: p.notes,
           icon: Icons.military_tech,
           color: getGradeColor(p.getSport(), p.newBelt),
+          category: p.isBeltChange ? 'Graduação' : 'Grau',
           onDelete: canFixHistory ? () => _deleteProgression(p) : null,
           progression: canFixHistory ? p : null,
         ),
@@ -4643,14 +4591,22 @@ class _AdminStudentDetailScreenState
 
     // Add achievements
     for (final a in _achievements) {
+      // Graduações geram um registro técnico e, em alguns fluxos antigos, uma
+      // conquista espelhada. Exibir ambos fazia o mesmo evento parecer duplo.
+      if (isMirroredProgressionAchievement(a, _progressions)) continue;
       allHistory.add(
         _HistoryItem(
           date: a.date,
           title: a.title,
           subtitle: a.description,
-          icon: Icons.emoji_events,
-          color: Colors.amber,
-          onDelete: canFixHistory ? () => _deleteAchievement(a) : null,
+          icon: _achievementTypeIcon(a.type),
+          color: _achievementTypeColor(a.type),
+          category: _achievementTypeLabel(a.type),
+          isPublic: a.isPublic,
+          onDelete: _canManageAchievement(a)
+              ? () => _deleteAchievement(a)
+              : null,
+          achievement: a,
         ),
       );
     }
@@ -4658,56 +4614,337 @@ class _AdminStudentDetailScreenState
     // Sort by date descending
     allHistory.sort((a, b) => b.date.compareTo(a.date));
 
-    if (allHistory.isEmpty) {
-      return const PolishedEmptyState(
-        icon: LucideIcons.history,
-        title: 'Nenhum histórico',
-        subtitle: 'Graduações e conquistas do aluno aparecerão aqui.',
-      );
-    }
+    final isStaff = currentUser?.isInstructor ?? false;
+    final graduationCount = allHistory
+        .where((item) => item.progression != null)
+        .length;
+    final achievementCount = allHistory.length - graduationCount;
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: allHistory.length,
-      itemBuilder: (context, index) {
-        final item = allHistory[index];
-        return Card(
-          margin: const EdgeInsets.only(bottom: 8),
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: item.color.withValues(alpha: 0.2),
-              child: Icon(item.icon, color: item.color),
+    return Stack(
+      children: [
+        ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 92),
+          children: [
+            _buildJourneyHeader(
+              graduationCount: graduationCount,
+              achievementCount: achievementCount,
+              showBulkActions: isStaff && _achievements.isNotEmpty,
             ),
-            title: Text(item.title),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(height: 16),
+            if (allHistory.isEmpty)
+              const SizedBox(
+                height: 300,
+                child: PolishedEmptyState(
+                  icon: LucideIcons.sparkles,
+                  title: 'A jornada começa aqui',
+                  subtitle:
+                      'Graduações e conquistas importantes aparecerão nesta linha do tempo.',
+                ),
+              )
+            else
+              ...List.generate(
+                allHistory.length,
+                (index) => _buildJourneyEntry(
+                  allHistory[index],
+                  isLast: index == allHistory.length - 1,
+                ).entrance(index: index),
+              ),
+          ],
+        ),
+        if (isStaff)
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FloatingActionButton.extended(
+              onPressed: _showAddAchievementDialog,
+              backgroundColor: AppTheme.primary,
+              icon: const Icon(LucideIcons.plus, color: Colors.white),
+              label: const Text(
+                'Adicionar conquista',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildJourneyHeader({
+    required int graduationCount,
+    required int achievementCount,
+    required bool showBulkActions,
+  }) {
+    final parts = <String>[
+      if (graduationCount > 0)
+        '$graduationCount ${graduationCount == 1 ? 'graduação' : 'graduações'}',
+      if (achievementCount > 0)
+        '$achievementCount ${achievementCount == 1 ? 'conquista' : 'conquistas'}',
+    ];
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Jornada do aluno',
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                parts.isEmpty
+                    ? 'Graduações e conquistas em um só lugar'
+                    : parts.join(' • '),
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (showBulkActions)
+          PopupMenuButton<String>(
+            icon: Icon(LucideIcons.settings2, color: AppTheme.textSecondary),
+            tooltip: 'Opções das conquistas',
+            onSelected: (value) {
+              switch (value) {
+                case 'all_public':
+                  _bulkSetPublic(true);
+                  break;
+                case 'all_private':
+                  _bulkSetPublic(false);
+                  break;
+                case 'recompute':
+                  _recomputeMilestones();
+                  break;
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'all_public',
+                child: ListTile(
+                  leading: Icon(LucideIcons.eye),
+                  title: Text('Tornar públicas'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'all_private',
+                child: ListTile(
+                  leading: Icon(LucideIcons.eyeOff),
+                  title: Text('Tornar privadas'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'recompute',
+                child: ListTile(
+                  leading: Icon(LucideIcons.refreshCw),
+                  title: Text('Recalcular marcos'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _buildJourneyEntry(_HistoryItem item, {required bool isLast}) {
+    final canManage = item.progression != null || item.achievement != null;
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 42,
+            child: Stack(
+              alignment: Alignment.topCenter,
               children: [
-                if (item.subtitle != null) Text(item.subtitle!),
-                Text(
-                  DateFormat('dd/MM/yyyy').format(item.date),
-                  style: AppTheme.bodySmall.copyWith(
-                    color: AppTheme.textSecondary,
+                if (!isLast)
+                  Positioned(
+                    top: 36,
+                    bottom: 0,
+                    child: Container(width: 2, color: AppTheme.divider),
                   ),
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: item.color.withValues(alpha: 0.14),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: item.color.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Icon(item.icon, size: 17, color: item.color),
                 ),
               ],
             ),
-            trailing: item.onDelete == null
-                ? null
-                : IconButton(
-                    icon: Icon(
-                      item.progression != null
-                          ? LucideIcons.pencil
-                          : LucideIcons.trash2,
-                      size: 18,
-                      color: AppTheme.textSecondary,
-                    ),
-                    tooltip: item.progression != null
-                        ? 'Corrigir / reverter graduação'
-                        : 'Remover registro',
-                    onPressed: () => _confirmHistoryDelete(item),
-                  ),
           ),
-        ).entrance(index: index);
+          const SizedBox(width: 8),
+          Expanded(
+            child: Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.title,
+                            style: AppTheme.bodyMedium.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (item.subtitle?.trim().isNotEmpty == true) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              item.subtitle!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 5,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 7,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: item.color.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(7),
+                                ),
+                                child: Text(
+                                  item.category,
+                                  style: AppTheme.labelSmall.copyWith(
+                                    color: item.color,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                DateFormat('dd/MM/yyyy').format(item.date),
+                                style: AppTheme.labelSmall.copyWith(
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ),
+                              if (item.isPublic != null)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      item.isPublic!
+                                          ? LucideIcons.eye
+                                          : LucideIcons.eyeOff,
+                                      size: 13,
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      item.isPublic! ? 'Pública' : 'Privada',
+                                      style: AppTheme.labelSmall.copyWith(
+                                        color: AppTheme.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (canManage && item.onDelete != null)
+                      _buildJourneyItemMenu(item),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildJourneyItemMenu(_HistoryItem item) {
+    return PopupMenuButton<String>(
+      icon: Icon(LucideIcons.moreVertical, color: AppTheme.textSecondary),
+      tooltip: item.progression != null
+          ? 'Opções da graduação'
+          : 'Opções da conquista',
+      onSelected: (value) {
+        if (value == 'correct') _confirmHistoryDelete(item);
+        if (value == 'edit' && item.achievement != null) {
+          _showEditAchievementDialog(item.achievement!);
+        }
+        if (value == 'toggle' && item.achievement != null) {
+          _toggleAchievementPublic(item.achievement!);
+        }
+        if (value == 'delete' && item.achievement != null) {
+          _showDeleteAchievementConfirmation(item.achievement!);
+        }
+      },
+      itemBuilder: (context) {
+        if (item.progression != null) {
+          return const [
+            PopupMenuItem(
+              value: 'correct',
+              child: ListTile(
+                leading: Icon(LucideIcons.undo2),
+                title: Text('Corrigir graduação'),
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ];
+        }
+        final achievement = item.achievement!;
+        return [
+          const PopupMenuItem(
+            value: 'edit',
+            child: ListTile(
+              leading: Icon(LucideIcons.pencil),
+              title: Text('Editar'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+          PopupMenuItem(
+            value: 'toggle',
+            child: ListTile(
+              leading: Icon(
+                achievement.isPublic ? LucideIcons.eyeOff : LucideIcons.eye,
+              ),
+              title: Text(
+                achievement.isPublic ? 'Tornar privada' : 'Tornar pública',
+              ),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'delete',
+            child: ListTile(
+              leading: Icon(LucideIcons.trash2, color: AppTheme.error),
+              title: Text('Excluir', style: TextStyle(color: AppTheme.error)),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        ];
       },
     );
   }
@@ -5616,13 +5853,83 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
+class _StudentProfileAction extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _StudentProfileAction({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppTheme.primary.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.primary.withValues(alpha: 0.22)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 19, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: AppTheme.bodyMedium.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                LucideIcons.chevronRight,
+                size: 18,
+                color: AppTheme.textSecondary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Payment Card Widget
 class _PaymentCard extends StatelessWidget {
   final Payment payment;
   // Ações opcionais (marcar pago em dinheiro / cancelar). Sem elas o card é
-  // somente-leitura. Essencial para cobranças AVULSAS, que não aparecem na tela
-  // de Financeiro (sem referenceMonth) — antes ficavam presas em "pendente"
-  // pra sempre e disparavam cobrança automática mesmo já pagas em dinheiro.
+  // somente-leitura. Essencial para cobranças AVULSAS recebidas em dinheiro.
   final VoidCallback? onMarkPaid;
   final VoidCallback? onCancel;
 
@@ -5909,6 +6216,8 @@ class _HistoryItem {
   final String? subtitle;
   final IconData icon;
   final Color color;
+  final String category;
+  final bool? isPublic;
 
   /// Remoção do registro (correção de erro) — null = sem ação.
   final Future<void> Function()? onDelete;
@@ -5916,6 +6225,7 @@ class _HistoryItem {
   /// Quando o item é uma graduação, carrega a progressão para permitir
   /// REVERTER a faixa (desfazer) além de só remover do histórico.
   final BeltProgression? progression;
+  final Achievement? achievement;
 
   _HistoryItem({
     required this.date,
@@ -5923,240 +6233,68 @@ class _HistoryItem {
     this.subtitle,
     required this.icon,
     required this.color,
+    required this.category,
+    this.isPublic,
     this.onDelete,
     this.progression,
+    this.achievement,
   });
 }
 
-/// Achievement Card Widget
-class _AchievementCard extends StatelessWidget {
-  final Achievement achievement;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  final VoidCallback onTogglePublic;
-
-  const _AchievementCard({
-    required this.achievement,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onTogglePublic,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        onTap: onEdit,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Icon
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: _getTypeColor().withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(_getTypeIcon(), color: _getTypeColor(), size: 24),
-              ),
-              const SizedBox(width: 12),
-              // Content
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      achievement.title,
-                      style: AppTheme.bodyMedium.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (achievement.description != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        achievement.description!,
-                        style: AppTheme.bodySmall.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.calendar_today,
-                          size: 14,
-                          color: AppTheme.textSecondary,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          DateFormat('dd/MM/yyyy').format(achievement.date),
-                          style: AppTheme.labelSmall.copyWith(
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _getTypeColor().withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            _getTypeLabel(),
-                            style: AppTheme.labelSmall.copyWith(
-                              color: _getTypeColor(),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        // Visibility indicator: público (membros) vs privado.
-                        Icon(
-                          achievement.isPublic
-                              ? LucideIcons.eye
-                              : LucideIcons.eyeOff,
-                          size: 14,
-                          color: achievement.isPublic
-                              ? AppTheme.textSecondary
-                              : Colors.redAccent,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          achievement.isPublic ? 'Público' : 'Privado',
-                          style: AppTheme.labelSmall.copyWith(
-                            color: achievement.isPublic
-                                ? AppTheme.textSecondary
-                                : Colors.redAccent,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              // Actions
-              PopupMenuButton<String>(
-                icon: Icon(Icons.more_vert, color: AppTheme.textSecondary),
-                onSelected: (value) {
-                  if (value == 'edit') onEdit();
-                  if (value == 'delete') onDelete();
-                  if (value == 'toggle') onTogglePublic();
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'edit',
-                    child: Row(
-                      children: [
-                        Icon(Icons.edit, size: 20),
-                        SizedBox(width: 8),
-                        Text('Editar'),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'toggle',
-                    child: Row(
-                      children: [
-                        Icon(
-                          achievement.isPublic
-                              ? LucideIcons.eyeOff
-                              : LucideIcons.eye,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          achievement.isPublic
-                              ? 'Tornar privado'
-                              : 'Tornar público',
-                        ),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete, size: 20, color: Colors.red),
-                        SizedBox(width: 8),
-                        Text('Excluir', style: TextStyle(color: Colors.red)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+IconData _achievementTypeIcon(AchievementType type) {
+  switch (type) {
+    case AchievementType.graduation:
+      return Icons.military_tech;
+    case AchievementType.stripe:
+      return LucideIcons.award;
+    case AchievementType.competition:
+      return Icons.emoji_events;
+    case AchievementType.milestone:
+      return Icons.star;
+    case AchievementType.attendanceStreak:
+      return LucideIcons.flame;
+    case AchievementType.rankingPosition:
+      return LucideIcons.trendingUp;
+    case AchievementType.trainingPr:
+      return LucideIcons.dumbbell;
   }
+}
 
-  IconData _getTypeIcon() {
-    switch (achievement.type) {
-      case AchievementType.graduation:
-        return Icons.military_tech;
-      case AchievementType.stripe:
-        return LucideIcons.award;
-      case AchievementType.competition:
-        return Icons.emoji_events;
-      case AchievementType.milestone:
-        return Icons.star;
-      case AchievementType.attendanceStreak:
-        return LucideIcons.flame;
-      case AchievementType.rankingPosition:
-        return LucideIcons.trendingUp;
-      case AchievementType.trainingPr:
-        return LucideIcons.dumbbell;
-    }
+Color _achievementTypeColor(AchievementType type) {
+  switch (type) {
+    case AchievementType.graduation:
+      return Colors.purple;
+    case AchievementType.stripe:
+      return Colors.blue;
+    case AchievementType.competition:
+      return Colors.amber.shade700;
+    case AchievementType.milestone:
+      return Colors.green;
+    case AchievementType.attendanceStreak:
+      return Colors.deepOrange;
+    case AchievementType.rankingPosition:
+      return Colors.teal;
+    case AchievementType.trainingPr:
+      return Colors.indigo;
   }
+}
 
-  Color _getTypeColor() {
-    switch (achievement.type) {
-      case AchievementType.graduation:
-        return Colors.purple;
-      case AchievementType.stripe:
-        return Colors.blue;
-      case AchievementType.competition:
-        return Colors.amber;
-      case AchievementType.milestone:
-        return Colors.green;
-      case AchievementType.attendanceStreak:
-        return Colors.deepOrange;
-      case AchievementType.rankingPosition:
-        return Colors.teal;
-      case AchievementType.trainingPr:
-        return Colors.indigo;
-    }
-  }
-
-  String _getTypeLabel() {
-    switch (achievement.type) {
-      case AchievementType.graduation:
-        return 'Graduação';
-      case AchievementType.stripe:
-        return 'Grau';
-      case AchievementType.competition:
-        return 'Competição';
-      case AchievementType.milestone:
-        return 'Marco';
-      case AchievementType.attendanceStreak:
-        return 'Sequência';
-      case AchievementType.rankingPosition:
-        return 'Ranking';
-      case AchievementType.trainingPr:
-        return 'Recorde';
-    }
+String _achievementTypeLabel(AchievementType type) {
+  switch (type) {
+    case AchievementType.graduation:
+      return 'Graduação';
+    case AchievementType.stripe:
+      return 'Grau';
+    case AchievementType.competition:
+      return 'Competição';
+    case AchievementType.milestone:
+      return 'Marco';
+    case AchievementType.attendanceStreak:
+      return 'Sequência';
+    case AchievementType.rankingPosition:
+      return 'Ranking';
+    case AchievementType.trainingPr:
+      return 'Recorde';
   }
 }
 

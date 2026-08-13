@@ -7289,6 +7289,14 @@ exports.createFinancialCharge = onCall(async (request) => {
       );
     }
   }
+  // Financeiro is month-scoped for every charge type. Keep avulsas and
+  // private lessons in the same canonical bucket as their due date even when
+  // an older client omits (or sends a stale) referenceMonth.
+  if (type !== 'monthly_tuition') {
+    const dueParts = datePartsInBillingTimeZone(dueDate);
+    referenceMonth = `${dueParts.year}-${String(dueParts.month).padStart(2, '0')}`;
+    planId = null;
+  }
   const now = admin.firestore.Timestamp.now();
   const financialRef = db.collection(
     `academies/${academyId}/financials`

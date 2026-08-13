@@ -13,10 +13,13 @@ import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../services/checkin_service.dart';
 import '../../widgets/checkin_confirm_dialog.dart';
+import '../../widgets/cached_image.dart';
 import '../../widgets/common/debounced_search_field.dart';
+import '../../widgets/common/grade_display.dart';
 import '../../widgets/onboarding/quick_create_class_form.dart';
 import '../../widgets/polish/polish.dart';
 import 'widgets/attendance_student_filter.dart';
+import 'widgets/attendance_class_selector.dart';
 
 /// Admin Attendance Screen - Mobile-optimized matching webapp UX
 class AdminAttendanceScreen extends ConsumerStatefulWidget {
@@ -56,7 +59,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   bool _isRemovingCheckin = false;
   bool _isAddingCheckin = false;
   String _searchQuery = '';
-  String _filterMode = 'all'; // 'all', 'present', 'absent'
+  String _filterMode = 'absent'; // checklist: 'absent' (a marcar), 'present'
+  bool _searchExpanded = false;
+  final Set<String> _syncingStudentIds = {};
 
   final _searchController = TextEditingController();
 
@@ -114,6 +119,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           }
         }
       }
+      preselected ??= selectBestAttendanceClass(classes, DateTime.now());
 
       setState(() {
         _classes = classes;
@@ -376,48 +382,79 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   }
 
   Future<void> _toggleAttendance(Student student) async {
-    if (_selectedClass == null || _isSaving) return;
+    final selectedClass = _selectedClass;
+    if (selectedClass == null ||
+        _isSaving ||
+        _syncingStudentIds.contains(student.id)) {
+      return;
+    }
 
-    setState(() => _isSaving = true);
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser?.academyId == null) return;
+
+    final wasPresent = _presentStudentIds.contains(student.id);
+    final selectedDate = _selectedDate;
+    setState(() {
+      _syncingStudentIds.add(student.id);
+      if (wasPresent) {
+        _presentStudentIds.remove(student.id);
+      } else {
+        _presentStudentIds.add(student.id);
+      }
+    });
 
     try {
-      final currentUser = ref.read(currentUserProvider).valueOrNull;
-      if (currentUser?.academyId == null) return;
-
       final attendanceService = AttendanceService(currentUser!.academyId!);
-      final wasPresent = _presentStudentIds.contains(student.id);
-
       if (wasPresent) {
         await attendanceService.unmarkPresent(
           student.id,
-          _selectedClass!.id,
-          _selectedDate,
+          selectedClass.id,
+          selectedDate,
         );
-        setState(() {
-          _presentStudentIds.remove(student.id);
-        });
       } else {
         await attendanceService.markPresent(
           studentId: student.id,
           studentName: student.fullName,
-          classId: _selectedClass!.id,
-          className: _selectedClass!.name,
+          classId: selectedClass.id,
+          className: selectedClass.name,
           verifiedBy: 'admin',
           verifiedByName: _verifierName,
-          date: _selectedDate,
-          weight: _selectedClass!.effectiveWeight(),
-          sport: _selectedClass!.sport,
+          date: selectedDate,
+          weight: selectedClass.effectiveWeight(),
+          sport: selectedClass.sport,
         );
-        setState(() {
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            wasPresent
+                ? 'Presença de ${student.fullName} removida'
+                : '${student.fullName} presente',
+          ),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'Desfazer',
+            onPressed: () => _toggleAttendance(student),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        if (wasPresent) {
           _presentStudentIds.add(student.id);
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        context.showError('Erro: $e');
-      }
+        } else {
+          _presentStudentIds.remove(student.id);
+        }
+      });
+      context.showError('Não foi possível salvar a presença. Tente novamente.');
     } finally {
-      setState(() => _isSaving = false);
+      if (mounted) {
+        setState(() => _syncingStudentIds.remove(student.id));
+      }
     }
   }
 
@@ -504,8 +541,9 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   }
 
   Future<void> _unmarkAllPresent() async {
-    if (_selectedClass == null || _isSaving || _presentStudentIds.isEmpty)
+    if (_selectedClass == null || _isSaving || _presentStudentIds.isEmpty) {
       return;
+    }
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -610,15 +648,6 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      floatingActionButton: _isSaving
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: () => context.push('/admin/chamada/qr'),
-              icon: const Icon(LucideIcons.qrCode, size: 18),
-              label: const Text('Chamada por QR'),
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-            ),
       body: Stack(
         children: [
           _isLoading
@@ -627,19 +656,10 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                   onRefresh: _loadData,
                   child: CustomScrollView(
                     slivers: [
-                      // Class + Date Selectors
                       SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                          child: Row(
-                            children: [
-                              // Class Dropdown
-                              Expanded(child: _buildClassDropdown()),
-                              const SizedBox(width: 12),
-                              // Date Button
-                              _buildDateButton(),
-                            ],
-                          ),
+                          child: _buildSessionHeader(),
                         ),
                       ),
 
@@ -689,30 +709,11 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                           ),
                         ),
 
-                      // Search bar
                       if (_selectedClass != null)
                         SliverToBoxAdapter(
                           child: Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                            child: _buildSearchBar(),
-                          ),
-                        ),
-
-                      // Filter chips
-                      if (_selectedClass != null)
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                            child: _buildFilterChips(),
-                          ),
-                        ),
-
-                      // Action buttons
-                      if (_selectedClass != null)
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                            child: _buildActionButtons(),
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                            child: _buildChecklistControls(),
                           ),
                         ),
 
@@ -730,8 +731,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
                             )
                           : _buildStudentSliverList(),
 
-                      // Bottom padding
-                      const SliverToBoxAdapter(child: SizedBox(height: 100)),
+                      const SliverToBoxAdapter(child: SizedBox(height: 32)),
                     ],
                   ),
                 ),
@@ -780,6 +780,307 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
     );
   }
 
+  Widget _buildSessionHeader() {
+    final selectedClass = _selectedClass;
+    final classTime = selectedClass == null
+        ? null
+        : attendanceClassTimeForDate(selectedClass, _selectedDate);
+    final progress = _totalCount == 0 ? 0.0 : _presentCount / _totalCount;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: _classes.isEmpty ? null : _showClassPicker,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                selectedClass?.name ?? 'Selecionar turma',
+                                style: AppTheme.bodyMedium.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (selectedClass != null)
+                                Text(
+                                  classTime == null
+                                      ? 'Sem horário hoje'
+                                      : 'Hoje · $classTime',
+                                  style: AppTheme.labelSmall.copyWith(
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const Icon(
+                          LucideIcons.chevronDown,
+                          size: 18,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (selectedClass != null) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: _showCalendarBottomSheet,
+                    borderRadius: BorderRadius.circular(10),
+                    child: _AttendanceHeaderControl(
+                      icon: LucideIcons.calendar,
+                      label: _isToday
+                          ? 'Data: Hoje'
+                          : 'Data: ${_selectedDate.day}/${_selectedDate.month}',
+                      trailingIcon: LucideIcons.chevronDown,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: PopupMenuButton<String>(
+                    tooltip: 'Abrir opções da chamada',
+                    onSelected: _handleAttendanceAction,
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'add',
+                        child: _AttendanceMenuItem(
+                          icon: LucideIcons.userPlus,
+                          label: 'Adicionar aluno',
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'all',
+                        child: _AttendanceMenuItem(
+                          icon: LucideIcons.checkCheck,
+                          label: 'Marcar todos presentes',
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'clear',
+                        enabled: _presentCount > 0,
+                        child: const _AttendanceMenuItem(
+                          icon: LucideIcons.rotateCcw,
+                          label: 'Limpar chamada',
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'qr',
+                        child: _AttendanceMenuItem(
+                          icon: LucideIcons.qrCode,
+                          label: 'Chamada por QR',
+                        ),
+                      ),
+                    ],
+                    child: const _AttendanceHeaderControl(
+                      icon: LucideIcons.menu,
+                      label: 'Opções',
+                      trailingIcon: LucideIcons.chevronDown,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: progress.clamp(0, 1),
+                      minHeight: 7,
+                      backgroundColor: AppTheme.surfaceVariant,
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        AppTheme.success,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  '$_presentCount de $_totalCount presentes',
+                  style: AppTheme.labelSmall.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            if (_checkinEnabled && _pendingCheckins.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: ActionChip(
+                  avatar: const Icon(LucideIcons.userCheck, size: 15),
+                  label: Text(
+                    '${_pendingCheckins.length} check-ins aguardando',
+                  ),
+                  onPressed: _showCheckinDialog,
+                  visualDensity: VisualDensity.compact,
+                  side: BorderSide(color: AppTheme.divider),
+                  backgroundColor: AppTheme.surfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChecklistControls() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _AttendanceSegment(
+                label: 'A marcar',
+                count: _absentCount,
+                isSelected: _filterMode == 'absent',
+                onTap: () => setState(() => _filterMode = 'absent'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _AttendanceSegment(
+                label: 'Presentes',
+                count: _presentCount,
+                isSelected: _filterMode == 'present',
+                onTap: () => setState(() => _filterMode = 'present'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              tooltip: 'Buscar aluno',
+              onPressed: () {
+                setState(() {
+                  _searchExpanded = !_searchExpanded;
+                  if (!_searchExpanded) {
+                    _searchController.clear();
+                    _searchQuery = '';
+                  }
+                });
+              },
+              icon: Icon(
+                _searchExpanded ? LucideIcons.x : LucideIcons.search,
+                size: 19,
+              ),
+            ),
+          ],
+        ),
+        AnimatedSwitcher(
+          duration: PolishMotion.fast,
+          child: _searchExpanded
+              ? Padding(
+                  key: const ValueKey('attendance-search'),
+                  padding: const EdgeInsets.only(top: 10),
+                  child: DebouncedSearchField(
+                    controller: _searchController,
+                    hintText: 'Buscar aluno...',
+                    onChanged: (value) {
+                      setState(() => _searchQuery = value.toLowerCase());
+                    },
+                  ),
+                )
+              : const SizedBox.shrink(key: ValueKey('attendance-no-search')),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showClassPicker() async {
+    final chosen = await showModalBottomSheet<BJJClass>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              child: Text(
+                'Escolher turma',
+                style: AppTheme.titleMedium.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            for (final item in _classes)
+              ListTile(
+                selected: item.id == _selectedClass?.id,
+                leading: Icon(
+                  item.id == _selectedClass?.id
+                      ? LucideIcons.checkCircle
+                      : LucideIcons.users,
+                  color: item.id == _selectedClass?.id
+                      ? AppTheme.success
+                      : AppTheme.textSecondary,
+                ),
+                title: Text(item.name),
+                subtitle: Text(
+                  attendanceClassTimeForDate(item, _selectedDate) ??
+                      'Sem horário nesta data',
+                ),
+                onTap: () => Navigator.pop(context, item),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
+    setState(() {
+      _selectedClass = chosen;
+      _filterMode = 'absent';
+    });
+    await _loadAttendanceForClass();
+  }
+
+  void _handleAttendanceAction(String value) {
+    switch (value) {
+      case 'add':
+        _showAddStudentDialog();
+        break;
+      case 'all':
+        _markAllPresent();
+        break;
+      case 'clear':
+        _unmarkAllPresent();
+        break;
+      case 'qr':
+        context.push('/admin/chamada/qr');
+        break;
+    }
+  }
+
+  // Legacy builders kept temporarily while the compact checklist rolls out.
+  // ignore: unused_element
   Widget _buildClassDropdown() {
     return Container(
       decoration: BoxDecoration(
@@ -788,7 +1089,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
         border: Border.all(color: AppTheme.divider),
       ),
       child: DropdownButtonFormField<BJJClass>(
-        value: _selectedClass,
+        initialValue: _selectedClass,
         isExpanded: true,
         icon: Icon(
           LucideIcons.chevronDown,
@@ -825,6 +1126,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildDateButton() {
     return GestureDetector(
       onTap: _showCalendarBottomSheet,
@@ -851,6 +1153,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildSearchBar() {
     return DebouncedSearchField(
       controller: _searchController,
@@ -861,6 +1164,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildFilterChips() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -899,6 +1203,7 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildActionButtons() {
     return Column(
       children: [
@@ -1167,10 +1472,125 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
           return _AttendanceStudentCard(
             key: ValueKey(student.id),
             student: student,
+            sportId: _selectedClass!.getSport(),
             isPresent: isPresent,
+            isSyncing: _syncingStudentIds.contains(student.id),
             onTap: () => _toggleAttendance(student),
           ).entrance(index: index);
         }, childCount: filteredStudents.length),
+      ),
+    );
+  }
+}
+
+class _AttendanceHeaderControl extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final IconData trailingIcon;
+
+  const _AttendanceHeaderControl({
+    required this.icon,
+    required this.label,
+    required this.trailingIcon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 17, color: AppTheme.textPrimary),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              label,
+              style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w700),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Icon(trailingIcon, size: 15, color: AppTheme.textSecondary),
+        ],
+      ),
+    );
+  }
+}
+
+class _AttendanceMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _AttendanceMenuItem({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [Icon(icon, size: 17), const SizedBox(width: 10), Text(label)],
+    );
+  }
+}
+
+class _AttendanceSegment extends StatelessWidget {
+  final String label;
+  final int count;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _AttendanceSegment({
+    required this.label,
+    required this.count,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: PolishMotion.fast,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.textPrimary : AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              label,
+              style: AppTheme.bodySmall.copyWith(
+                color: isSelected ? Colors.white : AppTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: 7),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? Colors.white.withValues(alpha: 0.16)
+                    : AppTheme.surface,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '$count',
+                style: AppTheme.labelSmall.copyWith(
+                  color: isSelected ? Colors.white : AppTheme.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1481,162 +1901,107 @@ class _CalendarBottomSheetState extends State<_CalendarBottomSheet> {
 /// Attendance Student Card - matches webapp mobile design
 class _AttendanceStudentCard extends StatelessWidget {
   final Student student;
+  final SportId sportId;
   final bool isPresent;
+  final bool isSyncing;
   final VoidCallback onTap;
 
   const _AttendanceStudentCard({
     super.key,
     required this.student,
+    required this.sportId,
     required this.isPresent,
+    required this.isSyncing,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final grade = student.getGrade(sportId);
+
     return Pressable(
       onTap: onTap,
       child: AnimatedContainer(
         duration: PolishMotion.fast,
         curve: PolishMotion.transition,
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
         decoration: BoxDecoration(
           color: isPresent
               ? AppTheme.success.withValues(alpha: 0.05)
               : AppTheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isPresent ? AppTheme.success : AppTheme.divider,
-            width: isPresent ? 2 : 1,
+          border: Border(
+            bottom: BorderSide(
+              color: isPresent
+                  ? AppTheme.success.withValues(alpha: 0.2)
+                  : AppTheme.divider,
+            ),
           ),
         ),
         child: Row(
           children: [
-            // Toggle Circle
-            AnimatedContainer(
-              duration: PolishMotion.fast,
-              curve: PolishMotion.transition,
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: isPresent ? AppTheme.success : AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
-              ),
-              child: AnimatedSwitcher(
-                duration: PolishMotion.fast,
-                transitionBuilder: (child, anim) =>
-                    ScaleTransition(scale: anim, child: child),
-                child: Icon(
-                  isPresent ? LucideIcons.checkCircle : LucideIcons.circle,
-                  key: ValueKey(isPresent),
-                  color: isPresent ? Colors.white : AppTheme.textDisabled,
-                  size: 22,
+            AppCachedAvatar(
+              imageUrl: student.photoUrl,
+              radius: 18,
+              backgroundColor: AppTheme.surfaceVariant,
+              child: Text(
+                (student.fullName.isNotEmpty ? student.fullName[0] : '?')
+                    .toUpperCase(),
+                style: AppTheme.bodySmall.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textSecondary,
                 ),
               ),
             ),
-            const SizedBox(width: 12),
-
-            // Avatar
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text(
-                  (student.fullName.isNotEmpty ? student.fullName[0] : '?')
-                      .toUpperCase(),
-                  style: AppTheme.bodyMedium.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-
-            // Name info
+            const SizedBox(width: 11),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    student.nickname ?? student.fullName.split(' ').first,
+                    student.fullName,
                     style: AppTheme.bodyMedium.copyWith(
                       fontWeight: FontWeight.w600,
                       color: isPresent
                           ? AppTheme.success
                           : AppTheme.textPrimary,
                     ),
-                  ),
-                  Text(
-                    student.fullName,
-                    style: AppTheme.bodySmall.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  if (grade != null) ...[
+                    const SizedBox(height: 5),
+                    GradeDisplay(
+                      sportId: sportId,
+                      grade: grade.currentGrade,
+                      stripes: grade.currentStripes,
+                      size: GradeDisplaySize.small,
+                    ),
+                  ],
                 ],
               ),
             ),
-
-            // Belt stripes indicator
-            _buildBeltIndicator(),
+            const SizedBox(width: 10),
+            if (isSyncing)
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              AnimatedSwitcher(
+                duration: PolishMotion.fast,
+                child: Icon(
+                  isPresent ? LucideIcons.checkCircle : LucideIcons.circle,
+                  key: ValueKey(isPresent),
+                  color: isPresent ? AppTheme.success : AppTheme.textDisabled,
+                  size: 23,
+                ),
+              ),
           ],
         ),
       ),
     );
   }
-
-  Widget _buildBeltIndicator() {
-    final beltColor = _getBeltColor(
-      student.currentBelt,
-      sportId: student.getPrimarySport(),
-    );
-    final stripes = student.currentStripes.clamp(0, 4);
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Belt bar
-        Container(
-          width: 4,
-          height: 32,
-          decoration: BoxDecoration(
-            color: beltColor,
-            borderRadius: BorderRadius.circular(2),
-            border: student.currentBelt == 'white'
-                ? Border.all(color: AppTheme.divider)
-                : null,
-          ),
-        ),
-        if (stripes > 0) ...[
-          const SizedBox(width: 4),
-          // Stripes
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: List.generate(
-              stripes,
-              (_) => Container(
-                width: 6,
-                height: 2,
-                margin: const EdgeInsets.only(bottom: 2),
-                decoration: BoxDecoration(
-                  color: AppTheme.textSecondary,
-                  borderRadius: BorderRadius.circular(1),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Color _getBeltColor(String belt, {SportId sportId = SportId.bjj}) =>
-      getGradeColor(sportId, belt);
 }
 
 /// Result of the add-student picker: either an existing student to enroll,

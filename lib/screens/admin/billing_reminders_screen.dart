@@ -2794,10 +2794,10 @@ class _AdminBillingRemindersScreenState
                         Expanded(
                           child: ChoiceChip(
                             label: const Text('Cobrança Única'),
-                            selected: chargeType == 'custom_charge',
+                            selected: chargeType == 'avulsa',
                             onSelected: (_) {
                               setSheetState(() {
-                                chargeType = 'custom_charge';
+                                chargeType = 'avulsa';
                                 descController.text = 'Cobrança Avulsa';
                               });
                             },

@@ -281,6 +281,13 @@ class Payment {
   }
 }
 
+/// Canonical month key used by Financeiro for every charge type.
+///
+/// Avulsas and private lessons used to omit this field and consequently did
+/// not appear in the month-scoped financial screen.
+String paymentReferenceMonth(DateTime dueDate) =>
+    '${dueDate.year}-${dueDate.month.toString().padLeft(2, '0')}';
+
 /// Payment Service - Multi-tenant payment management
 class PaymentService {
   final String academyId;
@@ -576,6 +583,9 @@ class PaymentService {
     String? instructorName,
   }) async {
     final isPrivateLesson = type == 'private_lesson';
+    final effectiveReferenceMonth = referenceMonth?.trim().isNotEmpty == true
+        ? referenceMonth!.trim()
+        : paymentReferenceMonth(dueDate);
     final result = await Fns.functions
         .httpsCallable('createFinancialCharge')
         .call({
@@ -586,7 +596,7 @@ class PaymentService {
           'type': type,
           'dueDate': dueDate.toUtc().toIso8601String(),
           'description': description ?? 'Mensalidade',
-          'referenceMonth': referenceMonth,
+          'referenceMonth': effectiveReferenceMonth,
           'planId': planId,
           'paymentMethodPolicy': paymentMethodPolicy.value,
           'sendNotification': sendNotification,

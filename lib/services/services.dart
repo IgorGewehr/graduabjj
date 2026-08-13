@@ -35,6 +35,7 @@ export 'workout_plan_service.dart';
 export 'training_video_service.dart';
 export 'student_import_service.dart';
 export 'student_export_service.dart';
+export 'student_report_pdf_service.dart';
 export 'physical_assessment_service.dart';
 export 'assessment_pdf_service.dart';
 export 'syllabus_service.dart';
