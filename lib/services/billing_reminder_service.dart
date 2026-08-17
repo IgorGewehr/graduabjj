@@ -278,6 +278,7 @@ class BillingReminderService {
         'status': status,
         'referenceMonth': data['referenceMonth'],
         'planId': data['planId'],
+        'type': data['type'] ?? 'monthly_tuition',
         'description': data['description'],
         'daysOverdue': daysOverdue,
         'stage': stage.value,
@@ -1190,13 +1191,56 @@ class BillingNotificationService {
         'Olá, {{1}}! A cobrança de {{3}} da {{2}}, com vencimento em {{4}}, está em aberto há mais de 30 dias.\n\nChave PIX para pagamento:\n{{5}}\n\nEntre em contato com a academia para regularizar sua situação e envie o comprovante após o pagamento.',
     'cobranca_d30_sempix':
         'Olá {{1}}, sua mensalidade de {{3}} da {{2}} (vencimento {{4}}) está com mais de 30 dias de atraso. Caso não seja regularizada, infelizmente precisaremos suspender seu acesso. Entre em contato urgente para negociarmos.',
+    'cobranca_avulsa_aberta':
+        'Olá, {{1}}! Uma cobrança no valor de {{3}}, referente a {{5}}, foi disponibilizada pela {{2}}. O vencimento é em {{4}}.\n\nPague pelo PIX (copia e cola):\n\n{{6}}\n\nSe preferir, use o botão abaixo para abrir o pagamento. Caso já tenha pago, desconsidere esta mensagem.',
+    'cobranca_avulsa_aberta_pix_manual':
+        'Olá, {{1}}! Uma cobrança no valor de {{3}}, referente a {{5}}, foi disponibilizada pela {{2}}. O vencimento é em {{4}}.\n\nChave PIX para pagamento:\n\n{{6}}\n\nApós o pagamento, envie o comprovante para a academia. Caso já tenha pago, desconsidere esta mensagem.',
+    'cobranca_avulsa_aberta_sempix':
+        'Olá, {{1}}! Uma cobrança no valor de {{3}}, referente a {{5}}, foi disponibilizada pela {{2}}. O vencimento é em {{4}}.\n\nPara combinar a forma de pagamento, entre em contato com a academia. Caso já tenha pago, desconsidere esta mensagem.',
+    'cobranca_avulsa_pendente':
+        'Olá, {{1}}! A cobrança no valor de {{3}}, referente a {{5}}, da {{2}}, com vencimento em {{4}}, continua em aberto.\n\nRegularize pelo PIX (copia e cola):\n\n{{6}}\n\nSe preferir, use o botão abaixo para abrir o pagamento. Caso já tenha pago, desconsidere esta mensagem.',
+    'cobranca_avulsa_pendente_pix_manual':
+        'Olá, {{1}}! A cobrança no valor de {{3}}, referente a {{5}}, da {{2}}, com vencimento em {{4}}, continua em aberto.\n\nChave PIX para pagamento:\n\n{{6}}\n\nApós o pagamento, envie o comprovante para a academia. Caso já tenha pago, desconsidere esta mensagem.',
+    'cobranca_avulsa_pendente_sempix':
+        'Olá, {{1}}! A cobrança no valor de {{3}}, referente a {{5}}, da {{2}}, com vencimento em {{4}}, continua em aberto.\n\nEntre em contato com a academia para combinar o pagamento. Caso já tenha pago, desconsidere esta mensagem.',
   };
+
+  static const Set<String> _oneTimeChargeTypes = {
+    'avulsa',
+    'private_lesson',
+    'uniform',
+    'seminar',
+    'graduation',
+    'competition',
+    'other',
+  };
+
+  bool _isOneTimeChargeType(String chargeType) =>
+      _oneTimeChargeTypes.contains(chargeType.trim());
+
+  String _oneTimeTemplateBase(BillingStage stage) {
+    switch (stage) {
+      case BillingStage.created:
+      case BillingStage.upcoming:
+      case BillingStage.d0:
+        return 'cobranca_avulsa_aberta';
+      case BillingStage.d1:
+      case BillingStage.d3:
+      case BillingStage.d7:
+      case BillingStage.d15:
+      case BillingStage.d30:
+        return 'cobranca_avulsa_pendente';
+    }
+  }
 
   String? templateNameForStage(
     BillingStage stage, {
     required BillingPaymentPreference paymentMode,
+    String chargeType = 'monthly_tuition',
   }) {
-    final base = _stageTemplateBase[stage.value];
+    final base = _isOneTimeChargeType(chargeType)
+        ? _oneTimeTemplateBase(stage)
+        : _stageTemplateBase[stage.value];
     if (base == null) return null;
     switch (paymentMode) {
       case BillingPaymentPreference.mercadoPago:
@@ -1215,19 +1259,33 @@ class BillingNotificationService {
     required double amount,
     required DateTime dueDate,
     String paymentValue = '',
+    String chargeType = 'monthly_tuition',
+    String description = '',
   }) {
-    final templateName = templateNameForStage(stage, paymentMode: paymentMode);
+    final templateName = templateNameForStage(
+      stage,
+      paymentMode: paymentMode,
+      chargeType: chargeType,
+    );
     final body = templateName == null
         ? null
         : _approvedMetaTemplateBodies[templateName];
     if (body == null) return null;
 
-    return body
+    final preview = body
         .replaceAll('{{1}}', studentName)
         .replaceAll('{{2}}', academyName)
         .replaceAll('{{3}}', _currencyFormat.format(amount))
-        .replaceAll('{{4}}', _dateFormat.format(dueDate))
-        .replaceAll('{{5}}', paymentValue);
+        .replaceAll('{{4}}', _dateFormat.format(dueDate));
+    if (_isOneTimeChargeType(chargeType)) {
+      final chargeDescription = description.trim().isEmpty
+          ? 'Cobrança avulsa'
+          : description.trim();
+      return preview
+          .replaceAll('{{5}}', chargeDescription)
+          .replaceAll('{{6}}', paymentValue);
+    }
+    return preview.replaceAll('{{5}}', paymentValue);
   }
 
   // ============================================
@@ -1235,7 +1293,9 @@ class BillingNotificationService {
   // ============================================
   /// Envia uma cobrança pelo canal OFICIAL (template aprovado). É o caminho que
   /// não derruba o chip. Variáveis, em ordem fixa (ver TEMPLATES_META.md):
-  ///   {{1}}=nome  {{2}}=academia  {{3}}=valor  {{4}}=vencimento  [{{5}}=pix]
+  /// Mensalidade: {{1}}=nome {{2}}=academia {{3}}=valor {{4}}=vencimento
+  /// [{{5}}=pix]. Avulsa/particular: os quatro primeiros são iguais,
+  /// {{5}}=descrição e [{{6}}=pix].
   /// O `ticketUrl` vira o parâmetro do botão dinâmico (variante com PIX).
   Future<NotificationResult> sendWhatsAppTemplate({
     required String phone,
@@ -1263,19 +1323,6 @@ class BillingNotificationService {
         studentName: studentName,
         studentId: studentId,
         error: 'Numero de telefone com formato invalido ou ficticio',
-      );
-    }
-
-    if (templateNameForStage(
-          stage,
-          paymentMode: BillingPaymentPreference.none,
-        ) ==
-        null) {
-      return NotificationResult(
-        success: false,
-        studentName: studentName,
-        studentId: studentId,
-        error: 'Ainda nao existe template Meta aprovado para esta etapa',
       );
     }
 

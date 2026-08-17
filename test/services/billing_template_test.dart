@@ -80,6 +80,79 @@ void main() {
       );
     });
 
+    test('one-time charges select open and pending template families', () {
+      for (final type in ['avulsa', 'private_lesson']) {
+        for (final stage in [
+          BillingStage.created,
+          BillingStage.upcoming,
+          BillingStage.d0,
+        ]) {
+          expect(
+            service.templateNameForStage(
+              stage,
+              paymentMode: BillingPaymentPreference.mercadoPago,
+              chargeType: type,
+            ),
+            'cobranca_avulsa_aberta',
+          );
+        }
+        expect(
+          service.templateNameForStage(
+            BillingStage.d30,
+            paymentMode: BillingPaymentPreference.manualPix,
+            chargeType: type,
+          ),
+          'cobranca_avulsa_pendente_pix_manual',
+        );
+        expect(
+          service.templateNameForStage(
+            BillingStage.d7,
+            paymentMode: BillingPaymentPreference.none,
+            chargeType: type,
+          ),
+          'cobranca_avulsa_pendente_sempix',
+        );
+      }
+    });
+
+    test(
+      'one-time preview shows description and payment in the right slots',
+      () {
+        final preview = service.generateOfficialWhatsAppPreview(
+          stage: BillingStage.upcoming,
+          paymentMode: BillingPaymentPreference.mercadoPago,
+          studentName: 'Gustavo',
+          amount: 80,
+          dueDate: DateTime(2026, 8, 20),
+          paymentValue: '[PIX Mercado Pago gerado no envio]',
+          chargeType: 'private_lesson',
+          description: 'Aula particular — 20/08/2026',
+        );
+
+        expect(preview, contains('referente a Aula particular — 20/08/2026'));
+        expect(preview, contains('[PIX Mercado Pago gerado no envio]'));
+        expect(preview, isNot(contains('mensalidade')));
+        expect(preview, isNot(contains('{{')));
+      },
+    );
+
+    test('overdue one-time preview never threatens training suspension', () {
+      final preview = service.generateOfficialWhatsAppPreview(
+        stage: BillingStage.d30,
+        paymentMode: BillingPaymentPreference.none,
+        studentName: 'Gustavo',
+        amount: 80,
+        dueDate: DateTime(2026, 8, 20),
+        chargeType: 'avulsa',
+        description: 'Taxa de seminário',
+      );
+
+      expect(preview, contains('continua em aberto'));
+      expect(preview, contains('Taxa de seminário'));
+      expect(preview, isNot(contains('suspender')));
+      expect(preview, isNot(contains('{{')));
+    });
+
     test('legacy academy WhatsApp text is discarded on read and save', () {
       final templates = BillingMessageTemplates.fromMap({
         'whatsapp': {'D+1': 'texto personalizado obsoleto'},

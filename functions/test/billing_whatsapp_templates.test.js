@@ -114,6 +114,77 @@ test('only due today maps from due-soon stages to an approved template', () => {
   assert.equal(templateNameFor('UPCOMING', BillingPaymentMode.NONE), null);
 });
 
+test('one-time charges use open and pending template families', () => {
+  for (const type of ['avulsa', 'private_lesson']) {
+    for (const stage of ['CREATED', 'UPCOMING', 'due-7', 'D+0']) {
+      assert.equal(
+        templateNameFor(stage, BillingPaymentMode.MERCADO_PAGO, type),
+        'cobranca_avulsa_aberta'
+      );
+      assert.equal(
+        templateNameFor(stage, BillingPaymentMode.MANUAL_PIX, type),
+        'cobranca_avulsa_aberta_pix_manual'
+      );
+      assert.equal(
+        templateNameFor(stage, BillingPaymentMode.NONE, type),
+        'cobranca_avulsa_aberta_sempix'
+      );
+    }
+    for (const stage of ['D+1', 'D+3', 'D+7', 'D+15', 'D+30']) {
+      assert.equal(
+        templateNameFor(stage, BillingPaymentMode.MERCADO_PAGO, type),
+        'cobranca_avulsa_pendente'
+      );
+    }
+  }
+});
+
+test('one-time Mercado Pago payload sends description as 5 and PIX as 6', () => {
+  const payload = buildBillingTemplatePayload({
+    ...common,
+    stage: 'UPCOMING',
+    chargeType: 'private_lesson',
+    description: 'Aula particular — 20/08/2026',
+    paymentInstruction: {
+      mode: BillingPaymentMode.MERCADO_PAGO,
+      pixCode: '000201-MP',
+      ticketUrl: 'https://www.mercadopago.com.br/payments/1/ticket?hash=x',
+    },
+  });
+
+  assert.deepEqual(payload, {
+    templateName: 'cobranca_avulsa_aberta',
+    variables: [
+      'Ana',
+      'Academia Centro',
+      'R$ 150,00',
+      '10/08/2026',
+      'Aula particular — 20/08/2026',
+      '000201-MP',
+    ],
+    paymentMode: BillingPaymentMode.MERCADO_PAGO,
+    buttonUrl: 'https://www.mercadopago.com.br/payments/1/ticket?hash=x',
+  });
+});
+
+test('one-time sempix payload retains description without payment variable', () => {
+  const payload = buildBillingTemplatePayload({
+    ...common,
+    chargeType: 'avulsa',
+    description: 'Taxa de matrícula',
+    paymentInstruction: { mode: BillingPaymentMode.NONE },
+  });
+
+  assert.equal(payload.templateName, 'cobranca_avulsa_pendente_sempix');
+  assert.deepEqual(payload.variables, [
+    'Ana',
+    'Academia Centro',
+    'R$ 150,00',
+    '10/08/2026',
+    'Taxa de matrícula',
+  ]);
+});
+
 test('SOURCE SYNC: automatic reminders use Meta templates and the resolver', () => {
   const source = fs.readFileSync(
     path.join(__dirname, '..', 'server_functions.js'),

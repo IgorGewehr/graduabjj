@@ -1471,6 +1471,8 @@ class _AdminBillingRemindersScreenState
     final amount = (financialItem['amount'] as num?)?.toDouble() ?? 0;
     final dueDate = financialItem['dueDate'] as DateTime;
     final daysOverdue = financialItem['daysOverdue'] as int? ?? 0;
+    final chargeType = financialItem['type'] as String? ?? 'monthly_tuition';
+    final description = financialItem['description'] as String? ?? '';
 
     String message;
     String subject = '';
@@ -1506,6 +1508,7 @@ class _AdminBillingRemindersScreenState
       whatsappTemplateName = _notificationService!.templateNameForStage(
         stage,
         paymentMode: previewPaymentMode,
+        chargeType: chargeType,
       );
       final paymentPreviewValue = switch (previewPaymentMode) {
         BillingPaymentPreference.mercadoPago =>
@@ -1521,6 +1524,8 @@ class _AdminBillingRemindersScreenState
             amount: amount,
             dueDate: dueDate,
             paymentValue: paymentPreviewValue,
+            chargeType: chargeType,
+            description: description,
           ) ??
           'Ainda nao existe template Meta aprovado para esta etapa.';
       paymentInstruction = switch (previewPaymentMode) {

@@ -61,6 +61,7 @@ const {
 const {
   buildBillingTemplatePayload,
   normalizeTemplateStage,
+  templateNameFor,
 } = require('./billing_whatsapp_templates');
 const {
   ManualPixConfirmationDecision,
@@ -802,9 +803,11 @@ async function sendBillingReminderWhatsApp(
       return { sent: false, skipped: 'already_sent' };
     }
 
-    // Only stages with approved Meta templates may use this official path.
-    // Creation and due-soon (>0) continue through push/internal notifications.
-    if (!normalizeTemplateStage(stage)) {
+    // Monthly tuition has approved templates only for D+0..D+30. One-time
+    // charges additionally support creation/upcoming through their generic
+    // open/pending template families.
+    const chargeType = financial.type || 'monthly_tuition';
+    if (!templateNameFor(stage, BillingPaymentMode.NONE, chargeType)) {
       console.log(`[S7] WhatsApp skipped: no approved Meta template for stage=${stage}`);
       return { sent: false, skipped: 'template_unavailable' };
     }
@@ -861,6 +864,8 @@ async function sendBillingReminderWhatsApp(
       academyName: academyName || academy.name || academy.academyName || '',
       amountFormatted: valor,
       dueDateFormatted: vencimento,
+      chargeType,
+      description: financial.description,
     });
     if (!templatePayload) {
       return { sent: false, skipped: 'template_unavailable' };
@@ -1298,6 +1303,17 @@ exports.onFinancialCreated = functions
     const dueDate = financial.dueDate.toDate();
     const formattedDate = dueDate.toLocaleDateString('pt-BR');
     const formattedAmount = (Number(financial.amount) || 0).toFixed(2);
+    const isTuition = (financial.type || 'monthly_tuition') === 'monthly_tuition';
+    const description = sanitizeString(financial.description) || 'Cobrança avulsa';
+    const notificationTitle = isTuition
+      ? 'Nova Mensalidade Disponível'
+      : 'Nova Cobrança Disponível';
+    const pushMessage = isTuition
+      ? `Uma nova mensalidade de R$ ${formattedAmount} foi gerada. Vencimento: ${formattedDate}.`
+      : `Uma nova cobrança de R$ ${formattedAmount}, referente a ${description}, foi gerada. Vencimento: ${formattedDate}.`;
+    const internalMessage = isTuition
+      ? `Sua mensalidade de R$ ${formattedAmount} vence em ${formattedDate}.`
+      : `Sua cobrança de R$ ${formattedAmount}, referente a ${description}, vence em ${formattedDate}.`;
 
     // Push/interna continuam independentes do WhatsApp. Sem conta vinculada,
     // o aluno ainda pode receber a mensagem automática pelo telefone cadastrado.
@@ -1305,8 +1321,8 @@ exports.onFinancialCreated = functions
     if (userId) {
       await sendToUser(
         userId,
-        'Nova Mensalidade Disponivel',
-        `Uma nova mensalidade de R$ ${formattedAmount} foi gerada. Vencimento: ${formattedDate}.`,
+        notificationTitle,
+        pushMessage,
         {
           type: 'financial',
           id: financialId,
@@ -1316,13 +1332,14 @@ exports.onFinancialCreated = functions
         }
       );
       await createInternalNotification(academyId, userId, 'financial', 'normal',
-        'Nova Mensalidade',
-        `Sua mensalidade de R$ ${formattedAmount} vence em ${formattedDate}.`,
+        notificationTitle,
+        internalMessage,
         { actionUrl: '/portal/financeiro', actionLabel: 'Ver detalhes', financialId, expiresInDays: 30 }
       );
     }
 
-    // Aviso de criação é opt-in e usa o mesmo template/PIX das cobranças.
+    // Aviso de criação é opt-in. Mensalidades continuam sem template CREATED;
+    // cobranças únicas usam a família cobranca_avulsa_aberta.
     const billingSettings = await getBillingReminderSettings(academyId);
     if (billingSettings.notifyOnCreation === true) {
       const academySnap = await db.doc(`academies/${academyId}`).get();

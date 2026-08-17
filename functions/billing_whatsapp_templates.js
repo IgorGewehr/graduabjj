@@ -11,16 +11,42 @@ const stageTemplateBase = Object.freeze({
   'D+30': 'cobranca_d30',
 });
 
+const oneTimeChargeTypes = new Set([
+  'avulsa',
+  'private_lesson',
+  // Legacy financial documents may still use these more specific values.
+  'uniform',
+  'seminar',
+  'graduation',
+  'competition',
+  'other',
+]);
+
+function isOneTimeChargeType(chargeType) {
+  return oneTimeChargeTypes.has(String(chargeType || '').trim());
+}
+
+function oneTimeTemplateBase(stage) {
+  if (stage === 'CREATED' || stage === 'UPCOMING' || stage === 'D+0' ||
+      stage === 'due-0' || /^due-\d+$/.test(String(stage || ''))) {
+    return 'cobranca_avulsa_aberta';
+  }
+  if (['D+1', 'D+3', 'D+7', 'D+15', 'D+30'].includes(stage)) {
+    return 'cobranca_avulsa_pendente';
+  }
+  return null;
+}
+
 function normalizeTemplateStage(stage) {
   if (stage === 'due-0') return 'D+0';
   return Object.hasOwn(stageTemplateBase, stage) ? stage : null;
 }
 
-function templateNameFor(stage, paymentMode) {
-  const normalizedStage = normalizeTemplateStage(stage);
-  if (!normalizedStage) return null;
-
-  const base = stageTemplateBase[normalizedStage];
+function templateNameFor(stage, paymentMode, chargeType = 'monthly_tuition') {
+  const base = isOneTimeChargeType(chargeType)
+    ? oneTimeTemplateBase(stage)
+    : stageTemplateBase[normalizeTemplateStage(stage)];
+  if (!base) return null;
   switch (paymentMode) {
     case BillingPaymentMode.MERCADO_PAGO:
       return base;
@@ -34,8 +60,8 @@ function templateNameFor(stage, paymentMode) {
 
 /**
  * Builds the exact payload accepted by /api/send-whatsapp-template.
- * CREATED and due-soon stages above zero intentionally return null because no
- * approved Meta template exists for those message copies yet.
+ * Monthly tuition keeps the D+0..D+30 matrix. One-time charges use the
+ * approved open/pending families, including creation and due-soon stages.
  */
 function buildBillingTemplatePayload({
   stage,
@@ -44,6 +70,8 @@ function buildBillingTemplatePayload({
   academyName,
   amountFormatted,
   dueDateFormatted,
+  chargeType = 'monthly_tuition',
+  description,
 } = {}) {
   let mode = paymentInstruction.mode;
   if (mode === BillingPaymentMode.MERCADO_PAGO &&
@@ -55,7 +83,7 @@ function buildBillingTemplatePayload({
     mode = BillingPaymentMode.NONE;
   }
 
-  const templateName = templateNameFor(stage, mode);
+  const templateName = templateNameFor(stage, mode, chargeType);
   if (!templateName) return null;
 
   const variables = [
@@ -64,6 +92,10 @@ function buildBillingTemplatePayload({
     String(amountFormatted || ''),
     String(dueDateFormatted || ''),
   ];
+
+  if (isOneTimeChargeType(chargeType)) {
+    variables.push(String(description || 'Cobrança avulsa').trim());
+  }
 
   if (mode === BillingPaymentMode.MERCADO_PAGO) {
     variables.push(String(paymentInstruction.pixCode).trim());
@@ -81,6 +113,8 @@ function buildBillingTemplatePayload({
 
 module.exports = {
   buildBillingTemplatePayload,
+  isOneTimeChargeType,
   normalizeTemplateStage,
+  oneTimeTemplateBase,
   templateNameFor,
 };
