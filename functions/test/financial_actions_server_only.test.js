@@ -73,6 +73,31 @@ test('billing dispatch is server-side and preview no longer mints PIX', () => {
     'utf8'
   );
   assert.match(serverSource, /exports\.sendBillingReminder\s*=\s*onCall/);
+  assert.match(
+    serverSource,
+    /exports\.sendBillingReminder\s*=\s*onCall\(\s*\{[^]*?invoker:\s*'public'/
+  );
+  assert.match(
+    serverSource,
+    /const key = process\.env\.WHATSAPP_API_KEY \|\| process\.env\.NOTIFICATION_API_KEY;/
+  );
+  const dispatchStart = serverSource.indexOf(
+    'exports.sendBillingReminder = onCall('
+  );
+  const dispatchHandler = serverSource.indexOf(
+    'async (request) =>',
+    dispatchStart
+  );
+  const dispatchOptions = serverSource.slice(dispatchStart, dispatchHandler);
+  assert.doesNotMatch(dispatchOptions, /'NOTIFICATION_API_KEY'/);
   assert.match(billingServiceSource, /httpsCallable\('sendBillingReminder'\)/);
   assert.doesNotMatch(billingScreenSource, /resolvePaymentInstruction\(/);
+  assert.match(
+    serverSource,
+    /payerFallbackUid:\s*request\.auth\.uid/
+  );
+  assert.match(
+    serverSource,
+    /admin\.auth\(\)\.getUser\(payerFallbackUid\)/
+  );
 });

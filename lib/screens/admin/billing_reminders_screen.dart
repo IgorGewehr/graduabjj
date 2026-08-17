@@ -55,6 +55,10 @@ class _AdminBillingRemindersScreenState
   CollectionStats? _stats;
   Map<String, StudentContact> _studentContacts = {};
   BillingNotificationSettings? _notificationSettings;
+  BillingPaymentPreference _billingPaymentPreference =
+      BillingPaymentPreference.mercadoPago;
+  bool _mercadoPagoAvailable = false;
+  String? _manualPixKey;
   // AUDITORIA: doc separado de _notificationSettings (settings/billing, não
   // settings/billingReminders) — ver BillingReminderService.getAutoTuitionEnabled.
   // Pré-carregado aqui (junto do resto) para que o dialog de configurações
@@ -103,7 +107,8 @@ class _AdminBillingRemindersScreenState
           .collection('academies')
           .doc(academyId)
           .get();
-      final academyName = academyDoc.data()?['name'] as String? ?? 'Academia';
+      final academyData = academyDoc.data() ?? const <String, dynamic>{};
+      final academyName = academyData['name'] as String? ?? 'Academia';
 
       final notifSettings = results[3] as BillingNotificationSettings;
 
@@ -113,6 +118,14 @@ class _AdminBillingRemindersScreenState
         _stats = results[1] as CollectionStats;
         _studentContacts = results[2] as Map<String, StudentContact>;
         _notificationSettings = notifSettings;
+        _billingPaymentPreference =
+            BillingPaymentPreferenceExtension.fromString(
+              academyData['billingPaymentPreference'] as String?,
+            );
+        _mercadoPagoAvailable =
+            academyData['mpConnected'] == true &&
+            academyData['mpNeedsReauth'] != true;
+        _manualPixKey = academyData['pixKey'] as String?;
         _autoTuitionEnabled = results[4] as bool;
         _notificationService = BillingNotificationService(
           academyId: academyId,
@@ -1463,17 +1476,62 @@ class _AdminBillingRemindersScreenState
     String subject = '';
     BillingPaymentInstruction paymentInstruction =
         const BillingPaymentInstruction.none();
+    String? whatsappTemplateName;
+    BillingPaymentPreference? previewPaymentMode;
+    String? mercadoPagoPreviewWarning;
 
     if (mode == 'whatsapp') {
-      // Preview is read-only: payment data is resolved only by the backend at
-      // send time, so opening this dialog never creates a PIX attempt.
-      message = _notificationService!.generateWhatsAppMessage(
-        stage: stage,
-        studentName: studentName,
-        amount: amount,
-        dueDate: dueDate,
-        daysOverdue: daysOverdue,
+      final senderEmail = FirebaseService.currentUser?.email?.trim() ?? '';
+      final manualSenderHasEmail =
+          senderEmail.contains('@') &&
+          senderEmail.split('@').last.contains('.');
+      final mercadoPagoReadyForStudent =
+          _mercadoPagoAvailable &&
+          contact.hasValidPayerCpf &&
+          (contact.hasPayerEmailSource || manualSenderHasEmail);
+      previewPaymentMode = (_notificationSettings?.includePaymentLink ?? true)
+          ? resolveBillingPaymentMode(
+              preference: _billingPaymentPreference,
+              mercadoPagoAvailable: mercadoPagoReadyForStudent,
+              manualPixKey: _manualPixKey,
+            )
+          : BillingPaymentPreference.none;
+      if (_billingPaymentPreference == BillingPaymentPreference.mercadoPago &&
+          _mercadoPagoAvailable &&
+          !mercadoPagoReadyForStudent) {
+        mercadoPagoPreviewWarning = contact.hasValidPayerCpf
+            ? 'Mercado Pago indisponivel: nenhuma conta com e-mail valido foi encontrada para este envio. O fallback configurado sera usado.'
+            : 'Mercado Pago indisponivel para este aluno: cadastre um CPF valido do pagador. O fallback configurado sera usado.';
+      }
+      whatsappTemplateName = _notificationService!.templateNameForStage(
+        stage,
+        paymentMode: previewPaymentMode,
       );
+      final paymentPreviewValue = switch (previewPaymentMode) {
+        BillingPaymentPreference.mercadoPago =>
+          '[PIX Mercado Pago gerado no envio]',
+        BillingPaymentPreference.manualPix => _manualPixKey?.trim() ?? '',
+        BillingPaymentPreference.none => '',
+      };
+      message =
+          _notificationService!.generateOfficialWhatsAppPreview(
+            stage: stage,
+            paymentMode: previewPaymentMode,
+            studentName: studentName,
+            amount: amount,
+            dueDate: dueDate,
+            paymentValue: paymentPreviewValue,
+          ) ??
+          'Ainda nao existe template Meta aprovado para esta etapa.';
+      paymentInstruction = switch (previewPaymentMode) {
+        BillingPaymentPreference.manualPix =>
+          BillingPaymentInstruction.manualPix(paymentPreviewValue),
+        BillingPaymentPreference.mercadoPago =>
+          const BillingPaymentInstruction.mercadoPago(
+            pixCode: '[gerado no envio]',
+          ),
+        BillingPaymentPreference.none => const BillingPaymentInstruction.none(),
+      };
     } else {
       final content = _notificationService!.generateEmailContent(
         stage: stage,
@@ -1568,12 +1626,43 @@ class _AdminBillingRemindersScreenState
                       color: AppTheme.textSecondary,
                     ),
                   ),
+                  if (whatsappTemplateName != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Template: $whatsappTemplateName • ${previewPaymentMode?.label ?? ''}',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                  if (previewPaymentMode ==
+                          BillingPaymentPreference.mercadoPago &&
+                      (_manualPixKey?.trim().isNotEmpty ?? false)) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Se o Mercado Pago estiver indisponivel no envio, o backend usa o PIX pessoal como fallback.',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                  if (mercadoPagoPreviewWarning != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      mercadoPagoPreviewWarning,
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.warning,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                 ],
                 TextField(
                   controller: messageController,
                   readOnly: mode == 'whatsapp',
-                  maxLines: 8,
+                  maxLines: 12,
                   decoration: InputDecoration(
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -1709,9 +1798,20 @@ class _AdminBillingRemindersScreenState
 
         if (mounted) {
           Celebration.confetti(context);
+          final fallbackMessage = switch (result.paymentFallbackReason) {
+            'missing_payer_data' =>
+              ' Mercado Pago nao foi usado: cadastre CPF e e-mail validos do pagador.',
+            'reconnect_required' =>
+              ' Mercado Pago precisa ser reconectado; foi usado o fallback.',
+            'seller_pix_unavailable' =>
+              ' A conta Mercado Pago nao conseguiu gerar PIX; foi usado o fallback.',
+            'mercado_pago_unavailable' =>
+              ' Mercado Pago estava indisponivel; foi usado o fallback.',
+            _ => '',
+          };
           FeedbackUtils.showSuccess(
             context,
-            '${mode == 'whatsapp' ? 'WhatsApp' : 'Email'} enviado para $studentName!',
+            '${mode == 'whatsapp' ? 'WhatsApp' : 'Email'} enviado para $studentName!$fallbackMessage',
           );
         }
       } else {
@@ -2183,11 +2283,14 @@ class _AdminBillingRemindersScreenState
         );
         if (result.success) {
           outcome.waSent++;
-          // The exact payment mode is selected server-side. Until the dispatch
-          // job projection exposes it, count the intent without claiming that
-          // a link was attached.
-          if (includePix && whatsappOn) {
+          if (result.paymentMode == 'mercado_pago' ||
+              result.paymentMode == 'manual_pix') {
+            outcome.waWithLink++;
+          } else if (includePix && whatsappOn) {
             outcome.waWithoutLink++;
+          }
+          if (result.paymentFallbackReason == 'missing_payer_data') {
+            outcome.missingCpfNames.add(studentName);
           }
         } else {
           outcome.waFailed++;

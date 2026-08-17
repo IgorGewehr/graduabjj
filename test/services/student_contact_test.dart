@@ -38,5 +38,29 @@ void main() {
 
       expect(contact.effectiveCpf, '111');
     });
+
+    test('Mercado Pago requires valid CPF and an email source', () {
+      final ready = StudentContact(
+        studentId: 's4',
+        studentName: 'Ready',
+        cpf: '52998224725',
+        email: 'ready@example.com',
+      );
+      final missingEmail = StudentContact(
+        studentId: 's5',
+        studentName: 'Missing email',
+        cpf: '52998224725',
+      );
+      final linked = StudentContact(
+        studentId: 's6',
+        studentName: 'Linked account',
+        cpf: '52998224725',
+        linkedUserId: 'uid-1',
+      );
+
+      expect(ready.canGenerateMercadoPagoPix, isTrue);
+      expect(missingEmail.canGenerateMercadoPagoPix, isFalse);
+      expect(linked.canGenerateMercadoPagoPix, isTrue);
+    });
   });
 }

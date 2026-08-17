@@ -115,7 +115,7 @@ test('provider statuses map to an attempt-only lifecycle without cancelling debt
   assert.equal(publicAttemptStatusFromProvider('unknown'), null);
 });
 
-test('source canary: reminders create stable links, never Mercado Pago payments', () => {
+test('source canary: reminders mint or reuse Mercado Pago PIX only at send time', () => {
   const root = path.resolve(__dirname, '..');
   const server = fs.readFileSync(path.join(root, 'server_functions.js'), 'utf8');
   const reminderStart = server.indexOf('async function sendBillingReminderWhatsApp(');
@@ -125,9 +125,12 @@ test('source canary: reminders create stable links, never Mercado Pago payments'
   assert.match(server, /exports\.startPublicCheckout\s*=\s*onRequest/);
   assert.match(server, /exports\.scheduledPublicPaymentAttemptReconcile\s*=\s*onSchedule/);
   assert.match(server, /projectPublicPaymentAttempt\(acad, payment\)/);
-  assert.match(reminder, /getOrCreatePublicPaymentLink\(/);
-  assert.doesNotMatch(reminder, /createMpPix\(|createMpPixPayment|checkout\/preferences/);
-  assert.doesNotMatch(server, /function generateReminderPix\(/);
+  assert.match(reminder, /resolveBillingPaymentInstruction\(/);
+  assert.match(reminder, /generateReminderMercadoPagoPix\(/);
+  assert.doesNotMatch(reminder, /getOrCreatePublicPaymentLink\(/);
+  assert.match(server, /async function generateReminderMercadoPagoPix\(/);
+  assert.match(server, /const mint = await mpAcquirePixMint\(/);
+  assert.match(server, /pix = await createMpPix\(/);
 });
 
 test('public site starts checkout only from the pay button handler', () => {

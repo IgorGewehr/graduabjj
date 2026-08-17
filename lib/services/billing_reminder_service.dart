@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
+import '../core/validators.dart';
 import '../models/billing_payment_preference.dart';
 import 'firebase_service.dart';
 import 'fns.dart';
@@ -487,6 +488,8 @@ class BillingReminderService {
         guardianEmail: guardian?['email'] as String?,
         cpf: data['cpf'] as String?,
         guardianCpf: guardian?['cpf'] as String?,
+        linkedUserId: data['linkedUserId'] as String?,
+        responsibleUserId: data['responsibleUserId'] as String?,
         category: data['category'] as String? ?? 'adult',
         photoUrl: data['photoUrl'] as String?,
       );
@@ -709,6 +712,8 @@ class StudentContact {
   final String? guardianEmail;
   final String? cpf;
   final String? guardianCpf;
+  final String? linkedUserId;
+  final String? responsibleUserId;
   final String category;
   final String? photoUrl;
 
@@ -721,6 +726,8 @@ class StudentContact {
     this.guardianEmail,
     this.cpf,
     this.guardianCpf,
+    this.linkedUserId,
+    this.responsibleUserId,
     this.category = 'adult',
     this.photoUrl,
   });
@@ -739,6 +746,18 @@ class StudentContact {
     if (category == 'kids') return nz(guardianCpf) ?? nz(cpf);
     return nz(cpf);
   }
+
+  bool get hasValidPayerCpf => Validators.cpf(effectiveCpf ?? '') == null;
+
+  bool get hasPayerEmailSource {
+    final directEmail = effectiveEmail?.trim() ?? '';
+    return (directEmail.contains('@') &&
+            directEmail.split('@').last.contains('.')) ||
+        (linkedUserId?.trim().isNotEmpty ?? false) ||
+        (responsibleUserId?.trim().isNotEmpty ?? false);
+  }
+
+  bool get canGenerateMercadoPagoPix => hasValidPayerCpf && hasPayerEmailSource;
 }
 
 // ============================================
@@ -885,6 +904,26 @@ class BillingNotificationService {
     required this.academyName,
     this.customTemplates,
   });
+
+  /// Converts callable failures into a short message suitable for the UI.
+  /// Firebase exception strings include a full native stack trace on Android;
+  /// never expose that implementation detail inside the error SnackBar.
+  static String readableSendError(Object error) {
+    final normalized = error.toString().toLowerCase();
+    if (normalized.contains('unauthenticated') ||
+        normalized.contains('forbidden')) {
+      return 'Nao foi possivel autenticar o envio. Entre novamente e, se o problema persistir, contate o suporte.';
+    }
+    if (normalized.contains('permission-denied')) {
+      return 'Sua conta nao tem permissao para enviar cobrancas desta academia.';
+    }
+    if (normalized.contains('unavailable') ||
+        normalized.contains('deadline-exceeded') ||
+        normalized.contains('timeout')) {
+      return 'O servico de cobrancas esta temporariamente indisponivel. Tente novamente.';
+    }
+    return 'Nao foi possivel enviar a cobranca. Tente novamente.';
+  }
 
   String _applyTemplate(
     String template,
@@ -1111,6 +1150,48 @@ class BillingNotificationService {
     'D+30': 'cobranca_d30',
   };
 
+  // Exact pt_BR bodies currently approved in the Meta account. Keep this
+  // catalog synchronized with WhatsApp Manager; the preview must never show
+  // the legacy editable copy as if it were the official template.
+  static const Map<String, String> _approvedMetaTemplateBodies = {
+    'cobranca_d0':
+        'Oi {{1}}! Passando pra lembrar que hoje, dia {{4}}, vence sua mensalidade de {{3}} com a {{2}}. Contamos com você!\n\nPague pelo PIX (copia e cola):\n{{5}}\n\nObrigado!',
+    'cobranca_d0_pix_manual':
+        'Olá, {{1}}! Lembrete: sua cobrança de {{3}} da {{2}} vence hoje, {{4}}.\n\nChave PIX para pagamento:\n{{5}}\n\nApós o pagamento, envie o comprovante para a academia.',
+    'cobranca_d0_sempix':
+        'Oi {{1}}! Passando pra lembrar que hoje, dia {{4}}, vence sua mensalidade de {{3}} com a {{2}}. Contamos com você! Qualquer dúvida, estamos à disposição.',
+    'cobranca_d1':
+        'Olá {{1}}! Aqui e a {{2}}. Identificamos que sua mensalidade de {{3}} venceu em {{4}}. Se já pagou, desconsidere. Caso contrário, pague pelo PIX (copia e cola):\n\n{{5}}\n\nObrigado!',
+    'cobranca_d1_pix_manual':
+        'Olá, {{1}}! Identificamos que a cobrança de {{3}} da {{2}}, com vencimento em {{4}}, ainda está em aberto.\n\nChave PIX para pagamento:\n{{5}}\n\nSe já realizou o pagamento, desconsidere esta mensagem. Caso contrário, envie o comprovante após pagar.',
+    'cobranca_d1_sempix':
+        'Olá {{1}}! Aqui é a {{2}}. Identificamos que sua mensalidade de {{3}} venceu em {{4}}. Se já efetuou o pagamento, desconsidere esta mensagem. Caso contrário, solicitamos a regularização. Obrigado!',
+    'cobranca_d3':
+        'Olá {{1}}! Sua mensalidade de {{3}} da {{2}} (vencimento {{4}}) está em atraso. Por favor, regularize o quanto antes. Pague pelo PIX (copia e cola):\n\n{{5}}\n\nObrigado!',
+    'cobranca_d3_pix_manual':
+        'Olá, {{1}}! A cobrança de {{3}} da {{2}}, com vencimento em {{4}}, está em atraso.\n\nChave PIX para pagamento:\n{{5}}\n\nPor favor, regularize assim que possível e envie o comprovante para a academia.',
+    'cobranca_d3_sempix':
+        'Olá {{1}}! Sua mensalidade de {{3}} da {{2}} (vencimento {{4}}) está em atraso. Por favor, regularize sua situação o mais breve possível. Em caso de dúvidas, estamos à disposição!',
+    'cobranca_d7':
+        'Olá {{1}}, sua mensalidade de {{3}} da {{2}} (vencimento {{4}}) segue em atraso. Precisamos regularizar para manter seus treinos em dia. Pague pelo PIX (copia e cola):\n\n{{5}}\n\nObrigado!',
+    'cobranca_d7_pix_manual':
+        'Olá, {{1}}! A cobrança de {{3}} da {{2}}, com vencimento em {{4}}, segue em aberto.\n\nChave PIX para pagamento:\n{{5}}\n\nPor favor, regularize para manter sua situação em dia e envie o comprovante após o pagamento.',
+    'cobranca_d7_sempix':
+        'Olá {{1}}, sua mensalidade de {{3}} da {{2}} (vencimento {{4}}) segue em atraso. Precisamos que regularize para manter seus treinos em dia. Entre em contato para combinar o pagamento.',
+    'cobranca_d15':
+        'Olá {{1}}, sua mensalidade de {{3}} da {{2}} (vencimento {{4}}) está com atraso significativo. Regularize com urgência para evitar a suspensão do acesso aos treinos. Pague pelo PIX (copia e cola):\n\n{{5}}\n\nObrigado!',
+    'cobranca_d15_pix_manual':
+        'Olá, {{1}}! A cobrança de {{3}} da {{2}}, com vencimento em {{4}}, está com atraso significativo.\n\nChave PIX para pagamento:\n{{5}}\n\nPedimos que regularize com urgência e envie o comprovante para a academia.',
+    'cobranca_d15_sempix':
+        'Olá {{1}}, sua mensalidade de {{3}} da {{2}} (vencimento {{4}}) está com atraso significativo. Sua situação precisa ser regularizada com urgência para evitar a suspensão do acesso. Por favor, entre em contato.',
+    'cobranca_d30':
+        'Olá {{1}}, sua mensalidade de {{3}} da {{2}} (vencimento {{4}}) está com mais de 30 dias de atraso. Sem a regularização, precisaremos suspender seu acesso. Pague pelo PIX (copia e cola):\n\n{{5}}\n\nObrigado!',
+    'cobranca_d30_pix_manual':
+        'Olá, {{1}}! A cobrança de {{3}} da {{2}}, com vencimento em {{4}}, está em aberto há mais de 30 dias.\n\nChave PIX para pagamento:\n{{5}}\n\nEntre em contato com a academia para regularizar sua situação e envie o comprovante após o pagamento.',
+    'cobranca_d30_sempix':
+        'Olá {{1}}, sua mensalidade de {{3}} da {{2}} (vencimento {{4}}) está com mais de 30 dias de atraso. Caso não seja regularizada, infelizmente precisaremos suspender seu acesso. Entre em contato urgente para negociarmos.',
+  };
+
   String? templateNameForStage(
     BillingStage stage, {
     required BillingPaymentPreference paymentMode,
@@ -1125,6 +1206,28 @@ class BillingNotificationService {
       case BillingPaymentPreference.none:
         return '${base}_sempix';
     }
+  }
+
+  String? generateOfficialWhatsAppPreview({
+    required BillingStage stage,
+    required BillingPaymentPreference paymentMode,
+    required String studentName,
+    required double amount,
+    required DateTime dueDate,
+    String paymentValue = '',
+  }) {
+    final templateName = templateNameForStage(stage, paymentMode: paymentMode);
+    final body = templateName == null
+        ? null
+        : _approvedMetaTemplateBodies[templateName];
+    if (body == null) return null;
+
+    return body
+        .replaceAll('{{1}}', studentName)
+        .replaceAll('{{2}}', academyName)
+        .replaceAll('{{3}}', _currencyFormat.format(amount))
+        .replaceAll('{{4}}', _dateFormat.format(dueDate))
+        .replaceAll('{{5}}', paymentValue);
   }
 
   // ============================================
@@ -1196,6 +1299,9 @@ class BillingNotificationService {
         success: data['success'] == true,
         studentName: studentName,
         studentId: studentId,
+        paymentMode: data['paymentMode'] as String?,
+        templateName: data['templateName'] as String?,
+        paymentFallbackReason: data['paymentFallbackReason'] as String?,
         error: data['success'] == true
             ? null
             : 'Falha no envio do template de WhatsApp',
@@ -1205,7 +1311,7 @@ class BillingNotificationService {
         success: false,
         studentName: studentName,
         studentId: studentId,
-        error: e.toString(),
+        error: readableSendError(e),
       );
     }
   }
@@ -1266,7 +1372,7 @@ class BillingNotificationService {
         success: false,
         studentName: studentName,
         studentId: studentId,
-        error: e.toString(),
+        error: readableSendError(e),
       );
     }
   }
@@ -1619,12 +1725,18 @@ class NotificationResult {
   final String studentName;
   final String? studentId;
   final String? error;
+  final String? paymentMode;
+  final String? templateName;
+  final String? paymentFallbackReason;
 
   NotificationResult({
     required this.success,
     required this.studentName,
     this.studentId,
     this.error,
+    this.paymentMode,
+    this.templateName,
+    this.paymentFallbackReason,
   });
 }
 

@@ -28,7 +28,9 @@ const messaging = admin.messaging();
 // secret explicitly. WhatsApp stays disabled until its provider credential is
 // explicitly provisioned; an absent optional channel must not block a safe
 // deployment of settlement, email and Pay Link code.
+const MP_MKT_SECRETS = ['MP_OAUTH_CLIENT_ID', 'MP_OAUTH_CLIENT_SECRET'];
 const BILLING_NOTIFICATION_SECRETS = [
+  ...MP_MKT_SECRETS,
   'PUBLIC_PAY_TOKEN_SECRET',
 ];
 const PUBLIC_PAY_SECRETS = [
@@ -277,7 +279,10 @@ async function getBillingRecipientUid(studentId, academyId) {
 // without calling anything. No academy-editable WhatsApp text crosses this
 // boundary: billing copy is identified by templateName and variables.
 async function sendWhatsAppTemplateServer(phone, academyId, templatePayload) {
-  const key = process.env.WHATSAPP_API_KEY;
+  // The current Firebase project provides the shared notification-server key
+  // through functions/.env. Keep a dedicated WhatsApp key as an optional
+  // override, but do not require a second credential for the same provider.
+  const key = process.env.WHATSAPP_API_KEY || process.env.NOTIFICATION_API_KEY;
   if (!key) {
     return { sent: false, skipped: 'no_key' };
   }
@@ -572,6 +577,162 @@ async function getOrCreatePublicPaymentLink(academyId, financialId) {
   };
 }
 
+function billingMercadoPagoFailureCode(error) {
+  const message = String(error?.message || '').toLowerCase();
+  if (message.includes('missing_valid_pix_payer')) {
+    return 'missing_payer_data';
+  }
+  if (message.includes('reconect') || message.includes('expir')) {
+    return 'reconnect_required';
+  }
+  if (message.includes('chave pix') || message.includes('pix without qr')) {
+    return 'seller_pix_unavailable';
+  }
+  return 'mercado_pago_unavailable';
+}
+
+// Creates or reuses the Mercado Pago PIX that is embedded in the approved
+// billing templates. This runs only at send time: opening a preview never
+// creates a provider payment. The financial document remains the idempotency
+// boundary, so repeated reminders reuse the same live PIX.
+async function generateReminderMercadoPagoPix(
+  academyId,
+  financial,
+  { payerFallbackUid = null } = {}
+) {
+  const financialId = String(financial?.id || '');
+  if (!financialId || financial?.paymentMethodPolicy === 'card_only') {
+    throw new Error('financial_not_eligible_for_pix');
+  }
+
+  const financialRef = db.doc(
+    `academies/${academyId}/financials/${financialId}`
+  );
+  const financialSnapshot = await financialRef.get();
+  if (!financialSnapshot.exists) throw new Error('financial_not_found');
+  const live = { id: financialId, ...(financialSnapshot.data() || {}) };
+  if (!['pending', 'overdue'].includes(live.status)) {
+    throw new Error('financial_not_collectible');
+  }
+
+  const amount = Number(live.amount) || 0;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('invalid_financial_amount');
+  }
+
+  const existingExpiry = live.pixExpiresAt &&
+    typeof live.pixExpiresAt.toMillis === 'function'
+    ? live.pixExpiresAt.toMillis() : 0;
+  const existingAmountMatches = typeof live.pixAmount !== 'number' ||
+    Math.abs(amount - live.pixAmount) <= 0.01;
+  if (live.gatewayPaymentId && live.pixCode &&
+      existingExpiry > Date.now() && existingAmountMatches) {
+    return {
+      pixCode: live.pixCode,
+      ticketUrl: live.pixTicketUrl || '',
+    };
+  }
+
+  const studentSnapshot = await db.doc(
+    `academies/${academyId}/students/${live.studentId}`
+  ).get();
+  const student = studentSnapshot.exists ? (studentSnapshot.data() || {}) : {};
+  const kids = student.category === 'kids';
+  const cpf = String(
+    kids ? (student.guardian?.cpf || student.cpf) : student.cpf
+  ).replace(/\D/g, '');
+  const email = String(
+    kids ? (student.guardian?.email || student.email) : student.email
+  ).trim();
+  let resolvedEmail = email;
+  if (!isValidBillingEmail(resolvedEmail)) {
+    try {
+      const recipientUid = await getBillingRecipientUid(
+        live.studentId,
+        academyId
+      );
+      if (recipientUid) {
+        const authUser = await admin.auth().getUser(recipientUid);
+        resolvedEmail = String(authUser.email || '').trim();
+      }
+    } catch (_) {
+      // The personal PIX resolver remains the safe fallback below.
+    }
+  }
+  // Compatibility with the pre-migration manual flow: MercadoPagoService used
+  // FirebaseAuth.currentUser.email, so the staff member sending the reminder
+  // supplied the required payer e-mail implicitly. Preserve that behavior only
+  // for an authenticated MANUAL dispatch. Scheduled sends never borrow a staff
+  // e-mail and keep the configured personal-PIX/no-payment fallback instead.
+  if (!isValidBillingEmail(resolvedEmail) && payerFallbackUid) {
+    try {
+      const authUser = await admin.auth().getUser(payerFallbackUid);
+      resolvedEmail = String(authUser.email || '').trim();
+    } catch (_) {
+      // The personal PIX resolver remains the safe fallback below.
+    }
+  }
+  if (!validateCPF(cpf) || !isValidBillingEmail(resolvedEmail)) {
+    throw new Error('missing_valid_pix_payer');
+  }
+
+  // A live PIX minted for an old amount must not remain payable beside the
+  // replacement. Cancel it before acquiring the new mint lock.
+  if (typeof live.pixAmount === 'number' &&
+      Math.abs(amount - live.pixAmount) > 0.01 &&
+      live.gatewayPaymentId && live.pixCode) {
+    await mpCancelPixPayment(academyId, live.gatewayPaymentId, {});
+  }
+
+  const mint = await mpAcquirePixMint(
+    financialRef,
+    'billing-reminder',
+    amount
+  );
+  if (mint.reuse) {
+    return {
+      pixCode: mint.reuse.pixCode,
+      ticketUrl: mint.reuse.pixTicketUrl || '',
+    };
+  }
+
+  let pix;
+  try {
+    pix = await createMpPix({
+      academyId,
+      transactionAmount: amount,
+      description: sanitizeString(live.description) || 'Mensalidade',
+      externalReference: `${academyId}:fin:${financialId}`,
+      payer: {
+        email: resolvedEmail,
+        cpf,
+        name: student.fullName || live.studentName || 'Aluno',
+      },
+    });
+  } catch (error) {
+    await mpReleasePixMint(financialRef);
+    throw error;
+  }
+
+  const expiresAt = admin.firestore.Timestamp.fromDate(pix.expiresAt);
+  await financialRef.update({
+    gatewayPaymentId: pix.paymentId,
+    paymentGateway: 'mercadopago',
+    pixCode: pix.pixCode,
+    pixQrCode: pix.qrCodeBase64 || null,
+    pixTicketUrl: pix.ticketUrl || null,
+    pixExpiresAt: expiresAt,
+    pixAmount: amount,
+    pixMintAt: admin.firestore.FieldValue.delete(),
+    pixMintBy: admin.firestore.FieldValue.delete(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return {
+    pixCode: pix.pixCode,
+    ticketUrl: pix.ticketUrl || '',
+  };
+}
+
 // ---- 6. Orchestrator: resolve + send one Meta billing template -----------
 // GATES: billingSettings.whatsappEnabled !== false; recipient phone present
 // (kids -> guardian.phone else phone, mirroring effectivePhone). Payment mode
@@ -662,40 +823,33 @@ async function sendBillingReminderWhatsApp(
     }
 
     let paymentInstruction = { mode: BillingPaymentMode.NONE };
-    if (settings.includePaymentLink !== false) {
-      const canUsePublicPay = academy.mpConnected === true &&
-        academy.publicPaymentLinksEnabled === true &&
-        academy.mpNeedsReauth !== true &&
-        financial.paymentMethodPolicy !== 'card_only' &&
-        financial.id &&
-        ['pending', 'overdue'].includes(financial.status);
-      if (canUsePublicPay) {
-        try {
-          const publicLink = await getOrCreatePublicPaymentLink(
-            academyId,
-            financial.id
-          );
-          // Existing approved templates already accept a fifth variable and a
-          // URL button. They now receive the durable MyDojo URL instead of a
-          // disposable PIX code/MP ticket. No provider object is created here.
-          paymentInstruction = {
-            mode: BillingPaymentMode.MERCADO_PAGO,
-            pixCode: publicLink.url,
-            ticketUrl: publicLink.url,
-          };
-        } catch (error) {
-          console.error(
-            '[billing] stable public link unavailable',
-            financial.id,
-            error && error.message
-          );
-        }
-      }
-      if (paymentInstruction.mode === BillingPaymentMode.NONE) {
-        // Preserve personal PIX as a non-provider fallback, but deliberately do
-        // not pass a Mercado Pago generator: reminders must never mint payments.
-        paymentInstruction = await resolveBillingPaymentInstruction({ academy });
-      }
+    let paymentFallbackReason = null;
+    if (settings.includePaymentLink !== false &&
+        financial.paymentMethodPolicy !== 'card_only') {
+      paymentInstruction = await resolveBillingPaymentInstruction({
+        academy,
+        generateMercadoPagoPix: async () => {
+          try {
+            return await generateReminderMercadoPagoPix(
+              academyId,
+              financial,
+              {
+                payerFallbackUid: manual
+                  ? options.payerFallbackUid || null
+                  : null,
+              }
+            );
+          } catch (error) {
+            paymentFallbackReason = billingMercadoPagoFailureCode(error);
+            console.warn(
+              '[billing] Mercado Pago unavailable; trying personal PIX',
+              financial.id,
+              paymentFallbackReason
+            );
+            throw error;
+          }
+        },
+      });
     }
 
     // The approved Meta template matrix is selected only by stage and payment
@@ -733,7 +887,13 @@ async function sendBillingReminderWhatsApp(
         // best-effort: the dedup marker is non-critical.
       }
     }
-    return result || { sent: false, skipped: 'unknown' };
+    return {
+      ...(result || { sent: false, skipped: 'unknown' }),
+      paymentMode: templatePayload.paymentMode,
+      templateName: templatePayload.templateName,
+      paymentFallbackReason: paymentInstruction.mode === BillingPaymentMode.MERCADO_PAGO
+        ? null : paymentFallbackReason,
+    };
   } catch (e) {
     console.error('[S7] sendBillingReminderWhatsApp failed:', e && e.message);
     return { sent: false, skipped: 'internal' };
@@ -907,10 +1067,12 @@ async function getBillingReminderSettings(academyId) {
 // from authoritative server data. Notification credentials never reach Flutter.
 exports.sendBillingReminder = onCall(
   {
-    secrets: [
-      'NOTIFICATION_API_KEY',
-      'PUBLIC_PAY_TOKEN_SECRET',
-    ],
+    // Callable endpoints must be reachable by the Firebase client. Access to
+    // academy data is still protected below by request.auth + isAcademyStaff.
+    // Without this IAM binding Cloud Run rejects the request with 403 before
+    // the callable SDK can validate the Firebase ID token.
+    invoker: 'public',
+    secrets: BILLING_NOTIFICATION_SECRETS,
   },
   async (request) => {
     if (!request.auth) {
@@ -999,7 +1161,11 @@ exports.sendBillingReminder = onCall(
         financial,
         stage,
         daysOverdue,
-        { manual: true, phoneOverride }
+        {
+          manual: true,
+          phoneOverride,
+          payerFallbackUid: request.auth.uid,
+        }
       );
     } else {
       result = await sendBillingReminderEmail(
@@ -1029,6 +1195,9 @@ exports.sendBillingReminder = onCall(
       channel,
       provider: result.provider || channel,
       stage,
+      paymentMode: result.paymentMode || null,
+      templateName: result.templateName || null,
+      paymentFallbackReason: result.paymentFallbackReason || null,
     };
   }
 );
@@ -3664,7 +3833,6 @@ exports.checkPixStatus = onCall(async (request) => {
 //   and the deployed mercadoPagoOAuthCallback URL.
 // ============================================================
 const MP_API_BASE = 'https://api.mercadopago.com';
-const MP_MKT_SECRETS = ['MP_OAUTH_CLIENT_ID', 'MP_OAUTH_CLIENT_SECRET'];
 const MP_MKT_WEBHOOK_SECRETS = [...MP_MKT_SECRETS, 'MP_MKT_WEBHOOK_SECRET'];
 
 function mpOAuthRedirect() {
