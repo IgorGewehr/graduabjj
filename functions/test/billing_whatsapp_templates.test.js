@@ -8,6 +8,7 @@ const path = require('node:path');
 const { BillingPaymentMode } = require('../billing_payment_resolver');
 const {
   buildBillingTemplatePayload,
+  mercadoPagoButtonUrlParam,
   normalizeTemplateStage,
   templateNameFor,
 } = require('../billing_whatsapp_templates');
@@ -50,7 +51,7 @@ test('Mercado Pago sends code as variable 5 and checkout as button', () => {
     paymentInstruction: {
       mode: BillingPaymentMode.MERCADO_PAGO,
       pixCode: '000201-MP',
-      ticketUrl: 'https://mp.example/checkout',
+      ticketUrl: 'https://www.mercadopago.com.br/payments/172335605249/ticket?caller_id=1629589953&hash=abc-123',
     },
   });
 
@@ -64,8 +65,25 @@ test('Mercado Pago sends code as variable 5 and checkout as button', () => {
       '000201-MP',
     ],
     paymentMode: BillingPaymentMode.MERCADO_PAGO,
-    buttonUrl: 'https://mp.example/checkout',
+    buttonUrl: '172335605249/ticket?caller_id=1629589953&hash=abc-123',
   });
+});
+
+test('Mercado Pago button keeps only the dynamic suffix expected by Meta', () => {
+  assert.equal(
+    mercadoPagoButtonUrlParam(
+      'https://www.mercadopago.com.br/payments/174298148560/ticket?caller_id=1629589953&hash=f8cffe44-01df-4211-aa96-ac565c2636a9'
+    ),
+    '174298148560/ticket?caller_id=1629589953&hash=f8cffe44-01df-4211-aa96-ac565c2636a9'
+  );
+  assert.equal(
+    mercadoPagoButtonUrlParam('174298148560/ticket?caller_id=1&hash=x'),
+    '174298148560/ticket?caller_id=1&hash=x'
+  );
+  assert.equal(
+    mercadoPagoButtonUrlParam('https://evil.example/payments/174298148560'),
+    ''
+  );
 });
 
 test('personal PIX selects manual template without a button', () => {
@@ -163,7 +181,7 @@ test('one-time Mercado Pago payload sends description as 5 and PIX as 6', () => 
       '000201-MP',
     ],
     paymentMode: BillingPaymentMode.MERCADO_PAGO,
-    buttonUrl: 'https://www.mercadopago.com.br/payments/1/ticket?hash=x',
+    buttonUrl: '1/ticket?hash=x',
   });
 });
 

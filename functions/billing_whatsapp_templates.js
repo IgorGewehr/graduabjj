@@ -2,6 +2,8 @@
 
 const { BillingPaymentMode } = require('./billing_payment_resolver');
 
+const MP_TICKET_PREFIX = 'https://www.mercadopago.com.br/payments/';
+
 const stageTemplateBase = Object.freeze({
   'D+0': 'cobranca_d0',
   'D+1': 'cobranca_d1',
@@ -59,6 +61,29 @@ function templateNameFor(stage, paymentMode, chargeType = 'monthly_tuition') {
 }
 
 /**
+ * The Meta template already owns the fixed URL prefix:
+ *   https://www.mercadopago.com.br/payments/{{1}}
+ *
+ * Therefore the API parameter must contain only what comes after
+ * `/payments/`. Keeping this normalization at the producer boundary prevents
+ * an older notification-server from duplicating the prefix.
+ */
+function mercadoPagoButtonUrlParam(ticketUrl) {
+  const value = String(ticketUrl || '').trim();
+  if (!value) return '';
+
+  if (value.startsWith(MP_TICKET_PREFIX)) {
+    return value.slice(MP_TICKET_PREFIX.length);
+  }
+
+  if (/^\d+\/ticket\?[A-Za-z0-9_~.!$&'()*+,;=:@%/?-]+$/.test(value)) {
+    return value;
+  }
+
+  return '';
+}
+
+/**
  * Builds the exact payload accepted by /api/send-whatsapp-template.
  * Monthly tuition keeps the D+0..D+30 matrix. One-time charges use the
  * approved open/pending families, including creation and due-soon stages.
@@ -105,7 +130,7 @@ function buildBillingTemplatePayload({
 
   const payload = { templateName, variables, paymentMode: mode };
   if (mode === BillingPaymentMode.MERCADO_PAGO) {
-    const buttonUrl = String(paymentInstruction.ticketUrl || '').trim();
+    const buttonUrl = mercadoPagoButtonUrlParam(paymentInstruction.ticketUrl);
     if (buttonUrl) payload.buttonUrl = buttonUrl;
   }
   return payload;
@@ -114,6 +139,7 @@ function buildBillingTemplatePayload({
 module.exports = {
   buildBillingTemplatePayload,
   isOneTimeChargeType,
+  mercadoPagoButtonUrlParam,
   normalizeTemplateStage,
   oneTimeTemplateBase,
   templateNameFor,
