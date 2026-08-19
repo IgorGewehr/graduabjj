@@ -312,6 +312,9 @@ class AcademySettings {
   /// default modality — NOT a feature gate.
   final String? profile;
 
+  /// Sports/modalidades oferecidas por esta academia (ex.: ['bjj', 'muaythai']).
+  final List<String> sports;
+
   final DateTime? updatedAt;
 
   AcademySettings({
@@ -378,6 +381,7 @@ class AcademySettings {
     this.onboardingDismissedSteps = const [],
     this.wizardSkippedAt,
     this.profile,
+    this.sports = const [],
     this.updatedAt,
   });
 
@@ -490,11 +494,17 @@ class AcademySettings {
           List<String>.from(data['onboardingDismissedSteps'] ?? []),
       wizardSkippedAt: (data['wizardSkippedAt'] as Timestamp?)?.toDate(),
       profile: data['profile'] as String?,
+      sports: data['sports'] is List
+          ? List<String>.from((data['sports'] as List).map((e) => e.toString()))
+          : const [],
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
   }
 
   // Computed properties
+  List<String> get effectiveSports =>
+      sports.isNotEmpty ? sports : const ['bjj'];
+
   String get fullAddress {
     final parts = <String>[];
     if (address != null) parts.add(address!);
@@ -962,6 +972,37 @@ class SettingsService {
       'profile': profile,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Update Academy Sports (list of sport IDs)
+  // ============================================
+  Future<void> updateAcademySports(List<String> sports) async {
+    await _academyRef.set({
+      'sports': sports,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // ============================================
+  // Update Attendance Check-in Method
+  // ============================================
+  Future<void> updateAttendanceCheckinMethod({
+    required bool studentCheckinEnabled,
+    String? musculacaoCheckinMode,
+    Map<String, dynamic>? accessControl,
+  }) async {
+    final data = <String, dynamic>{
+      'studentCheckinEnabled': studentCheckinEnabled,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    if (musculacaoCheckinMode != null) {
+      data['musculacaoCheckinMode'] = musculacaoCheckinMode;
+    }
+    if (accessControl != null) {
+      data['accessControl'] = accessControl;
+    }
+    await _academyRef.set(data, SetOptions(merge: true));
   }
 
   // ============================================

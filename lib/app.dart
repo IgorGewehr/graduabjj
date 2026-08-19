@@ -1458,6 +1458,21 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
+      // Central de Primeiros Passos (Guia e Módulos do Onboarding)
+      GoRoute(
+        path: '/admin/primeiros-passos',
+        pageBuilder: (context, state) => _buildPageWithPushTransition(
+          context: context,
+          state: state,
+          child: const BackButtonHandler(
+            currentLocation: '/admin/primeiros-passos',
+            isRootRoute: false,
+            child: FirstStepsHubScreen(),
+          ),
+        ),
+      ),
+
+
       // Admin Notifications (outside shell for full-screen overlay)
       GoRoute(
         path: '/admin/notificacoes',

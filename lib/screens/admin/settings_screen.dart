@@ -911,33 +911,104 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-      child: Row(
+      child: Column(
         children: [
-          if (_settings?.name != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                _settings!.name,
-                style: AppTheme.labelMedium.copyWith(
-                  color: AppTheme.textSecondary,
-                  fontWeight: FontWeight.w500,
+          Row(
+            children: [
+              if (_settings?.name != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    _settings!.name,
+                    style: AppTheme.labelMedium.copyWith(
+                      color: AppTheme.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              const Spacer(),
+              IconButton(
+                // Decisão do dono: sem funções repetidas na mesma tela — com edição
+                // pendente, a única via de recarregar/descartar é o botão "Descartar"
+                // da barra de alterações não salvas (_buildUnsavedBar).
+                onPressed: _isDirty ? null : _loadSettings,
+                icon: const Icon(LucideIcons.refreshCw, size: 20),
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.surface,
+                  foregroundColor: AppTheme.textSecondary,
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppTheme.textPrimary,
+                  AppTheme.textPrimary.withValues(alpha: 0.85),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
             ),
-          const Spacer(),
-          IconButton(
-            // Decisão do dono: sem funções repetidas na mesma tela — com edição
-            // pendente, a única via de recarregar/descartar é o botão "Descartar"
-            // da barra de alterações não salvas (_buildUnsavedBar).
-            onPressed: _isDirty ? null : _loadSettings,
-            icon: const Icon(LucideIcons.refreshCw, size: 20),
-            style: IconButton.styleFrom(
-              backgroundColor: AppTheme.surface,
-              foregroundColor: AppTheme.textSecondary,
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () => context.push('/admin/primeiros-passos'),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          LucideIcons.sparkles,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Central de Primeiros Passos',
+                              style: AppTheme.bodyLarge.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            Text(
+                              'Guia rápido e quiz de configuração da academia',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: Colors.white.withValues(alpha: 0.8),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        LucideIcons.chevronRight,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         ],

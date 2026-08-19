@@ -22,3 +22,4 @@ export 'retention_screen.dart';
 export 'events_screen.dart';
 export 'event_form_screen.dart';
 export 'onboarding_wizard_screen.dart';
+export 'first_steps_hub_screen.dart';
