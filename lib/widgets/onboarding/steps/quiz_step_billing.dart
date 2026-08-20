@@ -6,6 +6,7 @@ import '../../../core/theme.dart';
 import '../../../models/billing_payment_preference.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/portal_providers.dart';
+import '../../../screens/admin/mercado_pago_connect_screen.dart';
 import '../../../services/settings_service.dart';
 import '../../form/input_field.dart';
 import '../../polish/polish.dart';
@@ -30,6 +31,7 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
   _BillingChoice _choice = _BillingChoice.pixManual;
   final _pixKeyController = TextEditingController();
   PixKeyType _pixKeyType = PixKeyType.cpf;
+  bool _mpConnected = false;
   bool _saving = false;
 
   @override
@@ -37,8 +39,8 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
     super.initState();
     final settings = ref.read(academySettingsProvider).valueOrNull;
     if (settings != null) {
-      if (settings.billingPaymentPreference == BillingPaymentPreference.mercadoPago &&
-          settings.mpConnected) {
+      _mpConnected = settings.mpConnected;
+      if (settings.billingPaymentPreference == BillingPaymentPreference.mercadoPago) {
         _choice = _BillingChoice.mercadoPago;
       } else if (settings.hasPixKey) {
         _choice = _BillingChoice.pixManual;
@@ -52,6 +54,25 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
   void dispose() {
     _pixKeyController.dispose();
     super.dispose();
+  }
+
+  Future<void> _connectMercadoPago() async {
+    final academyId = ref.read(currentUserProvider).valueOrNull?.academyId;
+    if (academyId == null) return;
+    final connected = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => MercadoPagoConnectScreen(
+          academyId: academyId,
+        ),
+      ),
+    );
+    if (connected == true && mounted) {
+      setState(() {
+        _mpConnected = true;
+        _choice = _BillingChoice.mercadoPago;
+      });
+      ref.invalidate(academySettingsProvider);
+    }
   }
 
   Future<void> _submit() async {
@@ -179,6 +200,92 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
             isSelected: _choice == _BillingChoice.mercadoPago,
             onTap: () => setState(() => _choice = _BillingChoice.mercadoPago),
           ),
+          if (_choice == _BillingChoice.mercadoPago) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _mpConnected
+                    ? AppTheme.success.withValues(alpha: 0.08)
+                    : AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _mpConnected
+                      ? AppTheme.success.withValues(alpha: 0.3)
+                      : AppTheme.divider,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_mpConnected) ...[
+                    Row(
+                      children: [
+                        const Icon(LucideIcons.checkCircle2, color: AppTheme.success, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Mercado Pago Conectado',
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Sua conta está ativa para receber e dar baixa automática nas mensalidades.',
+                      style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                    ),
+                  ] else ...[
+                    Row(
+                      children: [
+                        const Icon(LucideIcons.info, color: AppTheme.info, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Conexão Necessária',
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Para emitir cobranças com baixa automática, conecte sua conta do Mercado Pago:',
+                      style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _connectMercadoPago,
+                        icon: const Icon(LucideIcons.link, size: 16),
+                        label: const Text('Conectar Conta Mercado Pago'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF009EE3),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Você também pode continuar agora e conectar mais tarde em Configurações.',
+                      style: AppTheme.labelSmall.copyWith(
+                        color: AppTheme.textSecondary,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
           QuizCardOption(
             title: 'Configurar financeiro mais tarde',
             subtitle: 'Pular este passo por enquanto e definir nas configurações depois.',
