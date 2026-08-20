@@ -4066,7 +4066,7 @@ exports.startMercadoPagoConnect = onCall({ secrets: MP_MKT_SECRETS }, async (req
   }, { merge: true });
 
   const state = `${academyId}:${nonce}`;
-  const url = 'https://auth.mercadopago.com/authorization' +
+  const url = 'https://auth.mercadopago.com.br/authorization' +
     `?client_id=${encodeURIComponent(process.env.MP_OAUTH_CLIENT_ID)}` +
     '&response_type=code&platform_id=mp' +
     `&state=${encodeURIComponent(state)}` +
