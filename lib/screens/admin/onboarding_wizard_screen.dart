@@ -18,7 +18,6 @@ import '../../widgets/onboarding/steps/quiz_step_billing.dart';
 import '../../widgets/onboarding/steps/quiz_step_extra_modules.dart';
 import '../../widgets/onboarding/steps/quiz_step_gamification.dart';
 import '../../widgets/onboarding/steps/quiz_step_graduation_rules.dart';
-import '../../widgets/onboarding/steps/quiz_step_modalities.dart';
 import '../../widgets/onboarding/steps/quiz_step_retention.dart';
 import '../../widgets/onboarding/steps/quiz_step_sandbox.dart';
 import '../../widgets/onboarding/steps/quiz_step_students.dart';
@@ -46,7 +45,7 @@ class _AdminOnboardingWizardScreenState
   int _level2Step = 0;
   bool _startedLogged = false;
 
-  static const int _totalLevel1Steps = 5;
+  static const int _totalLevel1Steps = 4;
   static const int _totalLevel2Steps = 4;
 
   void _nextLevel1Step() {
@@ -181,29 +180,24 @@ class _AdminOnboardingWizardScreenState
       case _WizardPhase.level1:
         switch (_level1Step) {
           case 0:
-            return QuizStepModalities(
+            return QuizStepBilling(
               key: const ValueKey('l1_s0'),
               onNext: _nextLevel1Step,
             );
           case 1:
-            return QuizStepBilling(
+            return QuizStepStudents(
               key: const ValueKey('l1_s1'),
               onNext: _nextLevel1Step,
             );
           case 2:
-            return QuizStepStudents(
+            return QuizStepAttendance(
               key: const ValueKey('l1_s2'),
               onNext: _nextLevel1Step,
             );
           case 3:
-            return QuizStepAttendance(
-              key: const ValueKey('l1_s3'),
-              onNext: _nextLevel1Step,
-            );
-          case 4:
           default:
             return QuizStepSandbox(
-              key: const ValueKey('l1_s4'),
+              key: const ValueKey('l1_s3'),
               onNext: _nextLevel1Step,
             );
         }
