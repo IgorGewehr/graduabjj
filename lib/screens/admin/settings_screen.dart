@@ -30,6 +30,7 @@ import '../../providers/portal_providers.dart';
 import '../../services/services.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/delete_account_helper.dart';
+import '../../widgets/common/image_crop_screen.dart';
 import '../../widgets/polish/polish.dart';
 import 'mercado_pago_connect_screen.dart';
 import 'team_tab_content.dart';
@@ -703,34 +704,17 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
       if (pickedFile == null) return;
 
-      // Crop to 1:1 aspect ratio. No desktop (sem image_cropper) usa a imagem
-      // original sem recortar.
-      final croppedFile = !PlatformSupport.canCropImage
-          ? CroppedFile(pickedFile.path)
-          : await ImageCropper().cropImage(
-        sourcePath: pickedFile.path,
-        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-        compressQuality: 85,
-        maxWidth: 512,
-        maxHeight: 512,
-        uiSettings: [
-          AndroidUiSettings(
-            toolbarTitle: 'Recortar Logo',
-            toolbarColor: AppTheme.textPrimary,
-            toolbarWidgetColor: Colors.white,
-            statusBarColor: AppTheme.textPrimary,
-            backgroundColor: AppTheme.background,
-            initAspectRatio: CropAspectRatioPreset.square,
-            lockAspectRatio: true,
-            hideBottomControls: true,
-          ),
-          IOSUiSettings(
+      if (!mounted) return;
+      final File? croppedFile = await Navigator.push<File>(
+        context,
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (context) => ImageCropScreen(
+            imageFile: File(pickedFile.path),
             title: 'Recortar Logo',
-            aspectRatioLockEnabled: true,
-            resetAspectRatioEnabled: false,
-            aspectRatioPickerButtonHidden: true,
+            withCircleUi: false,
           ),
-        ],
+        ),
       );
 
       if (croppedFile == null) return;

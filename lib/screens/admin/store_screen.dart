@@ -17,6 +17,7 @@ import '../../services/services.dart';
 import '../../services/store_service.dart';
 import '../../providers/store_provider.dart';
 import '../../widgets/cached_image.dart';
+import '../../widgets/common/image_crop_screen.dart';
 import '../../widgets/polish/polish.dart';
 
 /// Admin Store Screen - Product Management
@@ -940,36 +941,17 @@ class _ProductFormSheetState extends State<_ProductFormSheet> {
 
       if (pickedFile == null) return;
 
-      // Crop to 1:1 aspect ratio. No desktop (sem image_cropper) usa a imagem
-      // original sem recortar.
-      final croppedFile = !PlatformSupport.canCropImage
-          ? CroppedFile(pickedFile.path)
-          : await ImageCropper().cropImage(
-        sourcePath: pickedFile.path,
-        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-        compressQuality: 85,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        uiSettings: [
-          AndroidUiSettings(
-            toolbarTitle: 'Recortar Imagem',
-            toolbarColor: AppTheme.textPrimary,
-            toolbarWidgetColor: Colors.white,
-            statusBarColor: AppTheme.textPrimary,
-            backgroundColor: AppTheme.background,
-            initAspectRatio: CropAspectRatioPreset.square,
-            lockAspectRatio: true,
-            hideBottomControls: true,
-            showCropGrid: true,
-          ),
-          IOSUiSettings(
+      if (!mounted) return;
+      final File? croppedFile = await Navigator.push<File>(
+        context,
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (context) => ImageCropScreen(
+            imageFile: File(pickedFile.path),
             title: 'Recortar Imagem',
-            aspectRatioLockEnabled: true,
-            resetAspectRatioEnabled: false,
-            aspectRatioPickerButtonHidden: true,
-            minimumAspectRatio: 1.0,
+            withCircleUi: false,
           ),
-        ],
+        ),
       );
 
       if (croppedFile == null) return;

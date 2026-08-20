@@ -3,11 +3,22 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:crop_your_image/crop_your_image.dart';
 
-/// Custom image crop screen with confirm/cancel buttons at the bottom.
+import '../../core/theme.dart';
+
+/// Custom image crop screen with confirm/cancel buttons safely placed at the bottom.
 class ImageCropScreen extends StatefulWidget {
   final File imageFile;
+  final String title;
+  final bool withCircleUi;
+  final double? aspectRatio;
 
-  const ImageCropScreen({super.key, required this.imageFile});
+  const ImageCropScreen({
+    super.key,
+    required this.imageFile,
+    this.title = 'Ajustar Foto',
+    this.withCircleUi = true,
+    this.aspectRatio = 1.0,
+  });
 
   @override
   State<ImageCropScreen> createState() => _ImageCropScreenState();
@@ -52,14 +63,10 @@ class _ImageCropScreenState extends State<ImageCropScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Footer padding must clear the bottom gesture/home indicator inset so the
-    // primary action is always fully visible and tappable.
     final bottomInset = MediaQuery.of(context).viewPadding.bottom;
 
     return Scaffold(
       backgroundColor: Colors.black,
-      // AppBar respects the status bar automatically — the title and Cancel
-      // action can never sit under the status bar icons.
       appBar: AppBar(
         backgroundColor: Colors.black,
         elevation: 0,
@@ -69,9 +76,9 @@ class _ImageCropScreenState extends State<ImageCropScreen> {
           tooltip: 'Cancelar',
           onPressed: _isCropping ? null : () => Navigator.pop(context),
         ),
-        title: const Text(
-          'Ajustar Foto',
-          style: TextStyle(
+        title: Text(
+          widget.title,
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 18,
             fontWeight: FontWeight.bold,
@@ -88,11 +95,11 @@ class _ImageCropScreenState extends State<ImageCropScreen> {
                     image: _imageData!,
                     controller: _cropController,
                     onCropped: _onCropped,
-                    aspectRatio: 1,
-                    withCircleUi: true,
+                    aspectRatio: widget.aspectRatio,
+                    withCircleUi: widget.withCircleUi,
                     baseColor: Colors.black,
                     maskColor: Colors.black.withValues(alpha: 0.7),
-                    initialSize: 0.8,
+                    initialSize: 0.85,
                   )
                 : const Center(
                     child: CircularProgressIndicator(color: Colors.white),
@@ -101,7 +108,7 @@ class _ImageCropScreenState extends State<ImageCropScreen> {
 
           // Footer action: always visible above the bottom system inset.
           Padding(
-            padding: EdgeInsets.fromLTRB(20, 12, 20, 12 + bottomInset),
+            padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + bottomInset),
             child: Row(
               children: [
                 Expanded(
@@ -110,13 +117,16 @@ class _ImageCropScreenState extends State<ImageCropScreen> {
                         _isCropping ? null : () => Navigator.pop(context),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white70),
+                      side: const BorderSide(color: Colors.white54),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text('Cancelar'),
+                    child: const Text(
+                      'Cancelar',
+                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -129,6 +139,8 @@ class _ImageCropScreenState extends State<ImageCropScreen> {
                             _cropController.crop();
                           },
                     style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: AppTheme.textPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -140,10 +152,13 @@ class _ImageCropScreenState extends State<ImageCropScreen> {
                             width: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: AppTheme.textPrimary,
                             ),
                           )
-                        : const Text('Confirmar'),
+                        : const Text(
+                            'Confirmar',
+                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                          ),
                   ),
                 ),
               ],
