@@ -90,7 +90,7 @@ void main() {
       await tester.tap(find.text('Lucas Silva'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Presença computada!'), findsOneWidget);
+      expect(find.text('Presença registrada com sucesso!'), findsOneWidget);
       expect(find.text('Concluir e Continuar'), findsOneWidget);
 
       final continueButton = find.text('Concluir e Continuar');

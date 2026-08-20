@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../core/sports.dart';
 import '../../../core/theme.dart';
+import '../../cached_image.dart';
+import '../../common/grade_display.dart';
 import '../../polish/polish.dart';
 
-/// Passo 5 do Nível 1: Mini Simulação Prática (Sandbox de 3s / Aha! Moment)
+/// Passo 4 do Nível 1: Mini Simulação Prática (Chamada Real do Tatame)
+/// Espelha fielmente a tela real de chamada do app (AttendanceScreen)
 class QuizStepSandbox extends StatefulWidget {
   final VoidCallback onNext;
 
@@ -21,15 +25,25 @@ class QuizStepSandbox extends StatefulWidget {
 class _QuizStepSandboxState extends State<QuizStepSandbox> {
   bool _student1Checked = false;
   bool _student2Checked = false;
+  bool _student3Checked = false;
   bool _celebrated = false;
 
-  void _checkStudent(int studentIndex) {
-    HapticFeedback.heavyImpact();
-    setState(() {
-      if (studentIndex == 1) _student1Checked = true;
-      if (studentIndex == 2) _student2Checked = true;
+  int get _presentCount =>
+      11 +
+      (_student1Checked ? 1 : 0) +
+      (_student2Checked ? 1 : 0) +
+      (_student3Checked ? 1 : 0);
 
-      if (!_celebrated) {
+  static const int _totalStudents = 14;
+
+  void _toggleStudent(int index) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      if (index == 1) _student1Checked = !_student1Checked;
+      if (index == 2) _student2Checked = !_student2Checked;
+      if (index == 3) _student3Checked = !_student3Checked;
+
+      if ((_student1Checked || _student2Checked || _student3Checked) && !_celebrated) {
         _celebrated = true;
         Celebration.confetti(context);
       }
@@ -38,7 +52,8 @@ class _QuizStepSandboxState extends State<QuizStepSandbox> {
 
   @override
   Widget build(BuildContext context) {
-    final hasAnyChecked = _student1Checked || _student2Checked;
+    final hasAnyChecked = _student1Checked || _student2Checked || _student3Checked;
+    final progress = _presentCount / _totalStudents;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
@@ -77,14 +92,13 @@ class _QuizStepSandboxState extends State<QuizStepSandbox> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Toque no card de um dos alunos para registrar a presença de hoje:',
+                'Toque em um aluno para marcar presença na chamada da turma:',
                 style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
               ),
             ],
           ).entrance(),
           const SizedBox(height: 20),
           Container(
-            padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(20),
@@ -100,75 +114,135 @@ class _QuizStepSandboxState extends State<QuizStepSandbox> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Row(
+                // Header da Turma
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: AppTheme.textPrimary.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Icon(LucideIcons.flame, size: 18, color: AppTheme.textPrimary),
-                          ),
-                          const SizedBox(width: 10),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            child: Row(
                               children: [
-                                Text(
-                                  'Turma das 19:00',
-                                  style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w800),
-                                  overflow: TextOverflow.ellipsis,
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.textPrimary.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(
+                                    LucideIcons.flame,
+                                    size: 18,
+                                    color: AppTheme.textPrimary,
+                                  ),
                                 ),
-                                Text(
-                                  'Treino Técnico Geral',
-                                  style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-                                  overflow: TextOverflow.ellipsis,
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Turma das 19:00',
+                                        style: AppTheme.titleMedium.copyWith(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        'Jiu-Jitsu Adulto • Noite',
+                                        style: AppTheme.bodySmall.copyWith(
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ],
                             ),
                           ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppTheme.surfaceVariant,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              'Hoje',
+                              style: AppTheme.labelSmall.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ),
                         ],
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surfaceVariant,
-                        borderRadius: BorderRadius.circular(12),
+                      const SizedBox(height: 14),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Presentes no Tatame',
+                            style: AppTheme.labelSmall.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                          Text(
+                            '$_presentCount de $_totalStudents alunos',
+                            style: AppTheme.bodySmall.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                        ],
                       ),
-                      child: Text(
-                        'Hoje',
-                        style: AppTheme.labelSmall.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary,
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 6,
+                          backgroundColor: AppTheme.surfaceVariant,
+                          valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.textPrimary),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 16),
                 const Divider(height: 1),
-                const SizedBox(height: 14),
-                _buildMockStudentTile(
+                // Lista de Alunos (idêntica à tela real de chamada)
+                _buildStudentItem(
+                  index: 1,
                   name: 'Lucas Silva',
-                  grade: 'Faixa Azul • 2º Grau',
-                  gradeColor: AppTheme.beltBlue,
-                  isChecked: _student1Checked,
-                  onTap: () => _checkStudent(1),
+                  grade: 'blue',
+                  stripes: 2,
+                  attendancesCount: 35,
+                  isPresent: _student1Checked,
+                  onTap: () => _toggleStudent(1),
                 ),
-                const SizedBox(height: 10),
-                _buildMockStudentTile(
+                const Divider(height: 1, indent: 64),
+                _buildStudentItem(
+                  index: 2,
                   name: 'Amanda Costa',
-                  grade: 'Faixa Branca • 3º Grau',
-                  gradeColor: AppTheme.beltWhite,
-                  isChecked: _student2Checked,
-                  onTap: () => _checkStudent(2),
+                  grade: 'white',
+                  stripes: 3,
+                  attendancesCount: 39,
+                  isPresent: _student2Checked,
+                  onTap: () => _toggleStudent(2),
+                ),
+                const Divider(height: 1, indent: 64),
+                _buildStudentItem(
+                  index: 3,
+                  name: 'Rafael Mendonça',
+                  grade: 'purple',
+                  stripes: 1,
+                  attendancesCount: 62,
+                  isPresent: _student3Checked,
+                  onTap: () => _toggleStudent(3),
                 ),
               ],
             ),
@@ -178,9 +252,9 @@ class _QuizStepSandboxState extends State<QuizStepSandbox> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppTheme.success.withValues(alpha: 0.1),
+                color: AppTheme.success.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.success.withValues(alpha: 0.3)),
+                border: Border.all(color: AppTheme.success.withValues(alpha: 0.25)),
               ),
               child: Row(
                 children: [
@@ -198,14 +272,15 @@ class _QuizStepSandboxState extends State<QuizStepSandbox> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Presença computada!',
+                          'Presença registrada com sucesso!',
                           style: AppTheme.bodyLarge.copyWith(
                             fontWeight: FontWeight.w800,
                             color: AppTheme.textPrimary,
                           ),
                         ),
+                        const SizedBox(height: 2),
                         Text(
-                          'O sistema contabilizou a aula e atualizou o progresso de graduação automaticamente.',
+                          'A presença entra no histórico do aluno, conta para a graduação de faixa e fica salva no relatório da turma.',
                           style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
                         ),
                       ],
@@ -238,102 +313,107 @@ class _QuizStepSandboxState extends State<QuizStepSandbox> {
     );
   }
 
-  Widget _buildMockStudentTile({
+  Widget _buildStudentItem({
+    required int index,
     required String name,
     required String grade,
-    required Color gradeColor,
-    required bool isChecked,
+    required int stripes,
+    required int attendancesCount,
+    required bool isPresent,
     required VoidCallback onTap,
   }) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      decoration: BoxDecoration(
-        color: isChecked ? AppTheme.success.withValues(alpha: 0.08) : AppTheme.surfaceVariant,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isChecked ? AppTheme.success : Colors.transparent,
-          width: 1.5,
-        ),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: AppTheme.textPrimary.withValues(alpha: 0.08),
-                  child: Text(
-                    name.substring(0, 1),
-                    style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textPrimary),
+    final effectiveAttendances = isPresent ? attendancesCount + 1 : attendancesCount;
+
+    return Material(
+      color: isPresent ? AppTheme.success.withValues(alpha: 0.05) : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              AppCachedAvatar(
+                imageUrl: null,
+                radius: 19,
+                backgroundColor: isPresent
+                    ? AppTheme.success.withValues(alpha: 0.15)
+                    : AppTheme.surfaceVariant,
+                child: Text(
+                  name.substring(0, 1).toUpperCase(),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: isPresent ? AppTheme.success : AppTheme.textPrimary,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        name,
-                        style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: AppTheme.bodyMedium.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: isPresent ? AppTheme.success : AppTheme.textPrimary,
                       ),
-                      Row(
-                        children: [
-                          Container(
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                              color: gradeColor,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: AppTheme.divider),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            grade,
-                            style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isChecked ? AppTheme.success : Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: isChecked ? AppTheme.success : AppTheme.divider,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        isChecked ? LucideIcons.check : LucideIcons.userCheck,
-                        size: 14,
-                        color: isChecked ? Colors.white : AppTheme.textPrimary,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        isChecked ? 'Presente' : 'Marcar',
-                        style: AppTheme.labelSmall.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: isChecked ? Colors.white : AppTheme.textPrimary,
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        GradeDisplay(
+                          sportId: SportId.bjj,
+                          grade: grade,
+                          stripes: stripes,
+                          size: GradeDisplaySize.small,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        Text(
+                          '• $effectiveAttendances aulas',
+                          style: AppTheme.labelSmall.copyWith(
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isPresent ? AppTheme.success : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isPresent ? AppTheme.success : AppTheme.divider,
                   ),
                 ),
-              ],
-            ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isPresent ? LucideIcons.check : LucideIcons.userCheck,
+                      size: 14,
+                      color: isPresent ? Colors.white : AppTheme.textSecondary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isPresent ? 'Presente' : 'Marcar',
+                      style: AppTheme.labelSmall.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: isPresent ? Colors.white : AppTheme.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
