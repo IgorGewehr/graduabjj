@@ -12,7 +12,7 @@ import '../../form/input_field.dart';
 import '../../polish/polish.dart';
 import '../quiz_card_option.dart';
 
-/// Passo 2 do Nível 1: Método de Cobrança & Chave PIX
+/// Passo 1 do Nível 1: Faturamento & Cobrança (com transparência de taxas e automação)
 class QuizStepBilling extends ConsumerStatefulWidget {
   final VoidCallback onNext;
 
@@ -25,14 +25,14 @@ class QuizStepBilling extends ConsumerStatefulWidget {
   ConsumerState<QuizStepBilling> createState() => _QuizStepBillingState();
 }
 
-enum _BillingChoice { mercadoPago, pixManual, later }
+enum _BillingChoice { pixManual, mercadoPago, later }
 
 class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
   _BillingChoice _choice = _BillingChoice.pixManual;
-  final _pixKeyController = TextEditingController();
   PixKeyType _pixKeyType = PixKeyType.cpf;
-  bool _mpConnected = false;
+  final TextEditingController _pixKeyController = TextEditingController();
   bool _saving = false;
+  bool _mpConnected = false;
 
   @override
   void initState() {
@@ -61,11 +61,13 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
     if (academyId == null) return;
     final connected = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
+        fullscreenDialog: true,
         builder: (_) => MercadoPagoConnectScreen(
           academyId: academyId,
         ),
       ),
     );
+
     if (connected == true && mounted) {
       setState(() {
         _mpConnected = true;
@@ -96,7 +98,7 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao salvar financeiro: $e')),
+          SnackBar(content: Text('Erro ao salvar preferência de cobrança: $e')),
         );
       }
     } finally {
@@ -126,10 +128,12 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
             ],
           ).entrance(),
           const SizedBox(height: 20),
+
+          // Opção 1: PIX Direto
           QuizCardOption(
             title: 'PIX Direto na sua Conta',
-            subtitle: 'Receba 100% do valor direto na sua conta bancária sem taxas.',
-            badgeText: 'Mais Popular',
+            subtitle: 'Receba 100% do valor (0% de taxa). Você confere e dá baixa manual no sistema.',
+            badgeText: '0% de Taxa',
             badgeColor: AppTheme.success,
             icon: LucideIcons.qrCode,
             isSelected: _choice == _BillingChoice.pixManual,
@@ -147,8 +151,50 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Informações de Transparência
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.divider),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(LucideIcons.checkCircle2, color: AppTheme.success, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Vantagem: 100% do valor vai direto para sua conta sem nenhuma taxa.',
+                                style: AppTheme.bodySmall.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            const Icon(LucideIcons.clock, color: AppTheme.textSecondary, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Funcionamento: O aluno paga na sua chave e você dá a baixa manual no app.',
+                                style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                   Text(
-                    'Tipo de Chave PIX',
+                    'Tipo de Chave PIX da Academia',
                     style: AppTheme.bodySmall.copyWith(
                       fontWeight: FontWeight.w700,
                       color: AppTheme.textSecondary,
@@ -191,10 +237,12 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
               ),
             ),
           ],
+
+          // Opção 2: Mercado Pago
           QuizCardOption(
-            title: 'Mercado Pago (Automático)',
-            subtitle: 'Cobrança por cartão recorrente e PIX com baixa automática no sistema.',
-            badgeText: 'Automatizado',
+            title: 'Mercado Pago (Baixa Automática)',
+            subtitle: 'O aluno paga e o sistema dá baixa sozinho em 1 segundo via Webhook. Suporta Cartão Recorrente.',
+            badgeText: '100% Automático',
             badgeColor: AppTheme.info,
             icon: LucideIcons.creditCard,
             isSelected: _choice == _BillingChoice.mercadoPago,
@@ -218,6 +266,68 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Informações de Transparência do Mercado Pago
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.divider),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(LucideIcons.zap, color: AppTheme.info, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Vantagem: Baixa instantânea automática no sistema assim que o aluno paga (zero trabalho manual).',
+                                style: AppTheme.bodySmall.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(LucideIcons.creditCard, color: AppTheme.primary, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Cartão de Crédito: Permite cobrar mensalidades recorrentes no cartão dos alunos.',
+                                style: AppTheme.bodySmall.copyWith(color: AppTheme.textPrimary),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(LucideIcons.percent, color: AppTheme.warning, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Taxa do Mercado Pago: 0,99% por transação no PIX (cobrada pelo MP). O GraduaBJJ cobra 0% da plataforma.',
+                                style: AppTheme.bodySmall.copyWith(
+                                  color: AppTheme.textSecondary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
                   if (_mpConnected) ...[
                     Row(
                       children: [
@@ -234,7 +344,7 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Sua conta está ativa para receber e dar baixa automática nas mensalidades.',
+                      'Sua conta está conectada e pronta para receber com baixa automática.',
                       style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
                     ),
                   ] else ...[
@@ -243,7 +353,7 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
                         const Icon(LucideIcons.info, color: AppTheme.info, size: 20),
                         const SizedBox(width: 8),
                         Text(
-                          'Conexão Necessária',
+                          'Conectar sua Conta',
                           style: AppTheme.bodyMedium.copyWith(
                             fontWeight: FontWeight.w700,
                             color: AppTheme.textPrimary,
@@ -253,7 +363,7 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Para emitir cobranças com baixa automática, conecte sua conta do Mercado Pago:',
+                      'Conecte sua conta do Mercado Pago para ativar os pagamentos automáticos:',
                       style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
                     ),
                     const SizedBox(height: 12),
@@ -286,6 +396,8 @@ class _QuizStepBillingState extends ConsumerState<QuizStepBilling> {
               ),
             ),
           ],
+
+          // Opção 3: Configurar Mais Tarde
           QuizCardOption(
             title: 'Configurar financeiro mais tarde',
             subtitle: 'Pular este passo por enquanto e definir nas configurações depois.',
