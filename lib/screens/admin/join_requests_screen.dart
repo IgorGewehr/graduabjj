@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/sports.dart';
@@ -10,6 +11,7 @@ import '../../core/theme.dart';
 import '../../models/join_request.dart';
 import '../../models/student.dart';
 import '../../providers/join_request_providers.dart';
+import '../../providers/portal_providers.dart';
 import '../../services/firebase_service.dart';
 import '../../services/student_service.dart';
 import '../../services/team_service.dart';
@@ -301,6 +303,24 @@ class _AdminJoinRequestsScreenState
               child: const Text('Gerar'),
             )
           else ...[
+            IconButton(
+              tooltip: 'Compartilhar Convite',
+              icon: const Icon(LucideIcons.share2, size: 20),
+              onPressed: () {
+                final academyName = ref.read(academySettingsProvider).valueOrNull?.name ?? 'nossa academia';
+                final message = '🥋 *Convite da $academyName*\n\n'
+                    'Fala pessoal! O aplicativo oficial da nossa academia já está disponível para você acompanhar suas presenças, graduações e treinos.\n\n'
+                    '📲 *1. Baixe o app no Google Play:*\n'
+                    'https://play.google.com/store/apps/details?id=com.tensorroot.graduabjj\n\n'
+                    '🔑 *2. Nosso Código de Acesso:*\n'
+                    '*$code*\n\n'
+                    '👉 *Como entrar:*\n'
+                    '• Baixe e abra o app\n'
+                    '• Toque em "Entrar com Código"\n'
+                    '• Digite o código *$code* para entrar na nossa turma!';
+                Share.share(message);
+              },
+            ),
             IconButton(
               tooltip: 'Copiar',
               icon: const Icon(LucideIcons.copy, size: 20),

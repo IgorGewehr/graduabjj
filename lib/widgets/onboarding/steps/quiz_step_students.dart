@@ -212,9 +212,18 @@ class _QuizStepStudentsState extends ConsumerState<QuizStepStudents> {
                       onPressed: (code == null || code.isEmpty)
                           ? null
                           : () {
-                              Share.share(
-                                '🥋 Fala pessoal! Baixem o app da nossa academia e entrem com o nosso código: $code',
-                              );
+                              final academyName = ref.read(academySettingsProvider).valueOrNull?.name ?? 'nossa academia';
+                              final message = '🥋 *Convite da $academyName*\n\n'
+                                  'Fala pessoal! O aplicativo oficial da nossa academia já está disponível para você acompanhar suas presenças, graduações e treinos.\n\n'
+                                  '📲 *1. Baixe o app no Google Play:*\n'
+                                  'https://play.google.com/store/apps/details?id=com.tensorroot.graduabjj\n\n'
+                                  '🔑 *2. Nosso Código de Acesso:*\n'
+                                  '*$code*\n\n'
+                                  '👉 *Como entrar:*\n'
+                                  '• Baixe e abra o app\n'
+                                  '• Toque em "Entrar com Código"\n'
+                                  '• Digite o código *$code* para entrar na nossa turma!';
+                              Share.share(message);
                             },
                       icon: const Icon(LucideIcons.share2, size: 18),
                       label: const Text('Compartilhar no WhatsApp'),
