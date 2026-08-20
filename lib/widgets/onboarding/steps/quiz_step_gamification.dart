@@ -149,20 +149,57 @@ class _QuizStepGamificationState extends ConsumerState<QuizStepGamification> {
                   style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
                 ),
                 const SizedBox(height: 14),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [8, 12, 16, 20].map((goal) {
-                    final isSelected = _monthlyGoal == goal;
-                    return ChoiceChip(
-                      label: Text('$goal treinos/mês'),
-                      selected: isSelected,
-                      selectedColor: AppTheme.textPrimary,
-                      backgroundColor: Colors.white,
-                      labelStyle: TextStyle(
-                        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                        color: isSelected ? Colors.white : AppTheme.textPrimary,
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 10,
+                  children: [
+                    (goal: 8, label: '8 treinos/mês', sub: '2x por semana'),
+                    (goal: 12, label: '12 treinos/mês', sub: '3x por semana (Ideal)'),
+                    (goal: 16, label: '16 treinos/mês', sub: '4x por semana'),
+                    (goal: 20, label: '20 treinos/mês', sub: 'Todos os dias'),
+                  ].map((item) {
+                    final isSelected = _monthlyGoal == item.goal;
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () => setState(() => _monthlyGoal = item.goal),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                          decoration: BoxDecoration(
+                            color: isSelected ? AppTheme.textPrimary : Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected ? AppTheme.textPrimary : AppTheme.divider,
+                              width: isSelected ? 1.5 : 1.0,
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.label,
+                                style: AppTheme.bodySmall.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: isSelected ? Colors.white : AppTheme.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                item.sub,
+                                style: AppTheme.labelSmall.copyWith(
+                                  color: isSelected
+                                      ? Colors.white.withValues(alpha: 0.8)
+                                      : AppTheme.textSecondary,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                      onSelected: (_) => setState(() => _monthlyGoal = goal),
                     );
                   }).toList(),
                 ),

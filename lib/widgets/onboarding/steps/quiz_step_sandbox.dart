@@ -103,32 +103,39 @@ class _QuizStepSandboxState extends State<QuizStepSandbox> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.textPrimary.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(10),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppTheme.textPrimary.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(LucideIcons.flame, size: 18, color: AppTheme.textPrimary),
                           ),
-                          child: const Icon(LucideIcons.flame, size: 18, color: AppTheme.textPrimary),
-                        ),
-                        const SizedBox(width: 10),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Turma das 19:00',
-                              style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w800),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Turma das 19:00',
+                                  style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w800),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  'Treino Técnico Geral',
+                                  style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
                             ),
-                            Text(
-                              'Treino Técnico Geral',
-                              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-                            ),
-                          ],
-                        ),
-                      ],
+                          ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
