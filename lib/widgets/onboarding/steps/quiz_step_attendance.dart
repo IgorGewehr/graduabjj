@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../core/theme.dart';
@@ -9,7 +10,7 @@ import '../../../services/settings_service.dart';
 import '../../polish/polish.dart';
 import '../quiz_card_option.dart';
 
-/// Passo 4 do Nível 1: Método de Presença & Check-in
+/// Passo de Método de Presença & Check-in no Quiz
 class QuizStepAttendance extends ConsumerStatefulWidget {
   final VoidCallback onNext;
 
@@ -26,6 +27,8 @@ enum _AttendanceMethod { teacherApp, qrTatame, turnstile }
 
 class _QuizStepAttendanceState extends ConsumerState<QuizStepAttendance> {
   _AttendanceMethod _method = _AttendanceMethod.teacherApp;
+  String _vendor = 'control_id';
+  bool _blockOnOverdue = false;
   bool _saving = false;
 
   @override
@@ -35,6 +38,10 @@ class _QuizStepAttendanceState extends ConsumerState<QuizStepAttendance> {
     if (settings != null) {
       if (settings.accessControlEnabled) {
         _method = _AttendanceMethod.turnstile;
+        if (settings.accessControlVendor.isNotEmpty) {
+          _vendor = settings.accessControlVendor;
+        }
+        _blockOnOverdue = settings.accessControlBlockOnOverdue;
       } else if (settings.studentCheckinEnabled || settings.musculacaoSelfCheckin) {
         _method = _AttendanceMethod.qrTatame;
       } else {
@@ -65,8 +72,8 @@ class _QuizStepAttendanceState extends ConsumerState<QuizStepAttendance> {
           case _AttendanceMethod.turnstile:
             await service.updateAccessControl(
               enabled: true,
-              vendor: 'control_id',
-              blockOnOverdue: false,
+              vendor: _vendor,
+              blockOnOverdue: _blockOnOverdue,
             );
             break;
         }
@@ -86,6 +93,14 @@ class _QuizStepAttendanceState extends ConsumerState<QuizStepAttendance> {
 
   @override
   Widget build(BuildContext context) {
+    final vendors = [
+      (id: 'control_id', name: 'Control iD (Facial/Digital)'),
+      (id: 'henry', name: 'Henry'),
+      (id: 'intelbras', name: 'Intelbras'),
+      (id: 'topdata', name: 'Topdata'),
+      (id: 'kiosk', name: 'Totem Kiosk (Tablet)'),
+    ];
+
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
       child: Column(
@@ -131,6 +146,104 @@ class _QuizStepAttendanceState extends ConsumerState<QuizStepAttendance> {
             isSelected: _method == _AttendanceMethod.turnstile,
             onTap: () => setState(() => _method = _AttendanceMethod.turnstile),
           ),
+          if (_method == _AttendanceMethod.turnstile) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppTheme.divider),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.scanFace, color: AppTheme.primary, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Configuração da Catraca',
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Marca / Fabricante do seu equipamento:',
+                    style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: vendors.map((v) {
+                      final isSelected = _vendor == v.id;
+                      return ChoiceChip(
+                        label: Text(v.name),
+                        selected: isSelected,
+                        selectedColor: AppTheme.textPrimary,
+                        backgroundColor: Colors.white,
+                        labelStyle: TextStyle(
+                          fontSize: 12,
+                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                          color: isSelected ? Colors.white : AppTheme.textPrimary,
+                        ),
+                        onSelected: (_) => setState(() => _vendor = v.id),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: _blockOnOverdue,
+                        activeColor: AppTheme.textPrimary,
+                        onChanged: (val) => setState(() => _blockOnOverdue = val ?? false),
+                      ),
+                      Expanded(
+                        child: Text(
+                          'Bloquear giro de alunos inadimplentes',
+                          style: AppTheme.bodySmall.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => context.push('/admin/catracas'),
+                      icon: const Icon(LucideIcons.settings, size: 16),
+                      label: const Text('Cadastrar IP / Dispositivo Agora'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.textPrimary,
+                        side: const BorderSide(color: AppTheme.textPrimary),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Você também pode continuar o quiz e cadastrar os aparelhos depois em Configurações > Catracas.',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 28),
           SizedBox(
             width: double.infinity,
