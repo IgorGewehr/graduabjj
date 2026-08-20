@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme.dart';
 import '../../models/academy.dart' show AcademyProfile, AcademyProfileExtension;
-import '../../providers/billing_provider.dart';
 import '../../providers/onboarding_providers.dart';
 import '../../providers/providers.dart';
 import '../polish/polish.dart';
@@ -75,20 +74,14 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
     final settingsAsync = ref.watch(academySettingsProvider);
     final classesAsync = ref.watch(classesProvider);
     final plansAsync = ref.watch(activePlansProvider);
-    final studentsAsync = ref.watch(hasStudentsExistProvider);
     final attendanceAsync = ref.watch(hasAttendanceExistProvider);
-    // Fatia 0.7 (SPEC_ONBOARDING_2026-07.md): status combinado da automação
-    // de cobrança — drives o novo passo `billing` abaixo.
-    final billingAsync = ref.watch(billingAutomationStatusProvider);
 
     // Qualquer fonte ainda carregando → esqueleto discreto (mantém o lugar do
     // cartão sem "pular" o layout do dashboard).
     final anyLoading = settingsAsync.isLoading ||
         classesAsync.isLoading ||
         plansAsync.isLoading ||
-        studentsAsync.isLoading ||
-        attendanceAsync.isLoading ||
-        billingAsync.isLoading;
+        attendanceAsync.isLoading;
     if (anyLoading) {
       return const _ChecklistSkeleton();
     }
@@ -99,9 +92,7 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
     if (settings == null ||
         classesAsync.hasError ||
         plansAsync.hasError ||
-        studentsAsync.hasError ||
-        attendanceAsync.hasError ||
-        billingAsync.hasError) {
+        attendanceAsync.hasError) {
       return const SizedBox.shrink();
     }
 
@@ -110,28 +101,11 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
     final classes = classesAsync.valueOrNull ?? const [];
     final hasClass = classes.isNotEmpty;
     final hasPlan = (plansAsync.valueOrNull ?? const []).isNotEmpty;
-    final mpConnected = settings.mpConnected;
-    final hasStudent = studentsAsync.valueOrNull ?? false;
     final hasAttendance = attendanceAsync.valueOrNull ?? false;
-    final whatsappEnabled = billingAsync.valueOrNull?.whatsappEnabled ?? false;
     final dismissed = settings.onboardingDismissedSteps;
 
-    // Decisão 0.6: `AcademySettings.profile` era ignorado pelo checklist —
-    // passa a esconder "Crie sua 1ª turma" pra fitness (sem-turma/sem-faixa
-    // por design) e a trocar a copy do passo de presença/check-in.
     final profile = AcademyProfileExtension.fromString(settings.profile);
     final isFitness = profile == AcademyProfile.fitness;
-
-    // Beco sem saída detectado no diagnóstico: aluno cadastrado mas em
-    // NENHUMA turma fica invisível na chamada (que filtra por
-    // studentIds da turma). Quando já existe turma, "concluído" nesse
-    // passo exige matrícula de verdade — não só o cadastro do aluno.
-    // Sem turma ainda, mantém o critério antigo (o passo "Crie sua 1ª
-    // turma" já cobre esse caso separadamente).
-    final hasEnrolledStudent = classes.any((c) => c.studentIds.isNotEmpty);
-    final studentsStepDone = hasClass ? hasEnrolledStudent : hasStudent;
-    final studentsNeedEnrollment =
-        hasClass && hasStudent && !hasEnrolledStudent;
 
     // Ordem money-first (SPEC_ONBOARDING_2026-07.md §1.3, diretiva registrada
     // em docs/b2c/ATIVACAO_PROFESSOR_2026-07.md linha 47): perfil → turma
@@ -166,57 +140,15 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
         route: '/admin/financeiro',
         done: hasPlan,
       ),
-      // NOVO (Fatia 3/§1.3) — o aha da ativação: mesmo componente
-      // `BillingActivationStep` do wizard (§1.2), alcançado aqui pelo
-      // checklist para que a base instalada inteira ganhe o aha sem esperar
-      // o wizard (Fatia 7, fora desta fatia).
-      _ActivationStep(
-        id: 'billing',
-        icon: LucideIcons.messageCircle,
-        title: 'Ative a cobrança automática',
-        subtitle: 'Mensagem de WhatsApp com PIX, sozinha, quando o aluno atrasar',
-        route: '/admin/comece-aqui/cobranca',
-        done: whatsappEnabled,
-        dismissible: true,
-      ),
-      _ActivationStep(
-        id: 'mp',
-        icon: LucideIcons.wallet,
-        title: 'Conecte o Mercado Pago',
-        // Atualizado (§1.3): deixa claro que o WhatsApp acima já funciona
-        // sem o MP — o Mercado Pago só acrescenta o PIX automático.
-        subtitle: 'Para incluir PIX automático nas cobranças e receber online',
-        // Rota PRECISA: Settings → aba Financeiro → scroll + destaque no card.
-        route: '/admin/configuracoes?feature=payments',
-        done: mpConnected,
-        recommended: true,
-        dismissible: true, // opcional → pode ser dispensado
-      ),
-      _ActivationStep(
-        id: 'students',
-        icon: LucideIcons.userPlus,
-        title: 'Cadastre seus alunos',
-        subtitle: studentsNeedEnrollment
-            ? 'Coloque seus alunos numa turma'
-            : 'Adicione alunos e gere o código de acesso de cada um',
-        route: '/admin/alunos',
-        done: studentsStepDone,
-      ),
       _ActivationStep(
         id: 'attendance',
         icon: LucideIcons.qrCode,
-        // Copy condicional por perfil (§1.3): "check-in" pra fitness (sem
-        // chamada de turma), "presença" pra fight/hybrid — só texto, mesma
-        // lógica de `done` dos dois casos.
         title: isFitness ? 'Registre o 1º check-in' : 'Registre a 1ª presença',
         subtitle: isFitness
             ? 'Faça o primeiro check-in na academia'
             : 'Faça a primeira chamada de treino',
         route: '/admin/chamada',
         done: hasAttendance,
-        // Sem 2ª via pra mesma rota: o card "Chamada" das Ações Rápidas,
-        // logo abaixo nesta tela, é SEMPRE visível e já cobre esse destino
-        // (decisão do dono: nada de botões duplicados pra mesma função).
         navigable: false,
       ),
     ];
@@ -232,11 +164,6 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
     if (total == 0 || doneCount >= total) return const SizedBox.shrink();
 
     final progress = doneCount / total;
-
-    Future<void> dismissStep(String id) async {
-      await ref.read(settingsServiceProvider)?.dismissOnboardingStep(id);
-      ref.invalidate(academySettingsProvider);
-    }
 
     // Mesmo DNA visual dos cards de seção do dashboard (HOJE/RADAR): flat,
     // hairline divider e raio 16 — nada de sombra destoando no topo da tela.
@@ -328,9 +255,6 @@ class _ActivationChecklistState extends ConsumerState<ActivationChecklist> {
                           onTap: step.navigable
                               ? () => context.go(step.route)
                               : null,
-                          onDismiss: step.dismissible && !step.done
-                              ? () => dismissStep(step.id)
-                              : null,
                         ),
                       const SizedBox(height: 4),
                       Align(
@@ -369,12 +293,6 @@ class _ActivationStep {
   final String route;
   final bool done;
 
-  /// Marca o passo como "Recomendado" (badge) quando ainda pendente.
-  final bool recommended;
-
-  /// Pode ser dispensado pelo dono ("não vou usar") — passos opcionais.
-  final bool dismissible;
-
   /// Quando `false`, o tile não abre `route` ao tocar (decisão do dono: sem
   /// funções repetidas na mesma tela) — usado só quando a mesma rota já tem
   /// um card SEMPRE visível nas Ações Rápidas logo abaixo, no dashboard.
@@ -387,8 +305,6 @@ class _ActivationStep {
     required this.subtitle,
     required this.route,
     required this.done,
-    this.recommended = false,
-    this.dismissible = false,
     this.navigable = true,
   });
 }
@@ -404,13 +320,9 @@ class _ActivationStepTile extends StatelessWidget {
   /// pelas Ações Rápidas.
   final VoidCallback? onTap;
 
-  /// Quando não-nulo, o passo pode ser dispensado (mostra um "×" discreto).
-  final VoidCallback? onDismiss;
-
   const _ActivationStepTile({
     required this.step,
     required this.onTap,
-    this.onDismiss,
   });
 
   @override
@@ -441,29 +353,19 @@ class _ActivationStepTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          step.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTheme.bodyMedium.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: done
-                                ? AppTheme.textSecondary
-                                : AppTheme.textPrimary,
-                            decoration:
-                                done ? TextDecoration.lineThrough : null,
-                            decorationColor: AppTheme.textSecondary,
-                          ),
-                        ),
-                      ),
-                      if (step.recommended && !done) ...[
-                        const SizedBox(width: 8),
-                        const _RecommendedBadge(),
-                      ],
-                    ],
+                  Text(
+                    step.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: done
+                          ? AppTheme.textSecondary
+                          : AppTheme.textPrimary,
+                      decoration:
+                          done ? TextDecoration.lineThrough : null,
+                      decorationColor: AppTheme.textSecondary,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -478,17 +380,6 @@ class _ActivationStepTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            // "Dispensar" (× discreto) para passos opcionais pendentes.
-            if (onDismiss != null)
-              IconButton(
-                onPressed: onDismiss,
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                tooltip: 'Dispensar',
-                icon: const Icon(LucideIcons.x,
-                    size: 16, color: AppTheme.textSecondary),
-              ),
             // Estado: check verde (feito), seta (pendente e navegável) ou
             // indicador neutro (pendente mas sem 2ª via — ver `navigable`).
             _TrailingIndicator(done: done, navigable: step.navigable),
@@ -549,28 +440,7 @@ class _TrailingIndicator extends StatelessWidget {
   }
 }
 
-/// Pequeno selo "Recomendado".
-class _RecommendedBadge extends StatelessWidget {
-  const _RecommendedBadge();
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: AppTheme.info.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        'Recomendado',
-        style: AppTheme.labelSmall.copyWith(
-          color: AppTheme.info,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
 
 /// Esqueleto exibido enquanto as fontes de dados resolvem.
 class _ChecklistSkeleton extends StatelessWidget {
