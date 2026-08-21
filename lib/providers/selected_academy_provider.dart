@@ -64,6 +64,20 @@ class SelectedAcademyNotifier extends StateNotifier<SelectedAcademyState> {
 
   SelectedAcademyNotifier(this._ref) : super(const SelectedAcademyState()) {
     _initialize();
+    _listenToMappingChanges();
+  }
+
+  void _listenToMappingChanges() {
+    _ref.listen<AsyncValue<UserAcademyMapping?>>(userAcademyMappingProvider, (previous, next) {
+      final mapping = next.valueOrNull;
+      if (mapping != null && mapping.academyIds.isNotEmpty) {
+        final currentSelected = _ref.read(selectedAcademyIdProvider);
+        if (currentSelected == null || !mapping.academyIds.contains(currentSelected)) {
+          final primaryId = mapping.primaryAcademyId ?? mapping.academyIds.first;
+          _selectAcademyInternal(primaryId, mapping);
+        }
+      }
+    });
   }
 
   /// Initialize with user's primary academy

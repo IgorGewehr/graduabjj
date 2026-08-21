@@ -166,6 +166,14 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Escuta em tempo real: se o mestre aprovar/negar solicitações (inclusive em segundo plano),
+    // a lista de alunos recarrega automaticamente e exibe o novo aluno com feedback visual.
+    ref.listen<int>(pendingJoinRequestsCountProvider, (previous, next) {
+      if (previous != null && next != previous) {
+        _loadStudents();
+      }
+    });
+
     // Master switch (mesmo campo que gateia o botão de check-in do próprio
     // aluno em lutador_hub_screen.dart) — decide se a ação "Marcar presença
     // de hoje" aparece nos cards abaixo. `select` evita rebuild da tela
@@ -425,7 +433,12 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: () => context.push('/admin/alunos/solicitacoes'),
+          onTap: () async {
+            await context.push('/admin/alunos/solicitacoes');
+            if (mounted) {
+              _loadStudents();
+            }
+          },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(

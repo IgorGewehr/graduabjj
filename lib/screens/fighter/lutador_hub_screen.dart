@@ -95,6 +95,26 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Escuta em tempo real para transicionar a tela no exato segundo em que o mestre aprova
+    ref.listen<AsyncValue<PendingJoinRequest?>>(pendingJoinRequestProvider, (previous, next) {
+      if (previous?.valueOrNull != null && next.valueOrNull == null) {
+        ref.invalidate(userAcademyMappingProvider);
+        ref.invalidate(currentUserProvider);
+        ref.invalidate(currentStudentProvider);
+        ref.read(selectedAcademyProvider.notifier).refreshAcademyCache();
+      }
+    });
+
+    ref.listen<AsyncValue<UserAcademyMapping?>>(userAcademyMappingProvider, (previous, next) {
+      final prevIds = previous?.valueOrNull?.academyIds ?? [];
+      final nextIds = next.valueOrNull?.academyIds ?? [];
+      if (nextIds.length > prevIds.length) {
+        ref.invalidate(currentUserProvider);
+        ref.invalidate(currentStudentProvider);
+        ref.read(selectedAcademyProvider.notifier).refreshAcademyCache();
+      }
+    });
+
     final user = ref.watch(currentUserProvider).valueOrNull;
     final student = ref.watch(currentStudentProvider).valueOrNull;
     // Solicitação de entrada pendente (aluno se cadastrou pelo código e aguarda

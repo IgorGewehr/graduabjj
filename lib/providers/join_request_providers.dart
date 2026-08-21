@@ -9,7 +9,8 @@ import 'auth_provider.dart';
 /// na aba Academia. Reage em tempo real (aprovar/negar limpa o ponteiro).
 final pendingJoinRequestProvider =
     StreamProvider<PendingJoinRequest?>((ref) {
-  final uid = ref.watch(currentUserProvider).valueOrNull?.id;
+  final authUser = ref.watch(authStateProvider).valueOrNull;
+  final uid = authUser?.uid ?? ref.watch(currentUserProvider).valueOrNull?.id;
   if (uid == null) return Stream.value(null);
   return FirebaseService.firestore
       .collection('users')

@@ -46,15 +46,21 @@ final globalUserProvider = FutureProvider<GlobalUser?>((ref) async {
 });
 
 /// User academy mapping provider - fetches from userAcademyMapping collection
-final userAcademyMappingProvider = FutureProvider<UserAcademyMapping?>((
+/// Uses StreamProvider so that when a join request is approved by the master,
+/// the student account reacts and transitions UI instantly without restarting the app.
+final userAcademyMappingProvider = StreamProvider<UserAcademyMapping?>((
   ref,
-) async {
+) {
   final authState = ref.watch(authStateProvider);
   final firebaseUser = authState.valueOrNull;
 
-  if (firebaseUser == null) return null;
+  if (firebaseUser == null) return Stream.value(null);
 
-  return await globalUserService.getUserAcademyMapping(firebaseUser.uid);
+  return FirebaseFirestore.instance
+      .collection('userAcademyMapping')
+      .doc(firebaseUser.uid)
+      .snapshots()
+      .map((snap) => snap.exists ? UserAcademyMapping.fromFirestore(snap) : null);
 });
 
 /// Whether the current user is a free user (not linked to any academy)
@@ -65,9 +71,9 @@ final isFreeUserProvider = Provider<bool>((ref) {
 
 /// Current user provider with robust fallback logic.
 ///
-/// Watches [selectedAcademyIdProvider] via `.select` so that switching the
-/// active academy automatically rebuilds this provider — no manual
-/// `ref.invalidate(currentUserProvider)` needed in the academy switcher.
+/// Watches [selectedAcademyIdProvider] via `.select` and [userAcademyMappingProvider]
+/// so that switching academy or being approved by master automatically rebuilds this
+/// provider — no app restart needed.
 final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   final authState = ref.watch(authStateProvider);
   final firebaseUser = authState.valueOrNull;
@@ -78,6 +84,11 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   final selectedAcademyId = ref.watch(
     selectedAcademyIdProvider.select((id) => id),
   );
+
+  // Watch userAcademyMappingProvider so whenever the student's mapping doc updates
+  // (e.g. master approves the request), currentUserProvider rebuilds automatically!
+  final mappingAsync = ref.watch(userAcademyMappingProvider);
+  final mapping = mappingAsync.valueOrNull;
 
   if (firebaseUser == null) {
     print('[AUTH] No firebase user');
@@ -104,9 +115,6 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   }
 
   // Step 2: Get academy mapping
-  final mapping = await globalUserService.getUserAcademyMapping(
-    firebaseUser.uid,
-  );
   String? academyId;
 
   if (mapping != null && mapping.academyIds.isNotEmpty) {

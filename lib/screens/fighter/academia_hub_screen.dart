@@ -30,6 +30,28 @@ class AcademiaHubScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Escuta em tempo real para transicionar a tela no exato segundo em que o mestre aprova
+    ref.listen<AsyncValue<PendingJoinRequest?>>(pendingJoinRequestProvider, (previous, next) {
+      if (previous?.valueOrNull != null && next.valueOrNull == null) {
+        ref.invalidate(userAcademyMappingProvider);
+        ref.invalidate(currentUserProvider);
+        ref.invalidate(currentStudentProvider);
+        ref.invalidate(academySettingsProvider);
+        ref.read(selectedAcademyProvider.notifier).refreshAcademyCache();
+      }
+    });
+
+    ref.listen<AsyncValue<UserAcademyMapping?>>(userAcademyMappingProvider, (previous, next) {
+      final prevIds = previous?.valueOrNull?.academyIds ?? [];
+      final nextIds = next.valueOrNull?.academyIds ?? [];
+      if (nextIds.length > prevIds.length) {
+        ref.invalidate(currentUserProvider);
+        ref.invalidate(currentStudentProvider);
+        ref.invalidate(academySettingsProvider);
+        ref.read(selectedAcademyProvider.notifier).refreshAcademyCache();
+      }
+    });
+
     final settingsAsync = ref.watch(academySettingsProvider);
     // Sem academia: ou o aluno tem uma SOLICITAÇÃO pendente (aguardando o
     // professor aprovar) → tela de espera; ou não tem nada → prompt de entrar.

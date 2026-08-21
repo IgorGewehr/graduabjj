@@ -116,9 +116,13 @@ class _AdminJoinRequestsScreenState
         action: action,
         linkStudentId: linkStudentId,
       );
+      ref.invalidate(currentStudentProvider);
+      ref.invalidate(userAcademyMappingProvider);
+      ref.invalidate(dashboardStatsProvider);
+      ref.invalidate(pendingJoinRequestsCountProvider);
       if (mounted) {
         context.showSuccess(action == 'approve'
-            ? '${req.fullName} aprovado!'
+            ? '${req.fullName} aprovado com sucesso! Ficha criada e vinculada.'
             : 'Solicitação de ${req.fullName} negada.');
       }
     } catch (e) {
