@@ -298,7 +298,17 @@ class MercadoPagoService {
           await _functions.httpsCallable('startMercadoPagoConnect').call({
         'academyId': academyId,
       });
-      return (result.data as Map?)?['url'] as String?;
+      final rawUrl = (result.data as Map?)?['url'] as String?;
+      if (rawUrl == null) return null;
+      // Garante que a URL use o domínio do Brasil (auth.mercadopago.com.br) para
+      // que a tela de autorização abra sempre em Português.
+      if (rawUrl.startsWith('https://auth.mercadopago.com/')) {
+        return rawUrl.replaceFirst(
+          'https://auth.mercadopago.com/',
+          'https://auth.mercadopago.com.br/',
+        );
+      }
+      return rawUrl;
     } catch (e) {
       print('[MercadoPago] startConnect exception: $e');
       return null;
