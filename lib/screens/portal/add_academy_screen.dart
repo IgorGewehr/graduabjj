@@ -9,6 +9,7 @@ import '../../core/theme.dart';
 import '../../providers/providers.dart';
 import '../../services/firebase_service.dart';
 import '../../services/link_code_service.dart';
+import '../../services/team_service.dart';
 import '../../widgets/cached_image.dart';
 import '../../widgets/polish/polish.dart';
 
@@ -35,6 +36,7 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
   String? _academyName;
   String? _academyLogoUrl;
   String? _studentName;
+  bool _isAcademyJoinCodeMode = false;
 
   @override
   void dispose() {
@@ -359,59 +361,91 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
       _errorMessage = null;
     });
 
+    final raw = code.trim().toUpperCase();
+
     try {
-      // BUG FIX ("código inválido" ao entrar numa 2ª academia): a versão
-      // anterior listava TODAS as academias (rules: belongsToAcademy → o aluno
-      // de outra academia é NEGADO e caía no catch). O caminho certo é o MESMO
-      // do cadastro: collectionGroup em linkCodes (as rules liberam código
-      // não-usado explicitamente, e o índice CG code+usedAt já existe).
-      final validation = await validateCodeGlobally(code);
-      if (!validation.valid || validation.linkCode == null) {
-        setState(() {
-          _isValidating = false;
-          _errorMessage = validation.error ?? 'Codigo invalido ou ja utilizado';
-        });
-        return;
-      }
-      final linkCode = validation.linkCode!;
-      final foundAcademyId = linkCode.academyId;
-
-      // Check if already linked to this academy
-      final mapping = ref.read(userAcademyMappingProvider).valueOrNull;
-      if (mapping?.academyIds.contains(foundAcademyId) == true) {
-        setState(() {
-          _isValidating = false;
-          _errorMessage = 'Voce ja esta vinculado a esta academia';
-        });
-        return;
-      }
-
-      // Nome/logo da academia: o aluno ainda NÃO é membro, então essa leitura
-      // pode ser negada pelas rules — é só decorativa. Best-effort com
-      // fallback; o nome do aluno vem do próprio doc do código (studentName).
-      String academyName = 'Academia';
-      String? academyLogoUrl;
+      // 1. Tenta o código ÚNICO da academia (multi-uso - ilimitado)
+      Map<String, dynamic>? acad;
       try {
-        final academyDoc = await FirebaseService.firestore
-            .collection('academies')
-            .doc(foundAcademyId)
-            .get();
-        academyName = academyDoc.data()?['name'] ?? 'Academia';
-        academyLogoUrl = academyDoc.data()?['logoUrl'];
-      } catch (_) {/* sem acesso pré-vínculo: segue com fallback */}
+        acad = await teamService.resolveAcademyCode(raw);
+      } catch (_) {
+        try {
+          await Future.delayed(const Duration(milliseconds: 350));
+          acad = await teamService.resolveAcademyCode(raw);
+        } catch (_) {}
+      }
+
+      if (!mounted) return;
+      if (acad != null && acad['found'] == true) {
+        final foundAcademyId = acad['academyId']?.toString() ?? '';
+        final mapping = ref.read(userAcademyMappingProvider).valueOrNull;
+        if (mapping?.academyIds.contains(foundAcademyId) == true) {
+          setState(() {
+            _isValidating = false;
+            _errorMessage = 'Você já está vinculado a esta academia.';
+          });
+          return;
+        }
+
+        setState(() {
+          _isValidating = false;
+          _academyId = foundAcademyId;
+          _academyName = acad!['academyName']?.toString() ?? 'Academia';
+          _academyLogoUrl = null;
+          _studentName = null;
+          _isAcademyJoinCodeMode = true;
+        });
+        return;
+      }
+
+      // 2. Se não for código de academia, tenta o código de aluno legado
+      final validation = await validateCodeGlobally(raw);
+      if (validation.valid && validation.linkCode != null) {
+        final linkCode = validation.linkCode!;
+        final foundAcademyId = linkCode.academyId;
+
+        final mapping = ref.read(userAcademyMappingProvider).valueOrNull;
+        if (mapping?.academyIds.contains(foundAcademyId) == true) {
+          setState(() {
+            _isValidating = false;
+            _errorMessage = 'Você já está vinculado a esta academia.';
+          });
+          return;
+        }
+
+        String academyName = 'Academia';
+        String? academyLogoUrl;
+        try {
+          final academyDoc = await FirebaseService.firestore
+              .collection('academies')
+              .doc(foundAcademyId)
+              .get();
+          academyName = academyDoc.data()?['name'] ?? 'Academia';
+          academyLogoUrl = academyDoc.data()?['logoUrl'];
+        } catch (_) {}
+
+        setState(() {
+          _isValidating = false;
+          _academyId = foundAcademyId;
+          _academyName = academyName;
+          _academyLogoUrl = academyLogoUrl;
+          _studentName =
+              linkCode.studentName.isNotEmpty ? linkCode.studentName : null;
+          _isAcademyJoinCodeMode = false;
+        });
+        return;
+      }
 
       setState(() {
         _isValidating = false;
-        _academyId = foundAcademyId;
-        _academyName = academyName;
-        _academyLogoUrl = academyLogoUrl;
-        _studentName =
-            linkCode.studentName.isNotEmpty ? linkCode.studentName : null;
+        _errorMessage =
+            'Código não encontrado. Verifique se digitou os 6 caracteres corretamente.';
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isValidating = false;
-        _errorMessage = 'Erro ao validar codigo. Tente novamente.';
+        _errorMessage = 'Erro ao validar código. Tente novamente.';
       });
     }
   }
@@ -423,6 +457,7 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
       _academyName = null;
       _academyLogoUrl = null;
       _studentName = null;
+      _isAcademyJoinCodeMode = false;
       _errorMessage = null;
     });
     _codeFocusNode.requestFocus();
@@ -436,24 +471,41 @@ class _AddAcademyScreenState extends ConsumerState<AddAcademyScreen> {
     });
 
     try {
-      final authService = ref.read(authServiceProvider);
-      await authService.linkStudentAccount(
-        _codeController.text.toUpperCase(),
-        _academyId!,
-      );
+      final code = _codeController.text.trim().toUpperCase();
+      if (_isAcademyJoinCodeMode) {
+        await teamService.submitJoinRequest(code);
+        ref.invalidate(pendingJoinRequestProvider);
+        ref.invalidate(currentUserProvider);
+        ref.invalidate(currentStudentProvider);
 
-      // Refresh providers
-      ref.invalidate(userAcademiesInfoProvider);
-      ref.invalidate(userAcademyMappingProvider);
-      await ref.read(selectedAcademyProvider.notifier).refreshAcademyCache();
-
-      if (mounted) {
-        Celebration.confetti(context);
-        FeedbackUtils.showSuccess(
-          context,
-          'Vinculado a $_academyName com sucesso!',
+        if (mounted) {
+          Celebration.confetti(context);
+          FeedbackUtils.showSuccess(
+            context,
+            'Solicitação enviada para $_academyName! Aguardando aprovação do mestre.',
+          );
+          context.pop();
+        }
+      } else {
+        final authService = ref.read(authServiceProvider);
+        await authService.linkStudentAccount(
+          code,
+          _academyId!,
         );
-        context.pop();
+
+        // Refresh providers
+        ref.invalidate(userAcademiesInfoProvider);
+        ref.invalidate(userAcademyMappingProvider);
+        await ref.read(selectedAcademyProvider.notifier).refreshAcademyCache();
+
+        if (mounted) {
+          Celebration.confetti(context);
+          FeedbackUtils.showSuccess(
+            context,
+            'Vinculado a $_academyName com sucesso!',
+          );
+          context.pop();
+        }
       }
     } catch (e) {
       setState(() {

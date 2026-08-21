@@ -119,13 +119,13 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     final raw = _codeController.text.trim().toUpperCase();
 
     try {
-      // Dispatch by length: 6 = student linkCode, 8 = instructor invite.
+      // Dispatch by length: 6 = student linkCode / academy code, 8 = instructor invite.
       if (raw.length == 8) {
         final found = await validateInstructorCodeGlobally(raw);
         if (!mounted) return;
         if (found == null) {
           setState(() {
-            _errorMessage = 'Codigo nao encontrado, expirado ou ja utilizado.';
+            _errorMessage = 'Código de instrutor não encontrado ou expirado.';
             _isLoading = false;
           });
           return;
@@ -139,12 +139,34 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         return;
       }
 
-      // Student flow (6 chars). Tenta primeiro o código POR-ALUNO (legado);
-      // se não for, tenta o código ÚNICO da academia (auto-cadastro novo).
-      final validation = await validateCodeGlobally(raw);
+      // 1. Tenta o código ÚNICO da academia (auto-cadastro multi-uso - principal).
+      Map<String, dynamic>? acad;
+      try {
+        acad = await teamService.resolveAcademyCode(raw);
+      } catch (_) {
+        // Retry rápido em caso de timeout / cold-start
+        try {
+          await Future.delayed(const Duration(milliseconds: 350));
+          acad = await teamService.resolveAcademyCode(raw);
+        } catch (_) {}
+      }
 
-      if (validation.valid) {
-        if (!mounted) return;
+      if (!mounted) return;
+      if (acad != null) {
+        setState(() {
+          _academyMode = true;
+          _academyName = acad!['academyName']?.toString() ?? 'Academia';
+          _validatedAcademyId = acad['academyId']?.toString();
+          _currentStep = _Step.register;
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // 2. Se não for código de academia, tenta o código individual por aluno (legado).
+      final validation = await validateCodeGlobally(raw);
+      if (!mounted) return;
+      if (validation.valid && validation.linkCode != null) {
         setState(() {
           _validatedLinkCode = validation.linkCode;
           _currentStep = _Step.register;
@@ -153,28 +175,15 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         return;
       }
 
-      // Não é código de aluno → é o código da academia?
-      final acad = await teamService.resolveAcademyCode(raw);
-      if (!mounted) return;
-      if (acad != null) {
-        setState(() {
-          _academyMode = true;
-          _academyName = acad['academyName']?.toString() ?? 'Academia';
-          _validatedAcademyId = acad['academyId']?.toString();
-          _currentStep = _Step.register;
-          _isLoading = false;
-        });
-        return;
-      }
-
+      // 3. Não encontrado em nenhum dos formatos
       setState(() {
-        _errorMessage = validation.error ?? 'Código não encontrado.';
+        _errorMessage = 'Código não encontrado. Verifique se digitou os 6 caracteres corretamente.';
         _isLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorMessage = 'Erro ao validar codigo. Tente novamente.';
+        _errorMessage = 'Erro ao validar código. Verifique sua conexão e tente novamente.';
         _isLoading = false;
       });
     }
