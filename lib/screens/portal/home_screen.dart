@@ -50,6 +50,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final studentId = student.valueOrNull?.id;
 
+    final effectiveDisplayName =
+        (currentUser.valueOrNull?.displayName.isNotEmpty == true)
+            ? currentUser.valueOrNull!.displayName
+            : (FirebaseAuth.instance.currentUser?.displayName?.isNotEmpty ==
+                    true
+                ? FirebaseAuth.instance.currentUser!.displayName!
+                : 'Aluno');
+
     return RefreshIndicator(
       color: Theme.of(context).colorScheme.primary,
       onRefresh: () async {
@@ -78,27 +86,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               data: (s) {
                 if (s == null) {
                   return _WelcomeHeader(
-                    userName: currentUser.valueOrNull?.displayName ?? 'Aluno',
+                    userName: effectiveDisplayName,
                   );
                 }
                 final primarySport = s.getPrimarySport();
                 // Sports without a graduation system (e.g. musculação, boxe)
                 // have no belt/grade — show the plain header instead.
                 if (sports[primarySport]?.gradeSystem == GradeSystem.none) {
-                  return _WelcomeHeader(userName: s.displayName);
+                  return _WelcomeHeader(userName: s.displayName.isNotEmpty ? s.displayName : effectiveDisplayName);
                 }
                 return _WelcomeHeaderWithBelt(
                   student: s,
-                  userName: s.displayName,
+                  userName: s.displayName.isNotEmpty ? s.displayName : effectiveDisplayName,
                   sports: s.getSports(),
                   primarySport: primarySport,
                 );
               },
               loading: () => _WelcomeHeader(
-                userName: currentUser.valueOrNull?.displayName ?? 'Aluno',
+                userName: effectiveDisplayName,
               ),
               error: (_, __) => _WelcomeHeader(
-                userName: currentUser.valueOrNull?.displayName ?? 'Aluno',
+                userName: effectiveDisplayName,
               ),
             ),
 

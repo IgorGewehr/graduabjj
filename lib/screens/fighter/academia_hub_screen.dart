@@ -139,36 +139,63 @@ class _PendingApprovalStateState
             ),
             const SizedBox(height: 24),
             Text(
-              'AGUARDANDO APROVAÇÃO',
+              'AGUARDANDO APROVAÇÃO DO MESTRE',
               textAlign: TextAlign.center,
               style: FighterTheme.heroLabel.copyWith(fontSize: 20),
             ),
             const SizedBox(height: 12),
             Container(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: FighterTheme.ink,
-                borderRadius: FighterTheme.chipBorderRadius,
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: Text(
-                widget.pending.academyName.toUpperCase(),
-                style: FighterTheme.heroLabelOnInk.copyWith(fontSize: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(LucideIcons.building2, size: 14, color: FighterTheme.bone),
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.pending.academyName.toUpperCase(),
+                    style: FighterTheme.heroLabelOnInk.copyWith(fontSize: 13),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 20),
             Text(
-              'Sua solicitação foi enviada ao professor. Assim que ele aprovar, '
-              'o tatame da academia — horários, presenças, graduação e mais — '
-              'aparece aqui automaticamente.\n\nEnquanto isso, o resto do app é '
-              'seu: registre treinos, acompanhe sua jornada e a galera.',
+              'Sua solicitação de entrada foi enviada para o professor da academia.\n\nAssim que o mestre aprovar seu cadastro, o acesso completo às turmas, horários e presenças da ${widget.pending.academyName} será liberado automaticamente aqui!\n\nEnquanto isso, você já pode registrar seus treinos pessoais e acompanhar sua evolução.',
               textAlign: TextAlign.center,
               style: FighterTheme.bodyVoice.copyWith(
-                color: FighterTheme.ink.withValues(alpha: 0.7),
+                color: FighterTheme.ink.withValues(alpha: 0.75),
                 height: 1.5,
               ),
             ),
             const SizedBox(height: 28),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () {
+                  HapticFeedback.lightImpact();
+                  ref.invalidate(pendingJoinRequestProvider);
+                  ref.invalidate(currentUserProvider);
+                  ref.invalidate(currentStudentProvider);
+                  context.showSuccess('Verificando aprovação...');
+                },
+                icon: const Icon(LucideIcons.refreshCw, size: 16),
+                label: const Text('VERIFICAR APROVAÇÃO'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: FighterTheme.ink,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             _cancelling
                 ? const SizedBox(
                     height: 20,

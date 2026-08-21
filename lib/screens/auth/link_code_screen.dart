@@ -53,6 +53,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
   // após criar a conta, envia uma SOLICITAÇÃO que o professor aprova.
   bool _academyMode = false;
   String? _academyName;
+  String? _validatedAcademyId;
 
   bool get _isInstructorMode => _validatedInstructorCode != null;
 
@@ -159,6 +160,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         setState(() {
           _academyMode = true;
           _academyName = acad['academyName']?.toString() ?? 'Academia';
+          _validatedAcademyId = acad['academyId']?.toString();
           _currentStep = _Step.register;
           _isLoading = false;
         });
@@ -377,7 +379,16 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         userId: user.uid,
         email: email,
         displayName: fullName,
+        phone: phone.isNotEmpty ? phone : null,
         accountType: AccountType.free,
+        pendingJoinRequest: _validatedAcademyId != null
+            ? {
+                'academyId': _validatedAcademyId,
+                'academyName': _academyName ?? 'Academia',
+                'requestId': user.uid,
+                'createdAt': DateTime.now().toIso8601String(),
+              }
+            : null,
       );
       await teamService.submitJoinRequest(
         code,
@@ -999,23 +1010,22 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
         // Title
         Text(
-          _academyMode ? 'Solicitação enviada!' : 'Conta criada com sucesso!',
+          _academyMode ? 'Solicitação Enviada!' : 'Conta criada com sucesso!',
           style: AppTheme.displaySmall,
           textAlign: TextAlign.center,
         ).animate().fadeIn(delay: 100.ms),
 
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
 
         Text(
           _isInstructorMode
               ? 'Conta de professor criada e vinculada à academia.'
               : _academyMode
-                  ? 'Enviamos sua solicitação para ${_academyName ?? 'a academia'}. '
-                      'Assim que o professor aprovar, seu acesso à academia libera '
-                      'sozinho no app.'
+                  ? 'Sua conta foi criada e a solicitação de entrada foi enviada para o professor da ${_academyName ?? 'sua academia'}.\n\nAssim que o mestre aprovar, todos os horários e presenças da academia serão liberados automaticamente no aplicativo!'
                   : 'Sua conta foi vinculada ao aluno ${_validatedLinkCode!.studentName}',
           style: AppTheme.bodyMedium.copyWith(
             color: AppTheme.textSecondary,
+            height: 1.4,
           ),
           textAlign: TextAlign.center,
         ).animate().fadeIn(delay: 200.ms),
@@ -1024,8 +1034,8 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
 
         Text(
           _academyMode
-              ? 'Você já pode usar o app enquanto aguarda.'
-              : 'Agora faca login para acessar o app',
+              ? 'Enquanto aguarda a aprovação, você já pode explorar o app e registrar seus treinos.'
+              : 'Agora faça login para acessar o app',
           style: AppTheme.bodyMedium.copyWith(
             color: AppTheme.primary,
             fontWeight: FontWeight.w600,
@@ -1040,7 +1050,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
           height: 52,
           child: ElevatedButton(
             onPressed: () => context.go(_academyMode ? '/portal' : '/login'),
-            child: Text(_academyMode ? 'Entrar no app' : 'Ir para Login'),
+            child: Text(_academyMode ? 'Entrar no Aplicativo' : 'Ir para Login'),
           ),
         ).animate().fadeIn(delay: 300.ms).slideY(begin: 0.1),
       ],

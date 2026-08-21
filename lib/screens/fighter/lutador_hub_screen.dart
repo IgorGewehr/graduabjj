@@ -119,16 +119,21 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
         0;
     final beltColor = AppTheme.getBeltColor(belt);
 
-    // Fallback quando não há nome nenhum (raro): usa o substantivo da
-    // academia ('Lutador' / 'Aluno' — ver core/academy_vocab.dart). Para
-    // perfil 'fight' (default) o texto é idêntico ao anterior.
     final vocab = ref.watch(academyVocabProvider);
     final memberNounCapitalized = vocab.memberNoun.isEmpty
         ? vocab.memberNoun
         : vocab.memberNoun[0].toUpperCase() + vocab.memberNoun.substring(1);
-    final name = (student?.nickname != null && student!.nickname!.isNotEmpty)
+    final rawName = (student?.nickname != null && student!.nickname!.isNotEmpty)
         ? student.nickname!
-        : (student?.fullName ?? user?.displayName ?? memberNounCapitalized);
+        : (student?.fullName != null && student!.fullName.isNotEmpty
+            ? student.fullName
+            : (user?.displayName != null && user!.displayName.isNotEmpty
+                ? user.displayName
+                : (FirebaseAuth.instance.currentUser?.displayName != null &&
+                        FirebaseAuth.instance.currentUser!.displayName!.isNotEmpty
+                    ? FirebaseAuth.instance.currentUser!.displayName!
+                    : '')));
+    final name = rawName.isNotEmpty ? rawName : memberNounCapitalized;
 
     // ATIVAÇÃO 1ª SESSÃO (§2.1): zero treinos verificados E zero histórico de
     // streak (presença ∪ self-log) → o espaço streak/stats vira UM convite ao
@@ -240,44 +245,140 @@ class _LutadorHubScreenState extends ConsumerState<LutadorHubScreen> {
     );
   }
 
-  // Aluno aguardando o professor aprovar a solicitação de entrada. Toca pra ir
-  // à aba Academia (onde fica a tela completa + cancelar).
+  // Aluno aguardando o professor aprovar a solicitação de entrada.
   Widget _pendingHero(BuildContext context, PendingJoinRequest pending) {
-    return GestureDetector(
-      onTap: () => context.go('/portal/academia'),
-      child: _DarkCard(
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'AGUARDANDO APROVAÇÃO',
-                    style: TextStyle(
-                      color: _T.blood,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    pending.academyName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: _T.ash,
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700),
-                  ),
-                ],
+    return Container(
+      decoration: BoxDecoration(
+        color: _T.ink,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _T.blood.withValues(alpha: 0.4), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: _T.blood.withValues(alpha: 0.12),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: _T.blood.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(LucideIcons.hourglass,
+                    color: _T.blood, size: 20),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'AGUARDANDO APROVAÇÃO DO MESTRE',
+                      style: _eyebrow(_T.blood, 11),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      pending.academyName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _T.bone,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                  border:
+                      Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(LucideIcons.clock, size: 12, color: Colors.amber),
+                    SizedBox(width: 4),
+                    Text(
+                      'Pendente',
+                      style: TextStyle(
+                        color: Colors.amber,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Sua solicitação de entrada foi enviada para o professor da ${pending.academyName}. Assim que o mestre aprovar, todos os horários, presenças e turmas serão liberados automaticamente!',
+            style: const TextStyle(
+              color: _T.ash,
+              fontSize: 13,
+              height: 1.4,
+              fontWeight: FontWeight.w500,
             ),
-            const SizedBox(width: 12),
-            const Icon(LucideIcons.hourglass, color: _T.blood, size: 28),
-          ],
-        ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    HapticFeedback.lightImpact();
+                    ref.invalidate(pendingJoinRequestProvider);
+                    ref.invalidate(currentUserProvider);
+                    ref.invalidate(currentStudentProvider);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content:
+                            Text('Verificando aprovação do professor...'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  icon: const Icon(LucideIcons.refreshCw, size: 14),
+                  label: const Text('Verificar aprovação'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _T.bone,
+                    side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.25)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              TextButton(
+                onPressed: () => context.go('/portal/academia'),
+                style: TextButton.styleFrom(
+                  foregroundColor: _T.ash,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+                child: const Text('Ver detalhes',
+                    style: TextStyle(fontSize: 13)),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -416,6 +517,13 @@ class _Header extends StatelessWidget {
   final bool showsBeltCulture;
   final String? photoUrl;
 
+  String get _greeting {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Bom dia';
+    if (hour < 18) return 'Boa tarde';
+    return 'Boa noite';
+  }
+
   @override
   Widget build(BuildContext context) {
     final gradeLabel = getGradeLabel(sport, belt);
@@ -431,40 +539,43 @@ class _Header extends StatelessWidget {
     final avatarInk = _onBelt(avatarBg);
     return Row(
       children: [
-        Container(
-          width: 54,
-          height: 54,
-          decoration: BoxDecoration(
-            color: avatarBg,
-            borderRadius: BorderRadius.circular(14),
-            border: avatarBg.computeLuminance() > 0.6
-                ? Border.all(color: _T.ink.withValues(alpha: 0.15))
-                : null,
-          ),
-          clipBehavior: Clip.antiAlias,
-          alignment: Alignment.center,
-          child: hasPhoto
-              ? AppCachedImage(
-                  imageUrl: photoUrl,
-                  width: 54,
-                  height: 54,
-                  fit: BoxFit.cover,
-                  errorIcon: Text(initials,
-                      style: TextStyle(
-                          color: avatarInk,
-                          fontSize: 19,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.5)),
-                )
-              : Text(
-                  initials,
-                  style: TextStyle(
-                    color: avatarInk,
-                    fontSize: 19,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.5,
+        Pressable(
+          onTap: () => context.push('/portal/perfil'),
+          child: Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: avatarBg,
+              borderRadius: BorderRadius.circular(14),
+              border: avatarBg.computeLuminance() > 0.6
+                  ? Border.all(color: _T.ink.withValues(alpha: 0.15))
+                  : null,
+            ),
+            clipBehavior: Clip.antiAlias,
+            alignment: Alignment.center,
+            child: hasPhoto
+                ? AppCachedImage(
+                    imageUrl: photoUrl,
+                    width: 52,
+                    height: 52,
+                    fit: BoxFit.cover,
+                    errorIcon: Text(initials,
+                        style: TextStyle(
+                            color: avatarInk,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.5)),
+                  )
+                : Text(
+                    initials,
+                    style: TextStyle(
+                      color: avatarInk,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                    ),
                   ),
-                ),
+          ),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -472,12 +583,17 @@ class _Header extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
+                '$_greeting,'.toUpperCase(),
+                style: _eyebrow(_T.blood, 11),
+              ),
+              const SizedBox(height: 1),
+              Text(
                 name.toUpperCase(),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: _T.ink,
-                  fontSize: 23,
+                  fontSize: 22,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 0.3,
                 ),
@@ -500,7 +616,7 @@ class _Header extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: _T.smoke,
-                            fontSize: 13.5,
+                            fontSize: 13,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -508,7 +624,7 @@ class _Header extends StatelessWidget {
                       if (canSwitch) ...[
                         const SizedBox(width: 4),
                         const Icon(LucideIcons.chevronsUpDown,
-                            size: 15, color: _T.smoke),
+                            size: 14, color: _T.smoke),
                       ],
                     ],
                   ),
@@ -525,6 +641,7 @@ class _Header extends StatelessWidget {
             decoration: BoxDecoration(
               color: _T.card,
               borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _T.ink.withValues(alpha: 0.08)),
             ),
             alignment: Alignment.center,
             child: Stack(
@@ -548,7 +665,6 @@ class _Header extends StatelessWidget {
       ],
     );
   }
-
 }
 
 class _MiniBelt extends StatelessWidget {

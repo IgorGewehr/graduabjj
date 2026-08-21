@@ -69,6 +69,7 @@ class GlobalUserService {
     String? photoUrl,
     String? phone,
     AccountType accountType = AccountType.free,
+    Map<String, dynamic>? pendingJoinRequest,
   }) async {
     final userRef = RootCollections.user(userId);
 
@@ -79,6 +80,7 @@ class GlobalUserService {
       'phone': phone,
       'accountType': accountType.value,
       'isProfilePublic': false,
+      if (pendingJoinRequest != null) 'pendingJoinRequest': pendingJoinRequest,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     };
