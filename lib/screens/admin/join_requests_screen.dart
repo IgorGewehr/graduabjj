@@ -314,8 +314,11 @@ class _AdminJoinRequestsScreenState
                 final academyName = ref.read(academySettingsProvider).valueOrNull?.name ?? 'nossa academia';
                 final message = '🥋 *Convite da $academyName*\n\n'
                     'Fala pessoal! O aplicativo oficial da nossa academia já está disponível para você acompanhar suas presenças, graduações e treinos.\n\n'
-                    '📲 *1. Baixe o app no Google Play:*\n'
+                    '📲 *1. Baixe o app oficial:*\n'
+                    '🤖 *Android (Google Play):*\n'
                     'https://play.google.com/store/apps/details?id=com.tensorroot.graduabjj\n\n'
+                    '🍎 *iPhone (App Store):*\n'
+                    'https://apps.apple.com/app/graduabjj/id6742323719\n\n'
                     '🔑 *2. Nosso Código de Acesso:*\n'
                     '*$code*\n\n'
                     '👉 *Como entrar:*\n'
