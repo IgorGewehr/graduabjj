@@ -1255,7 +1255,7 @@ async function notifyAdminCF(academyId, type, title, message, options) {
   try {
     const academySnap = await db.doc(`academies/${academyId}`).get();
     if (!academySnap.exists) return;
-    const adminUserId = academySnap.data()?.ownerId || academySnap.data()?.adminUserId;
+    const adminUserId = getAcademyOwnerUid(academySnap.data());
     if (!adminUserId) return;
 
     // Internal notification
@@ -1277,6 +1277,13 @@ async function notifyAdminCF(academyId, type, title, message, options) {
 // `require('./server_functions')` como já faz para os outros helpers-puros
 // abaixo, senão o discovery de endpoints do Firebase tenta deployá-la.
 exports.notifyAdminCF = notifyAdminCF;
+
+// `ownerId` é o campo canônico escrito pelo app. `adminUserId` existia no
+// backend legado do ERP e permanece somente como fallback para documentos
+// antigos que ainda não foram migrados.
+function getAcademyOwnerUid(academy) {
+  return academy?.ownerId || academy?.adminUserId || null;
+}
 
 // ============================================
 // Cloud Functions - Firestore Triggers
@@ -1669,9 +1676,9 @@ exports.scheduledOverdueCheck = functions
       // gamificação) — um doc malformado / falha de leitura de UMA academia não
       // pode abortar o run de cobrança de toda a base.
       try {
-        // Skip if no admin user
-        if (!academy.adminUserId) {
-          console.log(`Academy ${academyId} has no admin user`);
+        const academyOwnerUid = getAcademyOwnerUid(academy);
+        if (!academyOwnerUid) {
+          console.log(`Academy ${academyId} has no owner user`);
           continue;
         }
 
@@ -1783,11 +1790,10 @@ exports.scheduledOverdueCheck = functions
 
         // Notify admin about overdue summary (push + internal)
         if (overdueCount > 0) {
-          const adminId = academy.ownerId || academy.adminUserId;
           const totalFormatted = (Number(totalOverdueAmount) || 0).toFixed(2);
           const summaryMsg = `Voce tem ${overdueCount} pagamento(s) atrasado(s) totalizando R$ ${totalFormatted}.`;
           await sendToUser(
-            adminId,
+            academyOwnerUid,
             'Resumo de Pagamentos Atrasados',
             summaryMsg,
             {
@@ -1795,7 +1801,7 @@ exports.scheduledOverdueCheck = functions
               academyId,
             }
           );
-          await createInternalNotification(academyId, adminId, 'financial', 'high',
+          await createInternalNotification(academyId, academyOwnerUid, 'financial', 'high',
             'Resumo de Pagamentos Atrasados',
             summaryMsg,
             { actionUrl: '/financeiro', actionLabel: 'Ver financeiro', expiresInDays: 7 }
@@ -2784,7 +2790,7 @@ exports.sendAcademyNotification = onCall(async (request) => {
   }
 
   const academy = academyDoc.data();
-  if (academy.adminUserId !== context.auth.uid) {
+  if (getAcademyOwnerUid(academy) !== context.auth.uid) {
     throw new HttpsError(
       'permission-denied',
       'User is not admin of this academy'
@@ -2833,7 +2839,7 @@ exports.sendUserNotification = onCall(async (request) => {
   }
 
   const academy = academyDoc.data();
-  if (academy.adminUserId !== context.auth.uid) {
+  if (getAcademyOwnerUid(academy) !== context.auth.uid) {
     throw new HttpsError(
       'permission-denied',
       'User is not admin of this academy'

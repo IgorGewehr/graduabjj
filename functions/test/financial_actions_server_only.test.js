@@ -55,6 +55,22 @@ test('opening Financeiro does not run overdue maintenance', () => {
   assert.match(serverSource, /exports\.scheduledOverdueCheck\s*=/);
 });
 
+test('academy ownership prefers ownerId with legacy adminUserId fallback', () => {
+  assert.match(
+    serverSource,
+    /function getAcademyOwnerUid\(academy\) \{[^]*?academy\?\.ownerId \|\| academy\?\.adminUserId \|\| null;/
+  );
+  assert.match(
+    serverSource,
+    /exports\.scheduledOverdueCheck\s*=[^]*?const academyOwnerUid = getAcademyOwnerUid\(academy\);[^]*?if \(!academyOwnerUid\)/
+  );
+  assert.doesNotMatch(serverSource, /if \(!academy\.adminUserId\)/);
+  assert.doesNotMatch(
+    serverSource,
+    /if \(academy\.adminUserId !== context\.auth\.uid\)/
+  );
+});
+
 test('distributed build contains no notification credential defines', () => {
   assert.doesNotMatch(
     buildSource,
