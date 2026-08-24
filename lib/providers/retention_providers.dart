@@ -57,11 +57,25 @@ final retentionStudentsProvider = FutureProvider<List<Student>>((ref) async {
 ///    (>90 dias não é "esfriando", é ex-aluno — outro funil).
 bool isCoolingAthlete(Student s) {
   final r = s.retention;
-  if (r == null) return false;
-  final days = s.daysSinceLastAttendance;
-  if (days == null) return false; // nunca treinou (in-app) → ativação
-  if (s.totalAttendanceCount < 8) return false; // nunca engatou
+  if (r == null) {
+    final days = s.daysSinceLastAttendance;
+    return days == null || days >= 7;
+  }
 
+  // 1. Alunos com risco computado pelo backend (crítico/alto/médio ou blues)
+  if (r.riskLevel == 'critical' || r.riskLevel == 'high' || r.riskLevel == 'medium') {
+    return true;
+  }
+  if (r.riskScore != null && r.riskScore! >= 25) {
+    return true;
+  }
+  if (r.bluesRisk == true) return true;
+
+  final days = s.daysSinceLastAttendance;
+  // 2. Alunos sem treino recente (7+ dias) ou sem nenhuma presença
+  if (days == null || days >= 7) return true;
+
+  // 3. Queda de hábito nas últimas semanas
   final weeks = s.last8WeeksBuckets(DateTime.now());
   final trainedWeeks = weeks.where((w) => w > 0).length;
   final hadRecentHabit = trainedWeeks >= 3 || r.attendanceLast30d >= 4;
@@ -71,7 +85,7 @@ bool isCoolingAthlete(Student s) {
     final recent = weeks.sublist(4).fold<int>(0, (a, b) => a + b);
     return recent < older || days >= 7;
   }
-  // Sem hábito nas últimas 8 semanas: só o fiel que sumiu recentemente.
+
   return s.totalAttendanceCount >= 20 && days >= 14 && days <= 90;
 }
 

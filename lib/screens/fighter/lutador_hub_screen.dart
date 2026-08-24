@@ -1,4 +1,6 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -10,10 +12,12 @@ import '../../core/theme.dart';
 import '../../models/feed_post.dart';
 import '../../models/join_request.dart';
 import '../../models/student.dart';
+import '../../models/user.dart' show UserAcademyMapping;
 import '../../providers/auth_provider.dart';
 import '../../providers/friend_providers.dart';
 import '../../providers/join_request_providers.dart';
 import '../../providers/portal_providers.dart';
+import '../../providers/selected_academy_provider.dart';
 import '../../providers/student_provider.dart';
 import '../../services/analytics_service.dart';
 import '../../services/feed_posts_service.dart';
@@ -1528,7 +1532,7 @@ class _FirstStepCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          const Text('REGISTRA TEU\nPRIMEIRO TREINO.',
+          const Text('REGISTRE SEU\nPRIMEIRO TREINO.',
               style: TextStyle(
                   color: _T.bone,
                   height: 1.1,
@@ -1536,8 +1540,8 @@ class _FirstStepCard extends StatelessWidget {
                   letterSpacing: 0.2,
                   fontWeight: FontWeight.w900)),
           const SizedBox(height: 8),
-          Text(
-            'Leva 5 segundos — e é aqui que a tua corrente acende.',
+          const Text(
+            'Leva poucos segundos para começar a acompanhar sua evolução.',
             style: TextStyle(
                 color: _T.ash,
                 fontSize: 13.5,

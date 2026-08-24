@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:intl/intl.dart';
 
 import '../core/validators.dart';
@@ -704,6 +705,23 @@ class TestBillingResult {
 // ============================================
 // Student Contact Model
 // ============================================
+bool isValidBillingPayerEmail(String? value) {
+  final clean = value?.trim() ?? '';
+  if (clean.isEmpty) return false;
+  final emailRegex = RegExp(
+    r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+  );
+  if (!emailRegex.hasMatch(clean)) return false;
+  const blockedDomains = {
+    'email.com',
+    'teste.com',
+    'test.com',
+    'exemplo.com',
+    'example.com',
+  };
+  return !blockedDomains.contains(clean.split('@').last.toLowerCase());
+}
+
 class StudentContact {
   final String studentId;
   final String studentName;
@@ -750,12 +768,14 @@ class StudentContact {
 
   bool get hasValidPayerCpf => Validators.cpf(effectiveCpf ?? '') == null;
 
+  bool get hasValidDirectPayerEmail => isValidBillingPayerEmail(effectiveEmail);
+
+  bool get hasLinkedPayerEmailSource =>
+      (linkedUserId?.trim().isNotEmpty ?? false) ||
+      (responsibleUserId?.trim().isNotEmpty ?? false);
+
   bool get hasPayerEmailSource {
-    final directEmail = effectiveEmail?.trim() ?? '';
-    return (directEmail.contains('@') &&
-            directEmail.split('@').last.contains('.')) ||
-        (linkedUserId?.trim().isNotEmpty ?? false) ||
-        (responsibleUserId?.trim().isNotEmpty ?? false);
+    return hasValidDirectPayerEmail || hasLinkedPayerEmailSource;
   }
 
   bool get canGenerateMercadoPagoPix => hasValidPayerCpf && hasPayerEmailSource;
@@ -907,16 +927,32 @@ class BillingNotificationService {
   });
 
   /// Converts callable failures into a short message suitable for the UI.
-  /// Firebase exception strings include a full native stack trace on Android;
-  /// never expose that implementation detail inside the error SnackBar.
   static String readableSendError(Object error) {
-    final normalized = error.toString().toLowerCase();
+    if (error is FirebaseFunctionsException &&
+        error.message != null &&
+        error.message!.trim().isNotEmpty &&
+        !error.message!.toLowerCase().contains('unauthenticated')) {
+      return error.message!.trim();
+    }
+    if (error is FnsException &&
+        error.message.trim().isNotEmpty &&
+        !error.message.toLowerCase().contains('unauthenticated')) {
+      return error.message.trim();
+    }
+    final raw = error.toString();
+    final normalized = raw.toLowerCase();
     if (normalized.contains('unauthenticated') ||
         normalized.contains('forbidden')) {
       return 'Nao foi possivel autenticar o envio. Entre novamente e, se o problema persistir, contate o suporte.';
     }
     if (normalized.contains('permission-denied')) {
       return 'Sua conta nao tem permissao para enviar cobrancas desta academia.';
+    }
+    if (normalized.contains('nao configurado') ||
+        normalized.contains('not_confirmed') ||
+        normalized.contains('502') ||
+        normalized.contains('bad gateway')) {
+      return 'Servico de envio WhatsApp temporariamente indisponivel. Tente novamente em instantes.';
     }
     if (normalized.contains('unavailable') ||
         normalized.contains('deadline-exceeded') ||
@@ -1069,24 +1105,6 @@ class BillingNotificationService {
     if (ddd < 11 || ddd > 99) return false;
     if (RegExp(r'^(\d)\1+$').hasMatch(local)) return false;
     if (local.contains('22223333') || local.contains('12345678')) return false;
-    return true;
-  }
-
-  static bool _isValidEmail(String email) {
-    final clean = email.trim();
-    if (clean.isEmpty) return false;
-    final emailRegex = RegExp(
-      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-    );
-    if (!emailRegex.hasMatch(clean)) return false;
-    final domain = clean.split('@').last.toLowerCase();
-    if (domain == 'email.com' ||
-        domain == 'teste.com' ||
-        domain == 'test.com' ||
-        domain == 'exemplo.com' ||
-        domain == 'example.com') {
-      return false;
-    }
     return true;
   }
 
@@ -1387,7 +1405,7 @@ class BillingNotificationService {
       );
     }
 
-    if (!_isValidEmail(email)) {
+    if (!isValidBillingPayerEmail(email)) {
       return NotificationResult(
         success: false,
         studentName: studentName,

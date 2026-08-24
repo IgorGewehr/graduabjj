@@ -11,22 +11,28 @@ import 'portal_providers.dart';
 /// cada widget) pra academia com o checklist E o gate ativos na mesma sessão
 /// não disparar a mesma query Firestore duas vezes.
 
-/// `true` se a academia já tem ao menos um aluno cadastrado.
-final hasStudentsExistProvider = FutureProvider<bool>((ref) async {
-  final user = await ref.watch(currentUserProvider.future);
+/// `true` se a academia já tem ao menos um aluno cadastrado — stream em tempo real.
+final hasStudentsExistProvider = StreamProvider<bool>((ref) {
+  final user = ref.watch(currentUserProvider).valueOrNull;
   final academyId = user?.academyId;
-  if (academyId == null) return false;
-  final snap = await Collections(academyId).students.limit(1).get();
-  return snap.docs.isNotEmpty;
+  if (academyId == null) return Stream.value(false);
+  return Collections(academyId)
+      .students
+      .limit(1)
+      .snapshots()
+      .map((snap) => snap.docs.isNotEmpty);
 });
 
-/// `true` se já existe ao menos um registro de presença na academia.
-final hasAttendanceExistProvider = FutureProvider<bool>((ref) async {
-  final user = await ref.watch(currentUserProvider.future);
+/// `true` se já existe ao menos um registro de presença na academia — stream em tempo real.
+final hasAttendanceExistProvider = StreamProvider<bool>((ref) {
+  final user = ref.watch(currentUserProvider).valueOrNull;
   final academyId = user?.academyId;
-  if (academyId == null) return false;
-  final snap = await Collections(academyId).attendance.limit(1).get();
-  return snap.docs.isNotEmpty;
+  if (academyId == null) return Stream.value(false);
+  return Collections(academyId)
+      .attendance
+      .limit(1)
+      .snapshots()
+      .map((snap) => snap.docs.isNotEmpty);
 });
 
 /// Estado do gate do wizard "Comece em 3 minutos" (SPEC_ONBOARDING_2026-07.md

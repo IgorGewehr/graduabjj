@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -253,13 +255,17 @@ class _AdminBillingRemindersScreenState
           AcademyPageHeader(
             compact: true,
             title: 'Cobrança',
-            leading: Navigator.canPop(context)
-                ? IconButton(
-                    onPressed: () => Navigator.of(context).maybePop(),
-                    icon: const Icon(LucideIcons.arrowLeft, size: 20),
-                    tooltip: 'Voltar',
-                  )
-                : null,
+            leading: IconButton(
+              onPressed: () {
+                if (Navigator.canPop(context)) {
+                  Navigator.of(context).maybePop();
+                } else {
+                  context.go('/admin/financeiro');
+                }
+              },
+              icon: const Icon(LucideIcons.arrowLeft, size: 20),
+              tooltip: 'Voltar',
+            ),
             actions: [
               IconButton(
                 onPressed: _showCreateChargeModal,
@@ -366,7 +372,7 @@ class _AdminBillingRemindersScreenState
                           CircularProgressIndicator(color: Colors.white),
                           SizedBox(height: 16),
                           Text(
-                            'Enviando cobrancas...',
+                            'Enviando cobranças...',
                             style: TextStyle(color: Colors.white, fontSize: 16),
                           ),
                         ],
@@ -417,6 +423,122 @@ class _AdminBillingRemindersScreenState
   /// dialog cru abaixo — que continua acessível pelo ícone de engrenagem no
   /// topo desta tela.
   Widget _buildAutomationBanner() => const BillingAutomationBanner();
+
+  List<StudentContact> get _collectiblePayerContacts {
+    final studentIds = <String>{};
+    for (final items in _overdueStages.values) {
+      for (final item in items) {
+        final studentId = item['studentId'] as String? ?? '';
+        if (studentId.isNotEmpty) studentIds.add(studentId);
+      }
+    }
+    return studentIds
+        .map((studentId) => _studentContacts[studentId])
+        .whereType<StudentContact>()
+        .toList();
+  }
+
+  Widget _buildAutomaticMercadoPagoReadiness({
+    required bool includePaymentLink,
+  }) {
+    if (_billingPaymentPreference != BillingPaymentPreference.mercadoPago ||
+        !includePaymentLink) {
+      return const SizedBox.shrink();
+    }
+
+    final contacts = _collectiblePayerContacts;
+    final missingCpf = contacts
+        .where((contact) => !contact.hasValidPayerCpf)
+        .map((contact) => contact.studentName)
+        .toSet()
+        .toList();
+    final missingEmail = contacts
+        .where((contact) => !contact.hasPayerEmailSource)
+        .map((contact) => contact.studentName)
+        .toSet()
+        .toList();
+    final ready = contacts
+        .where((contact) => contact.canGenerateMercadoPagoPix)
+        .length;
+    final hasProblem =
+        !_mercadoPagoAvailable ||
+        missingCpf.isNotEmpty ||
+        missingEmail.isNotEmpty;
+    final color = hasProblem ? AppTheme.warning : AppTheme.success;
+
+    String summary;
+    if (!_mercadoPagoAvailable) {
+      summary =
+          'Mercado Pago desconectado. As cobranças automáticas usarão o PIX pessoal configurado.';
+    } else if (contacts.isEmpty) {
+      summary =
+          'Para cobrar automaticamente pelo Mercado Pago, cada pagador precisa de CPF válido e e-mail real.';
+    } else if (!hasProblem) {
+      summary =
+          'Mercado Pago automático: todos os ${contacts.length} pagadores com cobranças estão prontos.';
+    } else {
+      summary =
+          'Mercado Pago automático: $ready de ${contacts.length} pagadores com cobranças estão prontos. Os demais usarão o PIX pessoal.';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            hasProblem ? LucideIcons.alertTriangle : LucideIcons.checkCircle,
+            size: 16,
+            color: color,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  summary,
+                  style: AppTheme.bodySmall.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (_mercadoPagoAvailable) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'O automático verifica o e-mail do aluno ou responsável e, se houver conta vinculada, consulta o e-mail dela no Firebase.',
+                    style: AppTheme.labelSmall.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+                if (missingCpf.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'CPF pendente: ${missingCpf.join(', ')}',
+                    style: AppTheme.labelSmall.copyWith(color: color),
+                  ),
+                ],
+                if (missingEmail.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'E-mail pendente: ${missingEmail.join(', ')}',
+                    style: AppTheme.labelSmall.copyWith(color: color),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildAutomationCard() {
     final whatsappEnabled = _notificationSettings?.whatsappEnabled ?? false;
@@ -555,6 +677,15 @@ class _AdminBillingRemindersScreenState
                     }
                   : null,
             ),
+            if (_billingPaymentPreference ==
+                    BillingPaymentPreference.mercadoPago &&
+                (_notificationSettings?.includePaymentLink ?? true)) ...[
+              const SizedBox(height: 8),
+              _buildAutomaticMercadoPagoReadiness(
+                includePaymentLink:
+                    _notificationSettings?.includePaymentLink ?? true,
+              ),
+            ],
           ],
         ),
       ),
@@ -921,7 +1052,7 @@ class _AdminBillingRemindersScreenState
         !(_notificationSettings?.emailEnabled ?? false)) {
       FeedbackUtils.showError(
         context,
-        'Nenhum canal de notificacao esta habilitado. Habilite WhatsApp ou Email nas configuracoes.',
+        'Nenhum canal de notificação está habilitado. Habilite WhatsApp ou e-mail nas configurações.',
       );
       return;
     }
@@ -958,7 +1089,7 @@ class _AdminBillingRemindersScreenState
           FeedbackUtils.showInfo(
             context,
             aggregated.alreadyPaidSkipped > 0
-                ? 'Todas as ${aggregated.alreadyPaidSkipped} cobrancas ja foram pagas — nada a enviar.'
+                ? 'Todas as ${aggregated.alreadyPaidSkipped} cobranças já foram pagas — nada a enviar.'
                 : 'Nada a enviar.',
           );
         }
@@ -968,7 +1099,7 @@ class _AdminBillingRemindersScreenState
           alreadyPaidSkipped: aggregated.alreadyPaidSkipped,
           waWithLink: aggregated.waWithLink,
           waWithoutLink: aggregated.waWithoutLink,
-          missingCpfNames: aggregated.missingCpfNames.toList(),
+          missingPayerDataNames: aggregated.missingPayerDataNames.toList(),
           linkIntended:
               (_notificationSettings?.includePaymentLink ?? false) &&
               (_notificationSettings?.whatsappEnabled ?? false),
@@ -1123,7 +1254,7 @@ class _AdminBillingRemindersScreenState
                   )
                 : () => FeedbackUtils.showInfo(
                     context,
-                    'WhatsApp indisponivel neste build. Reinicie o app com a configuracao do notification server.',
+                    'WhatsApp indisponível neste build. Reinicie o app com a configuração do notification server.',
                   ),
             icon: const Icon(LucideIcons.messageCircle, size: 16),
             label: const Text('Cobrar aluno'),
@@ -1147,11 +1278,11 @@ class _AdminBillingRemindersScreenState
                   )
                 : () => FeedbackUtils.showInfo(
                     context,
-                    'E-mail indisponivel neste build. Reinicie o app com a configuracao do notification server.',
+                    'E-mail indisponível neste build. Reinicie o app com a configuração do notification server.',
                   ),
             icon: const Icon(LucideIcons.mail, size: 20),
             color: hasEmail ? AppTheme.info : AppTheme.textDisabled,
-            tooltip: 'Enviar cobranca individual por e-mail',
+            tooltip: 'Enviar cobrança individual por e-mail',
             constraints: const BoxConstraints(),
             padding: const EdgeInsets.all(8),
           )
@@ -1302,7 +1433,7 @@ class _AdminBillingRemindersScreenState
                     ),
                     label: Text(
                       contact?.category == 'kids'
-                          ? 'Sem contato do responsavel'
+                          ? 'Sem contato do responsável'
                           : 'Sem contato',
                       style: TextStyle(fontSize: 11, color: Colors.orange),
                     ),
@@ -1448,9 +1579,16 @@ class _AdminBillingRemindersScreenState
           FeedbackUtils.showSuccess(context, 'Cobrança excluída!');
           _loadData();
         }
-      } catch (e) {
+      } on PaymentOperationException catch (e) {
         if (mounted) {
-          FeedbackUtils.showError(context, 'Erro ao excluir: $e');
+          FeedbackUtils.showError(context, e.message);
+        }
+      } catch (_) {
+        if (mounted) {
+          FeedbackUtils.showError(
+            context,
+            'Não foi possível excluir a cobrança. Tente novamente.',
+          );
         }
       }
     }
@@ -1481,12 +1619,12 @@ class _AdminBillingRemindersScreenState
     String? whatsappTemplateName;
     BillingPaymentPreference? previewPaymentMode;
     String? mercadoPagoPreviewWarning;
+    String? mercadoPagoPayerNotice;
+    bool mercadoPagoPayerNoticeIsWarning = false;
 
     if (mode == 'whatsapp') {
       final senderEmail = FirebaseService.currentUser?.email?.trim() ?? '';
-      final manualSenderHasEmail =
-          senderEmail.contains('@') &&
-          senderEmail.split('@').last.contains('.');
+      final manualSenderHasEmail = isValidBillingPayerEmail(senderEmail);
       final mercadoPagoReadyForStudent =
           _mercadoPagoAvailable &&
           contact.hasValidPayerCpf &&
@@ -1498,12 +1636,27 @@ class _AdminBillingRemindersScreenState
               manualPixKey: _manualPixKey,
             )
           : BillingPaymentPreference.none;
-      if (_billingPaymentPreference == BillingPaymentPreference.mercadoPago &&
-          _mercadoPagoAvailable &&
-          !mercadoPagoReadyForStudent) {
-        mercadoPagoPreviewWarning = contact.hasValidPayerCpf
-            ? 'Mercado Pago indisponivel: nenhuma conta com e-mail valido foi encontrada para este envio. O fallback configurado sera usado.'
-            : 'Mercado Pago indisponivel para este aluno: cadastre um CPF valido do pagador. O fallback configurado sera usado.';
+      if (_billingPaymentPreference == BillingPaymentPreference.mercadoPago) {
+        if (!_mercadoPagoAvailable) {
+          mercadoPagoPreviewWarning =
+              'Mercado Pago está desconectado. O fallback configurado será usado.';
+        } else if (!contact.hasValidPayerCpf) {
+          mercadoPagoPreviewWarning =
+              'Mercado Pago indisponível para este aluno: cadastre um CPF válido do pagador. O fallback configurado será usado.';
+        } else if (contact.hasValidDirectPayerEmail) {
+          mercadoPagoPayerNotice =
+              'CPF e e-mail do aluno/responsável serão usados para gerar o PIX no Mercado Pago.';
+        } else if (contact.hasLinkedPayerEmailSource) {
+          mercadoPagoPayerNotice =
+              'CPF válido. O e-mail será conferido na conta vinculada no momento do envio.';
+        } else if (manualSenderHasEmail) {
+          mercadoPagoPayerNotice =
+              'Este envio manual tentará o e-mail da sua conta porque o aluno não possui e-mail. No automático isso não acontece: ele usará o PIX pessoal até o e-mail do aluno ou responsável ser cadastrado.';
+          mercadoPagoPayerNoticeIsWarning = true;
+        } else {
+          mercadoPagoPreviewWarning =
+              'Mercado Pago indisponível: nenhuma conta com e-mail válido foi encontrada. O fallback configurado será usado.';
+        }
       }
       whatsappTemplateName = _notificationService!.templateNameForStage(
         stage,
@@ -1527,7 +1680,7 @@ class _AdminBillingRemindersScreenState
             chargeType: chargeType,
             description: description,
           ) ??
-          'Ainda nao existe template Meta aprovado para esta etapa.';
+          'Ainda não existe template Meta aprovado para esta etapa.';
       paymentInstruction = switch (previewPaymentMode) {
         BillingPaymentPreference.manualPix =>
           BillingPaymentInstruction.manualPix(paymentPreviewValue),
@@ -1626,7 +1779,7 @@ class _AdminBillingRemindersScreenState
                 const SizedBox(height: 8),
                 if (mode == 'whatsapp') ...[
                   Text(
-                    'Previa do template oficial aprovado na Meta. O texto do WhatsApp nao pode ser editado.',
+                    'Prévia do template oficial aprovado na Meta. O texto do WhatsApp não pode ser editado.',
                     style: AppTheme.bodySmall.copyWith(
                       color: AppTheme.textSecondary,
                     ),
@@ -1646,7 +1799,7 @@ class _AdminBillingRemindersScreenState
                       (_manualPixKey?.trim().isNotEmpty ?? false)) ...[
                     const SizedBox(height: 4),
                     Text(
-                      'Se o Mercado Pago estiver indisponivel no envio, o backend usa o PIX pessoal como fallback.',
+                      'Se o Mercado Pago estiver indisponível no envio, o backend usa o PIX pessoal como fallback.',
                       style: AppTheme.bodySmall.copyWith(
                         color: AppTheme.textSecondary,
                       ),
@@ -1654,11 +1807,60 @@ class _AdminBillingRemindersScreenState
                   ],
                   if (mercadoPagoPreviewWarning != null) ...[
                     const SizedBox(height: 6),
-                    Text(
-                      mercadoPagoPreviewWarning,
-                      style: AppTheme.bodySmall.copyWith(
-                        color: AppTheme.warning,
-                        fontWeight: FontWeight.w600,
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.warning.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        mercadoPagoPreviewWarning,
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.warning,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (mercadoPagoPayerNotice != null) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color:
+                            (mercadoPagoPayerNoticeIsWarning
+                                    ? AppTheme.warning
+                                    : AppTheme.info)
+                                .withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            mercadoPagoPayerNoticeIsWarning
+                                ? LucideIcons.alertTriangle
+                                : LucideIcons.info,
+                            size: 15,
+                            color: mercadoPagoPayerNoticeIsWarning
+                                ? AppTheme.warning
+                                : AppTheme.info,
+                          ),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: Text(
+                              mercadoPagoPayerNotice,
+                              style: AppTheme.bodySmall.copyWith(
+                                color: mercadoPagoPayerNoticeIsWarning
+                                    ? AppTheme.warning
+                                    : AppTheme.info,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -1750,7 +1952,7 @@ class _AdminBillingRemindersScreenState
         if (mounted) {
           FeedbackUtils.showInfo(
             context,
-            'Cobranca ja paga — envio ignorado para $studentName.',
+            'Cobrança já paga — envio ignorado para $studentName.',
           );
         }
         await _loadData();
@@ -1781,7 +1983,7 @@ class _AdminBillingRemindersScreenState
           dueDate: dueDate,
           daysOverdue: daysOverdue,
           stage: stage,
-          subject: subject ?? 'Cobranca - $studentName',
+          subject: subject ?? 'Cobrança - $studentName',
           message: message,
         );
       }
@@ -1794,7 +1996,7 @@ class _AdminBillingRemindersScreenState
           studentName: studentName,
           type: mode == 'whatsapp' ? ContactType.whatsapp : ContactType.email,
           notes:
-              'Cobranca enviada via ${mode == 'whatsapp' ? 'WhatsApp' : 'Email'}',
+              'Cobrança enviada via ${mode == 'whatsapp' ? 'WhatsApp' : 'e-mail'}',
           stage: stage.value,
           daysOverdue: daysOverdue,
           contactedBy: FirebaseService.currentUserId ?? '',
@@ -1804,14 +2006,18 @@ class _AdminBillingRemindersScreenState
         if (mounted) {
           Celebration.confetti(context);
           final fallbackMessage = switch (result.paymentFallbackReason) {
+            'missing_payer_cpf' =>
+              ' Mercado Pago não foi usado: cadastre um CPF válido do pagador.',
+            'missing_payer_email' =>
+              ' Mercado Pago não foi usado: cadastre um e-mail válido do aluno ou responsável.',
             'missing_payer_data' =>
-              ' Mercado Pago nao foi usado: cadastre CPF e e-mail validos do pagador.',
+              ' Mercado Pago não foi usado: cadastre CPF e e-mail válidos do pagador.',
             'reconnect_required' =>
               ' Mercado Pago precisa ser reconectado; foi usado o fallback.',
             'seller_pix_unavailable' =>
-              ' A conta Mercado Pago nao conseguiu gerar PIX; foi usado o fallback.',
+              ' A conta Mercado Pago não conseguiu gerar PIX; foi usado o fallback.',
             'mercado_pago_unavailable' =>
-              ' Mercado Pago estava indisponivel; foi usado o fallback.',
+              ' Mercado Pago estava indisponível; foi usado o fallback.',
             _ => '',
           };
           FeedbackUtils.showSuccess(
@@ -1976,7 +2182,7 @@ class _AdminBillingRemindersScreenState
                       Text(
                         recipients.emails.isNotEmpty
                             ? 'Mensagem do e-mail'
-                            : 'Previa do template oficial do WhatsApp',
+                            : 'Prévia do template oficial do WhatsApp',
                         style: AppTheme.labelMedium,
                       ),
                       const SizedBox(height: 6),
@@ -1990,7 +2196,7 @@ class _AdminBillingRemindersScreenState
                           ),
                           helperText: recipients.emails.isNotEmpty
                               ? 'Este texto afeta somente o e-mail. O WhatsApp usa o template aprovado na Meta.'
-                              : 'O texto do WhatsApp nao pode ser editado.',
+                              : 'O texto do WhatsApp não pode ser editado.',
                           helperMaxLines: 2,
                         ),
                       ),
@@ -2156,7 +2362,7 @@ class _AdminBillingRemindersScreenState
         !(_notificationSettings?.emailEnabled ?? false)) {
       FeedbackUtils.showError(
         context,
-        'Nenhum canal de notificacao esta habilitado. Habilite WhatsApp ou Email nas configuracoes.',
+        'Nenhum canal de notificação está habilitado. Habilite WhatsApp ou e-mail nas configurações.',
       );
       return;
     }
@@ -2177,7 +2383,7 @@ class _AdminBillingRemindersScreenState
           FeedbackUtils.showInfo(
             context,
             outcome.alreadyPaidSkipped > 0
-                ? 'Todas as ${outcome.alreadyPaidSkipped} cobrancas ja foram pagas — nada a enviar.'
+                ? 'Todas as ${outcome.alreadyPaidSkipped} cobranças já foram pagas — nada a enviar.'
                 : 'Nada a enviar.',
           );
         }
@@ -2191,7 +2397,7 @@ class _AdminBillingRemindersScreenState
           alreadyPaidSkipped: outcome.alreadyPaidSkipped,
           waWithLink: outcome.waWithLink,
           waWithoutLink: outcome.waWithoutLink,
-          missingCpfNames: outcome.missingCpfNames.toList(),
+          missingPayerDataNames: outcome.missingPayerDataNames.toList(),
           linkIntended:
               (_notificationSettings?.includePaymentLink ?? false) &&
               (_notificationSettings?.whatsappEnabled ?? false),
@@ -2294,8 +2500,10 @@ class _AdminBillingRemindersScreenState
           } else if (includePix && whatsappOn) {
             outcome.waWithoutLink++;
           }
-          if (result.paymentFallbackReason == 'missing_payer_data') {
-            outcome.missingCpfNames.add(studentName);
+          if (result.paymentFallbackReason == 'missing_payer_data' ||
+              result.paymentFallbackReason == 'missing_payer_cpf' ||
+              result.paymentFallbackReason == 'missing_payer_email') {
+            outcome.missingPayerDataNames.add(studentName);
           }
         } else {
           outcome.waFailed++;
@@ -2356,7 +2564,7 @@ class _AdminBillingRemindersScreenState
           studentId: studentId,
           studentName: studentName,
           type: sentWhatsApp ? ContactType.whatsapp : ContactType.email,
-          notes: 'Cobranca em massa (personalizada)',
+          notes: 'Cobrança em massa (personalizada)',
           stage: stage.value,
           daysOverdue: daysOverdue,
           contactedBy: FirebaseService.currentUserId ?? '',
@@ -2376,7 +2584,7 @@ class _AdminBillingRemindersScreenState
     int alreadyPaidSkipped = 0,
     int waWithLink = 0,
     int waWithoutLink = 0,
-    List<String> missingCpfNames = const [],
+    List<String> missingPayerDataNames = const [],
     bool linkIntended = false,
   }) {
     showDialog(
@@ -2511,7 +2719,7 @@ class _AdminBillingRemindersScreenState
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            '$alreadyPaidSkipped ja paga(s), ignorada(s)',
+                            '$alreadyPaidSkipped já paga(s), ignorada(s)',
                             style: AppTheme.bodySmall.copyWith(
                               color: AppTheme.info,
                             ),
@@ -2556,17 +2764,17 @@ class _AdminBillingRemindersScreenState
                                       : AppTheme.success,
                                 ),
                               ),
-                              if (missingCpfNames.isNotEmpty) ...[
+                              if (missingPayerDataNames.isNotEmpty) ...[
                                 const SizedBox(height: 6),
                                 Text(
-                                  'Alguns alunos sem forma de pagamento também estão sem CPF. Verifique o Mercado Pago, a chave PIX pessoal e o CPF do pagador:',
+                                  'Alguns alunos caíram no fallback por falta de CPF ou e-mail válido do pagador:',
                                   style: AppTheme.labelSmall.copyWith(
                                     color: AppTheme.textSecondary,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  missingCpfNames.join(', '),
+                                  missingPayerDataNames.join(', '),
                                   style: AppTheme.labelSmall.copyWith(
                                     color: AppTheme.warning,
                                     fontWeight: FontWeight.w600,
@@ -2719,7 +2927,9 @@ class _AdminBillingRemindersScreenState
           : 'Mensalidade do Plano',
     );
     DateTime selectedDueDate = DateTime.now().subtract(const Duration(days: 3));
+    bool isSubmitting = false;
 
+    if (!mounted) return;
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -3112,70 +3322,99 @@ class _AdminBillingRemindersScreenState
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        onPressed: () async {
-                          final parsedAmount = double.tryParse(
-                            amountController.text.replaceAll(',', '.'),
-                          );
-                          if (parsedAmount == null || parsedAmount <= 0) {
-                            FeedbackUtils.showError(
-                              ctx,
-                              'Informe um valor válido maior que zero.',
-                            );
-                            return;
-                          }
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                // A trava síncrona evita dois callables mesmo se
+                                // o segundo toque chegar antes do rebuild.
+                                if (isSubmitting) return;
+                                final parsedAmount = double.tryParse(
+                                  amountController.text.replaceAll(',', '.'),
+                                );
+                                if (parsedAmount == null || parsedAmount <= 0) {
+                                  FeedbackUtils.showError(
+                                    ctx,
+                                    'Informe um valor válido maior que zero.',
+                                  );
+                                  return;
+                                }
 
-                          try {
-                            final refMonth =
-                                '${selectedDueDate.year}-${selectedDueDate.month.toString().padLeft(2, '0')}';
+                                isSubmitting = true;
+                                setSheetState(() {});
 
-                            await PaymentService(academyId).create(
-                              studentId: selectedStudent.studentId,
-                              studentName: selectedStudent.studentName,
-                              value: parsedAmount,
-                              dueDate: selectedDueDate,
-                              type: chargeType,
-                              planId: chargeType == 'monthly_tuition'
-                                  ? selectedPlanId
-                                  : null,
-                              description: descController.text.trim().isNotEmpty
-                                  ? descController.text.trim()
-                                  : (chargeType == 'monthly_tuition'
-                                        ? 'Mensalidade do Plano'
-                                        : 'Cobrança Avulsa'),
-                              referenceMonth: refMonth,
-                              paymentMethodPolicy:
-                                  chargeType == 'monthly_tuition'
-                                  ? (selectedPlan?.paymentMethodPolicy ??
-                                        PaymentMethodPolicy.both)
-                                  : PaymentMethodPolicy.both,
-                            );
+                                try {
+                                  final refMonth =
+                                      '${selectedDueDate.year}-${selectedDueDate.month.toString().padLeft(2, '0')}';
 
-                            if (ctx.mounted) {
-                              Navigator.pop(ctx);
-                            }
-                            if (mounted) {
-                              FeedbackUtils.showSuccess(
-                                context,
-                                'Cobrança criada com sucesso!',
-                              );
-                              _loadData();
-                            }
-                          } catch (e) {
-                            if (ctx.mounted) {
-                              FeedbackUtils.showError(
-                                ctx,
-                                'Erro ao criar cobrança: $e',
-                              );
-                            }
-                          }
-                        },
-                        child: Text(
-                          'Criar Cobrança',
-                          style: AppTheme.titleSmall.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                                  await PaymentService(academyId).create(
+                                    studentId: selectedStudent.studentId,
+                                    studentName: selectedStudent.studentName,
+                                    value: parsedAmount,
+                                    dueDate: selectedDueDate,
+                                    type: chargeType,
+                                    planId: chargeType == 'monthly_tuition'
+                                        ? selectedPlanId
+                                        : null,
+                                    description:
+                                        descController.text.trim().isNotEmpty
+                                        ? descController.text.trim()
+                                        : (chargeType == 'monthly_tuition'
+                                              ? 'Mensalidade do Plano'
+                                              : 'Cobrança Avulsa'),
+                                    referenceMonth: refMonth,
+                                    paymentMethodPolicy:
+                                        chargeType == 'monthly_tuition'
+                                        ? (selectedPlan?.paymentMethodPolicy ??
+                                              PaymentMethodPolicy.both)
+                                        : PaymentMethodPolicy.both,
+                                  );
+
+                                  if (sheetContext.mounted &&
+                                      ModalRoute.of(sheetContext)?.isCurrent ==
+                                          true) {
+                                    Navigator.of(sheetContext).pop();
+                                  }
+                                  if (mounted) {
+                                    FeedbackUtils.showSuccess(
+                                      context,
+                                      'Cobrança criada com sucesso!',
+                                    );
+                                    _loadData();
+                                  }
+                                } catch (e) {
+                                  if (sheetContext.mounted) {
+                                    setSheetState(() => isSubmitting = false);
+                                  }
+                                  if (mounted) {
+                                    final msg = e is FirebaseFunctionsException
+                                        ? (e.message ?? e.code)
+                                        : e.toString().replaceAll(
+                                            'Exception: ',
+                                            '',
+                                          );
+                                    FeedbackUtils.showError(
+                                      context,
+                                      'Erro ao criar cobrança: $msg',
+                                    );
+                                  }
+                                }
+                              },
+                        child: isSubmitting
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(
+                                'Criar Cobrança',
+                                style: AppTheme.titleSmall.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                       ),
                     ),
                   ],
@@ -3257,7 +3496,7 @@ class _AdminBillingRemindersScreenState
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    'Configuracoes',
+                    'Configurações',
                     style: AppTheme.titleLarge.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
@@ -3271,17 +3510,17 @@ class _AdminBillingRemindersScreenState
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Canais de Cobranca', style: AppTheme.titleSmall),
+                      Text('Canais de Cobrança', style: AppTheme.titleSmall),
                       const SizedBox(height: 4),
                       Text(
-                        'Habilite os canais que deseja utilizar para enviar cobrancas aos alunos.',
+                        'Habilite os canais que deseja utilizar para enviar cobranças aos alunos.',
                         style: AppTheme.bodySmall.copyWith(
                           color: AppTheme.textSecondary,
                         ),
                       ),
                       const SizedBox(height: 16),
                       SwitchListTile(
-                        title: const Text('Automacao via WhatsApp'),
+                        title: const Text('Automação via WhatsApp'),
                         subtitle: Text(
                           'Envia sozinho nos momentos configurados. O botão Cobrar continua disponível para envios manuais.',
                           style: AppTheme.bodySmall.copyWith(
@@ -3321,7 +3560,7 @@ class _AdminBillingRemindersScreenState
                           'Incluir forma de pagamento nas mensagens',
                         ),
                         subtitle: Text(
-                          'Usa a preferencia definida em Financeiro: Mercado Pago ou PIX pessoal, com fallback automatico.',
+                          'Usa a preferência definida em Financeiro: Mercado Pago ou PIX pessoal, com fallback automático.',
                           style: AppTheme.bodySmall.copyWith(
                             color: AppTheme.textSecondary,
                           ),
@@ -3339,6 +3578,14 @@ class _AdminBillingRemindersScreenState
                           setDialogState(() => includePaymentLink = value);
                         },
                       ),
+                      if (_billingPaymentPreference ==
+                              BillingPaymentPreference.mercadoPago &&
+                          includePaymentLink) ...[
+                        const SizedBox(height: 8),
+                        _buildAutomaticMercadoPagoReadiness(
+                          includePaymentLink: includePaymentLink,
+                        ),
+                      ],
 
                       const Divider(height: 24),
 
@@ -3347,10 +3594,10 @@ class _AdminBillingRemindersScreenState
                       // WhatsApp (o switch de WhatsApp fica acima, em
                       // "Canais de Cobranca" — aqui só a flag nova).
                       // ============================================
-                      Text('Automacao', style: AppTheme.titleSmall),
+                      Text('Automação', style: AppTheme.titleSmall),
                       const SizedBox(height: 4),
                       Text(
-                        'Controle o que roda sozinho, sem voce precisar abrir o app.',
+                        'Controle o que roda sozinho, sem você precisar abrir o app.',
                         style: AppTheme.bodySmall.copyWith(
                           color: AppTheme.textSecondary,
                         ),
@@ -3359,7 +3606,7 @@ class _AdminBillingRemindersScreenState
                       SwitchListTile(
                         title: const Text('Gerar mensalidades automaticamente'),
                         subtitle: Text(
-                          'Na virada do mes, gera as mensalidades de todos os planos ativos (diariamente as 6h). Planos mensais no cartao continuam pela assinatura automatica.',
+                          'Na virada do mês, gera as mensalidades de todos os planos ativos (diariamente às 6h). Planos mensais no cartão continuam pela assinatura automática.',
                           style: AppTheme.bodySmall.copyWith(
                             color: AppTheme.textSecondary,
                           ),
@@ -3519,7 +3766,7 @@ class _AdminBillingRemindersScreenState
                                     child: Text(
                                       stageKey == 'CREATED' ||
                                               stageKey == 'UPCOMING'
-                                          ? 'WhatsApp - modelo Meta ainda nao disponivel ($stageKey)'
+                                          ? 'WhatsApp - modelo Meta ainda não disponível ($stageKey)'
                                           : 'WhatsApp - modelo oficial Meta ($stageKey)',
                                       style: AppTheme.labelSmall.copyWith(
                                         color: AppTheme.success,
@@ -3532,7 +3779,7 @@ class _AdminBillingRemindersScreenState
                               const SizedBox(height: 6),
                               Text(
                                 stageKey == 'CREATED' || stageKey == 'UPCOMING'
-                                    ? 'Esta etapa continua disponivel para notificacoes internas e e-mail. O WhatsApp sera ignorado ate existir um template aprovado.'
+                                    ? 'Esta etapa continua disponível para notificações internas e e-mail. O WhatsApp será ignorado até existir um template aprovado.'
                                     : BillingNotificationService
                                               .defaultWhatsAppTemplates[stageKey] ??
                                           '',
@@ -3678,7 +3925,7 @@ class _AdminBillingRemindersScreenState
                       if (mounted) {
                         FeedbackUtils.showSuccess(
                           context,
-                          'Configuracoes salvas!',
+                          'Configurações salvas!',
                         );
                       }
                     } catch (e) {
@@ -3879,7 +4126,7 @@ class _BulkSendOutcome {
   int waWithoutLink = 0;
   bool hadItemsToSend = false;
   final List<BulkFailure> failures = [];
-  final Set<String> missingCpfNames = {};
+  final Set<String> missingPayerDataNames = {};
 
   void merge(_BulkSendOutcome other) {
     waSent += other.waSent;
@@ -3893,7 +4140,7 @@ class _BulkSendOutcome {
     waWithoutLink += other.waWithoutLink;
     hadItemsToSend = hadItemsToSend || other.hadItemsToSend;
     failures.addAll(other.failures);
-    missingCpfNames.addAll(other.missingCpfNames);
+    missingPayerDataNames.addAll(other.missingPayerDataNames);
   }
 
   BulkServerResult toResult() {

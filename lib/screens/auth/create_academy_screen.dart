@@ -897,6 +897,10 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                   selected: _academyProfile == AcademyProfile.fight,
                   onTap: () => setState(() {
                     _academyProfile = AcademyProfile.fight;
+                    _selectedSports.remove(SportId.musculacao);
+                    if (_selectedSports.isEmpty) {
+                      _selectedSports.add(SportId.bjj);
+                    }
                     _errorMessage = null;
                   }),
                 ),
@@ -908,6 +912,8 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                   selected: _academyProfile == AcademyProfile.fitness,
                   onTap: () => setState(() {
                     _academyProfile = AcademyProfile.fitness;
+                    _selectedSports.clear();
+                    _selectedSports.add(SportId.musculacao);
                     _errorMessage = null;
                   }),
                 ),
@@ -919,6 +925,12 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
                   selected: _academyProfile == AcademyProfile.hybrid,
                   onTap: () => setState(() {
                     _academyProfile = AcademyProfile.hybrid;
+                    if (!_selectedSports.contains(SportId.musculacao)) {
+                      _selectedSports.add(SportId.musculacao);
+                    }
+                    if (!_selectedSports.any((s) => s != SportId.musculacao)) {
+                      _selectedSports.add(SportId.bjj);
+                    }
                     _errorMessage = null;
                   }),
                 ),
@@ -942,7 +954,12 @@ class _CreateAcademyScreenState extends ConsumerState<CreateAcademyScreen> {
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: sportOptions.map((id) {
+                children: (_academyProfile == AcademyProfile.fight
+                        ? sportOptions
+                            .where((id) => id != SportId.musculacao)
+                            .toList()
+                        : sportOptions)
+                    .map((id) {
                   final def = getSport(id);
                   return _SportChip(
                     icon: def.icon,

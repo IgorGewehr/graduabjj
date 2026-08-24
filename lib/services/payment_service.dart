@@ -614,13 +614,13 @@ class PaymentService {
     final financialId = data['financialId']?.toString() ?? '';
     if (financialId.isEmpty) {
       throw PaymentOperationException(
-        'O backend nao retornou a cobranca criada.',
+        'O backend não retornou a cobrança criada.',
       );
     }
     final payment = await getById(financialId);
     if (payment == null) {
       throw PaymentOperationException(
-        'A cobranca foi criada, mas nao foi possivel recarregar os dados.',
+        'A cobrança foi criada, mas não foi possível recarregar os dados.',
       );
     }
     return payment;
@@ -716,12 +716,23 @@ class PaymentService {
   // Cancel Payment
   // ============================================
   Future<Payment> cancel(String id) async {
-    await Fns.functions.httpsCallable('cancelFinancialCharge').call({
-      'academyId': academyId,
-      'financialId': id,
-    });
+    try {
+      await Fns.functions.httpsCallable('cancelFinancialCharge').call({
+        'academyId': academyId,
+        'financialId': id,
+      });
+    } catch (error) {
+      throw _friendlyPaymentError(
+        error,
+        fallback: 'Não foi possível cancelar a cobrança. Tente novamente.',
+      );
+    }
     final payment = await getById(id);
-    if (payment == null) throw StateError('Pagamento nao encontrado');
+    if (payment == null) {
+      throw const PaymentOperationException(
+        'A cobrança foi cancelada, mas não foi possível atualizar os dados.',
+      );
+    }
     return payment;
   }
 
@@ -742,10 +753,17 @@ class PaymentService {
   // Delete Payment
   // ============================================
   Future<void> delete(String id) async {
-    await Fns.functions.httpsCallable('deleteFinancialCharge').call({
-      'academyId': academyId,
-      'financialId': id,
-    });
+    try {
+      await Fns.functions.httpsCallable('deleteFinancialCharge').call({
+        'academyId': academyId,
+        'financialId': id,
+      });
+    } catch (error) {
+      throw _friendlyPaymentError(
+        error,
+        fallback: 'Não foi possível excluir a cobrança. Tente novamente.',
+      );
+    }
   }
 
   // ============================================
@@ -1160,6 +1178,46 @@ class PaymentOperationException implements Exception {
 
   @override
   String toString() => message;
+}
+
+PaymentOperationException _friendlyPaymentError(
+  Object error, {
+  required String fallback,
+}) {
+  if (error is PaymentOperationException) return error;
+
+  String? code;
+  String? message;
+  if (error is FirebaseFunctionsException) {
+    code = error.code;
+    message = error.message;
+  } else if (error is FnsException) {
+    code = error.code;
+    message = error.message;
+  }
+
+  final normalizedCode = code?.trim().toLowerCase() ?? '';
+  final cleanMessage = message?.trim() ?? '';
+  if (cleanMessage.isNotEmpty) {
+    return PaymentOperationException(cleanMessage);
+  }
+  if (normalizedCode == 'unavailable' ||
+      normalizedCode == 'deadline-exceeded') {
+    return const PaymentOperationException(
+      'O serviço financeiro está temporariamente indisponível. Tente novamente.',
+    );
+  }
+  if (normalizedCode == 'unauthenticated') {
+    return const PaymentOperationException(
+      'Sua sessão expirou. Entre novamente para continuar.',
+    );
+  }
+  if (normalizedCode == 'permission-denied') {
+    return const PaymentOperationException(
+      'Sua conta não tem permissão para realizar esta ação.',
+    );
+  }
+  return PaymentOperationException(fallback);
 }
 
 // ============================================

@@ -116,14 +116,14 @@ class _Body extends ConsumerWidget {
       cHigh = atRisk.where((s) => s.retention?.riskLevel == 'high').length;
       cMedium = atRisk.where((s) => s.retention?.riskLevel == 'medium').length;
     } else {
-      int band(Student s, bool Function(int) test) {
+      int band(Student s, bool Function(int?) test) {
         final d = s.daysSinceLastAttendance;
-        return d != null && test(d) ? 1 : 0;
+        return test(d) ? 1 : 0;
       }
 
-      cCritical = students.fold(0, (acc, s) => acc + band(s, (d) => d > 30));
-      cHigh = students.fold(0, (acc, s) => acc + band(s, (d) => d >= 15 && d <= 30));
-      cMedium = students.fold(0, (acc, s) => acc + band(s, (d) => d >= 7 && d < 15));
+      cCritical = atRisk.fold(0, (acc, s) => acc + band(s, (d) => d == null || d > 30));
+      cHigh = atRisk.fold(0, (acc, s) => acc + band(s, (d) => d != null && d >= 15 && d <= 30));
+      cMedium = atRisk.fold(0, (acc, s) => acc + band(s, (d) => d != null && d >= 7 && d < 15));
     }
 
     final children = <Widget>[
@@ -154,7 +154,7 @@ class _Body extends ConsumerWidget {
     } else {
       // Fallback: agrupa por banda de inatividade (30+/15–30/7–14).
       final b30 = atRisk
-          .where((s) => (s.daysSinceLastAttendance ?? 0) > 30)
+          .where((s) => s.daysSinceLastAttendance == null || s.daysSinceLastAttendance! > 30)
           .toList();
       final b15 = atRisk.where((s) {
         final d = s.daysSinceLastAttendance ?? 0;
@@ -523,9 +523,9 @@ class _RetentionCardState extends ConsumerState<_RetentionCard> {
       return _WaTemplate(
         'retention_blues_challenge',
         (name, academy) =>
-            'Fala $name! Teu jogo tá evoluindo demais — dá pra ver no tatame. '
+            'Fala $name! Seu jogo tá evoluindo demais — dá pra ver no tatame. '
             'Semana que vem quero te passar uma meta técnica nova, tem uma '
-            'chave que é a tua cara. Bora? 👊',
+            'chave que é a sua cara. Bora? 👊',
       );
     }
     final d = student.daysSinceLastAttendance ?? 999;

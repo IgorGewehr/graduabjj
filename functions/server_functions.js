@@ -580,6 +580,12 @@ async function getOrCreatePublicPaymentLink(academyId, financialId) {
 
 function billingMercadoPagoFailureCode(error) {
   const message = String(error?.message || '').toLowerCase();
+  if (message.includes('missing_valid_pix_payer_cpf')) {
+    return 'missing_payer_cpf';
+  }
+  if (message.includes('missing_valid_pix_payer_email')) {
+    return 'missing_payer_email';
+  }
   if (message.includes('missing_valid_pix_payer')) {
     return 'missing_payer_data';
   }
@@ -673,8 +679,11 @@ async function generateReminderMercadoPagoPix(
       // The personal PIX resolver remains the safe fallback below.
     }
   }
-  if (!validateCPF(cpf) || !isValidBillingEmail(resolvedEmail)) {
-    throw new Error('missing_valid_pix_payer');
+  if (!validateCPF(cpf)) {
+    throw new Error('missing_valid_pix_payer_cpf');
+  }
+  if (!isValidBillingEmail(resolvedEmail)) {
+    throw new Error('missing_valid_pix_payer_email');
   }
 
   // A live PIX minted for an old amount must not remain payable beside the
@@ -1072,11 +1081,8 @@ async function getBillingReminderSettings(academyId) {
 // from authoritative server data. Notification credentials never reach Flutter.
 exports.sendBillingReminder = onCall(
   {
-    // Callable endpoints must be reachable by the Firebase client. Access to
-    // academy data is still protected below by request.auth + isAcademyStaff.
-    // Without this IAM binding Cloud Run rejects the request with 403 before
-    // the callable SDK can validate the Firebase ID token.
-    invoker: 'public',
+    cors: true,
+    enforceAppCheck: false,
     secrets: BILLING_NOTIFICATION_SECRETS,
   },
   async (request) => {
@@ -2684,11 +2690,42 @@ async function isAcademyStaff(uid, academyId) {
  */
 async function getMembershipWithExtraPerms(uid, academyId) {
   if (!uid || !academyId) return { role: null, extraPermissions: [] };
+  let role = null;
+  let perms = [];
+
   const snap = await db.collection('userAcademyMapping').doc(uid).get();
-  if (!snap.exists) return { role: null, extraPermissions: [] };
-  const entry = ((snap.data() || {}).academyDetails || {})[academyId] || {};
-  const perms = Array.isArray(entry.extraPermissions) ? entry.extraPermissions : [];
-  return { role: entry.role || null, extraPermissions: perms };
+  if (snap.exists) {
+    const data = snap.data() || {};
+    const entry = (data.academyDetails || {})[academyId] || {};
+    if (entry.role) role = entry.role;
+    if (Array.isArray(entry.extraPermissions)) perms = entry.extraPermissions;
+    if (!role && data.primaryAcademyId === academyId && data.role) {
+      role = data.role;
+    }
+  }
+
+  if (!role) {
+    const academyUserDoc = await db.collection('academies').doc(academyId)
+      .collection('users').doc(uid).get();
+    if (academyUserDoc.exists) {
+      const udata = academyUserDoc.data() || {};
+      if (udata.role) role = udata.role;
+      if (Array.isArray(udata.extraPermissions)) perms = udata.extraPermissions;
+    }
+  }
+
+  if (!role) {
+    const academyDoc = await db.collection('academies').doc(academyId).get();
+    if (academyDoc.exists) {
+      const adata = academyDoc.data() || {};
+      if (adata.adminId === uid || adata.ownerId === uid ||
+          adata.userId === uid || adata.createdBy === uid) {
+        role = 'admin';
+      }
+    }
+  }
+
+  return { role: role || null, extraPermissions: perms };
 }
 
 /**
@@ -2990,7 +3027,17 @@ async function getUserAcademyMembership(uid, academyId) {
     (Array.isArray(mappingData?.academyIds) &&
       mappingData.academyIds.includes(academyId)) ||
     details !== undefined;
-  if (!belongs) return null;
+  if (!belongs) {
+    const academyDoc = await db.collection('academies').doc(academyId).get();
+    if (academyDoc.exists) {
+      const adata = academyDoc.data() || {};
+      if (adata.adminId === uid || adata.ownerId === uid ||
+          adata.userId === uid || adata.createdBy === uid) {
+        return { academyId, role: 'admin' };
+      }
+    }
+    return null;
+  }
 
   if (details?.role) {
     return { academyId, role: details.role, studentId: details.studentId };
@@ -3007,6 +3054,15 @@ async function getUserAcademyMembership(uid, academyId) {
       role: academyUserData.role,
       studentId: academyUserData.studentId,
     };
+  }
+
+  const academyDoc = await db.collection('academies').doc(academyId).get();
+  if (academyDoc.exists) {
+    const adata = academyDoc.data() || {};
+    if (adata.adminId === uid || adata.ownerId === uid ||
+        adata.userId === uid || adata.createdBy === uid) {
+      return { academyId, role: 'admin' };
+    }
   }
 
   return { academyId };
@@ -6314,15 +6370,19 @@ async function mpCancelPixPayment(academyId, paymentId, { token, throwOnError } 
   try {
     const tok = token || await getMpAccessToken(academyId);
     const current = await mpRequest('GET', `/v1/payments/${paymentId}`, { token: tok });
-    if (current.status !== 'pending' && current.status !== 'in_process') {
+    if (!['pending', 'in_process', 'authorized'].includes(current.status)) {
       // Já aprovado → NÃO cancela (seria estorno, fora de escopo). Se já estava
       // aprovado, sinaliza para o chamador via flag dedicada.
       return { cancelled: false, status: current.status,
         alreadyApproved: current.status === 'approved' };
     }
-    const updated = await mpRequest('POST', `/v1/payments/${paymentId}`, {
+    const cancellationKey = crypto.createHash('sha256')
+      .update(`${academyId}:cancel:${paymentId}`)
+      .digest('hex');
+    const updated = await mpRequest('PUT', `/v1/payments/${paymentId}`, {
       token: tok,
       body: { status: 'cancelled' },
+      idempotencyKey: cancellationKey,
     });
     return { cancelled: updated.status === 'cancelled', status: updated.status };
   } catch (e) {
@@ -6433,12 +6493,16 @@ exports.cancelMpPix = onCall({ secrets: MP_MKT_SECRETS }, async (request) => {
     const current = await mpRequest('GET', `/v1/payments/${paymentId}`, { token });
     // Only pending/in_process payments can be cancelled. If it already settled
     // we must NOT cancel (that would be a refund path, out of scope).
-    if (current.status !== 'pending' && current.status !== 'in_process') {
+    if (!['pending', 'in_process', 'authorized'].includes(current.status)) {
       return { cancelled: false, status: current.status };
     }
-    const updated = await mpRequest('POST', `/v1/payments/${paymentId}`, {
+    const cancellationKey = crypto.createHash('sha256')
+      .update(`${academyId}:cancel:${paymentId}`)
+      .digest('hex');
+    const updated = await mpRequest('PUT', `/v1/payments/${paymentId}`, {
       token,
       body: { status: 'cancelled' },
+      idempotencyKey: cancellationKey,
     });
     return { cancelled: updated.status === 'cancelled', status: updated.status };
   } catch (e) {
@@ -7319,7 +7383,9 @@ async function financialActorName(request) {
   ).trim();
 }
 
-exports.createFinancialCharge = onCall(async (request) => {
+exports.createFinancialCharge = onCall(
+  { cors: true, enforceAppCheck: false },
+  async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login obrigatorio.');
   const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
   const studentId = assertSafeDocumentId(request.data?.studentId, 'studentId');
@@ -7542,7 +7608,7 @@ exports.createFinancialCharge = onCall(async (request) => {
 });
 
 exports.updateFinancialTerms = onCall(
-  { secrets: MP_MKT_SECRETS }, async (request) => {
+  { cors: true, enforceAppCheck: false, secrets: MP_MKT_SECRETS }, async (request) => {
     const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
     const financialId = assertSafeDocumentId(
       request.data?.financialId, 'financialId'
@@ -7616,7 +7682,7 @@ exports.updateFinancialTerms = onCall(
 );
 
 exports.markFinancialPaidManual = onCall(
-  { secrets: MP_MKT_SECRETS }, async (request) => {
+  { cors: true, enforceAppCheck: false, secrets: MP_MKT_SECRETS }, async (request) => {
     const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
     const financialId = assertSafeDocumentId(
       request.data?.financialId, 'financialId'
@@ -7715,7 +7781,7 @@ exports.markFinancialPaidManual = onCall(
 );
 
 exports.cancelFinancialCharge = onCall(
-  { secrets: MP_MKT_SECRETS }, async (request) => {
+  { cors: true, enforceAppCheck: false, secrets: MP_MKT_SECRETS }, async (request) => {
     const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
     const financialId = assertSafeDocumentId(
       request.data?.financialId, 'financialId'
@@ -7766,7 +7832,9 @@ exports.cancelFinancialCharge = onCall(
   }
 );
 
-exports.reactivateFinancialCharge = onCall(async (request) => {
+exports.reactivateFinancialCharge = onCall(
+  { cors: true, enforceAppCheck: false },
+  async (request) => {
   const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
   const financialId = assertSafeDocumentId(
     request.data?.financialId, 'financialId'
@@ -7795,7 +7863,9 @@ exports.reactivateFinancialCharge = onCall(async (request) => {
   return { success: true };
 });
 
-exports.refreshOverdueFinancials = onCall(async (request) => {
+exports.refreshOverdueFinancials = onCall(
+  { cors: true, enforceAppCheck: false },
+  async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login obrigatorio.');
   const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
   if (!(await isAcademyStaff(request.auth.uid, academyId))) {
@@ -7835,7 +7905,9 @@ exports.refreshOverdueFinancials = onCall(async (request) => {
   return { success: true, updated };
 });
 
-exports.deleteFinancialCharge = onCall(async (request) => {
+exports.deleteFinancialCharge = onCall(
+  { cors: true, enforceAppCheck: false, secrets: MP_MKT_SECRETS },
+  async (request) => {
   const academyId = assertSafeDocumentId(request.data?.academyId, 'academyId');
   const financialId = assertSafeDocumentId(
     request.data?.financialId, 'financialId'
@@ -7844,16 +7916,41 @@ exports.deleteFinancialCharge = onCall(async (request) => {
   const financialRef = db.doc(
     `academies/${academyId}/financials/${financialId}`
   );
-  await db.runTransaction(async (tx) => {
+  const initialSnapshot = await financialRef.get();
+  if (!initialSnapshot.exists) return { success: true, alreadyDeleted: true };
+  const initial = initialSnapshot.data();
+  if (!['pending', 'overdue', 'cancelled', 'test'].includes(initial.status) ||
+      initial.paymentDate || initial.manualPaymentAudit) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Esta cobrança já foi paga e precisa permanecer no histórico financeiro.'
+    );
+  }
+
+  // Uma cobrança pode ter um PIX/cartão pendente no Mercado Pago mesmo sem
+  // qualquer pagamento aprovado. Excluir o documento sem invalidar essa
+  // tentativa deixaria um link órfão ainda pagável. Cancela e verifica no
+  // provedor antes da exclusão, usando a mesma proteção fail-closed aplicada
+  // à edição, ao cancelamento e à baixa manual.
+  const verifiedIds = await cancelCompetingPaymentsFailClosed(
+    academyId, initial
+  );
+  const invalidatedAttemptId = await db.runTransaction(async (tx) => {
     const snapshot = await tx.get(financialRef);
-    if (!snapshot.exists) return;
+    if (!snapshot.exists) return '';
     const financial = snapshot.data();
     if (!['pending', 'overdue', 'cancelled', 'test'].includes(financial.status) ||
-        competingProviderPaymentIds(financial).size > 0 ||
         financial.paymentDate || financial.manualPaymentAudit) {
       throw new HttpsError(
         'failed-precondition',
-        'Cobranca com historico financeiro nao pode ser excluida.'
+        'Esta cobrança mudou ou já foi paga. Atualize a tela antes de tentar novamente.'
+      );
+    }
+    const liveIds = competingProviderPaymentIds(financial);
+    if ([...liveIds].some((id) => !verifiedIds.has(id))) {
+      throw new HttpsError(
+        'aborted',
+        'Uma nova tentativa de pagamento surgiu. Tente excluir novamente.'
       );
     }
     if (financial.publicPaymentLinkHash) {
@@ -7864,7 +7961,13 @@ exports.deleteFinancialCharge = onCall(async (request) => {
       }, { merge: true });
     }
     tx.delete(financialRef);
+    return financial.lastCheckoutAttemptId || '';
   });
+  await invalidatePublicCheckoutAttemptBestEffort(
+    academyId,
+    invalidatedAttemptId,
+    'financial_deleted'
+  );
   return { success: true };
 });
 

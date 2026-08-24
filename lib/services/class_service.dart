@@ -191,6 +191,21 @@ class ClassService {
   }
 
   // ============================================
+  // Stream All Active Classes
+  // ============================================
+  Stream<List<BJJClass>> stream() {
+    return _classesRef
+        .where('isActive', isEqualTo: true)
+        .snapshots()
+        .map((snapshot) {
+      final classes =
+          snapshot.docs.map((doc) => BJJClass.fromFirestore(doc)).toList();
+      classes.sort((a, b) => a.name.compareTo(b.name));
+      return classes;
+    });
+  }
+
+  // ============================================
   // Get Class by ID
   // ============================================
   Future<BJJClass?> getById(String id) async {

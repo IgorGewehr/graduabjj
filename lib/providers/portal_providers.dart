@@ -17,13 +17,13 @@ final classServiceProvider = Provider<ClassService?>((ref) {
   return ClassService(currentUser!.academyId!);
 });
 
-/// All classes provider
-final classesProvider = FutureProvider<List<BJJClass>>((ref) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser?.academyId == null) return [];
+/// All classes provider — real-time stream
+final classesProvider = StreamProvider<List<BJJClass>>((ref) {
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+  if (currentUser?.academyId == null) return Stream.value([]);
 
   final service = ClassService(currentUser!.academyId!);
-  return await service.list();
+  return service.stream();
 });
 
 /// Today's classes provider
@@ -238,13 +238,13 @@ final planServiceProvider = Provider<PlanService?>((ref) {
   return PlanService(currentUser!.academyId!);
 });
 
-/// Active plans provider
-final activePlansProvider = FutureProvider<List<Plan>>((ref) async {
-  final currentUser = await ref.watch(currentUserProvider.future);
-  if (currentUser?.academyId == null) return [];
+/// Active plans provider — real-time stream
+final activePlansProvider = StreamProvider<List<Plan>>((ref) {
+  final currentUser = ref.watch(currentUserProvider).valueOrNull;
+  if (currentUser?.academyId == null) return Stream.value([]);
 
   final service = PlanService(currentUser!.academyId!);
-  return await service.getActive();
+  return service.streamActive();
 });
 
 /// Student plan provider (legacy — returns first plan)

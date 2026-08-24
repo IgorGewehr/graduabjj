@@ -278,6 +278,18 @@ class PlanService {
   }
 
   // ============================================
+  // Stream Active Plans
+  // ============================================
+  Stream<List<Plan>> streamActive() {
+    return _plansRef.snapshots().map((snapshot) {
+      final plans =
+          snapshot.docs.map((doc) => Plan.fromFirestore(doc)).toList();
+      plans.sort((a, b) => a.monthlyValue.compareTo(b.monthlyValue));
+      return plans.where((p) => p.isActive).toList();
+    });
+  }
+
+  // ============================================
   // Get Plan by ID
   // ============================================
   Future<Plan?> getById(String id) async {

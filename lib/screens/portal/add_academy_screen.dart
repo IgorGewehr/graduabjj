@@ -6,7 +6,10 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/feedback_utils.dart';
 import '../../core/theme.dart';
+import '../../providers/join_request_providers.dart';
 import '../../providers/providers.dart';
+import '../../providers/selected_academy_provider.dart';
+import '../../providers/student_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../services/link_code_service.dart';
 import '../../services/team_service.dart';

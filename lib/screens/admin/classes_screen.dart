@@ -833,6 +833,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                                 this.context.showSuccess(
                                   'Turma criada com sucesso!',
                                 );
+                                ref.invalidate(classesProvider);
                                 _loadClasses();
                               }
                             } catch (e) {
@@ -1191,6 +1192,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                               if (mounted) {
                                 Navigator.pop(sheetContext);
                                 this.context.showSuccess('Turma atualizada!');
+                                ref.invalidate(classesProvider);
                                 _loadClasses();
                               }
                             } catch (e) {
@@ -1566,6 +1568,7 @@ class _AdminClassesScreenState extends ConsumerState<AdminClassesScreen> {
                         if (mounted) {
                           Navigator.pop(context);
                           this.context.showSuccess('Turma excluida!');
+                          ref.invalidate(classesProvider);
                           _loadClasses();
                         }
                       } catch (e) {

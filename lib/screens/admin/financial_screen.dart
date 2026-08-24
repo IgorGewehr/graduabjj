@@ -9,6 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/responsive.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/portal_providers.dart' show activePlansProvider;
 import '../../widgets/cached_image.dart';
 import '../../widgets/common/grade_display.dart';
 import '../../widgets/common/sport_chip.dart';
@@ -380,7 +381,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => context.push('/admin/cobranca'),
+        onTap: () => context.go('/admin/cobranca'),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
@@ -845,6 +846,10 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                         onReactivate: payment.status == PaymentStatus.cancelled
                             ? () => _reactivatePayment(payment)
                             : null,
+                        onDelete: _canManageFinance &&
+                                payment.status != PaymentStatus.paid
+                            ? () => _confirmDeletePayment(payment)
+                            : null,
                       ).entrance(index: index),
                     );
                   },
@@ -1083,6 +1088,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                             if (mounted) {
                               Navigator.pop(context);
                               this.context.showSuccess('Plano criado!');
+                              ref.invalidate(activePlansProvider);
                               _loadData();
                             }
                           } catch (e) {
@@ -1335,6 +1341,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                             if (mounted) {
                               Navigator.pop(context);
                               this.context.showSuccess('Plano atualizado!');
+                              ref.invalidate(activePlansProvider);
                               _loadData();
                             }
                           } catch (e) {
@@ -1382,6 +1389,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 if (mounted) {
                   Navigator.pop(context);
                   this.context.showSuccess('Plano excluido!');
+                  ref.invalidate(activePlansProvider);
                   _loadData();
                 }
               } catch (e) {
@@ -1799,7 +1807,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   }
 
   void _sendReminder(Payment payment) {
-    context.push('/admin/cobranca?financialId=${payment.id}');
+    context.go('/admin/cobranca?financialId=${payment.id}');
   }
 
   Future<void> _cancelPayment(Payment payment) async {
@@ -1828,6 +1836,51 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     } catch (e) {
       if (mounted) {
         context.showError('Erro ao reativar: $e');
+      }
+    }
+  }
+
+  Future<void> _confirmDeletePayment(Payment payment) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir cobrança permanentemente?'),
+        content: Text(
+          'Esta ação removerá completamente a cobrança "${payment.description ?? 'Mensalidade'}" no valor de ${_formatCurrency(payment.value)} para ${payment.studentName}.\n\n'
+          'Ela será apagada do sistema e não aparecerá mais nem para a academia nem para o aluno.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Voltar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Excluir cobrança'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    try {
+      final paymentService = PaymentService(FirebaseService.academyId);
+      await paymentService.delete(payment.id);
+      if (mounted) {
+        context.showSuccess('Cobrança excluída permanentemente');
+        _loadData();
+      }
+    } on PaymentOperationException catch (e) {
+      if (mounted) {
+        context.showError(e.message);
+      }
+    } catch (_) {
+      if (mounted) {
+        context.showError('Não foi possível excluir a cobrança. Tente novamente.');
       }
     }
   }
@@ -2155,6 +2208,7 @@ class _PaymentCard extends StatelessWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onCancel;
   final VoidCallback? onReactivate;
+  final VoidCallback? onDelete;
 
   const _PaymentCard({
     required this.payment,
@@ -2165,6 +2219,7 @@ class _PaymentCard extends StatelessWidget {
     this.onEdit,
     this.onCancel,
     this.onReactivate,
+    this.onDelete,
   });
 
   @override
@@ -2416,7 +2471,25 @@ class _PaymentCard extends StatelessWidget {
                           ],
                         ),
                       ),
-                    if (isPaid)
+                    if (onDelete != null)
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(
+                              LucideIcons.trash2,
+                              size: 16,
+                              color: AppTheme.error,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Excluir cobrança',
+                              style: TextStyle(color: AppTheme.error),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (isPaid && onDelete == null)
                       const PopupMenuItem(
                         value: 'none',
                         enabled: false,
@@ -2438,6 +2511,9 @@ class _PaymentCard extends StatelessWidget {
                         break;
                       case 'reactivate':
                         onReactivate?.call();
+                        break;
+                      case 'delete':
+                        onDelete?.call();
                         break;
                     }
                   },

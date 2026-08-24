@@ -39,6 +39,50 @@ test('financial mutations are exported as authenticated backend actions', () => 
   }
 });
 
+test('deleting a charge invalidates pending provider payments before removal', () => {
+  const deleteStart = serverSource.indexOf(
+    'exports.deleteFinancialCharge = onCall('
+  );
+  const deleteEnd = serverSource.indexOf(
+    '/** Parses `${academyId}:fin:${id}`',
+    deleteStart
+  );
+  const deleteSource = serverSource.slice(deleteStart, deleteEnd);
+
+  assert.match(deleteSource, /secrets:\s*MP_MKT_SECRETS/);
+  assert.match(deleteSource, /cancelCompetingPaymentsFailClosed\(/);
+  assert.match(deleteSource, /competingProviderPaymentIds\(financial\)/);
+  assert.match(deleteSource, /verifiedIds\.has\(id\)/);
+  assert.match(deleteSource, /invalidatePublicCheckoutAttemptBestEffort\(/);
+  assert.match(deleteSource, /tx\.delete\(financialRef\)/);
+});
+
+test('Mercado Pago cancellation uses the documented PUT endpoint', () => {
+  const cancelHelperStart = serverSource.indexOf(
+    'async function mpCancelPixPayment('
+  );
+  const cancelHelperEnd = serverSource.indexOf(
+    '/**\n * Auditoria MP',
+    cancelHelperStart
+  );
+  const cancelHelperSource = serverSource.slice(
+    cancelHelperStart,
+    cancelHelperEnd
+  );
+
+  assert.match(
+    cancelHelperSource,
+    /mpRequest\('PUT', `\/v1\/payments\/\$\{paymentId\}`/
+  );
+  assert.doesNotMatch(
+    cancelHelperSource,
+    /mpRequest\('POST', `\/v1\/payments\/\$\{paymentId\}`/
+  );
+  assert.match(cancelHelperSource, /body:\s*\{ status: 'cancelled' \}/);
+  assert.match(cancelHelperSource, /idempotencyKey:\s*cancellationKey/);
+  assert.match(cancelHelperSource, /'authorized'/);
+});
+
 test('staff authorization supports legacy academy-scoped user roles', () => {
   assert.match(
     serverSource,
@@ -116,4 +160,17 @@ test('billing dispatch is server-side and preview no longer mints PIX', () => {
     serverSource,
     /admin\.auth\(\)\.getUser\(payerFallbackUid\)/
   );
+});
+
+test('Mercado Pago reminder fallback distinguishes missing CPF and email', () => {
+  assert.match(
+    serverSource,
+    /throw new Error\('missing_valid_pix_payer_cpf'\)/
+  );
+  assert.match(
+    serverSource,
+    /throw new Error\('missing_valid_pix_payer_email'\)/
+  );
+  assert.match(serverSource, /return 'missing_payer_cpf'/);
+  assert.match(serverSource, /return 'missing_payer_email'/);
 });

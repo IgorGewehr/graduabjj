@@ -67,8 +67,8 @@ class _QuizStepRetentionState extends State<QuizStepRetention> {
           ).entrance(),
           const SizedBox(height: 20),
           QuizCardOption(
-            title: 'Ativar Alerta de Alunos Sumidos',
-            subtitle: 'O sistema avisa automaticamente quando um aluno ficar 7+ dias sem treinar, com 1-toque para WhatsApp.',
+            title: 'Usar Radar de Alunos Sumidos',
+            subtitle: 'O sistema identifica automaticamente quem ficar 7+ dias sem treinar. O WhatsApp só abre quando você tocar e confirmar o envio.',
             badgeText: 'Anti-Churn',
             badgeColor: AppTheme.error,
             icon: LucideIcons.messageSquare,
@@ -76,8 +76,8 @@ class _QuizStepRetentionState extends State<QuizStepRetention> {
             onTap: () => setState(() => _enableRetention = true),
           ),
           QuizCardOption(
-            title: 'Não monitorar por enquanto',
-            subtitle: 'Você pode ligar o radar de retenção a qualquer momento nas configurações.',
+            title: 'Ver o radar depois',
+            subtitle: 'O acompanhamento continuará disponível no menu Retenção, sem enviar mensagens automaticamente.',
             icon: LucideIcons.bellOff,
             isSelected: !_enableRetention,
             onTap: () => setState(() => _enableRetention = false),

@@ -65,3 +65,7 @@ functions/.env
 firebase-debug.log
 firebase-debug.*.log
 .firebase/
+
+# Local tooling preferences (machine-specific)
+.claude/settings.local.json
+devtools_options.yaml

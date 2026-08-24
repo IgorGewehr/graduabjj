@@ -51,8 +51,17 @@ class _QuizStepModalitiesState extends ConsumerState<QuizStepModalities> {
     setState(() {
       _selectedProfile = profile;
       if (profile == AcademyProfile.fitness) {
+        _selectedSports.clear();
         _selectedSports.add('musculacao');
       } else if (profile == AcademyProfile.fight) {
+        _selectedSports.remove('musculacao');
+        if (_selectedSports.isEmpty) {
+          _selectedSports.add('bjj');
+        }
+      } else if (profile == AcademyProfile.hybrid) {
+        if (!_selectedSports.contains('musculacao')) {
+          _selectedSports.add('musculacao');
+        }
         if (!_selectedSports.any((s) => s != 'musculacao')) {
           _selectedSports.add('bjj');
         }
@@ -108,6 +117,12 @@ class _QuizStepModalitiesState extends ConsumerState<QuizStepModalities> {
       (id: 'karate', name: 'Karatê', icon: LucideIcons.star),
     ];
 
+    final visibleSports = _selectedProfile == AcademyProfile.fight
+        ? availableSports.where((s) => s.id != 'musculacao').toList()
+        : _selectedProfile == AcademyProfile.fitness
+            ? availableSports.where((s) => s.id == 'musculacao').toList()
+            : availableSports;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
       child: Column(
@@ -149,49 +164,52 @@ class _QuizStepModalitiesState extends ConsumerState<QuizStepModalities> {
             isSelected: _selectedProfile == AcademyProfile.hybrid,
             onTap: () => _onProfileChanged(AcademyProfile.hybrid),
           ),
-          const SizedBox(height: 24),
-          Text(
-            'Quais modalidades você ensina?',
-            style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Selecione todas as modalidades oferecidas:',
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 10,
-            children: availableSports.map((sport) {
-              final isSelected = _selectedSports.contains(sport.id);
-              return FilterChip(
-                selected: isSelected,
-                avatar: Icon(
-                  sport.icon,
-                  size: 16,
-                  color: isSelected ? Colors.white : AppTheme.textSecondary,
-                ),
-                label: Text(sport.name),
-                labelStyle: TextStyle(
-                  color: isSelected ? Colors.white : AppTheme.textPrimary,
-                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                  fontSize: 13,
-                ),
-                backgroundColor: AppTheme.surfaceVariant,
-                selectedColor: AppTheme.textPrimary,
-                checkmarkColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(
-                    color: isSelected ? AppTheme.textPrimary : AppTheme.divider,
+          if (_selectedProfile == AcademyProfile.fight ||
+              _selectedProfile == AcademyProfile.hybrid) ...[
+            const SizedBox(height: 24),
+            Text(
+              'Quais modalidades você ensina?',
+              style: AppTheme.titleMedium.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Selecione todas as modalidades oferecidas:',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 10,
+              children: visibleSports.map((sport) {
+                final isSelected = _selectedSports.contains(sport.id);
+                return FilterChip(
+                  selected: isSelected,
+                  avatar: Icon(
+                    sport.icon,
+                    size: 16,
+                    color: isSelected ? Colors.white : AppTheme.textSecondary,
                   ),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                onSelected: (_) => _toggleSport(sport.id),
-              );
-            }).toList(),
-          ),
+                  label: Text(sport.name),
+                  labelStyle: TextStyle(
+                    color: isSelected ? Colors.white : AppTheme.textPrimary,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: 13,
+                  ),
+                  backgroundColor: AppTheme.surfaceVariant,
+                  selectedColor: AppTheme.textPrimary,
+                  checkmarkColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(
+                      color: isSelected ? AppTheme.textPrimary : AppTheme.divider,
+                    ),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  onSelected: (_) => _toggleSport(sport.id),
+                );
+              }).toList(),
+            ),
+          ],
           const SizedBox(height: 32),
           SizedBox(
             width: double.infinity,

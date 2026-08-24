@@ -54,8 +54,30 @@ class Fns {
   /// (mesmo valor que `HttpsCallableResult.data`).
   static Future<dynamic> call(String name, [Map<String, dynamic>? data]) async {
     if (!_isDesktop) {
-      final res = await FirebaseFunctions.instance.httpsCallable(name).call(data);
-      return res.data;
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          await user.getIdToken();
+        }
+        final res =
+            await FirebaseFunctions.instance.httpsCallable(name).call(data);
+        return res.data;
+      } on FirebaseFunctionsException catch (e) {
+        if (e.code == 'unauthenticated' || e.code == 'unavailable') {
+          final user = FirebaseAuth.instance.currentUser;
+          if (user != null) {
+            await user.getIdToken(true);
+          }
+          try {
+            return await _httpCall(name, data);
+          } catch (_) {
+            rethrow;
+          }
+        }
+        rethrow;
+      } catch (_) {
+        return _httpCall(name, data);
+      }
     }
     return _httpCall(name, data);
   }

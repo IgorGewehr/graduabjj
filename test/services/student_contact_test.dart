@@ -44,7 +44,7 @@ void main() {
         studentId: 's4',
         studentName: 'Ready',
         cpf: '52998224725',
-        email: 'ready@example.com',
+        email: 'ready@academia.com.br',
       );
       final missingEmail = StudentContact(
         studentId: 's5',
@@ -61,6 +61,21 @@ void main() {
       expect(ready.canGenerateMercadoPagoPix, isTrue);
       expect(missingEmail.canGenerateMercadoPagoPix, isFalse);
       expect(linked.canGenerateMercadoPagoPix, isTrue);
+    });
+
+    test('payer email validation mirrors backend placeholder rules', () {
+      expect(isValidBillingPayerEmail('aluno@academia.com.br'), isTrue);
+      expect(isValidBillingPayerEmail('sem-arroba'), isFalse);
+      expect(isValidBillingPayerEmail('aluno@teste.com'), isFalse);
+
+      final placeholder = StudentContact(
+        studentId: 's7',
+        studentName: 'Placeholder',
+        cpf: '52998224725',
+        email: 'aluno@teste.com',
+      );
+      expect(placeholder.hasValidDirectPayerEmail, isFalse);
+      expect(placeholder.canGenerateMercadoPagoPix, isFalse);
     });
   });
 }

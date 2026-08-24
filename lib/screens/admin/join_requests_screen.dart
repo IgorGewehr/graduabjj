@@ -10,8 +10,10 @@ import '../../core/sports.dart';
 import '../../core/theme.dart';
 import '../../models/join_request.dart';
 import '../../models/student.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/join_request_providers.dart';
 import '../../providers/portal_providers.dart';
+import '../../providers/student_provider.dart';
 import '../../services/firebase_service.dart';
 import '../../services/student_service.dart';
 import '../../services/team_service.dart';
@@ -118,7 +120,6 @@ class _AdminJoinRequestsScreenState
       );
       ref.invalidate(currentStudentProvider);
       ref.invalidate(userAcademyMappingProvider);
-      ref.invalidate(dashboardStatsProvider);
       ref.invalidate(pendingJoinRequestsCountProvider);
       if (mounted) {
         context.showSuccess(action == 'approve'

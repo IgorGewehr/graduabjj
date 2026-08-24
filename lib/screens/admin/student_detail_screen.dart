@@ -2246,6 +2246,48 @@ class _AdminStudentDetailScreenState
     }
   }
 
+  /// Exclui permanentemente uma cobrança não-paga.
+  Future<void> _deleteCharge(Payment payment) async {
+    if (!_ensurePermission('financial:create')) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Excluir cobrança permanentemente?'),
+        content: Text(
+          'A cobrança "${payment.description ?? 'Cobrança'}" no valor de R\$ ${payment.value.toStringAsFixed(2)} '
+          'será excluída permanentemente e sumirá da listagem da academia e do aluno.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Voltar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Excluir cobrança'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await PaymentService(FirebaseService.academyId).delete(payment.id);
+      if (mounted) {
+        context.showSuccess('Cobrança excluída permanentemente.');
+        _loadData();
+      }
+    } on PaymentOperationException catch (e) {
+      if (mounted) {
+        context.showError(e.message);
+      }
+    } catch (_) {
+      if (mounted) {
+        context.showError('Não foi possível excluir a cobrança. Tente novamente.');
+      }
+    }
+  }
+
   Widget _buildFinancialTab() {
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
     // Creating charges (avulsa / aula particular) requires the
@@ -2477,6 +2519,9 @@ class _AdminStudentDetailScreenState
                   ? () => _markChargePaidCash(payment)
                   : null,
               onCancel: canCreateCharge ? () => _cancelCharge(payment) : null,
+              onDelete: canCreateCharge && payment.status != PaymentStatus.paid
+                  ? () => _deleteCharge(payment)
+                  : null,
             ),
           ),
           const SizedBox(height: 16),
@@ -2531,6 +2576,9 @@ class _AdminStudentDetailScreenState
                   ? () => _markChargePaidCash(payment)
                   : null,
               onCancel: canCreateCharge ? () => _cancelCharge(payment) : null,
+              onDelete: canCreateCharge && payment.status != PaymentStatus.paid
+                  ? () => _deleteCharge(payment)
+                  : null,
             ),
           ),
         ],
@@ -2726,8 +2774,11 @@ class _AdminStudentDetailScreenState
                               setDialogState(() => isSaving = false);
                             }
                             if (parentContext.mounted) {
+                              final msg = e is FirebaseFunctionsException
+                                  ? (e.message ?? e.code)
+                                  : e.toString().replaceAll('Exception: ', '');
                               parentContext.showError(
-                                'Não foi possível criar a cobrança. Tente novamente.',
+                                'Não foi possível criar a cobrança: $msg',
                               );
                             }
                             return;
@@ -5925,15 +5976,19 @@ class _StudentProfileAction extends StatelessWidget {
   }
 }
 
-/// Payment Card Widget
 class _PaymentCard extends StatelessWidget {
   final Payment payment;
-  // Ações opcionais (marcar pago em dinheiro / cancelar). Sem elas o card é
-  // somente-leitura. Essencial para cobranças AVULSAS recebidas em dinheiro.
+  // Ações opcionais (marcar pago em dinheiro / cancelar / excluir).
   final VoidCallback? onMarkPaid;
   final VoidCallback? onCancel;
+  final VoidCallback? onDelete;
 
-  const _PaymentCard({required this.payment, this.onMarkPaid, this.onCancel});
+  const _PaymentCard({
+    required this.payment,
+    this.onMarkPaid,
+    this.onCancel,
+    this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -5944,12 +5999,11 @@ class _PaymentCard extends StatelessWidget {
       PaymentStatus.cancelled: Colors.grey,
     };
     // Só cobranças NÃO terminais (pendente/vencida) e não-reembolso podem ser
-    // marcadas/canceladas. Pago/cancelado são estados finais.
+    // marcadas/canceladas/excluídas.
     final canAct =
-        (onMarkPaid != null || onCancel != null) &&
+        (onMarkPaid != null || onCancel != null || onDelete != null) &&
         !payment.isOvercharge &&
-        payment.status != PaymentStatus.paid &&
-        payment.status != PaymentStatus.cancelled;
+        payment.status != PaymentStatus.paid;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -6036,6 +6090,7 @@ class _PaymentCard extends StatelessWidget {
                 onSelected: (v) {
                   if (v == 'paid') onMarkPaid?.call();
                   if (v == 'cancel') onCancel?.call();
+                  if (v == 'delete') onDelete?.call();
                 },
                 itemBuilder: (_) => [
                   if (onMarkPaid != null)
@@ -6061,10 +6116,28 @@ class _PaymentCard extends StatelessWidget {
                           Icon(
                             Icons.cancel_outlined,
                             size: 18,
-                            color: Colors.red,
+                            color: Colors.orange,
                           ),
                           SizedBox(width: 10),
                           Text('Cancelar cobrança'),
+                        ],
+                      ),
+                    ),
+                  if (onDelete != null)
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: Colors.red,
+                          ),
+                          SizedBox(width: 10),
+                          Text(
+                            'Excluir cobrança',
+                            style: TextStyle(color: Colors.red),
+                          ),
                         ],
                       ),
                     ),

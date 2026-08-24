@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -6,6 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/feedback_utils.dart';
 import '../../core/fighter_theme.dart';
 import '../../models/join_request.dart';
+import '../../models/user.dart' show UserAcademyMapping;
 import '../../providers/join_request_providers.dart';
 import '../../providers/providers.dart';
 import '../../services/settings_service.dart';

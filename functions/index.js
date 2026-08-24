@@ -12,12 +12,15 @@
  * `FirebaseFunctions.httpsCallable('name')`.
  */
 
+const {setGlobalOptions} = require('firebase-functions/v2');
 const {onCall, onRequest, HttpsError} = require('firebase-functions/v2/https');
 const {onSchedule} = require('firebase-functions/v2/scheduler');
 const {initializeApp} = require('firebase-admin/app');
 const {getFirestore, FieldValue, Timestamp} = require('firebase-admin/firestore');
 const {getAuth} = require('firebase-admin/auth');
 const crypto = require('crypto');
+
+setGlobalOptions({region: 'us-central1'});
 
 // Cloud Functions run in UTC by default. Pin the process timezone to Brazil
 // so selfCheckin's operating-hours check (getHours/getDay) and any date-based

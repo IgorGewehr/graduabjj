@@ -226,7 +226,7 @@ Future<void> _showSelfTimelineOptions(
       ref.invalidate(_selfTimelineRecordsProvider(self.studentId));
       if (context.mounted && edited.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Confrontos salvos no teu cartel.')),
+          const SnackBar(content: Text('Confrontos salvos no seu cartel.')),
         );
       }
     } catch (_) {
@@ -2229,8 +2229,8 @@ class _SelfMatchesSheetState extends State<_SelfMatchesSheet> {
                         Padding(
                           padding: const EdgeInsets.only(bottom: 16),
                           child: Text(
-                            'Registra teus confrontos e monta teu cartel '
-                            'de chave.',
+                            'Registre seus confrontos e monte seu cartel '
+                            'de lutas.',
                             style: AppTheme.bodySmall.copyWith(
                               color: AppTheme.textSecondary,
                             ),
