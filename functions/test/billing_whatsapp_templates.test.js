@@ -8,6 +8,7 @@ const path = require('node:path');
 const { BillingPaymentMode } = require('../billing_payment_resolver');
 const {
   buildBillingTemplatePayload,
+  isUpcomingMonthlyStage,
   mercadoPagoButtonUrlParam,
   normalizeTemplateStage,
   templateNameFor,
@@ -125,11 +126,134 @@ test('missing payment data degrades to the sempix template', () => {
   assert.equal(manual.templateName, 'cobranca_d7_sempix');
 });
 
-test('only due today maps from due-soon stages to an approved template', () => {
+test('due today (due-0) still maps through the D+0 family, not cobranca_avencer', () => {
   assert.equal(normalizeTemplateStage('due-0'), 'D+0');
-  assert.equal(normalizeTemplateStage('due-1'), null);
+  assert.equal(isUpcomingMonthlyStage('due-0'), false);
+  assert.equal(
+    templateNameFor('due-0', BillingPaymentMode.NONE),
+    'cobranca_d0_sempix'
+  );
+});
+
+test('stray/unrecognized stages have no template (CREATED, non-due-N)', () => {
   assert.equal(normalizeTemplateStage('CREATED'), null);
-  assert.equal(templateNameFor('UPCOMING', BillingPaymentMode.NONE), null);
+  assert.equal(isUpcomingMonthlyStage('CREATED'), false);
+  assert.equal(templateNameFor('CREATED', BillingPaymentMode.NONE), null);
+});
+
+// Regressão real (Lobisomens Jiu Jitsu, 03/set/2026): o modelo Meta
+// "cobranca_avencer" (aprovado, categoria Marketing) existia e tinha
+// conteúdo certo pra avisar ANTES do vencimento, mas nunca foi conectado —
+// due-N (N>0) sempre batia em "template_unavailable" e nenhum aviso saía.
+// 'UPCOMING' é o literal que o envio manual (sendBillingReminder) usa pra
+// mesma situação — os dois precisam resolver pro mesmo template.
+test('due-soon (due-N and the manual-send literal UPCOMING) maps to cobranca_avencer, all three payment modes', () => {
+  for (const stage of ['due-1', 'due-3', 'due-7', 'UPCOMING']) {
+    assert.equal(isUpcomingMonthlyStage(stage), true);
+    assert.equal(
+      templateNameFor(stage, BillingPaymentMode.MERCADO_PAGO),
+      'cobranca_avencer'
+    );
+    assert.equal(
+      templateNameFor(stage, BillingPaymentMode.MANUAL_PIX),
+      'cobranca_avencer_pix_manual'
+    );
+    assert.equal(
+      templateNameFor(stage, BillingPaymentMode.NONE),
+      'cobranca_avencer_sempix'
+    );
+  }
+});
+
+// Ordem confirmada na definição BRUTA do modelo (não a prévia) direto no
+// Meta Business Manager, 03/set/2026:
+//   "Olá, {{1}}! Faltam {{5}} dia(s) para o vencimento da sua mensalidade
+//   de {{3}} da {{2}}, com vencimento em {{4}}. ... {{6}}" (PIX, quando tem)
+// {{1}}=nome {{2}}=academia {{3}}=valor {{4}}=vencimento {{5}}=dias {{6}}=pix
+test('cobranca_avencer (Mercado Pago): variables in {{1}}..{{6}} order, dias before PIX', () => {
+  const payload = buildBillingTemplatePayload({
+    ...common,
+    stage: 'due-3',
+    daysUntilDue: 3,
+    paymentInstruction: {
+      mode: BillingPaymentMode.MERCADO_PAGO,
+      pixCode: '000201-MP',
+      ticketUrl: 'https://www.mercadopago.com.br/payments/1/ticket?hash=x',
+    },
+  });
+
+  assert.deepEqual(payload, {
+    templateName: 'cobranca_avencer',
+    variables: [
+      'Ana',            // {{1}} nome
+      'Academia Centro', // {{2}} academia
+      'R$ 150,00',      // {{3}} valor
+      '10/08/2026',     // {{4}} vencimento
+      '3',              // {{5}} dias
+      '000201-MP',      // {{6}} pix
+    ],
+    paymentMode: BillingPaymentMode.MERCADO_PAGO,
+    buttonUrl: '1/ticket?hash=x',
+  });
+});
+
+test('cobranca_avencer_pix_manual: dias at {{5}}, chave PIX manual at {{6}}', () => {
+  const payload = buildBillingTemplatePayload({
+    ...common,
+    stage: 'due-7',
+    daysUntilDue: 7,
+    paymentInstruction: {
+      mode: BillingPaymentMode.MANUAL_PIX,
+      pixKey: 'financeiro@academiaexemplo.com',
+    },
+  });
+
+  assert.equal(payload.templateName, 'cobranca_avencer_pix_manual');
+  assert.deepEqual(payload.variables, [
+    'Ana',
+    'Academia Centro',
+    'R$ 150,00',
+    '10/08/2026',
+    '7',
+    'financeiro@academiaexemplo.com',
+  ]);
+});
+
+test('cobranca_avencer_sempix: five variables, dias last, no PIX slot', () => {
+  const payload = buildBillingTemplatePayload({
+    ...common,
+    stage: 'due-1',
+    daysUntilDue: 1,
+    paymentInstruction: { mode: BillingPaymentMode.NONE },
+  });
+
+  assert.equal(payload.templateName, 'cobranca_avencer_sempix');
+  assert.deepEqual(payload.variables, [
+    'Ana',
+    'Academia Centro',
+    'R$ 150,00',
+    '10/08/2026',
+    '1',
+  ]);
+});
+
+// Guarda de regressão: D+1..D+30 (atrasado) não ganham a variável de dias —
+// só cobranca_avencer (a-vencer) tem esse quinto slot.
+test('overdue stages (D+1..D+30) are unaffected: still four variables, no dias', () => {
+  const payload = buildBillingTemplatePayload({
+    ...common,
+    stage: 'D+7',
+    daysUntilDue: 999, // deve ser ignorado — só isUpcomingMonthlyStage usa isso
+    paymentInstruction: { mode: BillingPaymentMode.NONE },
+  });
+
+  assert.equal(payload.templateName, 'cobranca_d7_sempix');
+  assert.deepEqual(payload.variables, [
+    'Ana',
+    'Academia Centro',
+    'R$ 150,00',
+    '10/08/2026',
+  ]);
 });
 
 test('one-time charges use open and pending template families', () => {
@@ -214,4 +338,41 @@ test('SOURCE SYNC: automatic reminders use Meta templates and the resolver', () 
   assert.match(source, /buildBillingTemplatePayload\(\{/);
   assert.match(source, /type: 'billing_reminder'/);
   assert.doesNotMatch(source, /settings\.messageTemplates\?\.whatsapp/);
+});
+
+test('SOURCE SYNC: manual sendBillingReminder computes real days-until-due, not the overdue-clamped-to-0 value', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'server_functions.js'),
+    'utf8'
+  );
+  const start = source.indexOf('exports.sendBillingReminder = onCall');
+  const end = source.indexOf('exports.', start + 1);
+  const fn = source.slice(start, end);
+
+  // daysOverdueBR clampa futuro pra 0 — sem esse cálculo à parte, o envio
+  // manual de um lembrete a-vencer mandava {{5}} (dias) vazio pro cliente,
+  // mesmo com o template certo conectado (auditoria 03/set/2026).
+  assert.match(fn, /const isUpcoming = dueDay > today;/);
+  assert.match(fn, /const whatsappDaysArg = isUpcoming/);
+  assert.match(
+    fn,
+    /sendBillingReminderWhatsApp\(\s*academyId,\s*academyName,\s*settings,\s*financial,\s*stage,\s*whatsappDaysArg,/
+  );
+});
+
+test('SOURCE SYNC: sendBillingReminderWhatsApp forwards daysUntilDue to the template builder', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'server_functions.js'),
+    'utf8'
+  );
+  const start = source.indexOf('async function sendBillingReminderWhatsApp(');
+  const end = source.indexOf(
+    '\nfunction isValidBillingEmail',
+    start
+  );
+  const fn = source.slice(start, end === -1 ? undefined : end);
+
+  // Sem isso, cobranca_avencer manda {{5}} vazio pra todo mundo mesmo depois
+  // do fix — o wiring do template precisa vir junto com o dado que ele lê.
+  assert.match(fn, /daysUntilDue:\s*daysOverdue < 0 \? -daysOverdue : null/);
 });

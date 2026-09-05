@@ -1221,6 +1221,15 @@ class BillingNotificationService {
         'Olá, {{1}}! A cobrança no valor de {{3}}, referente a {{5}}, da {{2}}, com vencimento em {{4}}, continua em aberto.\n\nChave PIX para pagamento:\n\n{{6}}\n\nApós o pagamento, envie o comprovante para a academia. Caso já tenha pago, desconsidere esta mensagem.',
     'cobranca_avulsa_pendente_sempix':
         'Olá, {{1}}! A cobrança no valor de {{3}}, referente a {{5}}, da {{2}}, com vencimento em {{4}}, continua em aberto.\n\nEntre em contato com a academia para combinar o pagamento. Caso já tenha pago, desconsidere esta mensagem.',
+    // Mensalidade a-vencer (BillingStage.upcoming). Corpo bruto conferido
+    // direto no editor do modelo na Meta (03/set/2026, não a prévia
+    // renderizada) — {{5}}=dias até vencer, {{6}}=pix.
+    'cobranca_avencer':
+        'Olá, {{1}}! Faltam {{5}} dia(s) para o vencimento da sua mensalidade de {{3}} da {{2}}, com vencimento em {{4}}.\n\nPara facilitar, pague pelo PIX (copia e cola):\n\n{{6}}\n\nSe você já realizou o pagamento, desconsidere esta mensagem.',
+    'cobranca_avencer_pix_manual':
+        'Olá, {{1}}! Faltam {{5}} dia(s) para o vencimento da sua mensalidade de {{3}} da {{2}}, com vencimento em {{4}}.\n\nChave PIX para pagamento:\n\n{{6}}\n\nApós o pagamento, envie o comprovante para a academia. Se você já realizou o pagamento, desconsidere esta mensagem.',
+    'cobranca_avencer_sempix':
+        'Olá, {{1}}! Faltam {{5}} dia(s) para o vencimento da sua mensalidade de {{3}} da {{2}}, com vencimento em {{4}}.\n\nEntre em contato com a academia para combinar o pagamento. Se você já realizou o pagamento, desconsidere esta mensagem.',
   };
 
   static const Set<String> _oneTimeChargeTypes = {
@@ -1251,6 +1260,14 @@ class BillingNotificationService {
     }
   }
 
+  // Regressão real (Lobisomens Jiu Jitsu, 03/set/2026): o modelo Meta
+  // "cobranca_avencer" existia (aprovado, categoria Marketing) mas nunca
+  // esteve conectado aqui — BillingStage.upcoming caía direto no
+  // _stageTemplateBase (só D+0..D+30), sempre retornando null pra
+  // mensalidade a-vencer, e a prévia mostrava "Ainda não existe template
+  // Meta aprovado para esta etapa" mesmo com o modelo aprovado existindo.
+  // Espelha effectiveDueDay/isUpcomingMonthlyStage em
+  // functions/billing_whatsapp_templates.js — mantenha os dois em sync.
   String? templateNameForStage(
     BillingStage stage, {
     required BillingPaymentPreference paymentMode,
@@ -1258,7 +1275,9 @@ class BillingNotificationService {
   }) {
     final base = _isOneTimeChargeType(chargeType)
         ? _oneTimeTemplateBase(stage)
-        : _stageTemplateBase[stage.value];
+        : (stage == BillingStage.upcoming
+              ? 'cobranca_avencer'
+              : _stageTemplateBase[stage.value]);
     if (base == null) return null;
     switch (paymentMode) {
       case BillingPaymentPreference.mercadoPago:
@@ -1279,6 +1298,9 @@ class BillingNotificationService {
     String paymentValue = '',
     String chargeType = 'monthly_tuition',
     String description = '',
+    // Mesma convenção do servidor: negativo = dias até vencer. Só lido pra
+    // BillingStage.upcoming (cobranca_avencer {{5}}); ignorado nos demais.
+    int daysOverdue = 0,
   }) {
     final templateName = templateNameForStage(
       stage,
@@ -1303,6 +1325,12 @@ class BillingNotificationService {
           .replaceAll('{{5}}', chargeDescription)
           .replaceAll('{{6}}', paymentValue);
     }
+    if (stage == BillingStage.upcoming) {
+      final daysUntilDue = daysOverdue < 0 ? -daysOverdue : 0;
+      return preview
+          .replaceAll('{{5}}', daysUntilDue.toString())
+          .replaceAll('{{6}}', paymentValue);
+    }
     return preview.replaceAll('{{5}}', paymentValue);
   }
 
@@ -1311,9 +1339,11 @@ class BillingNotificationService {
   // ============================================
   /// Envia uma cobrança pelo canal OFICIAL (template aprovado). É o caminho que
   /// não derruba o chip. Variáveis, em ordem fixa (ver TEMPLATES_META.md):
-  /// Mensalidade: {{1}}=nome {{2}}=academia {{3}}=valor {{4}}=vencimento
-  /// [{{5}}=pix]. Avulsa/particular: os quatro primeiros são iguais,
-  /// {{5}}=descrição e [{{6}}=pix].
+  /// Mensalidade (D+0..D+30): {{1}}=nome {{2}}=academia {{3}}=valor
+  /// {{4}}=vencimento [{{5}}=pix]. Mensalidade a-vencer (cobranca_avencer):
+  /// os quatro primeiros iguais, {{5}}=dias até vencer, [{{6}}=pix].
+  /// Avulsa/particular: os quatro primeiros são iguais, {{5}}=descrição e
+  /// [{{6}}=pix].
   /// O `ticketUrl` vira o parâmetro do botão dinâmico (variante com PIX).
   Future<NotificationResult> sendWhatsAppTemplate({
     required String phone,

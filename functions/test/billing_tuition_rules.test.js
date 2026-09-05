@@ -7,6 +7,7 @@ const path = require('node:path');
 const {
   billingDateAtStartOfDay,
   clampDueDay,
+  effectiveDueDay,
   findConflictingStudentIds,
   isMembershipEligibleForMonth,
 } = require('../billing_tuition_rules');
@@ -53,6 +54,38 @@ test('billing due date is midnight in Sao Paulo, not midnight UTC', () => {
   );
 });
 
+test('effectiveDueDay: customDueDay (Personalizado) wins over legacy tuitionDay', () => {
+  // Caso real (Drakkar Academia, auditoria 01/set/2026): a UI mostrava
+  // "Personalizado: dia 28", mas a geração automática usava dia 10 (o
+  // default do model quando student.tuitionDay nunca foi setado
+  // explicitamente). A cobrança sumia do vencimento combinado com a família.
+  assert.equal(effectiveDueDay({
+    customDueDay: 28,
+    studentTuitionDay: 10,
+    defaultDueDay: 5,
+  }), 28);
+});
+
+test('effectiveDueDay: legacy tuitionDay is still the fallback when nothing is personalized', () => {
+  // Auditoria 01/set/2026 achou 54 alunos reais, em 10 academias, com
+  // tuitionDay divergindo do defaultDueDay do plano SEM customDueDay
+  // configurado — não dá pra saber se foi intencional (o form de edição do
+  // aluno também grava esse campo). Não pode virar regressão silenciosa.
+  assert.equal(effectiveDueDay({
+    customDueDay: undefined,
+    studentTuitionDay: 19,
+    defaultDueDay: 8,
+  }), 19);
+});
+
+test('effectiveDueDay: falls back to the plan default when neither is set', () => {
+  assert.equal(effectiveDueDay({
+    customDueDay: undefined,
+    studentTuitionDay: undefined,
+    defaultDueDay: 10,
+  }), 10);
+});
+
 test('students eligible in more than one plan are reported as conflicts', () => {
   const conflicts = findConflictingStudentIds([
     {studentId: 'a', planId: 'adult'},
@@ -79,6 +112,24 @@ test('source canary: auto tuition fails closed across plans and cancelled charge
   assert.doesNotMatch(generator, /if \(d\.status === 'cancelled'\) continue/);
 });
 
+test('source canary: auto tuition resolves due day through effectiveDueDay, not an inline tuitionDay-first ternary', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '..', 'server_functions.js'),
+    'utf8'
+  );
+  const start = source.indexOf('async function generateAcademyTuitions(');
+  const end = source.indexOf('exports.generateAcademyTuitions', start);
+  const generator = source.slice(start, end);
+
+  // Regressão real (Drakkar, 01/set/2026): a ordem antiga (tuitionDay antes
+  // de customDueDays) atropelava o "Personalizado" configurado no plano.
+  assert.match(generator, /effectiveDueDay\(\{/);
+  assert.doesNotMatch(
+    generator,
+    /stu\.tuitionDay != null\s*\?\s*stu\.tuitionDay/
+  );
+});
+
 test('source canary: manual tuition uses the same transactional guard', () => {
   const source = fs.readFileSync(
     path.resolve(__dirname, '..', 'server_functions.js'),
@@ -96,6 +147,13 @@ test('source canary: manual tuition uses the same transactional guard', () => {
   assert.match(createCharge, /existingTuition/);
   assert.match(createCharge, /isMembershipEligibleForMonth\(/);
   assert.match(createCharge, /memberships\.length > 1/);
+  // Mesma regressão do canary de generateAcademyTuitions acima, mas no
+  // caminho de cobrança manual: customDueDays precisa vencer tuitionDay.
+  assert.match(createCharge, /effectiveDueDay\(\{/);
+  assert.doesNotMatch(
+    createCharge,
+    /student\.tuitionDay != null\s*\?\s*student\.tuitionDay/
+  );
   assert.match(
     rules,
     /request\.resource\.data\.type in \['avulsa', 'private_lesson'\]/

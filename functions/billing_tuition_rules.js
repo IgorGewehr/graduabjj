@@ -100,6 +100,34 @@ function isMembershipEligibleForMonth({
   return true;
 }
 
+/**
+ * Dia de vencimento efetivo de um aluno num plano mensal: customDueDay (o
+ * "Personalizado" que a UI mostra/edita via pencil-icon em
+ * student_detail_screen.dart) tem prioridade sobre studentTuitionDay (campo
+ * legado `student.tuitionDay`), que cai pro defaultDueDay do plano.
+ *
+ * studentTuitionDay NÃO é sinal confiável de intenção: é regravado a cada
+ * save do cadastro do aluno por QUALQUER motivo (nome, telefone, etc. —
+ * ver toMap() em lib/models/student.dart), sempre com um valor (default 10),
+ * nunca fica genuinamente ausente depois do primeiro save. Antes desta
+ * função, a prioridade era invertida — studentTuitionDay vencia — e isso
+ * silenciosamente atropelava o "Personalizado" real configurado no plano
+ * (achado em produção 01/set/2026: Drakkar Academia, 3 alunas com
+ * customDueDay salvo e ignorado na geração automática).
+ *
+ * Mantido como fallback (não removido) porque uma auditoria em produção na
+ * mesma data achou 54 alunos, em 10 academias, sem customDueDay configurado
+ * onde studentTuitionDay diverge do defaultDueDay do plano — não dá pra
+ * saber se foi intencional (o form de edição do aluno também grava esse
+ * campo); remover o fallback mudaria a data de cobrança desses alunos sem
+ * aviso.
+ */
+function effectiveDueDay({ customDueDay, studentTuitionDay, defaultDueDay }) {
+  if (customDueDay != null) return customDueDay;
+  if (studentTuitionDay != null) return studentTuitionDay;
+  return defaultDueDay;
+}
+
 function findConflictingStudentIds(entries) {
   const planIdsByStudent = new Map();
   for (const entry of entries) {
@@ -121,6 +149,7 @@ module.exports = {
   billingDateAtStartOfDay,
   clampDueDay,
   datePartsInBillingTimeZone,
+  effectiveDueDay,
   findConflictingStudentIds,
   isMembershipEligibleForMonth,
 };

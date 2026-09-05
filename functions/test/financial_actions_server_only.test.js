@@ -174,3 +174,48 @@ test('Mercado Pago reminder fallback distinguishes missing CPF and email', () =>
   assert.match(serverSource, /return 'missing_payer_cpf'/);
   assert.match(serverSource, /return 'missing_payer_email'/);
 });
+
+test('scheduled billing retries WhatsApp independently without duplicating app alerts', () => {
+  const whatsappStart = serverSource.indexOf(
+    'async function sendBillingReminderWhatsApp('
+  );
+  const whatsappEnd = serverSource.indexOf(
+    'function isValidBillingEmail(',
+    whatsappStart
+  );
+  const whatsappSource = serverSource.slice(whatsappStart, whatsappEnd);
+
+  const overdueStart = serverSource.indexOf(
+    'exports.scheduledOverdueCheck = functions'
+  );
+  const dueSoonStart = serverSource.indexOf(
+    'exports.scheduledDueSoonReminder = functions'
+  );
+  const dueSoonEnd = serverSource.indexOf(
+    'exports.scheduledMonthlyTuitionGeneration',
+    dueSoonStart
+  );
+  const overdueSource = serverSource.slice(overdueStart, dueSoonStart);
+  const dueSoonSource = serverSource.slice(dueSoonStart, dueSoonEnd);
+
+  assert.match(whatsappSource, /financial\.lastWhatsAppReminderStage === stage/);
+  assert.doesNotMatch(whatsappSource, /financial\.lastReminderStage === stage/);
+  assert.match(whatsappSource, /lastWhatsAppAttemptResult/);
+  assert.match(whatsappSource, /lastWhatsAppReminderStage = stage/);
+
+  assert.match(overdueSource, /timeoutSeconds:\s*540/);
+  assert.match(overdueSource, /const appStageCovered =/);
+  assert.match(overdueSource, /migrateLegacyWhatsAppReminderStage\(/);
+  assert.doesNotMatch(
+    overdueSource,
+    /if \(financial\.lastReminderStage === stage\) continue/
+  );
+
+  assert.match(dueSoonSource, /timeoutSeconds:\s*540/);
+  assert.match(dueSoonSource, /const appDueStageCovered =/);
+  assert.match(dueSoonSource, /migrateLegacyWhatsAppReminderStage\(/);
+  assert.doesNotMatch(
+    dueSoonSource,
+    /if \(financial\.lastDueSoonStage === dueStage\) continue/
+  );
+});

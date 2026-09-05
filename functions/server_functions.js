@@ -55,6 +55,7 @@ const {
 const {
   billingDateAtStartOfDay,
   datePartsInBillingTimeZone,
+  effectiveDueDay,
   findConflictingStudentIds,
   isMembershipEligibleForMonth,
 } = require('./billing_tuition_rules');
@@ -759,6 +760,31 @@ async function sendBillingReminderWhatsApp(
   daysOverdue,
   options = {}
 ) {
+  const recordResult = async (result) => {
+    if (!financial?.id) return result;
+    try {
+      const update = {
+        whatsappReminderTrackingVersion: 1,
+        lastWhatsAppAttemptStage: stage,
+        lastWhatsAppAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastWhatsAppAttemptResult: result?.sent === true
+          ? 'sent'
+          : String(result?.skipped || 'failed'),
+      };
+      if (result?.sent === true) {
+        update.lastWhatsAppReminderStage = stage;
+        update.lastWhatsAppReminderAt =
+          admin.firestore.FieldValue.serverTimestamp();
+      }
+      await db.doc(
+        `academies/${academyId}/financials/${financial.id}`
+      ).update(update);
+    } catch (_) {
+      // Observabilidade/dedup de WhatsApp é best-effort e nunca bloqueia envio.
+    }
+    return result;
+  };
+
   try {
     const settings = billingSettings || {};
     const manual = options.manual === true;
@@ -772,7 +798,7 @@ async function sendBillingReminderWhatsApp(
     // sem nunca terem optado. `!== true` alinha o server com o default do
     // cliente: só envia para quem opt-in explicitamente.
     if (!manual && settings.whatsappEnabled !== true) {
-      return { sent: false, skipped: 'automation_disabled' };
+      return await recordResult({ sent: false, skipped: 'automation_disabled' });
     }
 
     // Resolve recipient phone from the student doc (effectivePhone semantics).
@@ -790,7 +816,7 @@ async function sendBillingReminderWhatsApp(
         if (stuSnap.exists) {
           const stu = stuSnap.data() || {};
           if (stu.whatsappOptOut === true) {
-            return { sent: false, skipped: 'recipient_opt_out' };
+            return await recordResult({ sent: false, skipped: 'recipient_opt_out' });
           }
           phone = stu.category === 'kids' ? stu.guardian?.phone : stu.phone;
         }
@@ -801,24 +827,28 @@ async function sendBillingReminderWhatsApp(
     // Auditoria (LOW): normaliza no servidor (dígitos + prefixo 55) antes de
     // mandar ao proxy, em vez de confiar no formato gravado no cadastro.
     phone = normalizePhoneServer(phone);
-    if (!phone) return { sent: false, skipped: 'missing_phone' };
+    if (!phone) {
+      return await recordResult({ sent: false, skipped: 'missing_phone' });
+    }
 
     // Stage-level dedup: each reminder stage (D+0, D+1, D+3, ...) goes out at
     // most once per charge, so a charge sitting overdue (or due-soon) for days
     // doesn't WhatsApp the student every single day the cron runs. Only an
     // actual send marks the stage as covered (below), so an INERT run with no
     // WHATSAPP_API_KEY still delivers once the key is later configured.
-    if (!manual && financial.lastReminderStage === stage) {
-      return { sent: false, skipped: 'already_sent' };
+    if (!manual && financial.lastWhatsAppReminderStage === stage) {
+      return await recordResult({ sent: false, skipped: 'already_sent' });
     }
 
-    // Monthly tuition has approved templates only for D+0..D+30. One-time
-    // charges additionally support creation/upcoming through their generic
-    // open/pending template families.
+    // Monthly tuition has approved templates for D+0..D+30 (overdue/due
+    // today) plus cobranca_avencer for due-soon before the due date (see
+    // isUpcomingMonthlyStage). One-time charges additionally support
+    // creation/upcoming through their generic open/pending template
+    // families.
     const chargeType = financial.type || 'monthly_tuition';
     if (!templateNameFor(stage, BillingPaymentMode.NONE, chargeType)) {
       console.log(`[S7] WhatsApp skipped: no approved Meta template for stage=${stage}`);
-      return { sent: false, skipped: 'template_unavailable' };
+      return await recordResult({ sent: false, skipped: 'template_unavailable' });
     }
 
     const dueDate = financial.dueDate && typeof financial.dueDate.toDate === 'function'
@@ -866,6 +896,9 @@ async function sendBillingReminderWhatsApp(
 
     // The approved Meta template matrix is selected only by stage and payment
     // mode. Academy-editable WhatsApp copy is intentionally ignored here.
+    // daysOverdue is negative for due-soon calls (scheduledDueSoonReminder
+    // passes -daysUntilDue) — only cobranca_avencer's {{5}} actually reads
+    // daysUntilDue (buildBillingTemplatePayload ignores it otherwise).
     const templatePayload = buildBillingTemplatePayload({
       stage,
       paymentInstruction,
@@ -873,11 +906,12 @@ async function sendBillingReminderWhatsApp(
       academyName: academyName || academy.name || academy.academyName || '',
       amountFormatted: valor,
       dueDateFormatted: vencimento,
+      daysUntilDue: daysOverdue < 0 ? -daysOverdue : null,
       chargeType,
       description: financial.description,
     });
     if (!templatePayload) {
-      return { sent: false, skipped: 'template_unavailable' };
+      return await recordResult({ sent: false, skipped: 'template_unavailable' });
     }
 
     console.log(
@@ -889,29 +923,49 @@ async function sendBillingReminderWhatsApp(
       academyId,
       templatePayload
     );
-    // Persist the dedup marker ONLY when the message actually went out (not on
-    // the INERT no_key path), so re-enabling WhatsApp later still delivers.
-    if (result && result.sent && financial.id) {
-      try {
-        await db.doc(`academies/${academyId}/financials/${financial.id}`).update({
-          lastReminderStage: stage,
-          lastReminderAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      } catch (_) {
-        // best-effort: the dedup marker is non-critical.
-      }
-    }
-    return {
+    return await recordResult({
       ...(result || { sent: false, skipped: 'unknown' }),
       paymentMode: templatePayload.paymentMode,
       templateName: templatePayload.templateName,
       paymentFallbackReason: paymentInstruction.mode === BillingPaymentMode.MERCADO_PAGO
         ? null : paymentFallbackReason,
-    };
+    });
   } catch (e) {
     console.error('[S7] sendBillingReminderWhatsApp failed:', e && e.message);
-    return { sent: false, skipped: 'internal' };
+    return await recordResult({ sent: false, skipped: 'internal' });
   }
+}
+
+// The legacy scheduler used the same marker for push/internal notifications and
+// WhatsApp. On the first run after splitting those channels, assume a stage that
+// was already covered by the legacy marker was also delivered on WhatsApp. This
+// avoids replaying the current stage to every existing charge. New attempts are
+// versioned independently and are retried until WhatsApp confirms delivery.
+async function migrateLegacyWhatsAppReminderStage(
+  financialDoc,
+  financial,
+  stage,
+  legacyStageField,
+  legacyTimestampField
+) {
+  if (Number(financial.whatsappReminderTrackingVersion) >= 1) return false;
+  if (financial[legacyStageField] !== stage) return false;
+
+  const legacyTimestamp = financial[legacyTimestampField] ||
+    admin.firestore.FieldValue.serverTimestamp();
+  try {
+    await financialDoc.ref.update({
+      whatsappReminderTrackingVersion: 1,
+      lastWhatsAppAttemptStage: stage,
+      lastWhatsAppAttemptAt: legacyTimestamp,
+      lastWhatsAppAttemptResult: 'legacy_assumed_sent',
+      lastWhatsAppReminderStage: stage,
+      lastWhatsAppReminderAt: legacyTimestamp,
+    });
+  } catch (_) {
+    // Fail closed against duplicate sends during the compatibility migration.
+  }
+  return true;
 }
 
 function isValidBillingEmail(email) {
@@ -1144,10 +1198,18 @@ exports.sendBillingReminder = onCall(
     const today = new Date(
       now.getFullYear(), now.getMonth(), now.getDate()
     ).getTime();
-    const liveStage = dueDay > today ? 'UPCOMING' : resolveStage(daysOverdue);
+    const isUpcoming = dueDay > today;
+    const liveStage = isUpcoming ? 'UPCOMING' : resolveStage(daysOverdue);
     const stage = financial.status === 'test' && normalizeTemplateStage(requestedStage)
       ? requestedStage
       : liveStage;
+    // daysOverdueBR clampa futuro pra 0 (é "dias de atraso", não "dias até
+    // vencer") — sem isso, cobranca_avencer mandava {{5}} vazio no envio
+    // manual mesmo depois de conectar o template (auditoria 03/set/2026).
+    // Mesma convenção do cron: negativo = dias até vencer.
+    const whatsappDaysArg = isUpcoming
+      ? -Math.round((dueDay - today) / (1000 * 60 * 60 * 24))
+      : daysOverdue;
     const academy = academySnapshot.data() || {};
     const academyName = academy.name || academy.academyName || 'Academia';
 
@@ -1171,7 +1233,7 @@ exports.sendBillingReminder = onCall(
         settings,
         financial,
         stage,
-        daysOverdue,
+        whatsappDaysArg,
         {
           manual: true,
           phoneOverride,
@@ -1664,7 +1726,10 @@ exports.PUBLIC_PROFILE_SAFE_FIELDS = PUBLIC_PROFILE_SAFE_FIELDS;
  * Action: Check for overdue payments and notify admins
  */
 exports.scheduledOverdueCheck = functions
-  .runWith({ secrets: BILLING_NOTIFICATION_SECRETS })
+  .runWith({
+    secrets: BILLING_NOTIFICATION_SECRETS,
+    timeoutSeconds: 540,
+  })
   .pubsub
   .schedule('0 9 * * *')
   .timeZone('America/Sao_Paulo')
@@ -1732,12 +1797,9 @@ exports.scheduledOverdueCheck = functions
           const daysOverdue = daysOverdueBR(dueDate, now);
           const stage = resolveStage(daysOverdue);
 
-          // Auditoria (HIGH product): deduplicação POR ESTÁGIO em TODOS os
-          // canais (push + interna + WhatsApp). Só dispara o lembrete quando o
-          // estágio MUDA (D+1 → D+3 → D+7 ...). Sem isso, com status 'overdue'
-          // agora varrido todo dia, o aluno receberia push/notificação TODA
-          // execução. O mesmo estágio nunca é reenviado.
-          if (financial.lastReminderStage === stage) continue;
+          // Push e notificação interna são deduplicados por estágio. O WhatsApp
+          // usa um marcador separado, pois falhas de entrega precisam de retry.
+          const appStageCovered = financial.lastReminderStage === stage;
 
           // Auditoria (LOW ux): copy diferente para não-mensalidade (aula
           // avulsa/particular) — sem o wording de "mensalidade atrasada".
@@ -1748,49 +1810,62 @@ exports.scheduledOverdueCheck = functions
 
           // Notify the billing recipient (responsible adult for kids, else
           // the student) about the overdue payment (push + internal)
-          const userId = await getBillingRecipientUid(financial.studentId, academyId);
-          if (userId) {
-            await sendToUser(
-              userId,
-              isTuition ? 'Pagamento Atrasado' : 'Cobranca em aberto',
-              `${noun} de R$ ${valorFmt} esta em aberto ha ${daysOverdue} dia(s).`,
-              {
-                type: 'financial',
-                id: financialDoc.id,
-                academyId,
-                category: 'financial', // sempre notificado — ver comentário no gate acima
-                actionUrl: '/portal/financeiro',
-              }
-            );
-            await createInternalNotification(academyId, userId, 'financial', 'high',
-              isTuition ? 'Pagamento Atrasado' : 'Cobrança em aberto',
-              `${nounAcc} de R$ ${valorFmt} está em aberto há ${daysOverdue} dia(s).`,
-              { actionUrl: '/portal/financeiro', actionLabel: 'Regularizar',
-                financialId: financialDoc.id, expiresInDays: 30 }
-            );
+          if (!appStageCovered) {
+            const userId = await getBillingRecipientUid(financial.studentId, academyId);
+            if (userId) {
+              await sendToUser(
+                userId,
+                isTuition ? 'Pagamento Atrasado' : 'Cobranca em aberto',
+                `${noun} de R$ ${valorFmt} esta em aberto ha ${daysOverdue} dia(s).`,
+                {
+                  type: 'financial',
+                  id: financialDoc.id,
+                  academyId,
+                  category: 'financial', // sempre notificado — ver comentário no gate acima
+                  actionUrl: '/portal/financeiro',
+                }
+              );
+              await createInternalNotification(academyId, userId, 'financial', 'high',
+                isTuition ? 'Pagamento Atrasado' : 'Cobrança em aberto',
+                `${nounAcc} de R$ ${valorFmt} está em aberto há ${daysOverdue} dia(s).`,
+                { actionUrl: '/portal/financeiro', actionLabel: 'Regularizar',
+                  financialId: financialDoc.id, expiresInDays: 30 }
+              );
+            }
           }
 
           // S7: additionally send the autonomous WhatsApp + PIX reminder.
           // INERT until WHATSAPP_API_KEY is set (template sender gate).
-          await sendBillingReminderWhatsApp(
-            academyId,
-            academyName,
-            billingSettings,
-            { ...financial, id: financialDoc.id },
-            stage,
-            daysOverdue
-          );
+          const legacyWhatsAppStageCovered =
+            await migrateLegacyWhatsAppReminderStage(
+              financialDoc,
+              financial,
+              stage,
+              'lastReminderStage',
+              'lastReminderAt'
+            );
+          if (!legacyWhatsAppStageCovered &&
+              financial.lastWhatsAppReminderStage !== stage) {
+            await sendBillingReminderWhatsApp(
+              academyId,
+              academyName,
+              billingSettings,
+              { ...financial, id: financialDoc.id },
+              stage,
+              daysOverdue
+            );
+          }
 
-          // Auditoria (HIGH product): persiste o estágio coberto para TODOS os
-          // canais (não só WhatsApp), garantindo que push/interna também não
-          // reenviem o mesmo estágio na próxima execução. Best-effort.
-          try {
-            await financialDoc.ref.update({
-              lastReminderStage: stage,
-              lastReminderAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-          } catch (_) {
-            // dedup marker é não-crítico
+          // Push/interna têm marcador próprio e não dependem do WhatsApp.
+          if (!appStageCovered) {
+            try {
+              await financialDoc.ref.update({
+                lastReminderStage: stage,
+                lastReminderAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+            } catch (_) {
+              // dedup marker é não-crítico
+            }
           }
         }
 
@@ -1829,7 +1904,10 @@ exports.scheduledOverdueCheck = functions
  * Action: Check for payments due soon (3 days before) and notify students
  */
 exports.scheduledDueSoonReminder = functions
-  .runWith({ secrets: BILLING_NOTIFICATION_SECRETS })
+  .runWith({
+    secrets: BILLING_NOTIFICATION_SECRETS,
+    timeoutSeconds: 540,
+  })
   .pubsub
   .schedule('0 8 * * *')
   .timeZone('America/Sao_Paulo')
@@ -1894,56 +1972,70 @@ exports.scheduledDueSoonReminder = functions
           // (lastDueSoonStage) para as duas réguas não colidirem.
           if (!offsets.includes(daysUntilDue)) continue;
           const dueStage = daysUntilDue === 0 ? 'D+0' : `due-${daysUntilDue}`;
-          if (financial.lastDueSoonStage === dueStage) continue;
+          const appDueStageCovered = financial.lastDueSoonStage === dueStage;
 
           const isTuition = (financial.type || 'monthly_tuition') === 'monthly_tuition';
           const noun = isTuition ? 'Sua mensalidade' : `Sua cobranca (${financial.description || 'avulsa'})`;
           const nounAcc = isTuition ? 'Sua mensalidade' : `Sua cobrança (${financial.description || 'avulsa'})`;
 
-          const userId = await getBillingRecipientUid(financial.studentId, academyId);
-          if (userId) {
-            const amtFormatted = (Number(financial.amount) || 0).toFixed(2);
-            await sendToUser(
-              userId,
-              'Lembrete de Pagamento',
-              `${noun} de R$ ${amtFormatted} vence em ${daysUntilDue} dia(s).`,
-              {
-                type: 'financial',
-                id: financialDoc.id,
-                academyId,
-                category: 'financial', // sempre notificado — ver comentário no gate acima
-                actionUrl: '/portal/financeiro',
-              }
-            );
-            await createInternalNotification(academyId, userId, 'financial', 'normal',
-              'Lembrete de Pagamento',
-              `${nounAcc} de R$ ${amtFormatted} vence em ${daysUntilDue} dia(s).`,
-              { actionUrl: '/portal/financeiro', actionLabel: 'Ver detalhes',
-                financialId: financialDoc.id, expiresInDays: 7 }
-            );
-            console.log(`Sent due soon reminder to user ${userId} for financial ${financialDoc.id}`);
+          if (!appDueStageCovered) {
+            const userId = await getBillingRecipientUid(financial.studentId, academyId);
+            if (userId) {
+              const amtFormatted = (Number(financial.amount) || 0).toFixed(2);
+              await sendToUser(
+                userId,
+                'Lembrete de Pagamento',
+                `${noun} de R$ ${amtFormatted} vence em ${daysUntilDue} dia(s).`,
+                {
+                  type: 'financial',
+                  id: financialDoc.id,
+                  academyId,
+                  category: 'financial', // sempre notificado — ver comentário no gate acima
+                  actionUrl: '/portal/financeiro',
+                }
+              );
+              await createInternalNotification(academyId, userId, 'financial', 'normal',
+                'Lembrete de Pagamento',
+                `${nounAcc} de R$ ${amtFormatted} vence em ${daysUntilDue} dia(s).`,
+                { actionUrl: '/portal/financeiro', actionLabel: 'Ver detalhes',
+                  financialId: financialDoc.id, expiresInDays: 7 }
+              );
+              console.log(`Sent due soon reminder to user ${userId} for financial ${financialDoc.id}`);
+            }
           }
 
           // WhatsApp a vencer em todos os dias escolhidos pelo professor. O
           // stage dinâmico deduplica cada marco; o conteúdo usa o template
           // único UPCOMING, com {diasAteVencimento} preenchido.
-          await sendBillingReminderWhatsApp(
-            academyId,
-            academyName,
-            billingSettings,
-            { ...financial, id: financialDoc.id },
-            dueStage,
-            -daysUntilDue
-          );
+          const legacyWhatsAppStageCovered =
+            await migrateLegacyWhatsAppReminderStage(
+              financialDoc,
+              financial,
+              dueStage,
+              'lastDueSoonStage',
+              'lastDueSoonAt'
+            );
+          if (!legacyWhatsAppStageCovered &&
+              financial.lastWhatsAppReminderStage !== dueStage) {
+            await sendBillingReminderWhatsApp(
+              academyId,
+              academyName,
+              billingSettings,
+              { ...financial, id: financialDoc.id },
+              dueStage,
+              -daysUntilDue
+            );
+          }
 
-          // Persist o estágio a-vencer coberto (best-effort) p/ deduplicar.
-          try {
-            await financialDoc.ref.update({
-              lastDueSoonStage: dueStage,
-              lastDueSoonAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-          } catch (_) {
-            // marcador de dedup é não-crítico
+          if (!appDueStageCovered) {
+            try {
+              await financialDoc.ref.update({
+                lastDueSoonStage: dueStage,
+                lastDueSoonAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+            } catch (_) {
+              // marcador de dedup é não-crítico
+            }
           }
         }
       } catch (e) {
@@ -2098,9 +2190,12 @@ async function generateAcademyTuitions(academyId, refDate) {
       if (!stu) continue;
       const value = customValues[studentId] != null ? customValues[studentId] : effectiveValue;
       if (!(Number(value) > 0)) continue;
-      const dueDay = stu.tuitionDay != null
-        ? stu.tuitionDay
-        : (customDueDays[studentId] != null ? customDueDays[studentId] : defaultDueDay);
+      // Ver effectiveDueDay (billing_tuition_rules.js) pra prioridade e histórico.
+      const dueDay = effectiveDueDay({
+        customDueDay: customDueDays[studentId],
+        studentTuitionDay: stu.tuitionDay,
+        defaultDueDay,
+      });
       if (!isMembershipEligibleForMonth({
         planCreatedAt: plan.createdAt,
         studentAddedAt: studentAddedAt[studentId],
@@ -2142,8 +2237,11 @@ async function generateAcademyTuitions(academyId, refDate) {
       if (!stu) continue; // só alunos ativos
 
       const value = customValues[studentId] != null ? customValues[studentId] : effectiveValue;
-      const rawDueDay = (stu.tuitionDay != null ? stu.tuitionDay
-        : (customDueDays[studentId] != null ? customDueDays[studentId] : defaultDueDay));
+      const rawDueDay = effectiveDueDay({
+        customDueDay: customDueDays[studentId],
+        studentTuitionDay: stu.tuitionDay,
+        defaultDueDay,
+      });
       if (!isMembershipEligibleForMonth({
         planCreatedAt: plan.createdAt,
         studentAddedAt: studentAddedAt[studentId],
@@ -7520,18 +7618,19 @@ exports.createFinancialCharge = onCall(
         );
       }
       const customDueDays = plan.customDueDays || {};
-      const effectiveDueDay = student.tuitionDay != null
-        ? student.tuitionDay
-        : (customDueDays[studentId] != null
-          ? customDueDays[studentId]
-          : (plan.defaultDueDay != null ? plan.defaultDueDay : 10));
+      // Ver effectiveDueDay (billing_tuition_rules.js) pra prioridade e histórico.
+      const resolvedDueDay = effectiveDueDay({
+        customDueDay: customDueDays[studentId],
+        studentTuitionDay: student.tuitionDay,
+        defaultDueDay: plan.defaultDueDay != null ? plan.defaultDueDay : 10,
+      });
       const studentAddedAt = plan.studentAddedAt || {};
       if (!isMembershipEligibleForMonth({
         planCreatedAt: plan.createdAt,
         studentAddedAt: studentAddedAt[studentId],
         referenceYear,
         referenceMonth: referenceMonthNumber,
-        dueDay: effectiveDueDay,
+        dueDay: resolvedDueDay,
       })) {
         throw new HttpsError(
           'failed-precondition',

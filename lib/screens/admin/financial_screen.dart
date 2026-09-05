@@ -45,9 +45,13 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     with SingleTickerProviderStateMixin {
   // Data
   List<Payment> _allPayments = [];
+  // Pendências/atrasos de meses anteriores ao selecionado — ver
+  // PaymentService.getOpenBefore. Mantidas à parte de _allPayments pra não
+  // entrar na aba "Todos" (que é por competência do mês selecionado), só nas
+  // listas/filtros de pendente e atrasado (ver _paymentsWithCarriedOver).
+  List<Payment> _carriedOverPayments = [];
   List<Plan> _plans = [];
   List<Student> _students = [];
-  Map<String, dynamic>? _monthlySummary;
   bool _isLoading = true;
   String? _loadError;
 
@@ -80,45 +84,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     _paymentsSub?.cancel();
     _tabController.dispose();
     super.dispose();
-  }
-
-  /// Recomputes the monthly summary buckets from a payments list (mirrors
-  /// PaymentService.getMonthlySummary) so the live stream keeps the stat cards
-  /// in sync without an extra query.
-  Map<String, dynamic> _summaryFromPayments(List<Payment> payments) {
-    double totalExpected = 0, totalPaid = 0, totalPending = 0, totalOverdue = 0;
-    int countPaid = 0, countPending = 0, countOverdue = 0, countCancelled = 0;
-    for (final p in payments) {
-      if (p.status == PaymentStatus.cancelled) {
-        countCancelled++;
-        continue;
-      }
-      // Cobrança indevida a reembolsar (subscription_overcharge) — não é
-      // receita; fica fora das somas/contagens (espelha getMonthlySummary).
-      if (p.isOvercharge) continue;
-      totalExpected += p.value;
-      if (p.status == PaymentStatus.paid) {
-        totalPaid += p.value;
-        countPaid++;
-      } else if (p.isOverdue || p.status == PaymentStatus.overdue) {
-        totalOverdue += p.value;
-        countOverdue++;
-      } else if (p.status == PaymentStatus.pending) {
-        totalPending += p.value;
-        countPending++;
-      }
-    }
-    return {
-      'referenceMonth': _currentMonthKey,
-      'totalExpected': totalExpected,
-      'paid': {'value': totalPaid, 'count': countPaid},
-      'pending': {'value': totalPending, 'count': countPending},
-      'overdue': {'value': totalOverdue, 'count': countOverdue},
-      'cancelled': countCancelled,
-      'collectionRate': totalExpected > 0
-          ? (totalPaid / totalExpected * 100)
-          : 0,
-    };
   }
 
   String get _currentMonthKey => DateFormat('yyyy-MM').format(_selectedMonth);
@@ -169,19 +134,24 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
         'alunos ativos',
         () => StudentService(academyId).getActive(),
       );
+      final carriedOverFuture = loadSection(
+        'pendências de meses anteriores',
+        () => paymentService.getOpenBefore(_currentMonthKey),
+      );
 
       final payments = await paymentsFuture;
       final plans = await plansFuture;
       final students = await studentsFuture;
+      final carriedOver = await carriedOverFuture;
 
       if (!mounted) return;
       setState(() {
         if (payments != null) {
           _allPayments = payments;
-          _monthlySummary = _summaryFromPayments(payments);
         }
         if (plans != null) _plans = plans;
         if (students != null) _students = students;
+        if (carriedOver != null) _carriedOverPayments = carriedOver;
         _loadError = failures.isEmpty
             ? null
             : 'Não foi possível atualizar ${failures.join(', ')}.';
@@ -199,7 +169,6 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 if (!mounted) return;
                 setState(() {
                   _allPayments = payments;
-                  _monthlySummary = _summaryFromPayments(payments);
                 });
               },
               onError: (Object error, StackTrace stackTrace) {
@@ -247,6 +216,23 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   List<Payment> get _overduePayments => _allPayments
       .where((p) => p.isOverdue || p.status == PaymentStatus.overdue)
       .toList();
+
+  // Atrasados do mês selecionado + carry-over de meses anteriores
+  // (_carriedOverPayments) — só a CONTAGEM/SOMA pro atalho "Ir para
+  // Cobranças" (_buildBillingShortcut). De propósito não entra nas
+  // listas/chips acima: a tela de Cobranças já lista e agrupa por estágio
+  // (D+0..D+30+) sem limite de mês — duplicar isso aqui arriscava inundar o
+  // Financeiro com dezenas de cards de dívida antiga (achado em auditoria:
+  // uma academia tinha 70 cobranças em aberto acumuladas desde fevereiro).
+  (int count, double total) get _overdueIncludingCarriedOver {
+    var count = _overduePayments.length;
+    var total = _overduePayments.fold<double>(0, (sum, p) => sum + p.value);
+    for (final p in _carriedOverPayments) {
+      count++;
+      total += p.value;
+    }
+    return (count, total);
+  }
 
   Map<String, Student> get _studentsById => {
     for (final student in _students) student.id: student,
@@ -372,10 +358,12 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   }
 
   /// Atalho permanente: cobrança não começa apenas depois do vencimento.
+  /// Conta atrasados do mês + carry-over (_overdueIncludingCarriedOver) —
+  /// senão o atalho ficava mudo justo quando havia dívida "escondida" de um
+  /// mês passado (ver PaymentService.getOpenBefore). Só o número/valor
+  /// somado aparece aqui; a lista em si mora em Cobranças (destino do tap).
   Widget _buildBillingShortcut() {
-    final summary = _monthlySummary ?? {};
-    final totalOverdue = (summary['overdue']?['value'] ?? 0).toDouble();
-    final overdueCount = summary['overdue']?['count'] ?? 0;
+    final (overdueCount, totalOverdue) = _overdueIncludingCarriedOver;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
@@ -3102,11 +3090,16 @@ class _GenerateTuitionsSheetState extends State<_GenerateTuitionsSheet> {
       for (final studentId in plan.studentIds) {
         final student = activeStudentsById[studentId];
         if (student == null || plan.getStudentValue(studentId) <= 0) continue;
+        // Mesma prioridade do servidor (generateAcademyTuitions): o
+        // "Personalizado" do plano (customDueDays) manda antes do campo
+        // legado student.tuitionDay — senão essa elegibilidade divergia do
+        // que a cobrança automática realmente gera.
+        final dueDay = plan.customDueDays[studentId] ?? student.tuitionDay;
         if (plan.isStudentEligibleForMonth(
           studentId,
           year: widget.month.year,
           month: widget.month.month,
-          dueDay: student.tuitionDay,
+          dueDay: dueDay,
         )) {
           eligiblePlanIdsByStudent
               .putIfAbsent(studentId, () => <String>{})
