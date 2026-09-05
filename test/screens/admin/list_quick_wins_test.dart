@@ -128,6 +128,29 @@ void main() {
     expect(students.map((student) => student.id), ['1', '2', '3']);
   });
 
+  // Regressão real (04/set/2026): turma sem roster fixo (studentIds vazio) é
+  // a forma hoje de fazer "chamada sem turma" — ex. musculação livre, onde
+  // qualquer aluno pode ser marcado presente a qualquer hora do dia. Espelha
+  // a mesma regra legada de BJJClass.acceptsCheckinFrom
+  // (studentIds.isEmpty || contains(...)): roster vazio = turma ABERTA, deve
+  // mostrar TODOS os alunos, não nenhum.
+  test('turma com roster vazio (aberta) mostra todos os alunos, não nenhum', () {
+    final students = [
+      _student(id: '1', name: 'Ana'),
+      _student(id: '2', name: 'Bruno'),
+    ];
+
+    final result = filterAttendanceStudents(
+      students: students,
+      searchQuery: '',
+      classStudentIds: <String>{},
+      presentStudentIds: const {},
+      filterMode: 'all',
+    );
+
+    expect(result.map((student) => student.id), ['1', '2']);
+  });
+
   testWidgets('busca só notifica após debounce e limpa imediatamente', (
     tester,
   ) async {
