@@ -45,13 +45,13 @@ function normalizeTemplateStage(stage) {
 }
 
 /**
- * A monthly-tuition due-soon stage strictly BEFORE the due date. Two shapes
- * reach here for the same situation: the automated cron
- * (scheduledDueSoonReminder) computes 'due-N'; the manual "enviar agora"
- * callable (sendBillingReminder) computes the literal 'UPCOMING' — both must
- * resolve to the same template family. 'due-0' (due today) is excluded on
- * purpose — it normalizes to 'D+0' above and keeps using the cobranca_d0
- * family, same as before this existed.
+ * Estágio de mensalidade a-vencer, estritamente ANTES do vencimento. Duas
+ * formas chegam aqui pra mesma situação: o cron automático
+ * (scheduledDueSoonReminder) calcula 'due-N'; o envio manual "enviar agora"
+ * (sendBillingReminder) calcula o literal 'UPCOMING' — os dois precisam
+ * resolver pra mesma família de template. 'due-0' (vence hoje) fica de fora
+ * de propósito — normaliza pra 'D+0' acima e continua na família
+ * cobranca_d0, igual já era antes disso existir.
  *
  * Auditoria 03/set/2026: o template Meta "cobranca_avencer" (aprovado,
  * categoria Marketing) já existe pra esse aviso antecipado, mas nunca foi

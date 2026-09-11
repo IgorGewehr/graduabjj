@@ -516,6 +516,28 @@ class PaymentService {
     return payments;
   }
 
+  /// Live stream do carry-over (mesmo filtro de getOpenBefore) — sem isso o
+  /// contador do atalho "Ir para Cobranças" ficava parado com a carga
+  /// inicial: um carry-over marcado pago por webhook enquanto a tela do
+  /// Financeiro está aberta continuava contando como atrasado até recarregar.
+  Stream<List<Payment>> streamOpenBefore(String referenceMonth) {
+    return _paymentsRef
+        .where('status', whereIn: ['pending', 'overdue'])
+        .snapshots()
+        .map((snap) {
+          final payments = snap.docs
+              .map((d) => Payment.fromFirestore(d))
+              .where(
+                (p) =>
+                    p.referenceMonth != null &&
+                    p.referenceMonth!.compareTo(referenceMonth) < 0,
+              )
+              .toList();
+          payments.sort((a, b) => a.dueDate.compareTo(b.dueDate));
+          return payments;
+        });
+  }
+
   /// Live stream of a month's payments — so the admin screen reflects a webhook
   /// flip to `paid` in real time (the one-shot getByMonth went stale, showing a
   /// just-paid charge as still open).
@@ -969,8 +991,17 @@ class PaymentService {
           .where((e) => activeStudentMap.containsKey(e.studentId))
           .map((e) {
             final data = activeStudentMap[e.studentId]!;
-            final effectiveDueDay = data['tuitionDay'] as int? ?? e.dueDay;
             final plan = plansById[e.planId]!;
+            // Mesma prioridade do servidor (effectiveDueDay em
+            // billing_tuition_rules.js): customDueDays do plano
+            // ("Personalizado", visível na UI) > tuitionDay (legado) >
+            // default do plano (e.dueDay já é customDueDays ?? default via
+            // plan.getStudentDueDay). Sem isso, "Gerar Mensalidades"
+            // reproduzia o mesmo bug corrigido no cron automático — o
+            // vencimento personalizado era silenciosamente ignorado.
+            final effectiveDueDay = plan.customDueDays[e.studentId] ??
+                data['tuitionDay'] as int? ??
+                e.dueDay;
             return (
               id: e.studentId,
               name: data['fullName'] as String? ?? '',

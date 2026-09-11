@@ -1509,21 +1509,26 @@ class BillingNotificationService {
 
       // AUDITORIA (idempotency): mesmo critério do cron (server_functions.js
       // sendBillingReminderWhatsApp) — se o estágio atual já foi enviado
-      // (lastReminderStage == stage), pula sem reenviar. Em caso de falha de
-      // leitura, é conservador e NÃO pula (prefere enviar a perder a cobrança,
-      // já que sendWhatsApp em si é o ponto de envio). Itens sem id não têm
-      // como deduplicar, então seguem o fluxo normal.
-      String? lastReminderStage;
+      // (lastWhatsAppReminderStage == stage), pula sem reenviar. Em caso de
+      // falha de leitura, é conservador e NÃO pula (prefere enviar a perder a
+      // cobrança, já que sendWhatsApp em si é o ponto de envio). Itens sem id
+      // não têm como deduplicar, então seguem o fluxo normal.
+      //
+      // Auditoria 11/set/2026: lastReminderStage virou o marcador só de
+      // push/notificação interna quando o WhatsApp ganhou canal próprio
+      // (lastWhatsAppReminderStage) — este pre-check ficou lendo o campo
+      // errado, sem nenhuma relação com o que o WhatsApp realmente já enviou.
+      String? lastWhatsAppReminderStage;
       if (financialId.isNotEmpty) {
         try {
           final snap = await financialsRef.doc(financialId).get();
           final data = snap.data();
-          lastReminderStage = data?['lastReminderStage'] as String?;
+          lastWhatsAppReminderStage = data?['lastWhatsAppReminderStage'] as String?;
         } catch (_) {
-          lastReminderStage = null;
+          lastWhatsAppReminderStage = null;
         }
       }
-      if (lastReminderStage == stage.value) {
+      if (lastWhatsAppReminderStage == stage.value) {
         skipped++;
         continue;
       }

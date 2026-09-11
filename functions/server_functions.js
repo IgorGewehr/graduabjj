@@ -936,11 +936,26 @@ async function sendBillingReminderWhatsApp(
   }
 }
 
-// The legacy scheduler used the same marker for push/internal notifications and
-// WhatsApp. On the first run after splitting those channels, assume a stage that
-// was already covered by the legacy marker was also delivered on WhatsApp. This
-// avoids replaying the current stage to every existing charge. New attempts are
-// versioned independently and are retried until WhatsApp confirms delivery.
+// O agendador legado usava o MESMO marcador pra push/notificação interna e
+// WhatsApp. Na primeira execução após separar os canais, assume que um
+// estágio já coberto pelo marcador legado também foi entregue no WhatsApp —
+// evita reenviar o estágio atual pra toda cobrança existente de uma vez
+// (thundering herd no dia do deploy). Tentativas novas são versionadas à
+// parte e ficam sujeitas a retry até o WhatsApp confirmar entrega.
+//
+// LIMITAÇÃO CONHECIDA (auditoria 11/set/2026, não corrigida de propósito):
+// o marcador legado era gravado incondicionalmente depois de chamar
+// sendBillingReminderWhatsApp, mesmo quando o envio real não saiu
+// (automation_disabled, missing_phone, template_unavailable etc. — ver
+// código anterior a este split). Então "legado == estágio atual" não prova
+// que o WhatsApp saiu de verdade; pra quem tinha WhatsApp desligado, o
+// primeiro estágio coberto depois de LIGAR o canal pode ser assumido como
+// já enviado e pular o aviso real. Janela estreita (só o estágio ativo no
+// exato momento do deploy) e a migração só roda uma vez por cobrança —
+// como já rodou em produção desde 03/set/2026, mudar a lógica agora não
+// corrige retroativamente quem já passou por ela, e reescrever a
+// salvaguarda de thundering-herd tem seu próprio risco. Registrado aqui em
+// vez de alterado.
 async function migrateLegacyWhatsAppReminderStage(
   financialDoc,
   financial,
@@ -7761,6 +7776,17 @@ exports.updateFinancialTerms = onCall(
         lastReminderAt: admin.firestore.FieldValue.delete(),
         lastDueSoonStage: admin.firestore.FieldValue.delete(),
         lastDueSoonAt: admin.firestore.FieldValue.delete(),
+        // Auditoria: o marcador de WhatsApp é independente (canal próprio,
+        // ver sendBillingReminderWhatsApp) e não era limpo aqui — reagendar
+        // o vencimento pode recalcular pro MESMO estágio que já estava
+        // marcado como enviado sob a data antiga, e o gate de dedup do
+        // WhatsApp então pula silenciosamente o aviso da data nova.
+        lastWhatsAppReminderStage: admin.firestore.FieldValue.delete(),
+        lastWhatsAppReminderAt: admin.firestore.FieldValue.delete(),
+        whatsappReminderTrackingVersion: admin.firestore.FieldValue.delete(),
+        lastWhatsAppAttemptStage: admin.firestore.FieldValue.delete(),
+        lastWhatsAppAttemptAt: admin.firestore.FieldValue.delete(),
+        lastWhatsAppAttemptResult: admin.firestore.FieldValue.delete(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       if (live.publicPaymentLinkHash) {

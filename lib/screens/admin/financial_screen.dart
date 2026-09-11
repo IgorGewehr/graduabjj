@@ -67,6 +67,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   DateTime _selectedMonth = DateTime.now();
   late TabController _tabController;
   StreamSubscription<List<Payment>>? _paymentsSub;
+  StreamSubscription<List<Payment>>? _carriedOverSub;
 
   // Payments filter state
   String _paymentFilter = 'all'; // all, paid, pending, overdue, cancelled
@@ -82,6 +83,7 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   @override
   void dispose() {
     _paymentsSub?.cancel();
+    _carriedOverSub?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -181,6 +183,21 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
               },
             );
       }
+      if (carriedOver != null) {
+        _carriedOverSub?.cancel();
+        _carriedOverSub = paymentService
+            .streamOpenBefore(_currentMonthKey)
+            .listen(
+              (carried) {
+                if (!mounted) return;
+                setState(() => _carriedOverPayments = carried);
+              },
+              onError: (Object error, StackTrace stackTrace) {
+                debugPrint('[Financeiro] Falha no fluxo de carry-over: $error');
+                debugPrintStack(stackTrace: stackTrace);
+              },
+            );
+      }
     } catch (error, stackTrace) {
       debugPrint('[Financeiro] Falha geral ao carregar: $error');
       debugPrintStack(stackTrace: stackTrace);
@@ -225,9 +242,14 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
   // Financeiro com dezenas de cards de dívida antiga (achado em auditoria:
   // uma academia tinha 70 cobranças em aberto acumuladas desde fevereiro).
   (int count, double total) get _overdueIncludingCarriedOver {
-    var count = _overduePayments.length;
-    var total = _overduePayments.fold<double>(0, (sum, p) => sum + p.value);
-    for (final p in _carriedOverPayments) {
+    // Cobrança indevida a reembolsar (subscription_overcharge) não é receita
+    // em aberto — mesma exclusão que o extinto _summaryFromPayments já
+    // fazia pro banner; sem isso o atalho passou a somar dívida que a
+    // academia deve ao aluno, não o contrário.
+    var count = 0;
+    var total = 0.0;
+    for (final p in [..._overduePayments, ..._carriedOverPayments]) {
+      if (p.isOvercharge) continue;
       count++;
       total += p.value;
     }
