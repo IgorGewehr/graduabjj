@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../core/sports.dart';
 import '../models/student.dart';
 import 'firebase_service.dart';
+import 'fns.dart';
 
 /// Student Service - Multi-tenant student data management
 class StudentService {
@@ -515,6 +516,26 @@ class StudentService {
 
     // Por fim, o documento do aluno.
     await _collections.student(id).delete();
+  }
+
+  /// Desvincula a conta (e-mail) ligada a este aluno, sem apagar nem a ficha
+  /// nem a conta. `userAcademyMapping`/`academies/{id}/users` não são
+  /// editáveis pelo cliente (regras de segurança — mesmo motivo de
+  /// `hardDelete` não tocar neles), por isso passa pela Cloud Function
+  /// `unlinkStudentAccount` (admin-only) em vez de escrever direto no
+  /// Firestore. Depois disso a ficha volta a ficar "órfã", pronta pra ser
+  /// vinculada a uma conta diferente.
+  ///
+  /// Retorna `wasLinked` pra quem chama distinguir "desvinculei de verdade"
+  /// de "não havia nada pra desvincular" (ex.: tela desatualizada — outro
+  /// admin já tinha desvinculado, ou a conta se religou a outro aluno
+  /// bem no meio da chamada) — evita um toast de sucesso enganoso.
+  Future<bool> unlinkAccount(String studentId) async {
+    final result = await Fns.functions
+        .httpsCallable('unlinkStudentAccount')
+        .call({'studentId': studentId, 'academyId': academyId});
+    final data = result.data;
+    return data is Map && data['wasLinked'] == true;
   }
 
   /// Apaga, em lotes (≤450 ops por batch, limite do Firestore é 500), todos os

@@ -318,6 +318,9 @@ class _AdminStudentDetailScreenState
     final canDelete =
         currentUser != null &&
         (currentUser.isAdmin || currentUser.hasPermission('students:delete'));
+    // Desvincular conta é admin-only de propósito (pedido do produto): mexe
+    // no vínculo de LOGIN do aluno (userAcademyMapping), não só na ficha.
+    final canUnlinkAccount = currentUser?.isAdmin == true;
 
     final menuItems = <PopupMenuEntry<String>>[
       // Meta técnica (anti-blues §6.3): morava como 3º ícone no AppBar e
@@ -375,6 +378,19 @@ class _AdminStudentDetailScreenState
             ],
           ),
         ),
+      // Contraparte de "Gerar Código de Acesso": só faz sentido quando JÁ
+      // existe uma conta vinculada pra desfazer.
+      if (canUnlinkAccount && _student!.linkedUserId != null)
+        const PopupMenuItem(
+          value: 'unlink_account',
+          child: Row(
+            children: [
+              Icon(LucideIcons.unlink),
+              SizedBox(width: 8),
+              Text('Desvincular Conta'),
+            ],
+          ),
+        ),
       // Transferir (saiu da academia) — só para quem ainda não saiu.
       if (canManage && _student!.status != StudentStatus.transferred)
         const PopupMenuItem(
@@ -426,6 +442,7 @@ class _AdminStudentDetailScreenState
               if (value == 'promote') _showPromoteDialog();
               if (value == 'toggle_status') _toggleStatus();
               if (value == 'generate_code') _generateLinkCode();
+              if (value == 'unlink_account') _showUnlinkAccountConfirmation();
               if (value == 'transfer') _showTransferDialog();
               if (value == 'delete') _showHardDeleteConfirmation();
             },
@@ -5753,6 +5770,67 @@ class _AdminStudentDetailScreenState
         ],
       ),
     );
+  }
+
+  /// Contraparte de _generateLinkCode: desfaz o vínculo conta↔ficha (pedido
+  /// real de suporte — pai vinculou o e-mail ao filho errado). Um só
+  /// diálogo de confirmação (não dois como o hard-delete): é reversível —
+  /// dá pra gerar um código novo e vincular de novo a qualquer momento.
+  Future<void> _showUnlinkAccountConfirmation() async {
+    // Admin-only (não "OR students:manage") — mesmo gate do servidor
+    // (unlinkStudentAccount exige isAdmin) e do item de menu acima.
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser?.isAdmin != true) {
+      context.showError('Apenas admins podem desvincular contas.');
+      return;
+    }
+    final email = _student?.email;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Desvincular conta'),
+        content: Text(
+          'Isso desfaz o vínculo entre ${_student!.fullName} e a conta '
+          '${email != null && email.isNotEmpty ? '($email)' : 'de e-mail atual'} '
+          'vinculada a ele.\n\n'
+          'Depois disso:\n'
+          '• Este aluno fica pronto para ser vinculado a uma conta diferente '
+          '(gerando um novo código de acesso).\n'
+          '• A conta desvinculada fica livre para ser vinculada a outro aluno.\n\n'
+          'Presenças, financeiro e histórico do aluno NÃO são afetados.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Desvincular'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    try {
+      final wasLinked = await StudentService(
+        FirebaseService.academyId,
+      ).unlinkAccount(_student!.id);
+      if (!mounted) return;
+      // wasLinked == false: a tela estava desatualizada (outro admin já
+      // desvinculou, ou a conta se religou a outro aluno nesse meio-tempo)
+      // — nada foi desfeito agora, o toast não pode dizer que foi.
+      context.showSuccess(
+        wasLinked
+            ? 'Conta desvinculada.'
+            : 'Este aluno já não tinha conta vinculada.',
+      );
+      _loadData();
+    } catch (e) {
+      if (mounted) context.showError('Erro ao desvincular: $e');
+    }
   }
 }
 
