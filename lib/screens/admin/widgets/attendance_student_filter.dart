@@ -15,7 +15,14 @@ List<Student> filterAttendanceStudents({
         !(student.nickname?.toLowerCase().contains(query) ?? false)) {
       return false;
     }
-    if (classStudentIds != null && !classStudentIds.contains(student.id)) {
+    // Roster vazio = turma aberta (mesma regra legada de
+    // BJJClass.acceptsCheckinFrom: studentIds.isEmpty || contains(...)).
+    // Sem esse `isNotEmpty`, uma turma "sem alunos fixos" (o jeito hoje de
+    // fazer chamada sem horário/turma real — ex.: musculação livre) escondia
+    // TODOS os alunos da lista de chamada, em vez de mostrar todos.
+    if (classStudentIds != null &&
+        classStudentIds.isNotEmpty &&
+        !classStudentIds.contains(student.id)) {
       return false;
     }
     final isPresent = presentStudentIds.contains(student.id);

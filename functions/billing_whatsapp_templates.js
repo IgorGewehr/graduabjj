@@ -44,10 +44,36 @@ function normalizeTemplateStage(stage) {
   return Object.hasOwn(stageTemplateBase, stage) ? stage : null;
 }
 
+/**
+ * Estágio de mensalidade a-vencer, estritamente ANTES do vencimento. Duas
+ * formas chegam aqui pra mesma situação: o cron automático
+ * (scheduledDueSoonReminder) calcula 'due-N'; o envio manual "enviar agora"
+ * (sendBillingReminder) calcula o literal 'UPCOMING' — os dois precisam
+ * resolver pra mesma família de template. 'due-0' (vence hoje) fica de fora
+ * de propósito — normaliza pra 'D+0' acima e continua na família
+ * cobranca_d0, igual já era antes disso existir.
+ *
+ * Auditoria 03/set/2026: o template Meta "cobranca_avencer" (aprovado,
+ * categoria Marketing) já existe pra esse aviso antecipado, mas nunca foi
+ * conectado aqui — qualquer due-N ou UPCOMING de mensalidade caía em
+ * "template_unavailable" e nenhum aviso saía antes do vencimento (achado ao
+ * validar o fix de vencimento personalizado com o dono do produto, testando
+ * a Lobisomens Jiu Jitsu).
+ */
+function isUpcomingMonthlyStage(stage) {
+  if (stage === 'UPCOMING') return true;
+  return stage !== 'due-0' && /^due-\d+$/.test(String(stage || ''));
+}
+
 function templateNameFor(stage, paymentMode, chargeType = 'monthly_tuition') {
-  const base = isOneTimeChargeType(chargeType)
-    ? oneTimeTemplateBase(stage)
-    : stageTemplateBase[normalizeTemplateStage(stage)];
+  let base;
+  if (isOneTimeChargeType(chargeType)) {
+    base = oneTimeTemplateBase(stage);
+  } else if (isUpcomingMonthlyStage(stage)) {
+    base = 'cobranca_avencer';
+  } else {
+    base = stageTemplateBase[normalizeTemplateStage(stage)];
+  }
   if (!base) return null;
   switch (paymentMode) {
     case BillingPaymentMode.MERCADO_PAGO:
@@ -85,8 +111,10 @@ function mercadoPagoButtonUrlParam(ticketUrl) {
 
 /**
  * Builds the exact payload accepted by /api/send-whatsapp-template.
- * Monthly tuition keeps the D+0..D+30 matrix. One-time charges use the
- * approved open/pending families, including creation and due-soon stages.
+ * Monthly tuition uses the D+0..D+30 matrix for due/overdue stages and the
+ * standalone cobranca_avencer family for due-soon (before the due date, see
+ * isUpcomingMonthlyStage). One-time charges use the approved open/pending
+ * template families, including creation and due-soon stages.
  */
 function buildBillingTemplatePayload({
   stage,
@@ -95,6 +123,7 @@ function buildBillingTemplatePayload({
   academyName,
   amountFormatted,
   dueDateFormatted,
+  daysUntilDue,
   chargeType = 'monthly_tuition',
   description,
 } = {}) {
@@ -120,6 +149,10 @@ function buildBillingTemplatePayload({
 
   if (isOneTimeChargeType(chargeType)) {
     variables.push(String(description || 'Cobrança avulsa').trim());
+  } else if (isUpcomingMonthlyStage(stage)) {
+    // cobranca_avencer {{5}}: "Faltam {{5}} dia(s) para o vencimento...".
+    // Confirmado direto na definição bruta do modelo na Meta (03/set/2026).
+    variables.push(String(daysUntilDue != null ? daysUntilDue : ''));
   }
 
   if (mode === BillingPaymentMode.MERCADO_PAGO) {
@@ -139,6 +172,7 @@ function buildBillingTemplatePayload({
 module.exports = {
   buildBillingTemplatePayload,
   isOneTimeChargeType,
+  isUpcomingMonthlyStage,
   mercadoPagoButtonUrlParam,
   normalizeTemplateStage,
   oneTimeTemplateBase,

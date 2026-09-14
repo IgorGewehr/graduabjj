@@ -1679,6 +1679,7 @@ class _AdminBillingRemindersScreenState
             paymentValue: paymentPreviewValue,
             chargeType: chargeType,
             description: description,
+            daysOverdue: daysOverdue,
           ) ??
           'Ainda não existe template Meta aprovado para esta etapa.';
       paymentInstruction = switch (previewPaymentMode) {

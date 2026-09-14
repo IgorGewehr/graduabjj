@@ -1292,6 +1292,133 @@ exports.revokeMember = onCall(async (request) => {
 });
 
 // ============================================================
+// unlinkStudentAccount — admin desvincula a conta (email) de uma ficha de
+// aluno, SEM apagar nem a ficha nem a conta. Deixa os dois lados livres pra
+// serem religados a algo diferente:
+//   - a ficha volta a ficar órfã (linkedUserId/email limpos) — pronta pra
+//     ser reivindicada por OUTRA conta via decideJoinRequest com
+//     linkStudentId (que hoje recusa reivindicar uma ficha cujo
+//     linkedUserId já aponta pra outra conta — ver checagem lá).
+//   - a conta perde o vínculo com ESTA academia (mesma limpeza de
+//     revokeMember em userAcademyMapping/academies/{id}/users), podendo
+//     pedir vínculo de novo, inclusive a um aluno diferente.
+// Pedido real de suporte (professor, set/2026): pai vinculou o e-mail ao
+// filho errado e precisa desfazer pra vincular no filho certo.
+// ============================================================
+/**
+ * Núcleo puro (sem checagem de auth/permissão — isso é responsabilidade do
+ * onCall abaixo) da desvinculação. Exportado à parte (mesmo padrão de
+ * `_selfCheckinCore`) pra poder ser testado/auditado direto contra o
+ * Firestore real sem precisar simular um request autenticado.
+ */
+async function _unlinkStudentAccountCore(academyId, studentId) {
+  const studentRef = db.doc(`academies/${academyId}/students/${studentId}`);
+  const studentSnap = await studentRef.get();
+  if (!studentSnap.exists) {
+    throw new HttpsError('not-found', 'Aluno não encontrado.');
+  }
+  const linkedUserId = studentSnap.get('linkedUserId');
+  if (!linkedUserId) {
+    return {success: true, wasLinked: false};
+  }
+
+  const mappingRef = db.collection('userAcademyMapping').doc(linkedUserId);
+  const academyUserRef = db
+      .collection('academies').doc(academyId)
+      .collection('users').doc(linkedUserId);
+
+  return db.runTransaction(async (tx) => {
+    // Auditoria: re-lê a ficha DENTRO da transação (não só o mapping) — sem
+    // isso, um duplo-clique ou uma re-vinculação legítima concorrente entre
+    // o read acima e o commit fazia o tx.update abaixo apagar um
+    // linkedUserId DIFERENTE do que o admin viu na tela, sem checagem
+    // nenhuma (só o mapping tinha proteção otimista, a ficha não).
+    const liveStudentSnap = await tx.get(studentRef);
+    if (!liveStudentSnap.exists) {
+      throw new HttpsError('not-found', 'Aluno não encontrado.');
+    }
+    if (liveStudentSnap.get('linkedUserId') !== linkedUserId) {
+      // Mudou entre o read fora da tx e agora — não desfaz um vínculo
+      // diferente do que foi decidido desvincular.
+      return {success: true, wasLinked: false};
+    }
+
+    // Lê os DOIS lados que podem registrar "esta conta pertence a esta
+    // ficha nesta academia" (ver "3 ERAS de vínculo conta↔ficha" no
+    // CLAUDE.md): era 1 (mapping.academyDetails[academyId].studentId) e
+    // era 2 (o doc legado academies/{id}/users/{uid}.studentId). Uma conta
+    // promovida a instrutor ou vinda de antes da era 1 pode só ter o
+    // registro legado — sem checar os dois, essa conta ficava com
+    // linkedUserId limpo na FICHA mas continuava membro pleno da academia
+    // (mapping/doc legado intactos), e a ficha ficava reivindicável por
+    // OUTRA conta ao mesmo tempo — duas contas "donas" da mesma ficha.
+    const [mappingSnap, academyUserSnap] = await Promise.all([
+      tx.get(mappingRef),
+      tx.get(academyUserRef),
+    ]);
+    const mappingData = mappingSnap.exists ? (mappingSnap.data() || {}) : null;
+    const details = mappingData ? (mappingData.academyDetails || {}) : {};
+    const era1Matches = details[academyId] && details[academyId].studentId === studentId;
+    const era2Matches = academyUserSnap.exists && academyUserSnap.get('studentId') === studentId;
+
+    // email limpo de propósito (pedido do produto): quem reivindicar a
+    // ficha depois grava o PRÓPRIO email por cima (decideJoinRequest, ramo
+    // "reivindica a ficha órfã" — claim.email = email da conta nova).
+    tx.update(studentRef, {
+      linkedUserId: FieldValue.delete(),
+      email: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    // Defensivo: só libera a conta desta academia se pelo menos uma das
+    // eras ainda apontar pra ESTA ficha (evita apagar um vínculo que já
+    // mudou entre a leitura acima e agora — ex.: a conta já foi religada a
+    // outro aluno por outro caminho).
+    if (era1Matches || era2Matches) {
+      if (mappingData) {
+        const academyIds = Array.isArray(mappingData.academyIds) ? mappingData.academyIds : [];
+        const remaining = academyIds.filter((id) => id !== academyId);
+        const newDetails = Object.assign({}, details);
+        delete newDetails[academyId];
+        let primary = mappingData.primaryAcademyId;
+        if (primary === academyId) {
+          primary = remaining.length > 0 ? remaining[0] : null;
+        }
+        tx.update(mappingRef, {
+          academyIds: remaining,
+          primaryAcademyId: primary,
+          academyDetails: newDetails,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+      // Apaga (não revoga como `revokeMember`) de propósito: unlink existe
+      // pra deixar a CONTA pronta pra um vínculo novo nesta mesma academia
+      // (ex.: outro filho da mesma família) — um doc "revoked" sobrando
+      // aqui não ajuda esse fluxo, diferente de revokeMember (expulsão,
+      // onde manter o rastro de auditoria importa mais que reuso).
+      if (academyUserSnap.exists) {
+        tx.delete(academyUserRef);
+      }
+    }
+
+    return {success: true, wasLinked: true, previousUserId: linkedUserId};
+  });
+}
+exports._unlinkStudentAccountCore = _unlinkStudentAccountCore;
+
+exports.unlinkStudentAccount = onCall(async (request) => {
+  const adminUid = requireAuth(request);
+  const {studentId, academyId} = request.data || {};
+  if (!studentId || !academyId) {
+    throw new HttpsError('invalid-argument', 'studentId e academyId são obrigatórios.');
+  }
+  if (!(await isAdmin(adminUid, academyId))) {
+    throw new HttpsError('permission-denied', 'Apenas admins podem desvincular contas.');
+  }
+  return _unlinkStudentAccountCore(academyId, studentId);
+});
+
+// ============================================================
 // listAcademyMembers — admin listing all staff/students in their academy
 // ============================================================
 //

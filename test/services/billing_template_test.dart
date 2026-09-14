@@ -71,12 +71,34 @@ void main() {
         ),
         isNull,
       );
+    });
+
+    // Regressão real (Lobisomens Jiu Jitsu, 03/set/2026): o template Meta
+    // "cobranca_avencer" (mensalidade a-vencer, aprovado) existia mas nunca
+    // foi conectado aqui — BillingStage.upcoming pra monthly_tuition sempre
+    // voltava null (o antigo teste acima travava esse bug como "esperado").
+    // Espelha server_functions.js/billing_whatsapp_templates.js.
+    test('upcoming (a-vencer) monthly tuition selects cobranca_avencer, all three payment modes', () {
       expect(
         service.templateNameForStage(
           BillingStage.upcoming,
           paymentMode: BillingPaymentPreference.mercadoPago,
         ),
-        isNull,
+        'cobranca_avencer',
+      );
+      expect(
+        service.templateNameForStage(
+          BillingStage.upcoming,
+          paymentMode: BillingPaymentPreference.manualPix,
+        ),
+        'cobranca_avencer_pix_manual',
+      );
+      expect(
+        service.templateNameForStage(
+          BillingStage.upcoming,
+          paymentMode: BillingPaymentPreference.none,
+        ),
+        'cobranca_avencer_sempix',
       );
     });
 

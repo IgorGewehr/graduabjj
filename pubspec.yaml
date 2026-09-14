@@ -2,7 +2,7 @@ name: graduabjj
 description: "MyDojo - Sistema Whitelabel para Academias de Jiu-Jitsu"
 publish_to: 'none'
 
-version: 3.4.2+120
+version: 5.0.0+120
 
 environment:
   sdk: ^3.10.7

@@ -635,7 +635,11 @@ class _AdminAttendanceScreenState extends ConsumerState<AdminAttendanceScreen> {
   }
 
   int get _totalCount {
-    if (_selectedClass != null) {
+    // Roster vazio = turma aberta (mesma regra de filterAttendanceStudents/
+    // BJJClass.acceptsCheckinFrom) — o total precisa contar TODOS os alunos
+    // da academia, não zero, senão "0 de 0 presentes" contradiz a lista
+    // cheia de alunos que a chamada mostra pra essa turma.
+    if (_selectedClass != null && _selectedClass!.studentIds.isNotEmpty) {
       return _selectedClass!.studentIds.length;
     }
     return _students.length;

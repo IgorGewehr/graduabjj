@@ -493,6 +493,51 @@ class PaymentService {
     return payments;
   }
 
+  /// Cobranças pendentes/atrasadas de meses ANTERIORES a [referenceMonth] —
+  /// sem isso, a aba Financeiro (mês-a-mês via getByMonth) escondia dívida do
+  /// mês passado assim que o calendário virava, mesmo com o aluno ainda
+  /// inadimplente (caso real: Drakkar/Ueverton, 01/set/2026 — cobrança de
+  /// agosto ainda em aberto sumiu da aba ao entrar em setembro). Varre por
+  /// status (índice single-field automático, sem exigir índice composto) e
+  /// filtra o mês no cliente — dataset pequeno por academia.
+  Future<List<Payment>> getOpenBefore(String referenceMonth) async {
+    final snapshot = await _paymentsRef
+        .where('status', whereIn: ['pending', 'overdue'])
+        .get();
+    final payments = snapshot.docs
+        .map((doc) => Payment.fromFirestore(doc))
+        .where(
+          (p) =>
+              p.referenceMonth != null &&
+              p.referenceMonth!.compareTo(referenceMonth) < 0,
+        )
+        .toList();
+    payments.sort((a, b) => a.dueDate.compareTo(b.dueDate));
+    return payments;
+  }
+
+  /// Live stream do carry-over (mesmo filtro de getOpenBefore) — sem isso o
+  /// contador do atalho "Ir para Cobranças" ficava parado com a carga
+  /// inicial: um carry-over marcado pago por webhook enquanto a tela do
+  /// Financeiro está aberta continuava contando como atrasado até recarregar.
+  Stream<List<Payment>> streamOpenBefore(String referenceMonth) {
+    return _paymentsRef
+        .where('status', whereIn: ['pending', 'overdue'])
+        .snapshots()
+        .map((snap) {
+          final payments = snap.docs
+              .map((d) => Payment.fromFirestore(d))
+              .where(
+                (p) =>
+                    p.referenceMonth != null &&
+                    p.referenceMonth!.compareTo(referenceMonth) < 0,
+              )
+              .toList();
+          payments.sort((a, b) => a.dueDate.compareTo(b.dueDate));
+          return payments;
+        });
+  }
+
   /// Live stream of a month's payments — so the admin screen reflects a webhook
   /// flip to `paid` in real time (the one-shot getByMonth went stale, showing a
   /// just-paid charge as still open).
@@ -946,8 +991,17 @@ class PaymentService {
           .where((e) => activeStudentMap.containsKey(e.studentId))
           .map((e) {
             final data = activeStudentMap[e.studentId]!;
-            final effectiveDueDay = data['tuitionDay'] as int? ?? e.dueDay;
             final plan = plansById[e.planId]!;
+            // Mesma prioridade do servidor (effectiveDueDay em
+            // billing_tuition_rules.js): customDueDays do plano
+            // ("Personalizado", visível na UI) > tuitionDay (legado) >
+            // default do plano (e.dueDay já é customDueDays ?? default via
+            // plan.getStudentDueDay). Sem isso, "Gerar Mensalidades"
+            // reproduzia o mesmo bug corrigido no cron automático — o
+            // vencimento personalizado era silenciosamente ignorado.
+            final effectiveDueDay = plan.customDueDays[e.studentId] ??
+                data['tuitionDay'] as int? ??
+                e.dueDay;
             return (
               id: e.studentId,
               name: data['fullName'] as String? ?? '',
