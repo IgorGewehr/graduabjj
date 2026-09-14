@@ -1,6 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 /// Canonical feature ids used by both the navigation gate and the
 /// deep-link/highlight mechanism. Every gateable [NavEntry] references one.

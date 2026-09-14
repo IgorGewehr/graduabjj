@@ -4,7 +4,7 @@ import 'package:graduabjj/widgets/onboarding/quiz_card_option.dart';
 import 'package:graduabjj/widgets/onboarding/quiz_decision_bridge.dart';
 import 'package:graduabjj/widgets/onboarding/quiz_header.dart';
 import 'package:graduabjj/widgets/onboarding/steps/quiz_step_sandbox.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 void main() {
   group('Onboarding Quiz Components Tests', () {

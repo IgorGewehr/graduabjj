@@ -2,7 +2,7 @@ name: graduabjj
 description: "MyDojo - Sistema Whitelabel para Academias de Jiu-Jitsu"
 publish_to: 'none'
 
-version: 3.4.1+118
+version: 3.4.2+120
 
 environment:
   sdk: ^3.10.7
@@ -33,7 +33,7 @@ dependencies:
 
   # UI Components
   cupertino_icons: ^1.0.8
-  lucide_icons: ^0.257.0
+  lucide_icons_flutter: ^3.1.17
   cached_network_image: ^3.4.1
   shimmer: ^3.0.0
   flutter_svg: ^2.0.16
