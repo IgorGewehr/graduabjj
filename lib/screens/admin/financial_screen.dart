@@ -17,6 +17,8 @@ import '../../widgets/polish/polish.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
+import 'widgets/plan_overrides.dart';
+import 'widgets/plan_overrides_sheet.dart';
 import 'widgets/plan_student_filter.dart';
 
 /// Parse robusto de valor em R$ digitado por brasileiro. Aceita "150,50"
@@ -655,6 +657,8 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
                 onEdit: () => _showEditPlanDialog(entry.value),
                 onDelete: () => _showDeletePlanDialog(entry.value),
                 onManageStudents: () => _showManageStudentsDialog(entry.value),
+                onShowOverrides: (kind) =>
+                    _showPlanOverrides(entry.value, kind),
               ).entrance(index: entry.key),
             ),
           ),
@@ -1435,6 +1439,20 @@ class _AdminFinancialScreenState extends ConsumerState<AdminFinancialScreen>
     if (mounted) await _loadData();
   }
 
+  /// Lista só de quem tem valor/vencimento personalizado no plano (aberta
+  /// pelos selos do card). Editar é admin-only, como a regra de `plans`.
+  Future<void> _showPlanOverrides(Plan plan, PlanOverrideKind kind) async {
+    await showPlanOverridesSheet(
+      context,
+      plan: plan,
+      students: _students,
+      conflictStudentIds: _billingConflictStudentIds,
+      initialKind: kind,
+      canEdit: ref.read(currentUserProvider).valueOrNull?.isAdmin == true,
+    );
+    if (mounted) await _loadData();
+  }
+
   void _showMarkPaidDialog(Payment payment) {
     PaymentMethod selectedMethod = PaymentMethod.pix;
     bool isSaving = false;
@@ -1909,6 +1927,7 @@ class _PlanCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onManageStudents;
+  final void Function(PlanOverrideKind kind) onShowOverrides;
 
   const _PlanCard({
     required this.plan,
@@ -1918,6 +1937,7 @@ class _PlanCard extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onManageStudents,
+    required this.onShowOverrides,
   });
 
   @override
@@ -1929,7 +1949,14 @@ class _PlanCard extends StatelessWidget {
     final includedIds = billableStudentIds
         .where((studentId) => !conflictStudentIds.contains(studentId))
         .toList();
-    final customIds = includedIds.where(plan.customValues.containsKey).toList();
+    // Mesma população do selo → o número do selo bate com a lista que abre.
+    final overrides = planOverrideIds(
+      plan,
+      activeStudentIds: activeStudentIds,
+      conflictStudentIds: conflictStudentIds,
+    );
+    final customIds = overrides.value;
+    final dueDayIds = overrides.dueDay;
     final standardCount = includedIds.length - customIds.length;
     final customTotal = customIds.fold(
       0.0,
@@ -2096,7 +2123,9 @@ class _PlanCard extends StatelessWidget {
               ],
             ),
           ),
-          if (customIds.isNotEmpty || conflictingIds.isNotEmpty) ...[
+          if (customIds.isNotEmpty ||
+              dueDayIds.isNotEmpty ||
+              conflictingIds.isNotEmpty) ...[
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
@@ -2108,6 +2137,15 @@ class _PlanCard extends StatelessWidget {
                     label:
                         '${customIds.length} valor${customIds.length == 1 ? '' : 'es'} personalizado${customIds.length == 1 ? '' : 's'}',
                     color: AppTheme.textSecondary,
+                    onTap: () => onShowOverrides(PlanOverrideKind.value),
+                  ),
+                if (dueDayIds.isNotEmpty)
+                  _PlanExceptionBadge(
+                    icon: LucideIcons.calendarClock,
+                    label:
+                        '${dueDayIds.length} vencimento${dueDayIds.length == 1 ? '' : 's'} personalizado${dueDayIds.length == 1 ? '' : 's'}',
+                    color: AppTheme.textSecondary,
+                    onTap: () => onShowOverrides(PlanOverrideKind.dueDay),
                   ),
                 if (conflictingIds.isNotEmpty)
                   _PlanExceptionBadge(
@@ -2148,15 +2186,20 @@ class _PlanExceptionBadge extends StatelessWidget {
   final String label;
   final Color color;
 
+  /// Quando presente o selo vira botão (abre a lista de quem tem a exceção) e
+  /// ganha o chevron — sem ele o selo é só informativo, como o de conflito.
+  final VoidCallback? onTap;
+
   const _PlanExceptionBadge({
     required this.icon,
     required this.label,
     required this.color,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final badge = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
@@ -2175,7 +2218,21 @@ class _PlanExceptionBadge extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
+          if (onTap != null) ...[
+            const SizedBox(width: 4),
+            Icon(LucideIcons.chevronRight, size: 13, color: color),
+          ],
         ],
+      ),
+    );
+    if (onTap == null) return badge;
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: badge,
       ),
     );
   }
