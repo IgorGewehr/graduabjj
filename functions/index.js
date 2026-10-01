@@ -1934,22 +1934,23 @@ exports.caktoWebhook = onRequest(
     const trimestralOffer = process.env.CAKTO_OFFER_TRIMESTRAL || '';
     const mensalOffer = process.env.CAKTO_OFFER_MENSAL || '';
 
-    const graceDays = 5; // folga p/ atraso de webhook/renovação
+    // Sem folga — mesma regra do MP_GRACE_DAYS: venceu sem pagar, bloqueia no dia.
+    const graceDays = 0;
     let daysToAdd;
     if (recurrenceDays > 0) {
-      daysToAdd = recurrenceDays + graceDays; // 30→35, 90→95, 365→370
+      daysToAdd = recurrenceDays + graceDays;
     } else if (offerId && offerId === anualOffer) {
-      daysToAdd = 370;
+      daysToAdd = 365 + graceDays;
     } else if (offerId && offerId === trimestralOffer) {
-      daysToAdd = 95;
+      daysToAdd = 90 + graceDays;
     } else if (offerId && offerId === mensalOffer) {
-      daysToAdd = 35;
+      daysToAdd = 30 + graceDays;
     } else if (offerName.includes('anual')) {
-      daysToAdd = 370;
+      daysToAdd = 365 + graceDays;
     } else if (offerName.includes('trimestral')) {
-      daysToAdd = 95;
+      daysToAdd = 90 + graceDays;
     } else {
-      daysToAdd = 35; // default: mensal + buffer
+      daysToAdd = 30 + graceDays; // default: mensal
     }
 
     const snap = await academyRef.get();
@@ -2008,7 +2009,11 @@ exports.caktoWebhook = onRequest(
 // Cadastre a URL desta function em: MP → sua aplicação → Webhooks.
 // ============================================================
 const MP_API = 'https://api.mercadopago.com';
-const MP_GRACE_DAYS = 5;
+// Sem folga: regra do dono (set/2026) — não pagou no dia do vencimento,
+// bloqueia no dia. A folga de 5 dias antiga deixava academia inadimplente
+// usando o app quase uma semana de graça (caso LEAU FIGHT TEAM, 24→29/09).
+// Pagamento atrasado reabre o acesso na hora (o webhook estende a partir de hoje).
+const MP_GRACE_DAYS = 0;
 
 function mpPeriodToDays(period) {
   switch (String(period || '').toLowerCase()) {
