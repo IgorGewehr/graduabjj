@@ -17,6 +17,7 @@ import '../../widgets/polish/polish.dart';
 import '../../core/theme.dart';
 import '../../models/student.dart';
 import '../../services/services.dart';
+import 'widgets/plan_student_filter.dart';
 
 /// Parse robusto de valor em R$ digitado por brasileiro. Aceita "150,50"
 /// (vírgula decimal), "1.500,00" (ponto milhar + vírgula) e "150.50"/"150".
@@ -2632,13 +2633,20 @@ class _ManageStudentsSheetState extends State<_ManageStudentsSheet> {
   late Set<String> _enrolledIds;
   String _searchQuery = '';
   bool _isSaving = false;
+  PlanMembershipFilter _filter = PlanMembershipFilter.all;
+  // Foto de quem estava no plano quando a aba atual foi aberta (ver
+  // _filteredStudents). _enrolledIds é o estado ao vivo.
+  late Set<String> _groupSnapshot;
   final _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _enrolledIds = Set.from(widget.plan.studentIds);
+    _groupSnapshot = Set.from(_enrolledIds);
   }
+
+  int get _inPlanCount => countStudentsInPlan(widget.students, _enrolledIds);
 
   @override
   void dispose() {
@@ -2646,31 +2654,15 @@ class _ManageStudentsSheetState extends State<_ManageStudentsSheet> {
     super.dispose();
   }
 
-  List<Student> get _filteredStudents {
-    var result = widget.students.toList();
-
-    // Filter by search
-    if (_searchQuery.isNotEmpty) {
-      result = result
-          .where(
-            (s) =>
-                s.fullName.toLowerCase().contains(_searchQuery) ||
-                (s.nickname?.toLowerCase().contains(_searchQuery) ?? false),
-          )
-          .toList();
-    }
-
-    // Sort: NOT enrolled first, then alphabetically
-    result.sort((a, b) {
-      final aInPlan = _enrolledIds.contains(a.id);
-      final bInPlan = _enrolledIds.contains(b.id);
-      if (!aInPlan && bInPlan) return -1;
-      if (aInPlan && !bInPlan) return 1;
-      return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
-    });
-
-    return result;
-  }
+  // Filtro/ordem em função pura (plan_student_filter.dart) sobre
+  // _groupSnapshot, não _enrolledIds — ver o doc de lá. O estado visual do
+  // card (check/"Vinculado") segue o ao-vivo.
+  List<Student> get _filteredStudents => filterStudentsForPlan(
+    students: widget.students,
+    groupSnapshot: _groupSnapshot,
+    filter: _filter,
+    searchQuery: _searchQuery,
+  );
 
   Future<void> _toggleStudent(Student student) async {
     if (_isSaving) return;
@@ -2830,6 +2822,44 @@ class _ManageStudentsSheetState extends State<_ManageStudentsSheet> {
                       },
                     ),
                   ),
+                  const SizedBox(height: 10),
+
+                  // Filtro por situação, com contagem ao vivo (os números
+                  // seguem o que o usuário já tocou; a LISTA só reagrupa ao
+                  // trocar de aba — ver _groupSnapshot).
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<PlanMembershipFilter>(
+                      showSelectedIcon: false,
+                      style: const ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                        padding: WidgetStatePropertyAll(
+                          EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                      ),
+                      segments: [
+                        ButtonSegment(
+                          value: PlanMembershipFilter.all,
+                          label: Text('Todos · ${widget.students.length}'),
+                        ),
+                        ButtonSegment(
+                          value: PlanMembershipFilter.inPlan,
+                          label: Text('No plano · $_inPlanCount'),
+                        ),
+                        ButtonSegment(
+                          value: PlanMembershipFilter.notInPlan,
+                          label: Text(
+                            'Fora · ${widget.students.length - _inPlanCount}',
+                          ),
+                        ),
+                      ],
+                      selected: {_filter},
+                      onSelectionChanged: (selection) => setState(() {
+                        _filter = selection.first;
+                        _groupSnapshot = Set.from(_enrolledIds);
+                      }),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -2850,7 +2880,16 @@ class _ManageStudentsSheetState extends State<_ManageStudentsSheet> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'Nenhum aluno encontrado',
+                            _searchQuery.isNotEmpty
+                                ? 'Nenhum aluno encontrado'
+                                : switch (_filter) {
+                                    PlanMembershipFilter.inPlan =>
+                                      'Nenhum aluno neste plano ainda',
+                                    PlanMembershipFilter.notInPlan =>
+                                      'Todos os alunos já estão neste plano',
+                                    PlanMembershipFilter.all =>
+                                      'Nenhum aluno encontrado',
+                                  },
                             style: AppTheme.bodyMedium.copyWith(
                               color: AppTheme.textSecondary,
                             ),
