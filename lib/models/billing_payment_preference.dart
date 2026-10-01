@@ -49,6 +49,36 @@ BillingPaymentPreference resolveBillingPaymentMode({
   return BillingPaymentPreference.none;
 }
 
+/// Frase curta, em português simples, de COMO o aluno recebe a forma de
+/// pagamento nas mensagens de cobrança (card "Como você recebe").
+///
+/// Resolve pela MESMA regra do envio ([resolveBillingPaymentMode]) para não
+/// prometer Mercado Pago quando, na prática, vai o PIX pessoal.
+String billingPaymentSummary({
+  required bool includePaymentLink,
+  required BillingPaymentPreference preference,
+  required bool mercadoPagoAvailable,
+  required String? manualPixKey,
+}) {
+  if (!includePaymentLink) {
+    return 'Desligado — as mensagens vão sem forma de pagamento';
+  }
+  final mode = resolveBillingPaymentMode(
+    preference: preference,
+    mercadoPagoAvailable: mercadoPagoAvailable,
+    manualPixKey: manualPixKey,
+  );
+  if (mode == BillingPaymentPreference.none) {
+    return preference == BillingPaymentPreference.none
+        ? 'Nenhuma — as mensagens vão sem chave ou código'
+        : 'Nenhuma configurada ainda';
+  }
+  if (mode != preference && preference != BillingPaymentPreference.none) {
+    return '${mode.label} (${preference.label} não está disponível)';
+  }
+  return mode.label;
+}
+
 /// Dados finais que entram no template oficial de cobranca.
 class BillingPaymentInstruction {
   final BillingPaymentPreference mode;

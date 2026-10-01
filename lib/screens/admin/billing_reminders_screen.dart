@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import '../../core/feedback_utils.dart';
+import '../../core/navigation/nav_catalog.dart';
 import '../../models/billing_payment_preference.dart';
 import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
@@ -509,7 +510,26 @@ class _AdminBillingRemindersScreenState
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                if (_mercadoPagoAvailable) ...[
+                if (!_mercadoPagoAvailable && _canOpenSettings) ...[
+                  // Antes era um beco sem saída: avisava que o Mercado Pago
+                  // estava desconectado mas a conexão mora em Configurações.
+                  const SizedBox(height: 4),
+                  TextButton.icon(
+                    onPressed: () =>
+                        context.go(settingsDeepLinkFor(FeatureId.payments)),
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      foregroundColor: color,
+                    ),
+                    icon: const Icon(LucideIcons.link, size: 14),
+                    label: const Text(
+                      'Conectar Mercado Pago',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ] else if (_mercadoPagoAvailable) ...[
                   const SizedBox(height: 4),
                   Text(
                     'O automático verifica o e-mail do aluno ou responsável e, se houver conta vinculada, consulta o e-mail dela no Firebase.',
@@ -539,6 +559,19 @@ class _AdminBillingRemindersScreenState
       ),
     );
   }
+
+  /// Configurações é admin-only (nav_catalog: admin_config), mas Cobrança abre
+  /// para quem tem `financial:view` sem ser admin — para esses, "Alterar" e
+  /// "Conectar" levariam a uma tela que não podem usar, então nem aparecem.
+  bool get _canOpenSettings =>
+      ref.watch(currentUserProvider).valueOrNull?.isAdmin == true;
+
+  String get _paymentMethodSummary => billingPaymentSummary(
+    includePaymentLink: _notificationSettings?.includePaymentLink ?? true,
+    preference: _billingPaymentPreference,
+    mercadoPagoAvailable: _mercadoPagoAvailable,
+    manualPixKey: _manualPixKey,
+  );
 
   Widget _buildAutomationCard() {
     final whatsappEnabled = _notificationSettings?.whatsappEnabled ?? false;
@@ -590,7 +623,7 @@ class _AdminBillingRemindersScreenState
             SwitchListTile(
               title: const Text('Gerar mensalidades automaticamente'),
               subtitle: Text(
-                'Na virada do mês, gera as mensalidades de todos os planos ativos (diariamente às 6h).',
+                'Na virada do mês, gera as mensalidades de todos os planos ativos (diariamente às 6h). Planos mensais no cartão continuam pela assinatura automática.',
                 style: AppTheme.bodySmall.copyWith(
                   color: AppTheme.textSecondary,
                 ),
@@ -676,6 +709,41 @@ class _AdminBillingRemindersScreenState
                       }
                     }
                   : null,
+            ),
+            const Divider(height: 16),
+            // Ponte para onde a escolha Mercado Pago x PIX realmente mora
+            // (Configurações > Financeiro). Antes o diálogo mandava procurar
+            // "em Financeiro" sem nenhum caminho até lá.
+            Row(
+              children: [
+                Icon(
+                  LucideIcons.wallet,
+                  size: 20,
+                  color: AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Como você recebe', style: AppTheme.bodyMedium),
+                      const SizedBox(height: 2),
+                      Text(
+                        _paymentMethodSummary,
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_canOpenSettings)
+                  TextButton(
+                    onPressed: () =>
+                        context.go(settingsDeepLinkFor(FeatureId.payments)),
+                    child: const Text('Alterar'),
+                  ),
+              ],
             ),
             if (_billingPaymentPreference ==
                     BillingPaymentPreference.mercadoPago &&
@@ -3435,11 +3503,11 @@ class _AdminBillingRemindersScreenState
     bool whatsappEnabled = _notificationSettings?.whatsappEnabled ?? false;
     bool emailEnabled = _notificationSettings?.emailEnabled ?? false;
     bool includePaymentLink = _notificationSettings?.includePaymentLink ?? true;
-    bool notifyOnCreation = _notificationSettings?.notifyOnCreation ?? false;
+    // "Gerar mensalidades" e "Avisar parcela criada" vivem só no card de
+    // Automação da tela (salvam na hora); aqui o valor atual de
+    // notifyOnCreation apenas é preservado ao salvar o resto.
+    final notifyOnCreation = _notificationSettings?.notifyOnCreation ?? false;
     final dueSoonOffsets = <int>{...?_notificationSettings?.dueSoonOffsets};
-    // Pré-carregado em _loadData (doc settings/billing, separado dos demais
-    // toggles acima que moram em settings/billingReminders).
-    bool autoTuitionEnabled = _autoTuitionEnabled;
     // Clone current templates or start empty
     final emailSubjectTemplates = Map<String, String>.from(
       _notificationSettings?.messageTemplates?.emailSubject ?? {},
@@ -3561,7 +3629,7 @@ class _AdminBillingRemindersScreenState
                           'Incluir forma de pagamento nas mensagens',
                         ),
                         subtitle: Text(
-                          'Usa a preferência definida em Financeiro: Mercado Pago ou PIX pessoal, com fallback automático.',
+                          'Usa a forma de recebimento definida em Configurações › Financeiro (veja "Como você recebe" no card de Automação).',
                           style: AppTheme.bodySmall.copyWith(
                             color: AppTheme.textSecondary,
                           ),
@@ -3579,83 +3647,12 @@ class _AdminBillingRemindersScreenState
                           setDialogState(() => includePaymentLink = value);
                         },
                       ),
-                      if (_billingPaymentPreference ==
-                              BillingPaymentPreference.mercadoPago &&
-                          includePaymentLink) ...[
-                        const SizedBox(height: 8),
-                        _buildAutomaticMercadoPagoReadiness(
-                          includePaymentLink: includePaymentLink,
-                        ),
-                      ],
 
                       const Divider(height: 24),
 
-                      // ============================================
-                      // Automação: geração de mensalidades + régua de
-                      // WhatsApp (o switch de WhatsApp fica acima, em
-                      // "Canais de Cobranca" — aqui só a flag nova).
-                      // ============================================
-                      Text('Automação', style: AppTheme.titleSmall),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Controle o que roda sozinho, sem você precisar abrir o app.',
-                        style: AppTheme.bodySmall.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SwitchListTile(
-                        title: const Text('Gerar mensalidades automaticamente'),
-                        subtitle: Text(
-                          'Na virada do mês, gera as mensalidades de todos os planos ativos (diariamente às 6h). Planos mensais no cartão continuam pela assinatura automática.',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                        secondary: Icon(
-                          LucideIcons.repeat,
-                          color: autoTuitionEnabled
-                              ? AppTheme.success
-                              : AppTheme.textSecondary,
-                        ),
-                        value: autoTuitionEnabled,
-                        // AUDITORIA: `activeThumbColor` (não `activeColor`,
-                        // já deprecated) — mesma cor/densidade visual dos
-                        // switches vizinhos, sem introduzir warning novo.
-                        activeThumbColor: AppTheme.success,
-                        contentPadding: EdgeInsets.zero,
-                        onChanged: (value) {
-                          setDialogState(() => autoTuitionEnabled = value);
-                        },
-                      ),
-                      SwitchListTile(
-                        title: const Text('Avisar quando a parcela for criada'),
-                        subtitle: Text(
-                          'Envia automaticamente o template "Parcela criada" assim que uma nova cobrança ficar disponível.',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                        secondary: Icon(
-                          LucideIcons.bell,
-                          color: notifyOnCreation
-                              ? AppTheme.success
-                              : AppTheme.textSecondary,
-                        ),
-                        value: notifyOnCreation,
-                        activeThumbColor: AppTheme.success,
-                        contentPadding: EdgeInsets.zero,
-                        onChanged: whatsappEnabled
-                            ? (value) =>
-                                  setDialogState(() => notifyOnCreation = value)
-                            : null,
-                      ),
-                      const SizedBox(height: 8),
                       Text(
                         'Avisos antes e no dia do vencimento',
-                        style: AppTheme.labelMedium.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: AppTheme.titleSmall,
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -3897,20 +3894,12 @@ class _AdminBillingRemindersScreenState
                         messageTemplates: templates,
                       );
 
-                      // Mesmo fluxo/botão dos demais toggles: salva os dois
-                      // docs juntos (settings/billingReminders +
-                      // settings/billing) para que "Salvar" seja uma ação
-                      // única e previsível para o admin.
-                      await Future.wait([
-                        _billingService.saveNotificationSettings(newSettings),
-                        _billingService.setAutoTuitionEnabled(
-                          autoTuitionEnabled,
-                        ),
-                      ]);
+                      await _billingService.saveNotificationSettings(
+                        newSettings,
+                      );
 
                       setState(() {
                         _notificationSettings = newSettings;
-                        _autoTuitionEnabled = autoTuitionEnabled;
                         // Update notification service with new templates
                         _notificationService?.customTemplates = templates;
                       });
