@@ -1375,6 +1375,29 @@ async function _unlinkStudentAccountCore(academyId, studentId) {
     // mudou entre a leitura acima e agora — ex.: a conta já foi religada a
     // outro aluno por outro caminho).
     if (era1Matches || era2Matches) {
+      // Staff (admin/instrutor) vinculado a uma ficha: o MESMO entry
+      // academyDetails[academyId] / doc academies/{id}/users/{uid} guarda o
+      // `role` que dá acesso à academia (resolveRole lê dali). Apagar o entry
+      // inteiro tiraria o admin da própria academia — o pedido é só soltar a
+      // FICHA, então aqui só o ponteiro studentId some e o papel é preservado.
+      // Só conta de aluno puro (role 'student'/ausente) perde o vínculo todo.
+      const role = (era1Matches && details[academyId].role) ||
+          (era2Matches && academyUserSnap.get('role')) || null;
+      if (role && role !== 'student') {
+        if (era1Matches) {
+          tx.update(mappingRef, {
+            [`academyDetails.${academyId}.studentId`]: FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+        if (era2Matches) {
+          tx.update(academyUserRef, {
+            studentId: FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+        return {success: true, wasLinked: true, previousUserId: linkedUserId, keptStaffRole: role};
+      }
       if (mappingData) {
         const academyIds = Array.isArray(mappingData.academyIds) ? mappingData.academyIds : [];
         const remaining = academyIds.filter((id) => id !== academyId);

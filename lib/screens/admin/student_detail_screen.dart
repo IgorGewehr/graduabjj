@@ -5785,6 +5785,12 @@ class _AdminStudentDetailScreenState
       return;
     }
     final email = _student?.email;
+    // Admin desvinculando a PRÓPRIA conta de uma ficha (caso real: testou o
+    // fluxo com o próprio e-mail). O servidor preserva o papel de equipe, mas
+    // o aviso explícito evita susto de "vou me trancar pra fora".
+    final isOwnAccount =
+        _student?.linkedUserId != null &&
+        _student!.linkedUserId == currentUser?.id;
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -5797,7 +5803,11 @@ class _AdminStudentDetailScreenState
           'Depois disso:\n'
           '• Este aluno fica pronto para ser vinculado a uma conta diferente '
           '(gerando um novo código de acesso).\n'
-          '• A conta desvinculada fica livre para ser vinculada a outro aluno.\n\n'
+          '• A conta desvinculada fica livre para ser vinculada a outro aluno.\n'
+          '• Se for conta de aluno, ela perde o acesso a esta academia até ser '
+          'vinculada novamente.\n\n'
+          '${isOwnAccount ? 'Esta é a SUA conta. Seu acesso de equipe/admin é mantido, '
+              'mas a ficha deixa de estar ligada ao seu login.\n\n' : ''}'
           'Presenças, financeiro e histórico do aluno NÃO são afetados.',
         ),
         actions: [
