@@ -186,9 +186,8 @@ class AcademySubscription {
   }
 
   /// Janela do aviso de vencimento: só aparece nos últimos N dias antes do
-  /// `paidUntil`. Como `paidUntil = ciclo (30) + 5 de folga`, N=5 faz o aviso
-  /// surgir só DEPOIS da data de cobrança (dias ~30→35) — ou seja, quando a
-  /// renovação não veio e o acesso está pra acabar. Antes disso, nada.
+  /// `paidUntil`. Sem folga no backend (`paidUntil` = data de cobrança, bloqueia
+  /// no dia se não pagar), então N=5 é o aviso ANTECIPADO de "vence em X dias".
   static const int expiryWarningDays = 5;
 
   /// Dias restantes de acesso PAGO (baseado em [paidUntil]). 0 se não houver
