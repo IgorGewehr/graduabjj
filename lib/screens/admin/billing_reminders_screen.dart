@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -389,6 +390,13 @@ class _AdminBillingRemindersScreenState
     );
   }
 
+  /// Em release não existe "reiniciar com dart-defines": isso é instrução de
+  /// desenvolvedor. O dono vê uma mensagem que ele consegue seguir; a dica
+  /// técnica fica só em debug.
+  String _channelUnavailableMessage(String channel) => kDebugMode
+      ? '$channel indisponível neste build. Reinicie o app com a configuração do notification server.'
+      : '$channel indisponível no momento. Atualize o app ou fale com o suporte.';
+
   Widget _buildApiWarning() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -406,7 +414,9 @@ class _AdminBillingRemindersScreenState
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Este build foi iniciado sem as configuracoes das APIs de WhatsApp e e-mail. Reinicie o app com os dart-defines do notification server.',
+                kDebugMode
+                    ? 'Este build foi iniciado sem as configuracoes das APIs de WhatsApp e e-mail. Reinicie o app com os dart-defines do notification server.'
+                    : 'O envio por WhatsApp e e-mail não está disponível nesta versão do app. Atualize o app ou fale com o suporte.',
                 style: AppTheme.bodySmall.copyWith(color: AppTheme.warning),
               ),
             ),
@@ -1323,7 +1333,7 @@ class _AdminBillingRemindersScreenState
                   )
                 : () => FeedbackUtils.showInfo(
                     context,
-                    'WhatsApp indisponível neste build. Reinicie o app com a configuração do notification server.',
+                    _channelUnavailableMessage('WhatsApp'),
                   ),
             icon: const Icon(LucideIcons.messageCircle, size: 16),
             label: const Text('Cobrar aluno'),
@@ -1347,7 +1357,7 @@ class _AdminBillingRemindersScreenState
                   )
                 : () => FeedbackUtils.showInfo(
                     context,
-                    'E-mail indisponível neste build. Reinicie o app com a configuração do notification server.',
+                    _channelUnavailableMessage('E-mail'),
                   ),
             icon: const Icon(LucideIcons.mail, size: 20),
             color: hasEmail ? AppTheme.info : AppTheme.textDisabled,
@@ -1708,10 +1718,10 @@ class _AdminBillingRemindersScreenState
       if (_billingPaymentPreference == BillingPaymentPreference.mercadoPago) {
         if (!_mercadoPagoAvailable) {
           mercadoPagoPreviewWarning =
-              'Mercado Pago está desconectado. O fallback configurado será usado.';
+              'Mercado Pago está desconectado. Será usado o PIX pessoal, se estiver cadastrado.';
         } else if (!contact.hasValidPayerCpf) {
           mercadoPagoPreviewWarning =
-              'Mercado Pago indisponível para este aluno: cadastre um CPF válido do pagador. O fallback configurado será usado.';
+              'Mercado Pago indisponível para este aluno: cadastre um CPF válido do pagador. Será usado o PIX pessoal, se estiver cadastrado.';
         } else if (contact.hasValidDirectPayerEmail) {
           mercadoPagoPayerNotice =
               'CPF e e-mail do aluno/responsável serão usados para gerar o PIX no Mercado Pago.';
@@ -1724,7 +1734,7 @@ class _AdminBillingRemindersScreenState
           mercadoPagoPayerNoticeIsWarning = true;
         } else {
           mercadoPagoPreviewWarning =
-              'Mercado Pago indisponível: nenhuma conta com e-mail válido foi encontrada. O fallback configurado será usado.';
+              'Mercado Pago indisponível: nenhuma conta com e-mail válido foi encontrada. Será usado o PIX pessoal, se estiver cadastrado.';
         }
       }
       whatsappTemplateName = _notificationService!.templateNameForStage(
@@ -1750,7 +1760,7 @@ class _AdminBillingRemindersScreenState
             description: description,
             daysOverdue: daysOverdue,
           ) ??
-          'Ainda não existe template Meta aprovado para esta etapa.';
+          'Esta etapa ainda não tem mensagem pronta para WhatsApp.';
       paymentInstruction = switch (previewPaymentMode) {
         BillingPaymentPreference.manualPix =>
           BillingPaymentInstruction.manualPix(paymentPreviewValue),
@@ -1849,7 +1859,7 @@ class _AdminBillingRemindersScreenState
                 const SizedBox(height: 8),
                 if (mode == 'whatsapp') ...[
                   Text(
-                    'Prévia do template oficial aprovado na Meta. O texto do WhatsApp não pode ser editado.',
+                    'Prévia da mensagem de WhatsApp (modelo pronto e aprovado). Este texto não pode ser editado.',
                     style: AppTheme.bodySmall.copyWith(
                       color: AppTheme.textSecondary,
                     ),
@@ -1857,7 +1867,9 @@ class _AdminBillingRemindersScreenState
                   if (whatsappTemplateName != null) ...[
                     const SizedBox(height: 6),
                     Text(
-                      'Template: $whatsappTemplateName • ${previewPaymentMode?.label ?? ''}',
+                      previewPaymentMode == BillingPaymentPreference.none
+                          ? 'Sem forma de pagamento na mensagem'
+                          : 'Pagamento pelo ${previewPaymentMode?.label ?? ''}',
                       style: AppTheme.bodySmall.copyWith(
                         color: AppTheme.textPrimary,
                         fontWeight: FontWeight.w600,
@@ -1869,7 +1881,7 @@ class _AdminBillingRemindersScreenState
                       (_manualPixKey?.trim().isNotEmpty ?? false)) ...[
                     const SizedBox(height: 4),
                     Text(
-                      'Se o Mercado Pago estiver indisponível no envio, o backend usa o PIX pessoal como fallback.',
+                      'Se o Mercado Pago estiver indisponível na hora do envio, será usado o seu PIX pessoal.',
                       style: AppTheme.bodySmall.copyWith(
                         color: AppTheme.textSecondary,
                       ),
@@ -2075,21 +2087,10 @@ class _AdminBillingRemindersScreenState
 
         if (mounted) {
           Celebration.confetti(context);
-          final fallbackMessage = switch (result.paymentFallbackReason) {
-            'missing_payer_cpf' =>
-              ' Mercado Pago não foi usado: cadastre um CPF válido do pagador.',
-            'missing_payer_email' =>
-              ' Mercado Pago não foi usado: cadastre um e-mail válido do aluno ou responsável.',
-            'missing_payer_data' =>
-              ' Mercado Pago não foi usado: cadastre CPF e e-mail válidos do pagador.',
-            'reconnect_required' =>
-              ' Mercado Pago precisa ser reconectado; foi usado o fallback.',
-            'seller_pix_unavailable' =>
-              ' A conta Mercado Pago não conseguiu gerar PIX; foi usado o fallback.',
-            'mercado_pago_unavailable' =>
-              ' Mercado Pago estava indisponível; foi usado o fallback.',
-            _ => '',
-          };
+          final fallbackMessage = billingFallbackNotice(
+            reason: result.paymentFallbackReason,
+            paymentMode: result.paymentMode,
+          );
           FeedbackUtils.showSuccess(
             context,
             '${mode == 'whatsapp' ? 'WhatsApp' : 'Email'} enviado para $studentName!$fallbackMessage',
@@ -2252,7 +2253,7 @@ class _AdminBillingRemindersScreenState
                       Text(
                         recipients.emails.isNotEmpty
                             ? 'Mensagem do e-mail'
-                            : 'Prévia do template oficial do WhatsApp',
+                            : 'Prévia da mensagem do WhatsApp',
                         style: AppTheme.labelMedium,
                       ),
                       const SizedBox(height: 6),
@@ -2265,7 +2266,7 @@ class _AdminBillingRemindersScreenState
                             borderRadius: BorderRadius.circular(8),
                           ),
                           helperText: recipients.emails.isNotEmpty
-                              ? 'Este texto afeta somente o e-mail. O WhatsApp usa o template aprovado na Meta.'
+                              ? 'Este texto afeta somente o e-mail. O WhatsApp usa uma mensagem pronta e aprovada.'
                               : 'O texto do WhatsApp não pode ser editado.',
                           helperMaxLines: 2,
                         ),
@@ -2837,7 +2838,7 @@ class _AdminBillingRemindersScreenState
                               if (missingPayerDataNames.isNotEmpty) ...[
                                 const SizedBox(height: 6),
                                 Text(
-                                  'Alguns alunos caíram no fallback por falta de CPF ou e-mail válido do pagador:',
+                                  'Para estes alunos o Mercado Pago não foi usado, por falta de CPF ou e-mail válido do pagador:',
                                   style: AppTheme.labelSmall.copyWith(
                                     color: AppTheme.textSecondary,
                                   ),

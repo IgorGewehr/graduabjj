@@ -124,4 +124,65 @@ void main() {
       );
     });
   });
+
+  group('billingFallbackNotice (toast depois do envio)', () {
+    String notice(String? reason, String? mode) =>
+        billingFallbackNotice(reason: reason, paymentMode: mode);
+
+    test('sem motivo de fallback não acrescenta nada', () {
+      expect(notice(null, 'mercado_pago'), '');
+      expect(notice('algo_desconhecido', 'manual_pix'), '');
+    });
+
+    test('Mercado Pago falhou e foi o PIX pessoal: diz isso', () {
+      expect(
+        notice('mercado_pago_unavailable', 'manual_pix'),
+        ' Mercado Pago estava indisponível; a cobrança foi com o PIX pessoal.',
+      );
+    });
+
+    test('Mercado Pago falhou e NÃO há PIX pessoal: não finge que houve', () {
+      final text = notice('reconnect_required', 'none');
+      expect(text, contains('reconectado'));
+      expect(text, contains('sem forma de pagamento'));
+      expect(text, isNot(contains('foi com o PIX pessoal')));
+    });
+
+    test('dados do pagador faltando orientam o que cadastrar', () {
+      expect(notice('missing_payer_cpf', 'manual_pix'), contains('CPF válido'));
+      expect(
+        notice('missing_payer_email', 'manual_pix'),
+        contains('e-mail válido'),
+      );
+      expect(
+        notice('missing_payer_data', 'manual_pix'),
+        contains('CPF e e-mail'),
+      );
+    });
+
+    test('modo desconhecido/ausente fecha a frase sem inventar o desfecho', () {
+      expect(
+        notice('seller_pix_unavailable', null),
+        ' A conta Mercado Pago não conseguiu gerar o PIX.',
+      );
+    });
+
+    test('nunca expõe a palavra "fallback" ao usuário', () {
+      for (final reason in [
+        'missing_payer_cpf',
+        'missing_payer_email',
+        'missing_payer_data',
+        'reconnect_required',
+        'seller_pix_unavailable',
+        'mercado_pago_unavailable',
+      ]) {
+        for (final mode in ['manual_pix', 'none', null]) {
+          expect(
+            notice(reason, mode).toLowerCase(),
+            isNot(contains('fallback')),
+          );
+        }
+      }
+    });
+  });
 }

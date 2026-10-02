@@ -79,6 +79,41 @@ String billingPaymentSummary({
   return mode.label;
 }
 
+/// Aviso, em português simples, de quando o Mercado Pago NÃO foi usado num
+/// envio e o que foi no lugar. [reason] = `paymentFallbackReason` do servidor;
+/// [paymentMode] = forma que de fato foi na mensagem (`manual_pix`, `none`...).
+///
+/// Diz o que aconteceu de verdade: o servidor tenta o PIX pessoal, mas se não
+/// houver chave cadastrada a cobrança segue SEM forma de pagamento — então não
+/// dá para afirmar "foi usado o PIX pessoal" sem olhar o modo final.
+/// Devolve '' quando não houve fallback (começa com espaço, para anexar).
+String billingFallbackNotice({
+  required String? reason,
+  required String? paymentMode,
+}) {
+  final head = switch (reason) {
+    'missing_payer_cpf' =>
+      'Mercado Pago não foi usado: cadastre um CPF válido do pagador',
+    'missing_payer_email' =>
+      'Mercado Pago não foi usado: cadastre um e-mail válido do aluno ou responsável',
+    'missing_payer_data' =>
+      'Mercado Pago não foi usado: cadastre CPF e e-mail válidos do pagador',
+    'reconnect_required' => 'Mercado Pago precisa ser reconectado',
+    'seller_pix_unavailable' =>
+      'A conta Mercado Pago não conseguiu gerar o PIX',
+    'mercado_pago_unavailable' => 'Mercado Pago estava indisponível',
+    _ => null,
+  };
+  if (head == null) return '';
+  final tail = switch (paymentMode) {
+    'manual_pix' => '; a cobrança foi com o PIX pessoal.',
+    'none' =>
+      '; a cobrança foi sem forma de pagamento — cadastre seu PIX pessoal.',
+    _ => '.',
+  };
+  return ' $head$tail';
+}
+
 /// Dados finais que entram no template oficial de cobranca.
 class BillingPaymentInstruction {
   final BillingPaymentPreference mode;
