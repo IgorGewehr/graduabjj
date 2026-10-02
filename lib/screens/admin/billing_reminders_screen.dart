@@ -23,6 +23,7 @@ import '../../widgets/common/academy_page_header.dart';
 import '../../widgets/common/billing_automation_banner.dart';
 import '../../widgets/polish/polish.dart';
 import 'widgets/billing_payment_actions.dart';
+import 'widgets/billing_stage_copy.dart';
 
 /// Admin Billing Reminders Screen ("Cobrança").
 ///
@@ -662,7 +663,7 @@ class _AdminBillingRemindersScreenState
             SwitchListTile(
               title: const Text('Avisar quando a parcela for criada'),
               subtitle: Text(
-                'Envia automaticamente o template "Parcela criada" assim que uma nova cobrança ficar disponível.',
+                'Envia automaticamente a mensagem "Parcela criada" assim que uma nova cobrança ficar disponível.',
                 style: AppTheme.bodySmall.copyWith(
                   color: AppTheme.textSecondary,
                 ),
@@ -3517,33 +3518,14 @@ class _AdminBillingRemindersScreenState
     );
     bool showTemplates = false;
     int selectedStageIdx = 0;
-    const stageKeys = [
-      'CREATED',
-      'UPCOMING',
-      'D+0',
-      'D+1',
-      'D+3',
-      'D+7',
-      'D+15',
-      'D+30',
-    ];
-    const stageLabels = [
-      'Parcela criada',
-      'A vencer',
-      'Vence hoje',
-      '1–2 dias',
-      '3–6 dias',
-      '7–14 dias',
-      '15–29 dias',
-      '30+ dias',
-    ];
 
     showDialog(
       context: context,
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final stageKey = stageKeys[selectedStageIdx];
+            final stage = kBillingStageCopies[selectedStageIdx];
+            final stageKey = stage.key;
 
             return AlertDialog(
               shape: RoundedRectangleBorder(
@@ -3656,7 +3638,7 @@ class _AdminBillingRemindersScreenState
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'O aluno é avisado no app e, com WhatsApp automático ligado, recebe também o template "A vencer".',
+                        'O aluno é avisado no app e, com WhatsApp automático ligado, recebe também a mensagem "A vencer".',
                         style: AppTheme.bodySmall.copyWith(
                           color: AppTheme.textSecondary,
                         ),
@@ -3686,14 +3668,12 @@ class _AdminBillingRemindersScreenState
 
                       const Divider(height: 24),
 
-                      // Template Editor Toggle
+                      // Mensagens: prévia do WhatsApp (modelo pronto, só leitura)
+                      // e editor dos textos de e-mail.
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            'Templates oficiais e e-mail',
-                            style: AppTheme.titleSmall,
-                          ),
+                          Text('Mensagens', style: AppTheme.titleSmall),
                           TextButton(
                             onPressed: () {
                               setDialogState(
@@ -3701,13 +3681,13 @@ class _AdminBillingRemindersScreenState
                               );
                             },
                             child: Text(
-                              showTemplates ? 'Ocultar' : 'Configurar',
+                              showTemplates ? 'Ocultar' : 'Ver e editar',
                             ),
                           ),
                         ],
                       ),
                       Text(
-                        'O WhatsApp usa modelos aprovados na Meta. Apenas os textos de e-mail podem ser editados.',
+                        'O WhatsApp usa modelos prontos e aprovados: você vê como ficam, mas só os textos de e-mail podem ser editados.',
                         style: AppTheme.labelSmall.copyWith(
                           color: AppTheme.textSecondary,
                         ),
@@ -3716,13 +3696,15 @@ class _AdminBillingRemindersScreenState
                       if (showTemplates) ...[
                         const SizedBox(height: 12),
 
-                        // Stage selector chips
+                        // Seletor do momento da cobrança
                         Wrap(
                           spacing: 6,
-                          children: List.generate(stageKeys.length, (i) {
+                          children: List.generate(kBillingStageCopies.length, (
+                            i,
+                          ) {
                             return ChoiceChip(
                               label: Text(
-                                stageLabels[i],
+                                kBillingStageCopies[i].label,
                                 style: const TextStyle(fontSize: 12),
                               ),
                               selected: selectedStageIdx == i,
@@ -3738,131 +3720,198 @@ class _AdminBillingRemindersScreenState
                         ),
                         const SizedBox(height: 12),
 
-                        // WhatsApp official template info (read-only)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: AppTheme.success.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: AppTheme.success.withValues(alpha: 0.2),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    LucideIcons.checkCircle,
-                                    size: 14,
-                                    color: AppTheme.success,
+                        // WhatsApp (somente leitura): exemplo já preenchido,
+                        // sem {variáveis} nem marcadores [[PIX]] crus.
+                        Builder(
+                          builder: (_) {
+                            // Serviço ainda não carregado: não afirma nada sobre
+                            // o WhatsApp (senão toda etapa pareceria "sem
+                            // mensagem pronta").
+                            if (_notificationService == null) {
+                              return const SizedBox.shrink();
+                            }
+                            // MESMA chamada do diálogo de envio: o texto do
+                            // WhatsApp é o modelo APROVADO na Meta (não os
+                            // textos legados de defaultWhatsAppTemplates, que
+                            // não são o que o aluno recebe). Null = a etapa
+                            // não tem modelo aprovado.
+                            final paymentMode = includePaymentLink
+                                ? resolveBillingPaymentMode(
+                                    preference: _billingPaymentPreference,
+                                    mercadoPagoAvailable: _mercadoPagoAvailable,
+                                    manualPixKey: _manualPixKey,
+                                  )
+                                : BillingPaymentPreference.none;
+                            final preview = _notificationService
+                                ?.generateOfficialWhatsAppPreview(
+                                  stage: BillingStage.values.firstWhere(
+                                    (b) => b.value == stageKey,
                                   ),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Text(
-                                      stageKey == 'CREATED' ||
-                                              stageKey == 'UPCOMING'
-                                          ? 'WhatsApp - modelo Meta ainda não disponível ($stageKey)'
-                                          : 'WhatsApp - modelo oficial Meta ($stageKey)',
-                                      style: AppTheme.labelSmall.copyWith(
-                                        color: AppTheme.success,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
+                                  paymentMode: paymentMode,
+                                  studentName: 'Maria',
+                                  amount: 150,
+                                  dueDate: DateTime.now().subtract(
+                                    Duration(days: stage.sampleDaysOverdue),
                                   ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                stageKey == 'CREATED' || stageKey == 'UPCOMING'
-                                    ? 'Esta etapa continua disponível para notificações internas e e-mail. O WhatsApp será ignorado até existir um template aprovado.'
-                                    : BillingNotificationService
-                                              .defaultWhatsAppTemplates[stageKey] ??
-                                          '',
-                                style: AppTheme.bodySmall.copyWith(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 12,
+                                  paymentValue: switch (paymentMode) {
+                                    BillingPaymentPreference.mercadoPago =>
+                                      '[PIX Mercado Pago gerado no envio]',
+                                    BillingPaymentPreference.manualPix =>
+                                      _manualPixKey?.trim() ?? '',
+                                    BillingPaymentPreference.none => '',
+                                  },
+                                  daysOverdue: stage.sampleDaysOverdue,
+                                );
+                            final hasWhatsApp = preview != null;
+                            final color = hasWhatsApp
+                                ? AppTheme.success
+                                : AppTheme.textSecondary;
+                            return Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: color.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: color.withValues(alpha: 0.2),
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Email subject
-                        Text('Assunto do e-mail', style: AppTheme.labelMedium),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          key: ValueKey(
-                            'email_subj_${stageKey}_${emailSubjectTemplates[stageKey]}',
-                          ),
-                          initialValue:
-                              emailSubjectTemplates[stageKey] ??
-                              BillingNotificationService
-                                  .defaultEmailSubjectTemplates[stageKey] ??
-                              '',
-                          style: const TextStyle(fontSize: 13),
-                          decoration: InputDecoration(
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 10,
-                            ),
-                          ),
-                          onChanged: (v) {
-                            emailSubjectTemplates[stageKey] = v;
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        hasWhatsApp
+                                            ? LucideIcons.checkCircle
+                                            : LucideIcons.info,
+                                        size: 14,
+                                        color: color,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          hasWhatsApp
+                                              ? 'WhatsApp — como o aluno recebe'
+                                              : 'WhatsApp — sem mensagem pronta nesta etapa',
+                                          style: AppTheme.labelSmall.copyWith(
+                                            color: color,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    hasWhatsApp
+                                        ? preview
+                                        : 'Nesta etapa o aluno é avisado no app e por e-mail. O WhatsApp ainda não envia mensagem aqui.',
+                                    style: AppTheme.bodySmall.copyWith(
+                                      color: AppTheme.textSecondary,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  if (hasWhatsApp) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'Exemplo com um aluno fictício.',
+                                      style: AppTheme.labelSmall.copyWith(
+                                        color: AppTheme.textDisabled,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            );
                           },
                         ),
                         const SizedBox(height: 12),
 
-                        // Email body
-                        Text('Corpo do e-mail', style: AppTheme.labelMedium),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          key: ValueKey(
-                            'email_body_${stageKey}_${emailBodyTemplates[stageKey]}',
-                          ),
-                          initialValue:
-                              emailBodyTemplates[stageKey] ??
-                              BillingNotificationService
-                                  .defaultEmailBodyTemplates[stageKey] ??
-                              '',
-                          maxLines: 4,
-                          style: const TextStyle(fontSize: 13),
-                          decoration: InputDecoration(
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
+                        if (!emailEnabled)
+                          Text(
+                            'Para editar os textos de e-mail, ligue "Cobrança via Email" lá em cima.',
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.textSecondary,
                             ),
-                            contentPadding: const EdgeInsets.all(10),
-                          ),
-                          onChanged: (v) {
-                            emailBodyTemplates[stageKey] = v;
-                          },
-                        ),
-
-                        // Reset to default
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton(
-                            onPressed: () {
-                              setDialogState(() {
-                                emailSubjectTemplates.remove(stageKey);
-                                emailBodyTemplates.remove(stageKey);
-                              });
+                          )
+                        else ...[
+                          // Email subject
+                          Text('Assunto do e-mail', style: AppTheme.labelMedium),
+                          const SizedBox(height: 6),
+                          TextFormField(
+                            key: ValueKey(
+                              'email_subj_${stageKey}_${emailSubjectTemplates[stageKey]}',
+                            ),
+                            initialValue:
+                                emailSubjectTemplates[stageKey] ??
+                                BillingNotificationService
+                                    .defaultEmailSubjectTemplates[stageKey] ??
+                                '',
+                            style: const TextStyle(fontSize: 13),
+                            decoration: InputDecoration(
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 10,
+                              ),
+                            ),
+                            onChanged: (v) {
+                              emailSubjectTemplates[stageKey] = v;
                             },
-                            child: Text(
-                              'Restaurar padrão deste momento',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.warning,
+                          ),
+                          const SizedBox(height: 12),
+
+                          // Email body
+                          Text('Corpo do e-mail', style: AppTheme.labelMedium),
+                          const SizedBox(height: 6),
+                          TextFormField(
+                            key: ValueKey(
+                              'email_body_${stageKey}_${emailBodyTemplates[stageKey]}',
+                            ),
+                            initialValue:
+                                emailBodyTemplates[stageKey] ??
+                                BillingNotificationService
+                                    .defaultEmailBodyTemplates[stageKey] ??
+                                '',
+                            maxLines: 4,
+                            style: const TextStyle(fontSize: 13),
+                            decoration: InputDecoration(
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              contentPadding: const EdgeInsets.all(10),
+                              helperText:
+                                  'Você pode usar: ${billingTemplateVariablesHint(stage)}',
+                              helperMaxLines: 3,
+                            ),
+                            onChanged: (v) {
+                              emailBodyTemplates[stageKey] = v;
+                            },
+                          ),
+
+                          // Reset to default
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton(
+                              onPressed: () {
+                                setDialogState(() {
+                                  emailSubjectTemplates.remove(stageKey);
+                                  emailBodyTemplates.remove(stageKey);
+                                });
+                              },
+                              child: Text(
+                                'Restaurar texto padrão desta etapa',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.warning,
+                                ),
                               ),
                             ),
                           ),
-                        ),
+                        ],
                       ],
                     ],
                   ),
