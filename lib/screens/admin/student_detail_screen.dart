@@ -5796,19 +5796,77 @@ class _AdminStudentDetailScreenState
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Desvincular conta'),
-        content: Text(
-          'Isso desfaz o vínculo entre ${_student!.fullName} e a conta '
-          '${email != null && email.isNotEmpty ? '($email)' : 'de e-mail atual'} '
-          'vinculada a ele.\n\n'
-          'Depois disso:\n'
-          '• Este aluno fica pronto para ser vinculado a uma conta diferente '
-          '(gerando um novo código de acesso).\n'
-          '• A conta desvinculada fica livre para ser vinculada a outro aluno.\n'
-          '• Se for conta de aluno, ela perde o acesso a esta academia até ser '
-          'vinculada novamente.\n\n'
-          '${isOwnAccount ? 'Esta é a SUA conta. Seu acesso de equipe/admin é mantido, '
-              'mas a ficha deixa de estar ligada ao seu login.\n\n' : ''}'
-          'Presenças, financeiro e histórico do aluno NÃO são afetados.',
+        // SingleChildScrollView: com o aviso da própria conta o conteúdo cresce
+        // e, em tela pequena/fonte grande, estouraria o diálogo.
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Aviso da PRÓPRIA conta no TOPO e em caixa colorida: como uma
+              // frase solta no meio do texto corrido ele passava batido no teste
+              // real (07/out/2026) — e é justamente o que impede o susto de
+              // "vou me trancar pra fora".
+              if (isOwnAccount)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 14),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.warning.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: AppTheme.warning.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        LucideIcons.alertTriangle,
+                        size: 18,
+                        color: AppTheme.warning,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Esta é a SUA conta',
+                              style: AppTheme.bodyMedium.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Seu acesso de equipe/admin é mantido; só esta '
+                              'ficha deixa de estar ligada ao seu login.',
+                              style: AppTheme.labelSmall.copyWith(
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              Text(
+                'Isso desfaz o vínculo entre ${_student!.fullName} e a conta '
+                '${email != null && email.isNotEmpty ? '($email)' : 'de e-mail atual'} '
+                'vinculada a ele.\n\n'
+                'Depois disso:\n'
+                '• Este aluno fica pronto para ser vinculado a uma conta diferente '
+                '(gerando um novo código de acesso).\n'
+                '• A conta desvinculada fica livre para ser vinculada a outro aluno.\n'
+                '• Se for conta de aluno, ela perde o acesso a esta academia até ser '
+                'vinculada novamente.\n\n'
+                'Presenças, financeiro e histórico do aluno NÃO são afetados.',
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
