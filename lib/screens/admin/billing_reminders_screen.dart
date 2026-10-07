@@ -543,7 +543,7 @@ class _AdminBillingRemindersScreenState
                 ] else if (_mercadoPagoAvailable) ...[
                   const SizedBox(height: 4),
                   Text(
-                    'O automático verifica o e-mail do aluno ou responsável e, se houver conta vinculada, consulta o e-mail dela no Firebase.',
+                    'O automático usa o e-mail do aluno ou do responsável e, se o aluno tiver conta no app, também o e-mail da conta dele.',
                     style: AppTheme.labelSmall.copyWith(
                       color: AppTheme.textSecondary,
                     ),
