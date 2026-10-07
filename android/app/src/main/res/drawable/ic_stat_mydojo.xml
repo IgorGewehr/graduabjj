@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícone pequeno das notificações (status bar / cabeçalho da notificação).
+     O Android só usa o canal ALFA desse ícone e pinta por cima com a cor do
+     sistema — por isso ele precisa ser silhueta branca em fundo transparente.
+     Sem ele, o FCM caía no ic_launcher adaptativo (fundo opaco), que vira um
+     círculo/anel genérico em vez da marca. Mesma geometria do
+     mydojo_mark_vector, sem o traço vermelho (some em 24dp) e recortada para
+     o quadrado da marca com ~2dp de respiro, como pede o guia de ícones. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="518.4"
+    android:viewportHeight="518.4">
+    <group
+        android:translateX="-252.8"
+        android:translateY="-233.6">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M296,276.8H443.2V545.6H296ZM459.2,276.8H728V424H459.2ZM580.8,440H728V708.8H580.8ZM296,561.6H564.8V708.8H296Z" />
+    </group>
+</vector>

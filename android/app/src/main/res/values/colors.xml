@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#F4F3EF</color>
+    <!-- Cor de destaque do ícone/nome do app nas notificações (Brand.blood). -->
+    <color name="notification_accent">#B91C1C</color>
 </resources>
