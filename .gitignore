@@ -69,3 +69,6 @@ firebase-debug.*.log
 # Local tooling preferences (machine-specific)
 .claude/settings.local.json
 devtools_options.yaml
+
+# Backup do acesso do admin criado pelo qa_seed_lobisomens.js --admin-link
+functions/scripts/.qa_backup.json
