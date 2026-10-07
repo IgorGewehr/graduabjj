@@ -296,6 +296,7 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     // The widget may be disposed during async work (GoRouter rebuilds on auth state change),
     // so we use the ProviderContainer directly instead of ref.
     final container = ProviderScope.containerOf(context);
+    final router = GoRouter.of(context);
     final authService = ref.read(authServiceProvider);
     final cpfDigits = _cpfController.text.replaceAll(RegExp(r'\D'), '');
     final phone = _phoneController.text.replaceAll(RegExp(r'\D'), '');
@@ -343,9 +344,16 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
         }
       }
 
-      // Dismiss overlay - the router will naturally redirect to the dashboard
-      // since the user is authenticated and currentUserProvider has data
       container.read(isCreatingAccountProvider.notifier).state = false;
+
+      // O redirect do router DEIXA um usuário logado parado em /link-code (é de
+      // propósito: quem já tem conta pode abrir essa tela para vincular outra
+      // ficha — ver app.dart). Só que a conta recém-criada também já está
+      // logada, então, sem navegar, o overlay sumia e o aluno caía de volta no
+      // formulário de cadastro (só reabrindo o app ele entrava). Ir para '/'
+      // reaproveita o redirect por papel (aluno → /portal, admin → /admin) e
+      // segura no splash enquanto o bootstrap ainda resolve.
+      router.go('/');
     } catch (e) {
       // Dismiss overlay on error
       container.read(isCreatingAccountProvider.notifier).state = false;
@@ -434,7 +442,10 @@ class _LinkCodeScreenState extends ConsumerState<LinkCodeScreen> {
     if (error is FirebaseAuthException) {
       switch (error.code) {
         case 'email-already-in-use':
-          return 'Este email ja esta em uso';
+          // Cobre também o reenvio logo após um cadastro que DEU CERTO mas cuja
+          // tela não avançou: a conta já existe, então o caminho é entrar.
+          return 'Este e-mail já tem uma conta. Se você acabou de se cadastrar, '
+              'volte e entre com ele; caso contrário, use outro e-mail.';
         case 'invalid-email':
           return 'Email invalido';
         case 'weak-password':
