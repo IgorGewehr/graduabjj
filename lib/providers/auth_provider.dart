@@ -88,15 +88,35 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   // Watch userAcademyMappingProvider so whenever the student's mapping doc updates
   // (e.g. master approves the request), currentUserProvider rebuilds automatically!
   final mappingAsync = ref.watch(userAcademyMappingProvider);
-  final mapping = mappingAsync.valueOrNull;
+  final firestore = ref.watch(firestoreProvider);
+  var mapping = mappingAsync.valueOrNull;
 
   if (firebaseUser == null) {
     print('[AUTH] No firebase user');
     return null;
   }
 
+  // CORRIDA do 1º load (login logo após instalar, sem cache do Firestore): o
+  // mapping vem de um STREAM e este provider roda antes do 1º snapshot. Sem
+  // esperar, `mapping` fica null, o bloco abaixo devolve um usuário "grátis"
+  // (papel aluno, sem academia), o bootstrap marca `ready` e o router manda um
+  // ADMIN para o portal do aluno — e ele fica lá, porque o redirect só reescreve
+  // a rota em /login, splash e afins. Quando o stream emite, este provider
+  // recalcula e acerta o usuário, mas o router já decidiu.
+  // Esperamos só o PRIMEIRO snapshot, com teto: se o stream ficar mudo (offline
+  // sem cache), cai no comportamento antigo em vez de prender no splash.
+  if (mappingAsync.isLoading && mapping == null) {
+    try {
+      mapping = await ref
+          .watch(userAcademyMappingProvider.future)
+          .timeout(const Duration(seconds: 8));
+    } catch (e) {
+      print('[AUTH] mapping não chegou a tempo; seguindo sem ele: $e');
+      mapping = null;
+    }
+  }
+
   print('[AUTH] Loading user data for: ${firebaseUser.uid}');
-  final firestore = ref.watch(firestoreProvider);
 
   // Step 1: Get or create global user
   GlobalUser? globalUser = await globalUserService.getGlobalUser(
